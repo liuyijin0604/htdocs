@@ -1,0 +1,404 @@
+<?php 
+class InvoiceService extends Service
+{
+	private $urlBase="https://os.toplogistics.com.au";
+	public function exportingInvoiceDiff()
+	{
+			$inv_file = empty($_FILES['inv_file']) ? [] : $_FILES['inv_file'];
+			$errors = [];
+			if (empty($inv_file['tmp_name'])) {
+				$errors[] = "Invalid Template";
+			} else {
+				if (preg_match('/csv/i', $inv_file['name'])) {
+					$xls = new oExcel('CSV');
+					$xls->load($inv_file['tmp_name']);
+					$data = $xls->getAll();
+				} else if (preg_match('/xlsx/i', $inv_file['name'])) {
+					$xls = new oExcel;
+					$xls->load($inv_file['tmp_name']);
+					$data = $xls->getAll();
+				} else if (preg_match('/xls/i', $inv_file['name'])) {
+					$xls = new oExcel('Excel5');
+					$xls->load($inv_file['tmp_name']);
+					$data = $xls->getAll();
+				}
+
+				if (empty($_POST['rate_option'])) {
+					$errors[] = "rate option is empty";
+				}
+				$head = $data[1];
+				// check format
+				$correct = false;
+				foreach ($data as $k => $line) {
+					yii::log(implode(',', $line), 'warning');
+					if (implode(',', $line) == 'Invoice No,Invoice Date,Customer,Created By,Label Number,RF,Con Id,Consignment Type,Charge Level,Charge Type,Weight,Parcel Weight (kg),Parcel Length (cm),Parcel Width (cm),Parcel Height (cm),Satchel Size,Date Issued,Pickup Date,Label Cost (Ex GST),Reference,Additional Notes,Pickup Street Address 1,Pickup Street Address 2,Pickup Town,Pickup Postcode,Destination Street Address 1,Destination Street Address 2,Destination Town,Destination  Postcode,Last Scan Desc,Last Scan Date') {
+						$correct = true;
+						$type = 1;
+						unset($data[$k]);
+						break;
+					}else if($line[3]=="Invoice No"&&$line[1]=="Customer")
+					{
+						$correct = true;
+						$type = 0;
+						unset($data[$k]);
+						break;
+					}else if($line[1]=="Country"&&$line[2]=="Label"&&$line[1]=="Country"&&$line[9]="Banked Courier"&&$line[27]=="New Price")
+					{
+						$correct = true;
+						$type = 2;
+						unset($data[$k]);
+						break;
+					}else if($line[2]=="Consignment No"&&$line[3]=="Receiver Postcode"&&$line[4]=="Billed Weight"&&$line[5]="Volume"&&$line[6]=="Fuel")
+					{
+						$correct = true;
+						$type = 3;
+						unset($data[$k]);
+						break;
+					}
+					unset($data[$k]);
+				}
+				if (!$correct) {
+					$errors[] = 'Invalid template file (Try "Save as .xlsx or .csv" in Excel)';
+				}
+
+				if(!empty($errors))
+				{
+					return $errors;
+				}
+
+				$errors = [];
+
+				$total = 0;
+				$ourTotal = 0;
+				$lines1 = [];
+				$lines2 = [];
+				$this->getFastwayInvoiceLines($data,$type,$lines1,$lines2,$errors);
+
+
+				return $this->exportDiffData($type,$lines1,$lines2,$errors,$head,$data);
+			}
+	}
+	private function exportDiffData($type,$lines1,$lines2,$errors,$head,$data)
+	{
+		if(in_array($type, [0,1,3]))
+		{
+			switch($type)
+			{
+				case 0:
+				case 1:
+					$name = 'Fastway';
+				case 3:
+					$name = 'TNT';
+			}
+			$xsl=new oExcel();
+			$i=1;
+			$xsl->addRow($i++, ['ref','invoice','postcode','weight',$name.' Cost','PCAE Cost','Diff']);
+			foreach ($lines1 as $key => $line) {
+				$xsl->addRow($i++, $line);
+			}
+
+			if(!empty($lines2))
+			{
+				$xsl->addRow($i++, []);
+				$xsl->addRow($i++, ["Empty In Consol"]);
+				$xsl->addRow($i++, []);
+				foreach ($lines2 as $key => $line) {
+					$xsl->addRow($i++, $line);
+				}
+			}
+			$tempfile = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.'invoice_diff_export.xlsx';
+			$xsl->output($tempfile, null, false);
+			return [1,$errors];
+		}else
+		{
+			$xsl=new oExcel();
+			$i=1;
+			$head[] = 'Customer Weight';
+			$head[] = 'Manifest Weight';
+			$head[] = 'Is Cubic Weight';
+			$head[] = 'Calculated Cubic Weight';
+			$head[] = 'Calculated Cubic Cost';
+			$head[] = 'Weight Cost';
+			$head[] = 'Diff-Weight Cost VS Sys Price';
+			$head[] = 'Manifest Weight Cost';
+			$head[] = 'Manifest Weight Cost VS Sys Price';
+			$xsl->addRow($i++, $head);
+			foreach ($data as $key => $line) {
+				if(empty($line[2])) continue;
+				$thisLine = $line;
+				$thisLine[12] = gmdate("Y/m/d H:i", intval(($line[12] - 25569) * 3600 * 24));
+				$thisLine[] = $lines1[$line[2]][1];
+				$thisLine[] = $lines1[$line[2]][2];
+				$thisLine[] = $lines1[$line[2]][4];
+				$thisLine[] = $lines1[$line[2]][3];
+				$thisLine[] = $lines1[$line[2]][5];
+				$thisLine[] = $lines1[$line[2]][6];
+				$thisLine[] = $lines1[$line[2]][7];
+				$thisLine[] = $lines1[$line[2]][8];
+				$thisLine[] = $lines1[$line[2]][9];
+				$xsl->addRow($i++, $thisLine);
+			}
+
+			$tempfile = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.'invoice_diff_export.xlsx';
+			$xsl->output($tempfile, null, false);
+			return [1,$errors];
+		}
+	}
+
+
+	private function getFastwayInvoiceLines($data,$type,&$lines1,&$lines2,&$errors)
+	{
+		if($type!=2)
+		{
+			foreach ($data as $k => $line) 
+			{
+				if($type==0)
+				{
+					$no = $line[2];
+					$invoice = $line[3];
+				}else if($type ==1)
+				{
+					$no = $line[5];
+					$invoice = $line[1];
+				}else if($type == 3)
+				{
+					$no = $line[2];
+					$invoice = $line[1];
+				}
+
+				if (empty($no)) {
+					continue;
+				}
+
+				if($type==0)
+				{
+					if (!empty($line[6])) {
+						$weight = $line[6];
+					} else {
+						$errors[] = $no.'line ' . $k . ' column 12, weight is empty';
+						continue;
+					}
+		
+				}else if($type==1)
+				{
+					if (!empty($line[12])) {
+						$weight = $line[12];
+					} else if (preg_match('/300GM/i', $line[16])) {
+						$weight = 0.3;
+					} else {
+						$errors[] = $no.'line ' . $k . ' column 12, weight is empty';
+						continue;
+					}
+					if (empty($line[19])) {
+						$errors[] = $no. 'line ' . $k . ' column 19, value is empty';
+						continue;
+						// $this->ajaxResult($model);
+					}
+				}else if($type==3)
+				{
+					if (!empty($line[4])) {
+						$weight = $line[4];
+					}else{
+						$errors[] = $no. 'line ' . $k . ' column 19, value is empty';
+						continue;
+						// $this->ajaxResult($model);
+					}
+				}
+
+				$shipment = ImParcel::model()->find('ref = :ref', [':ref' => $no]);
+				if($type==0)
+				{
+
+					$value = floatval($line[10]);
+					$postcode = $line[19];
+					$org_rate_id = $_POST['rate_option'];
+				}else if($type==1)
+				{
+					$value = floatval($line[19]);
+					$postcode = $line[29];
+					$org_rate_id = $_POST['rate_option'];
+				}else if($type==3)
+				{
+					$value = floatval($line[7]);
+					$postcode = @$shipment->cnee->postcode;
+					$org_rate_id = ImportChargeCode::TNT_SYDNEY_ID;
+					if (preg_match("/PCD\d{9}/", $no)) {
+						$org_rate_id = ImportChargeCode::TNT_MELBOURNE_ID;
+					}
+				}
+
+				$ourRated = Shipment::getCourierCostByShipment($no,$org_rate_id,$weight);
+				// add real cost to the shipment
+				$manifest_weight = $cust_check_weight = $chargevalue = $our_charge_weight = 0;
+				if (!empty($shipment)) {
+					$ourRate['consol_id'] = $shipment->consol_id;
+					$manifest_weight = isset($shipment->mdata['manifest_weight']) ? floatval($shipment->mdata['manifest_weight']) : 0;
+					$cust_check_weight = $shipment->weight;
+					$our_charge_weight = floatval(isset($shipment->mdata['charge_client_weight']) ? $shipment->mdata['charge_client_weight'] : $shipment->chargeWeight());
+					$chargevalue = number_format($shipment->getCouiercost(), 2, '.', '');
+				}
+				if(empty($shipment->consol_id))
+				{
+					$lines2[] = [$no, $invoice, $postcode, $weight, $value, $ourRated['price'], ($value-$ourRated['price'])];
+				}else
+				{
+					$lines1[] = [$no, $invoice, $postcode, $weight, $value, $ourRated['price'], ($value-$ourRated['price'])];
+				}
+			}
+		}
+		if($type==2)
+		{
+			//***********************************type = 2 declare *******************************//
+			foreach ($data as $k => $line) 
+			{
+				if($type==2)
+				{
+					$no = $line[2];
+				}
+				if (empty($no)) {
+					continue;
+				}
+
+				if($type==2)
+				{
+
+					$value = floatval($line[27]);
+					$postcode = $line[39];
+				}
+				$weight = $line[22];
+				$calculatedWeight = round(($line[23]*$line[24]*$line[25])*0.000001*250,2);
+				$ourRated = Shipment::getCourierCostByShipment($no, $_POST['rate_option'],$calculatedWeight);
+				$ourRatedWeight = Shipment::getCourierCostByShipment($no, $_POST['rate_option'],$weight);
+				$manifestWeightCost =  Shipment::getCourierCostByShipment($no, $_POST['rate_option'],@$shipment->mdata['manifest_weight']);
+				$isPao = (round($ourRated['price'],2)==$line[27])?"Yes":"No";
+				if (empty($ourRated['price'])) {
+					$errors[] =' calculated price is empty';
+					$isPao = '';
+				}
+
+
+				$shipment = ImParcel::model()->find('ref = :ref', [':ref' => $no]);
+				$lines1[$no] = [$no, @$shipment->weight,@$shipment->mdata['manifest_weight'],$calculatedWeight,$isPao,$ourRated['price'],$ourRatedWeight['price'],$ourRatedWeight['price']-$line[19],$manifestWeightCost['price'],$manifestWeightCost['price']-$line[19]];
+
+			}
+		}
+
+	}
+
+	public function createContainerPickupBookingInvoice($booking)
+	{
+		$invoice = Invoice::model()->findByAttributes(['no' => $booking->booking_number]);
+		if (empty($invoice)){
+			$invoice = new Invoice();
+			switch (substr($booking->booking_number, 0, 1)) {
+				case "S":
+				case "s":
+					$invoice->dpt_id = 106;	// TLA SYD
+					break;
+				case "M":
+				case "m":
+					$invoice->dpt_id = 218;	// TLA MEL
+					break;
+				case "B":
+				case "b":
+					$invoice->dpt_id = 530; // TLA BNE
+					break;
+			}
+			$shipment = ImParcel::model()->findByPk($booking->shipment_id);
+			$invoice->mdata['delivery_method'] = 2;
+			$invoice->mdata['container_info']=(!empty($shipment->consol->mdata['container_no'])?$shipment->consol->mdata['container_no']:'').'-'.(!empty($shipment->consol->mdata['sea_type'])?DmawbConsol::$containerTypes[$shipment->consol->mdata['sea_type']]:'').'-'.(!empty($shipment->consol->mdata['cargo_type'])?$shipment->consol->mdata['cargo_type']:'');
+			$invoice->mdata['awb'] = $shipment->consol->awb;
+			$invoice->to_id = Org::ORGID_IMPORT_CASUAL_CUSTOMER;
+			$invoice->consol_id = $shipment->consol->id;
+			$invoice->pid = $shipment->id;
+			$invoice->dpmt = Invoice::DPMT_IMPORT;
+			$invoice->status = Invoice::INVOICE_STATUS_PENDING_PAID;
+			$invoice->type = Invoice::INVOICE_TYPE_PICKUPBOOKING;
+			$invoice->currency = Invoice::CURRENCY_AUD;
+			$invoice->no = $booking->booking_number;
+			$invoice->bflag = Invoice::INVOICE_FLAG_PAYPAL;
+			$invoice->date = date('Y-m-d');
+			$invoice->due = date('Y-m-d');
+			$invoice->posted = date('Y-m-d');
+			$invoice->total = $booking->fee;
+			$invoice->gst =  number_format((float)$booking->fee * 0.1, 2, '.', '');
+			$invoice->is_paypal = 2;
+			$invoice->sync_xero = 0;
+			$invoice->mdata['name'] = $booking->company_name;
+			$invoice->mdata['address'] = " ";
+			$invoice->save();
+		}	
+	}
+
+	public function printInvoice($id)
+	{
+		if(!empty($_GET['xls']))
+		{
+			$model = Invoice::model()->findByPk($id);
+			$model->exportExcelInvoice();
+		}else if (!empty($_GET['inv_b']))
+		{
+			$model = Invoice::model()->findByPk($id);
+			$model->exportExcelInvoiceB();
+		}else
+		{
+			$model = Invoice::model()->findByPk($id);
+			if ($model->type != 60)
+			{
+				$d = ['inv' => $model];
+				if (!empty($_GET['obh']))
+				{
+					switch ($model->to_id) {
+						case 1084:
+							$d['behalf'] = 'priority';
+							break;
+					}
+				}
+				if (in_array($model->to_id, Org::$displayJobRef) && !empty($model->job->mdata['ref']))
+				{
+					$no = $model->job->mdata['ref'];
+				} else {
+					$no = $model->no;
+				}
+				oPDF::renderPDF('invoice', $d, 1, 'Invoice_' . $no . '.pdf');
+			}else
+			{
+				$ps = [];
+				$f1 = tempnam(Yii::app()->basePath . "/runtime", "ivp");
+				$f2 = tempnam(Yii::app()->basePath . "/runtime", "ivp");
+				oPDF::renderPDF('invoice', ['inv' => $model], 2, $f1);
+				oPDF::renderPDF('invoice_detail', ['inv' => $model], 2, $f2);
+				$ps = [$f1, $f2];
+				if ($model->to_id == 1457) {
+					$f3 = tempnam(Yii::app()->basePath . "/runtime", "ivp");
+					oPDF::renderPDF('stock_detail', ['inv' => $model], 2, $f3);
+					$ps[] = $f3;
+				}
+				oPDF::mergePDF($ps, 1, true, 'Invoice_' . $model->no . '.pdf');
+			}
+		}
+	}
+
+
+	public function createPaypallink($invoiceId){
+		$data = ["invoice_id"=>$invoiceId];
+		$paylink = $this->urlBase . '/payInvoice/paypal.app?token=';
+		$iv = str_repeat("\x00", openssl_cipher_iv_length('AES-256-CBC'));
+		$token = base64_encode(openssl_encrypt(json_encode($data), 'AES-128-CBC', md5(PoliPaymentApi::PAYLINK_KEY), 0, $iv));
+		$paylink .= trim($this->safe_b64encode($token));
+		return $paylink;
+	}
+
+	/**
+	 * remove special string for URL paramters
+	 * @param $string
+	 * @return mixed|string
+	 */
+	private function safe_b64encode($string)
+	{
+		$data = base64_encode($string);
+		$data = str_replace(['+', '/', '='], ['-', '_', ''], $data);
+		return $data;
+	}
+}
+?>

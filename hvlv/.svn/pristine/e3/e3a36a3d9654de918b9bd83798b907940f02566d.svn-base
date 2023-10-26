@@ -1,0 +1,247 @@
+<?php
+
+/**
+ * This is the model class for table "connote_range".
+ *
+ * The followings are the available columns in table 'connote_range':
+ * @property string $id
+ * @property integer $type
+ * @property integer $status
+ * @property string $model
+ * @property string $fid
+ * @property string $prefix
+ * @property string $suffix
+ * @property string $start
+ * @property string $finish
+ * @property integer $digits
+ * @property string $meta
+ */
+class ConnoteRange extends CActiveRecord
+{
+
+	public static $types = array(
+		10 => 'Normal',
+		20 => 'EMS Checksum',
+		30 => 'SSCC',
+	);
+	
+	public static $states = array(
+		10 => 'Active',
+		70 => 'Client Reserved',
+		80 => 'Used Up',
+		90 => 'Inactive',
+	);
+	
+	public $mdata = [];
+
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName()
+	{
+		return 'connote_range';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('type, status, model, fid, start, finish', 'required'),
+			array('prefix, suffix, digits, meta', 'safe'),
+			array('type, status, digits', 'numerical', 'integerOnly'=>true),
+			array('model, prefix, suffix', 'length', 'max'=>50),
+			array('fid, start, finish', 'length', 'max'=>11),
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, type, status, model, fid, prefix, suffix, start, finish, digits, meta', 'safe', 'on'=>'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+		);
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return array(
+			'id' => 'ID',
+			'type' => 'Type',
+			'status' => 'Status',
+			'model' => 'Model',
+			'fid' => 'Fid',
+			'prefix' => 'Prefix',
+			'suffix' => 'Suffix',
+			'start' => 'Start',
+			'finish' => 'Finish',
+			'digits' => 'Digits',
+			'meta' => 'Meta',
+		);
+	}
+
+	public function getStatus(){
+		return isset(static::$states[$this->status])? Yii::t(strtolower(__CLASS__), static::$states[$this->status]) : $this->status;
+	}
+
+	public function getType(){
+		return isset(static::$types[$this->type])? Yii::t(strtolower(__CLASS__), static::$types[$this->type]) : $this->type;
+	}
+
+	public static function totalAvailable($model, $fid, $pfx=''){
+		$c = 0;
+		foreach(self::ranges($model, $fid, $pfx) as $r){
+			$c += $r->avail();
+		}
+		return $c;
+	}
+
+	public static function newNumber($model, $fid, $pfx=''){
+                $n='';
+		foreach(self::ranges($model, $fid, $pfx) as $r){
+			$n = $r->getNextNumber();
+			if($n !== false) break;
+		}
+		return $n;
+	}
+
+	protected static function ranges($model, $fid, $pfx=''){
+		$ps = [':m' => $model, ':fid' => $fid];
+		$cond = 'status = 10 AND model = :m AND fid = :fid AND `start` < `finish`';
+		if(!empty($pfx)){
+			$cond .= ' AND prefix = :pfx';
+			$ps[':pfx'] = $pfx;
+		}
+		return self::model()->findAll($cond, $ps);
+	}
+
+	public static function checkReserved($oid, $no){
+		$rs = self::model()->findAll('type = 10 AND status = 70 AND model="Org" AND fid = :oid', [':oid' => $oid]);
+		$rt = 0;
+		foreach($rs as $r){
+			if(preg_match('/^'.$r->prefix.'(\d+)$/', $no, $m)){
+				$n = intval($m[1]);
+				if($n >= $r->start && $n <= $r->finish){
+					return 1;
+				}else{
+					$rt = -9;
+				}
+			}
+		}
+		return $rt;
+	}
+
+	public function avail(){
+		return $this->finish - $this->start + 1;
+	}
+
+	public function getNextNumber(){
+		if($this->status > 10) return false;
+		$v = '@nln_'.hash('crc32b', microtime().rand(0,999999));
+		Yii::app()->db->createCommand('UPDATE '.$this->tableName().' SET `start`=('.$v.':=`start`)+1, `status` = IF(`start` >= `finish`, 80, 10) WHERE status = 10 AND `start` < `finish` AND id=:id')->bindValue(":id", $this->id)->execute();
+		
+		$n = Yii::app()->db->createCommand('SELECT '.$v.';SET '.$v.'=NULL;')->queryScalar();
+		if($n >= $this->finish) $this->status = 80;
+		return $this->prefix.$this->prepNumber($n).$this->suffix;
+	}
+
+	private function prepNumber($n){
+		if($this->type == 20){
+			return self::emsCheckSum($n);
+		}else{
+			return $this->digits>0? sprintf('%0'.$this->digits.'d', $n) : $n;
+		}
+	}
+
+	public static function emsCheckSum($a){
+		$a = str_pad((string) $a, 8, "0", STR_PAD_LEFT);
+		$cs = $a[0] * 8 + $a[1] * 6 + $a[2] * 4 + $a[3] * 2 + $a[4] * 3 + $a[5] * 5 + $a[6] * 9 + $a[7] * 7;
+		$cs = 11 - ($cs % 11);
+		if($cs == 10) $cs = 0;
+		if($cs == 11) $cs = 5;
+		return $a.$cs;
+	}
+	
+	public function beforeSave(){
+		if(!empty($this->mdata)) $this->meta = json_encode($this->mdata);
+		return parent::beforeSave();
+	}
+
+	public function afterFind(){
+		if(!empty($this->meta)) $this->mdata = json_decode($this->meta, true);
+		return parent::afterFind();
+	}
+
+	/**
+	 * get consumables sell mode
+	 * 0 - free
+	 * 1 - not free
+	 * @return int
+	 */
+	public function getCgSellModel(){
+	   // currently we save consumables price setting in the sell type table
+	   // if ( isset($this->extra['cg_sell_model']) ) {
+	   //     return $this->extra['cg_sell_model'];
+	   // }
+		$ratesInfo = SellRate::getCgoodsRates($this->id);
+		return $ratesInfo['found'] ? 1 : 0;
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search()
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('id',$this->id);
+		$criteria->compare('type',$this->type);
+		$criteria->compare('status',$this->status);
+		$criteria->compare('model',$this->model,true);
+		$criteria->compare('fid',$this->fid);
+		$criteria->compare('prefix',$this->prefix,true);
+		$criteria->compare('suffix',$this->suffix,true);
+		$criteria->compare('start',$this->start,true);
+		$criteria->compare('finish',$this->finish,true);
+		$criteria->compare('digits',$this->digits);
+		$criteria->compare('meta',$this->meta,true);
+
+		return new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+		));
+	}
+
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return ConnoteRange the static model class
+	 */
+	public static function model($className=__CLASS__)
+	{
+		return parent::model($className);
+	}
+}

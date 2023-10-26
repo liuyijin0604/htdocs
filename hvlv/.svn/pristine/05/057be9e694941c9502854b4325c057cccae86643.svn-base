@@ -1,0 +1,668 @@
+<?php
+class DmawbConsol extends Consol
+{
+	public static $my_type = 70;
+	const STATE_DELIVERY=90;
+	const STATE_CLEAR=60;
+	const STATE_HELD=50;
+
+	public static $states = [
+		10 => 'New',
+		20 => 'Confirmed',
+		24=> 'Dispatched',
+		25 => 'Arrived',
+		30 => 'Reported',
+		40 => 'Acknowledged',
+		45 => 'Acquitted',
+		50 => 'Held',
+		60 => 'Cleared',
+		90 => 'Delivered',
+		95 => 'Completed',
+		100 => 'Cancelled',
+	];
+	public static $containerTypes=[1=>'20 GP',2=>'40 GP',3=>'40 HQ',4=>'40 HC'];
+	
+	public static $containerCode=[
+		1=>"2008",
+		2=>"4008",
+		3=>"0000",
+		4=>'4008',
+	];
+
+	public static $bwfs=[
+	];
+
+	public static $cargo_receip_address=[
+		1=>'WINIT: Block L, 391 Park Road, Regents Park, NSW 2143',
+		2=>'CK1: Warehouse 6 45-53 Davies Road Padstow NSW 2211',
+		3=>'4PX: Block G2, 391 Park Road, Regents Park, NSW 2143',
+		4=>'BWU1: 23 Centenary Ave, Moorebank, NSW 2170',
+		5=>'MEL1: 29 NATIONAL DRIVE, DANDENONG SOUTH, VIC 3175',
+		6=>'GC: 63-69 Pound Road West, DANDENONG SOUTH, VIC 3175',
+		7=>'WINIT(MEL): 1-5 Felstead Drive, Trunganina, VIC 3029',
+		8=>'JD(SYD): Block A, 391 Park Road, Regents Park, NSW 2143',
+		9=>'Ausriver Group Pty Ltd: 6/4A Huntley St, ALEXANDRIA, NSW 2015',
+		10=>'WINIT(NSW3): Warehouse 2, 54 Ferndell St, South Granville, NSW 2142',
+		11=>'PER2: Amazon warehouse, 60 Paltridge Rd, Perth Airport, WA 6105',
+		12=>'BNE1: 42-52 Export Street, Lytton, QLD 4178',
+		13=>'MELTULL: Warehouse B, 25-29 Jets Court, Tullamarine, VIC 3043',
+		14=>'AU(MEL5): 103 Palm Springs Road, RAVENHALL, VIC 3023',
+		15=>'GCSS G982(NSW): C/O D1B/ 350 Parramata Road Campus Business Park, Homebush West, NSW 2140',
+		16=>'BWU2: 13 Emporium Avenue, Kemps Creek, NSW 2178',
+		17=>'Fastgo: 1233 Caterbury Road, Punchbowl, NSW 2196'
+	];
+
+	public static $available_address=[
+		1=>'CITO| CITO transport 22A Sara grove, Tottenham, VIC, 3012  Opening time: 6:00AM - 2:00PM',
+		2=>'Derrimut| Top Logistics 18 Grimes Court Derrimut Vic 3030 Opening hours: 9:00 AM- 5:00 PM TEL +61 3 8366 1450',
+		4=>'PCA | Top Logistics  6C The Crescent, Kingsgrove, NSW 2208 Opening hours: 9:00 AM- 6:00 PM',
+		5=>'AMI MEL| AMI MEL UNIT 1F, 19-21 MACE WAY MELBOURNE AIRPORT, VIC 3045 Opening hours: 8:00am – 4:30pm',
+		0=>'AMI BNE| AMI BNE 115 Sugarmill Road, Brisbane Airport 4008',
+		6=>'SCS(MEL)| SUCCESS LOGISTICS MELBOURNE 83 PROXIMITY DRIVE SUNSHINE WEST VIC 3020 AUSTRALIA Phone: +61 3 9318 0049',
+		7=>'SCS(SYD)| SUCCESS LOGISTICS SYDNEY 2 LADBROKE STREETMILPERRA NSW 2214 AUSTRALIA Phone: +61 2 9771 5566',
+		8=>'ALS(QLD)| AUSTRALIAN LOGISTICS SOLUTIONS PTY LTD DEPOT HOURS: 7.30AM-3.45PM 155 FISON AVENUE -COLLECTIONS VIA -364A CURTIN AVE **ENCLOSED FOOTWEAR & HI-VIS REQUIRED** EAGLE FARM QLD 4009 AUSTRALIA',
+		9=>'TOP(SYD)| Top logistics, 1/233 Milperra Rd, Bankstown Aerodrome, NSW, 2200 Opening hours: 9:00 AM- 5:30 PM',
+		10=>'TOP(MEL)| Top logistics VIC, 3B/8 Judge St Sunshine, VIC 3020,Opening hours: 9:00 AM-5:00 PM',
+		11=>'AMI(PER)| AMI PER U1, 13 Hugh Edwards Drive, Perth Intl Airport, WA 6105',
+		13=>'PORTGATE| PORTGATE LOGISTICS, LP70 LUCINDA DRIVE, PORT OF BRISBANE, QLD 4178, OPEN HOURS MON TO FRI 7AM -3:00PM',
+		14=>'XLI| XLI, 8 Glenferrie Road, Welshpool, WA 6106, Operating hour - 8:00-16:00',
+		15=>'SLA| Specialised Logistics Australia Warehouse 3/1 221 Gooderham Rd, Willawong, QLD 4110',
+		16=>'TOP(BNE)| Top Logistics QLD, 6/55 Musgrave Rd, Coopers Plains, QLD 4108 Opening hours: 9:30 AM - 5:30 PM',
+		17=>'TOP(PER)| Top Logistics PER, 151 Milner Rd, High Wycombe, WA 6057 Opening Hours: 8:00 AM - 4:00 AM',
+		18=>'Tiger(PER)| Tiger, 2 Tarlton CrescentPerth International Airport,WA 6105',
+
+		3=>'Other: '
+	];
+
+	public static $available_address_name=[
+		1=>'CITO',
+		2=>'Derrimut',
+		4=>'PCA',
+		5=>'AMI MEL',
+		9=>'AMI BNE',
+		6=>'SCS(MEL)',
+		7=>'SCS(SYD)',
+		8=>'ALS(QLD)',
+		9=>'TOP(SYD)',
+		10=>'TOP(MEL)',
+		11=>'AMI(PER)',
+		12=>'AU(MEL5)',
+		13=>'PORTGATE',
+		14=>'XLI',
+		3=>'Other'
+	];
+
+	public static function getContainerCode($d)
+	{
+		if (array_key_exists($d, self::$containerCode)) {
+			return self::$containerCode[$d];
+		}
+		return "0000";
+	}
+
+	public function rules()
+	{
+		$rules = [
+			['owner_id,dpt_id', 'required'],
+			['owner_id', 'checkCredit', 'on'=>'create'],
+		];
+		return array_merge(parent::rules(), $rules);
+	}
+
+	public function checkCredit()
+	{
+		$org = Org::model()->findByPk($this->owner_id);
+		if (empty($org)) {
+			$this->addError('owner_id', 'Client invalid');
+			return false;
+		}
+		if ($org->overCreditLimit()) {
+			$this->addError('owner_id', 'Client '.$org->name.' credit limit exceeded, please contact accounts!');
+			return false;
+		}
+		return true;
+	}
+
+	public function relations()
+	{
+		$r = parent::relations();
+		$r['linkShipment']=[self::MANY_MANY,'Shipment','consol_shipment_map(cid,sid)'];
+		$r['invoice'] = [self::HAS_MANY, 'Invoice', 'consol_id'];
+		$r['amazon_info']=[self::HAS_ONE,'AmazonInfo','fid','on'=>"amazon_info.model='".get_called_class()."'"];
+		return $r;
+	}
+
+	public function genNo()
+	{
+		$pfx = 'DW';
+		if(strtotime($this->eta) >= strtotime('2020-08-01')) $pfx = 'TDW';
+		$n = $pfx.date('ymd', strtotime($this->created));
+		$s = self::model()->count('no LIKE :n', [':n' => $n.'%']) + 1;
+		return $n.sprintf('%02d', $s).substr($this->pod, 2);
+	}
+		
+	public function getAmazonInfo()
+	{
+		if (empty($this->amazon_info)) {
+			$amazonInfo=new AmazonInfo();
+			$amazonInfo->fid= $this->id;
+			$amazonInfo->model= get_class($this);
+			$amazonInfo->save();
+			return $amazonInfo;
+		}
+		return $this->amazon_info;
+	}
+
+	/**
+	* @param $data
+	* @return array
+	*/
+	public function genInvoice()
+	{
+		$errors = [];
+		$owner = Org::model()->findByPk($this->owner_id);
+
+				// create invoice based on chargeable or AWB weight
+		$awb_wt = 0.0;
+		$cgb_wt = 0.0;
+		$tare_wt = 0.0;
+		if (isset($this->mdata['awb_wt'])) {
+			$awb_wt = floatval($this->mdata['awb_wt']);
+		}
+		if (isset($this->mdata['cgb_wt'])) {
+			$cgb_wt = floatval($this->mdata['cgb_wt']);
+		}
+		if ($awb_wt <= 0.00001 || $cgb_wt <= 0.00001) {
+			$errors[] = 'Please set console AWB weight and Chargeable weight firstly';
+		}
+		if (isset($this->mdata['tare_wt'])) {
+			$tare_wt = floatval($this->mdata['tare_wt']);
+		}
+
+
+		// check to see if we should including GST (default 10%)
+		$includingGST = false;
+		if (isset($owner) && isset($owner->extra['incl_gst']) && $owner->extra['incl_gst'] == 1) {
+			$includingGST = true;
+		}
+		// if existing or not checking
+		$inv = null;
+		$oldPaymentsList = [];
+		$oldInv=null;
+		$invs = Invoice::model()->with('lines')->findAll('type = 39 AND to_id = :id AND lines.model = :m AND lines.fid = :fid', [':id' => $owner->id, ':m' => 'DmawbConsol', ':fid' => $this->id]);
+		foreach ($invs as $invOne) {
+			// there are frozen invoice and not paid invoice as well
+			// just ignore the invoice we have frozen before
+			if (in_array($invOne->status, [Invoice::INVOICE_STATUS_PAID, Invoice::INVOICE_STATUS_PAID_PARTLY_CREDIT])&& $invOne->isInvoiceClosed()) {
+				continue;
+			}
+			if (in_array($invOne->status, [Invoice::INVOICE_STATUS_CACELLED])) {
+				continue;
+			}
+			$inv = $invOne;
+		}
+
+		// invoice existing and has been paid
+		if (!empty($inv)) {
+			if ($inv->status == Invoice::INVOICE_STATUS_PAID) {
+				$errors[] = 'Console invoice ' . $inv->no . 'has been paid before, please contact account for more';
+			}
+			if ($inv->isInvoiceClosed() && $inv->status < Invoice::INVOICE_STATUS_PAID) {
+				// in case invoice frozen and create credit for it
+				$oldInv=$inv;
+				// create a new invoice the for this month
+				$invRef = 'Original Invoice : ' . $inv->no;
+				$oldInvoiceNo = $inv->no;
+				$inv = new Invoice;
+				$inv->type = Invoice::INVOICE_TYPE_DIRECT_MAWB; // for direct mawb invoice
+				$inv->no =Invoice::genNewInvoiceNo($oldInvoiceNo);		//$oldInvoiceNo . '-1';
+				$inv->ref = $invRef;
+				$inv->date = date('Y-m-d');
+				$inv->posted = $inv->date;
+				$inv->status = Invoice::INVOICE_STATUS_PENDING; // set as posted which means will send to client for paying
+			}
+		}
+
+
+		// if not existing or not pending(1) or posted(2) or overdue(3) we create a new one
+		$isUpdate = true;
+		if (empty($inv)) {
+			$inv = new Invoice;
+			$isUpdate = false;
+			$inv->date = date('Y-m-d'); // for update we shouldn't change invoice data
+			$inv->status = Invoice::INVOICE_STATUS_PENDING; // set as posted which means will send to client for paying
+		}
+
+		$inv->type = Invoice::INVOICE_TYPE_DIRECT_MAWB; // for direct mawb invoice
+		$inv->dpmt = Invoice::DPMT_IMPORT;
+		$inv->to_id = $owner->id;
+		$inv->consol_id = $this->id;
+		$inv->man_id = 0; // in case there is no manifest now
+		$inv->dpt_id = $this->dpt_id;
+		$inv->currency = '1';
+
+		// calculate price based on awb weight
+		$items = [];
+
+		// create invoice based on chargeable
+		// 1.	Customs Declaration*  AUD85
+		//  2.	Airline Document Fee *  AUD50
+		// 3.	CMR Fee *  AUD15
+		// 4.	Airline Terminal Fee ^  $0.50/kg
+		// 5.	Airline Breakbulk Fee^  $0.1/kg
+		// 6.	Delivery Fee^   $0.2/kg
+		// 7.	Customs Duties & Fees
+		$tot = 0;
+		$this->calculateInvoiceExtendFee($inv,$items,$owner,$tot,$errors);
+		// $items = $extendsFee['items'];
+		// $inv = $extendsFee['inv'];
+		// $owner = $extendsFee['owner'];
+		// $tot = $extendsFee['tot'];
+		// $errors = $extendsFee['errors'];
+
+		$orgRateService = new OrgRateService();
+		$flexibleItems = $orgRateService->getImcoConsolOrgFlexibleRateItems($this->id,$this->shipments,$owner->id,$cgb_wt,$awb_wt,$tare_wt);
+		$checkFlexibleItems = function($thisFitem,$thisFitemLabel,&$items,$thisItemLabel,&$thisFStatus,&$tot){
+			if($thisFitem[0]==$thisFitemLabel)
+			{
+				foreach ($items as $itk => $myItem) {
+					if($myItem[1]==$thisItemLabel)
+					{
+						$thisFStatus = true;
+						$tot = $tot - $items[$itk][5];
+						unset($items[$itk]);
+					}
+				}
+			}
+		};
+
+
+		foreach ($flexibleItems as $fik => $fitem) {
+			$thisFStatus = false;
+			$checkFlexibleItems($fitem,'Sea Doc',$items,'Sea Document Fee',$thisFStatus,$tot);
+			if($thisFStatus) continue;
+			$thisFStatus = false;
+			$checkFlexibleItems($fitem,'Port Charge',$items,'Port Fee',$thisFStatus,$tot);
+			if($thisFStatus) continue;
+			$thisFStatus = false;
+			$checkFlexibleItems($fitem,'Timeslot',$items,'Time Slot Fee',$thisFStatus,$tot);
+			if($thisFStatus) continue;
+			$thisFStatus = false;
+			$checkFlexibleItems($fitem,'Fuel',$items,'Fuel Surcharge',$thisFStatus,$tot);
+			if($thisFStatus) continue;
+			$thisFStatus = false;
+			$checkFlexibleItems($fitem,'Unpack',$items,'CMR Fee',$thisFStatus,$tot);
+			if($thisFStatus) continue;
+			$thisFStatus = false;
+			$checkFlexibleItems($fitem,'Cartage',$items,'Delivery Fee',$thisFStatus,$tot);
+			if($thisFStatus) continue;
+		}
+
+		foreach ($flexibleItems as $jjj => $vvv) {
+			$items[] = $vvv;
+			$tot += $vvv[5];
+		}
+
+
+		
+		if (!empty($this->shipments) && sizeof($this->shipments) > 1) {
+			$shipments = [];
+			foreach ($this->shipments as $shipment) {
+				if (($shipment->cbwf & ImParcel::CBWF_DIRECT_CONSOL_BASE) > 0) {
+					continue;
+				}
+				$shipments[] = $shipment;
+			}
+			if (!empty($shipments)) {
+				$itemsDelivery = [];
+				$imConsol = new ImcoConsol;
+				$orgRate = OrgRate::model()->find('org_id = :oid AND type = 40', [':oid' => $owner->id]);
+				$rate=$imConsol->getChargeRate($owner);
+				if ($rate[3]) {
+					$imConsol = new ImcoConsol;
+					$result = $imConsol->genShipmentsInvoicePro($owner, $orgRate, $shipments);
+					if ($result[0] > 0) {
+						$totDelivery = $result[0];
+						$itemsDelivery = $result[1];
+					}
+					foreach ($shipments as $theShipment) {
+						if (!empty($theShipment->tempErrors)) {
+							$errors[] = $theShipment->tempErrors;
+						}
+					}
+				}
+			}
+		}
+		if (!empty($errors)) {
+			return $errors;
+		}
+		// if including GST we add GST
+		$gst = 0;
+		if ($includingGST) {
+			$gst = round($tot * 10 / 100, 2);
+			$tot += $gst;
+		}
+		$directTot=$tot;
+		$directGst=$gst;
+		if (!empty($totDelivery)) {
+			$deliveryGst=0;
+			if ($includingGST) {
+				$deliveryGst=round($totDelivery * 10 / 100, 2);
+				$gst+=$deliveryGst;
+				$totDelivery+=$deliveryGst;
+			}
+			$tot+=$totDelivery;
+		}
+
+		$tot = round($tot, 2);
+		$inv->mdata['awb'] = $this->awb;
+		$inv->mdata['name'] = $owner->name;
+		$inv->mdata['address'] = $owner->getAddress();
+		$inv->mdata['payterm'] = empty($owner->extra['payterm']) ? '2 days' : $owner->extra['payterm'] . ' days';
+		$inv->due = Invoice::calcDue($inv->date, $inv->mdata['payterm']);
+		$inv->total = $tot;
+		$inv->gst = $gst;
+		if ($isUpdate) {
+			$inv->sync_xero = 0; // in order to sync with xero again
+		}
+		if ($inv->save()) { //only when new invoice was successfully created, the old invoice can be credited;
+			if (!empty($oldInv)) {
+				$oldPaymentsList = $oldInv->createCreditForMe();
+			}
+		}
+		// remove old invoice lines if existing
+		if ($isUpdate) {
+			// in case update , we should remove all old invoice lines
+			InvLine::model()->deleteAll('inv_id = :lid', [':lid' => $inv->id]);
+		}
+
+		$il = new InvLine;
+		$il->inv_id = $inv->id;
+		$il->amount = number_format($directTot, 2, '.', '');
+		$il->gst = number_format($directGst, 2, '.', '');
+		if ($il->gst > 0) {
+			$il->tax = 'OUTPUT';
+		}
+		$il->mdata['items'] = $items;
+		$il->model = 'DmawbConsol';
+		$il->fid = $this->id;
+		$il->qty = 1;
+		$il->save();
+		if (!empty($itemsDelivery)) {
+			$il = new InvLine;
+			$il->inv_id = $inv->id;
+			$il->amount = number_format($totDelivery, 2, '.', '');
+			$il->gst = number_format($deliveryGst, 2, '.', '');
+			if ($il->gst > 0) {
+				$il->tax = 'OUTPUT';
+			}
+			$il->mdata['delivery']=1;
+			$il->mdata['items'] = $itemsDelivery;
+			$il->model = 'DmawbConsol';
+			$il->fid = $this->id;
+			$il->save();
+		}
+
+		// apply old payments for the new created invoice
+		if (!empty($oldPaymentsList)) {
+			$inv->applyPayments($oldPaymentsList);
+		}
+
+		$errors = $inv->getErrors();
+		$errors = array_merge($errors, $il->getErrors());
+		return $errors;
+	}
+
+	public function getEtaToNow()
+	{
+		if (empty($this->eta)) {
+			return 0;
+		}
+		$etaDay=new DateTime($this->eta, new DateTimeZone('Australia/Sydney'));
+		$now=new DateTime('now', new DateTimeZone('Australia/Sydney'));
+		$daydiff = $now->diff($etaDay)->format("%a");
+		return $daydiff;
+	}
+	
+	public function totHeldShipments($wid=0)
+	{
+		$sql = 'SELECT COUNT(id) AS t FROM shipment WHERE consol_id = '.$this->id.' AND status < 60 and status !=42';
+		if (!empty($wid)) {
+			$sql .= ' AND odpt_id = '.$wid;
+		}
+		$c = Yii::app()->db->createCommand($sql);
+		return $c->queryScalar();
+	}
+
+	public function totClearShipments($wid=0)
+	{
+		$sql = 'SELECT COUNT(id) AS t FROM shipment WHERE consol_id = '.$this->id.' AND status in (60)';
+		if (!empty($wid)) {
+			$sql .= ' AND odpt_id = '.$wid;
+		}
+		$c = Yii::app()->db->createCommand($sql);
+		return $c->queryScalar();
+	}
+	
+	/**
+	*
+	*/
+	public function hasEparcel()
+	{
+		$sql="SELECT id from `shipment` WHERE type=10 AND ref like '%AMQ%' and consol_id=".$this->id;
+		$r=Yii::app()->db->createCommand($sql)->queryScalar();
+		if (!empty($r)) {
+			return true;
+		}
+		return false;
+	}
+	
+	public function getOrgsInfo($withOutAGDSY = false)
+	{
+		$orgs = [];
+		foreach ($this->shipments as $shipment) {
+			if (!isset($orgs[$shipment->agent->id])) {
+				$orgs[$shipment->agent->id] = [
+					'id' => $shipment->agent->id,
+					'name' => $shipment->agent->name,
+					'weight' => floatval($shipment->weight),
+					'AGDSY_weight'=>0
+				];
+			} else {
+				$orgs[$shipment->agent->id]['weight'] += floatval($shipment->weight);
+			}
+			if($withOutAGDSY)
+			{
+				//if cancelled,not calculate the cost
+				if ($shipment->status==100) {
+					continue;
+				}
+				if (preg_match('/AGDSY\d{8}/i', $shipment->hbn)) {
+					$orgs[$ship_bill_to_id]['AGDSY_weight']+=$shipment->weight;
+				}
+			}
+			unset($shipment->agent);
+		}
+		return $orgs;
+	}
+
+	/*ll
+	*
+	*/
+	public function hasStartrack()
+	{
+		$sql="SELECT id from `shipment` WHERE type=10 AND ref like '%7RFZ%' and consol_id=".$this->id;
+		$r=Yii::app()->db->createCommand($sql)->queryScalar();
+		if (!empty($r)) {
+			return true;
+		}
+		return false;
+	}
+
+	public function hasToll()
+	{
+		$sql="SELECT id from `shipment` WHERE type=10 AND (ref like '%AWNL%' OR ref like '%AWUJ%') and consol_id=".$this->id;
+		$r=Yii::app()->db->createCommand($sql)->queryScalar();
+		if (!empty($r)) {
+			return true;
+		}
+		return false;
+	}
+	
+	public function hasLetter()
+	{
+		$sql="SELECT id from `shipment` WHERE type=10 AND ref like '%LET%' and consol_id=".$this->id;
+		$r=Yii::app()->db->createCommand($sql)->queryScalar();
+		if (!empty($r)) {
+			return true;
+		}
+		return false;
+	}
+	
+	/*
+	* create the consol process if not have
+	*
+	*/
+	public function toProcess()
+	{
+		if ($this->service == 10) { //air direct consol
+			if (empty($this->process)) {
+				if (!empty($this->eta)&&preg_match('/^\d{4}\-\d{2}\-\d{2}$/i', $this->eta)&&$this->eta<='2018-05-10') {
+					$this->newConsolProcess(ConsolProcess::STATE_CONSOL_PROCESS_DONE, ConsolProcess::TYPE_DIRECT_AIR_CONSOL);
+				} else {
+					$this->newConsolProcess(ConsolProcess::STATE_WAITING_MAIN_ACR, ConsolProcess::TYPE_DIRECT_AIR_CONSOL);
+				}
+			} elseif ($this->process->type!= ConsolProcess::TYPE_DIRECT_AIR_CONSOL) {
+				$this->newConsolProcess($this->process->status, ConsolProcess::TYPE_DIRECT_AIR_CONSOL);
+			}
+		} elseif ($this->service == 20) {//sea consol
+			if (empty($this->process)) {
+				if (!empty($this->eta)&&preg_match('/^\d{4}\-\d{2}\-\d{2}$/i', $this->eta)&&$this->eta<='2018-05-10') {
+					$this->newConsolProcess(ConsolProcess::SEA_FINISH_STATES, ConsolProcess::TYPE_DIRECT_SEA_CONSOL, 2);
+				} else {
+					$this->newConsolProcess(ConsolProcess::STATE_NEW, ConsolProcess::TYPE_DIRECT_SEA_CONSOL, 2);
+				}
+			} elseif ($this->process->main_type!= 2) {
+				$this->newConsolProcess(ConsolProcess::STATE_NEW, ConsolProcess::TYPE_DIRECT_SEA_CONSOL, 2);
+			}
+		}
+	}
+	
+	public function newConsolProcess($status=1, $type=0, $main_type=1)
+	{
+		if (empty($this->process)) {
+			$process=new ConsolProcess();
+			$process->started=date('Y-m-d H:i:s');
+			$process->fid=$this->id;
+			$process->main_type=$main_type;
+		} else {
+			$process=$this->process;
+		}
+		$process->status= $status;
+		if ($process->main_type!=$main_type) {
+			$process->main_type=$main_type;
+			$process->status=1;
+		}
+		$process->type=$type;
+		$process->date=date('Y-m-d H:i:s');
+		if ($process->save()) {
+			return true;
+		}
+		return false;
+	}
+
+	public function addTrack($shipment)
+	{
+		if ($this->status== self::STATE_DELIVERY) {
+			$shipment->status=90;
+			if (!$shipment->hasTracking(90)) {
+				$shipment->addTracking(90, 'Parcels Successfully Delivered');
+			}
+			$shipment->update('status');
+		}
+		if ($this->status== self::STATE_CLEAR) {
+			if($shipment->status!=90)
+			{
+				$shipment->status=60;
+			}
+			if (!$shipment->hasTracking(60)) {
+				$shipment->addTracking(60, 'Clearance processing complete', 'Botany');
+			}
+			$shipment->update('status');
+		}
+		if ($this->status== self::STATE_HELD) {
+			$shipment->status=55;
+			if (!$shipment->hasTracking(55)) {
+				$shipment->addTracking(55, 'Customs held'.$shipment->getHeldReasons(), 'Botany', '', 0, 0, $shipment->meta);
+			}
+			$shipment->update('status');
+		}
+	}
+	public function totAQISShipments($wid=0)
+	{
+		$total = 0;
+		$rs = ImParcel::model()->findAll('consol_id = :cid AND (bwf & '.ImParcel::AQISCODE.') > 0', [':cid' => $this->id]);
+		foreach ($rs as $key => $p) {
+			if($p->isRealAQIS())
+			{
+				$total++;
+			}
+		}
+		return $total;
+	}
+	public function totEMPPShipments($wid=0)
+	{
+		$sql = 'SELECT COUNT(id) AS t FROM shipment WHERE consol_id = '.$this->id.' and (bwf&512)>0';
+		if (!empty($wid)) {
+			$sql .= ' AND odpt_id = '.$wid;
+		}
+		$c = Yii::app()->db->createCommand($sql);
+		return $c->queryScalar();
+	}
+	public function totDGShipments($wid=0)
+	{
+		$sql = 'SELECT COUNT(id) AS t FROM shipment WHERE consol_id = '.$this->id.' and json_value(meta,"s.is_dg") = 1';
+		if (!empty($wid)) {
+			$sql .= ' AND odpt_id = '.$wid;
+		}
+		$c = Yii::app()->db->createCommand($sql);
+		return $c->queryScalar();
+	}
+	public function beforeSave()
+	{
+		return parent::beforeSave();
+	}
+
+	public function afterSave()
+	{
+		$shipment=$this->linkShipment();
+		$this->toProcess();
+		$this->addTrack($shipment);
+		parent::afterSave();
+	}
+
+	public function getCourierList()
+	{
+		$result = [0=>'All',999=>'Other'];
+		$sql = 'SELECT tr.org_id, o.name FROM tranship tr join shipment s on tr.pid = s.id join org o on o.id =tr.org_id WHERE consol_id ='.$this->id.' group by tr.org_id';
+		$rs = Yii::app()->db->createCommand($sql)->queryAll();
+		foreach ($rs as $key => $r) {
+			$result[$r['org_id']] = $r['name'];
+		}
+
+		return $result;
+	}
+
+	public function getOrgList($withCasual=true, $billing=false)
+	{
+		$orgList= $this->getOrgsInfo($billing);
+		$tmp=[];
+		foreach ($orgList as $key=>$list) {
+			$tmp[$key]=$list['name'];
+		}
+		if ($withCasual) {
+			$tmp['1228']='PCA EXPRESS IMPORTS-CASUAL CUSTOMER';
+		}
+		return $tmp;
+	}
+}

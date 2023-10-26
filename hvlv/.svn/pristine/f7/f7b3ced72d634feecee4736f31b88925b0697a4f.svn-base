@@ -1,0 +1,431 @@
+<?php
+
+class CargoProcessPlanController extends Controller
+{
+	protected $nonAjax = ['createInvoice', 'synchronize'];
+
+	public function actionIndex()
+	{
+		$this->render('index');
+	}
+
+	public function actionList()
+	{
+		$model = new CargoProcessPlan('search');
+		$model->unsetAttributes(); // clear any default values
+		if (isset($_GET['CargoProcessPlan'])) {
+			$model->attributes = $_GET['CargoProcessPlan'];
+		} else {
+			$model->status = [10, 20, 30];
+		}
+
+		$assignSql = 'SELECT creater FROM `cargo_process_plan` WHERE status != 100 group by creater';
+		$arrAssigns = Yii::app()->db->createCommand($assignSql)->queryAll();
+		$arrUser = [];
+		if(!empty($arrAssigns)){
+			foreach($arrAssigns as $arrAssign){
+				if(!empty($arrAssign['creater'])){
+					$objUser = User::model()->findByPk($arrAssign['creater']);
+					if(!empty($objUser)){
+						$arrUser[$arrAssign['creater']] = $objUser->fname ." ". $objUser->lname;
+					}
+				}
+			}
+		}
+
+
+		$this->render('list', array(
+			'model' => $model,
+			'arrUser' => $arrUser,
+		));
+	}
+
+	public function actionCreate()
+	{
+
+		$model = new CargoProcessPlan;
+		$model->status = 10;
+		$isError = CargoProcessPlanService::createCargoPlan($model);
+
+		if (!empty($_POST['CargoProcessPlan'])) {
+			$this->ajaxResult($model, ['id']);
+		}
+		$this->render('create', array(
+			'model' => $model,
+		));
+	}
+
+	public function actionView()
+	{
+	}
+
+	public function actionUpdate($id)
+	{
+		$model = $this->loadModel($id);
+
+		if (empty($_POST)) {
+			if (isset($_GET['tab'])) {
+				$this->render('tab_' . $_GET['tab'], array('model' => $model));
+			} else {
+				$this->render('update', array('model' => $model));
+			}
+		} else {
+			if (empty($_POST['act_btn']) || $_POST['act_btn'] == 'Save') {
+				$this->_update($model);
+			}
+		}
+	}
+
+	public function actionCreateInvoice($id)
+	{
+
+		$modelCargoPlan = $this->loadModel($id);
+
+		[$app_name, Yii::app()->name] = [Yii::app()->name, 'TLA'];
+
+		$modelInvoice = new Invoice('create');
+		$modelInvoice->type = 40;
+		$modelInvoice->currency = 1;
+
+		if (isset($_POST['CargoProcessPlan']) || isset($_POST['Invoice'])) {
+			$dpmt = isset($_POST['CargoProcessPlan']['ot_id']) ? $_POST['CargoProcessPlan']['ot_id'] : 0;
+			if ($dpmt <= 0) {
+				$modelInvoice->addError('ot_id        ', 'Invoice Department is mandatory!');
+				$this->ajaxResult($modelInvoice, ['id']);
+			}
+			$consoleNo = '';
+			if (isset($_POST['consolno'])) {
+				$consoleNo = trim($_POST['consolno']);
+			}
+
+			$modelInvoice->attributes = $_POST['Invoice'];
+			$modelInvoice->to_id =  $_POST['CargoProcessPlan']['agent_id'];
+			$modelInvoice->dpt_id = $_POST['CargoProcessPlan']['dpt_id'];
+			$modelInvoice->dpmt = $_POST['CargoProcessPlan']['ot_id'];
+			$modelInvoice->status = 1;
+
+			$awb = '';
+			if (!empty($consoleNo)) {
+				$console = Consol::model()->find('no = :no', [':no' => $consoleNo]);
+			}
+			if (!empty($console)) {
+				$modelInvoice->consol_id = $console->id;
+				$awb = $console->awb;
+			} else if (!empty($_POST['consolno'])) {
+				$modelInvoice->addError('dpmt', 'Consol No is incorrect!');
+				$this->ajaxResult($modelInvoice, ['id']);
+			}
+			$modelInvoice->save();
+			$total = 0;
+			$tgst = 0;
+			if (is_array($_POST['InvLine']['amount'])) {
+				foreach ($_POST['InvLine']['amount'] as $i => $a) {
+					if (!empty($a)) {
+						$il = new InvLine;
+						$il->inv_id = $modelInvoice->id;
+						$il->ccode = $_POST['InvLine']['ccode'][$i];
+						$il->det = $_POST['InvLine']['det'][$i];
+						$il->tax = $_POST['InvLine']['tax'][$i];
+						$il->rebate = empty($_POST['InvLine']['rebate'][$i]) ? 0 : 1;
+						if ($_POST['InvLine']['linkto'][$i] == "PS:T1231231;SKP8888888888") {
+							$linkto = "";
+						} else {
+							$linkto = $_POST['InvLine']['linkto'][$i];
+						}
+						$il->linkto = $linkto;
+						$il->amount = $a;
+						$gst = 0;
+						if ($il->tax == 'OUTPUT') {
+							$gst = floatval($il->amount) * 10 / 100;
+						}
+						$il->amount += $gst;
+						$il->gst = $gst;
+						$il->qty = empty($_POST['InvLine']['qty'][$i]) ? 1 : $_POST['InvLine']['qty'][$i];
+
+						// linked invoice line with related console if needed
+						if (!empty($console)) {
+							$il->fid = $console->id;
+							$il->model = $console->getType();
+						} else {
+							$il->fid = $modelCargoPlan->id;
+							$il->model = "CargoProcessPlanLine";
+						}
+
+						//minimun 75
+						if (($il->amount * $il->qty) < 75) {
+							if ($_POST['InvLine']['det'][$i] == "Pallets Request Fee") {
+								$il->det = "Pallets Request Fee (Minimum 75)";
+								$il->amount = 75;
+								$gst = 0;
+								if ($il->tax == 'OUTPUT') {
+									$gst = floatval($il->amount) * 10 / 100;
+								}
+								$il->amount += $gst;
+								$il->gst = $gst;
+								$il->qty = 1;
+							}
+						}
+
+						$il->save();
+						$total += $il->amount * $il->qty;
+						$tgst += $il->gst * $il->qty;
+					}
+				}
+			} else {
+				$modelInvoice->addError('id', 'Invoice lines are empty!');
+				Invoice::model()->deleteByPk($modelInvoice->id);
+				$this->ajaxResult($modelInvoice, ['id']);
+			}
+			$modelInvoice->total = number_format($total, 2, '.', '');
+			$modelInvoice->gst = number_format($tgst, 2, '.', '');
+			//$modelInvoice->mdata['awb'] = $awb;
+			$modelInvoice->mdata['name'] = $modelInvoice->cust->name;
+			//$modelInvoice->mdata['address'] = $modelInvoice->cust->getAddress();
+			//$modelInvoice->mdata['payterm'] = empty($modelInvoice->cust->extra['payterm']) ? 'COD' : $modelInvoice->cust->extra['payterm'] . ' days';
+			$modelInvoice->save();
+			Yii::app()->name = $app_name;
+
+			$modelCargoPlan->invoice_id = $modelInvoice->id;
+			$modelCargoPlan->save();
+			$this->ajaxResult($modelInvoice, ['id']);
+		}
+		$modelInvoice->date = date('Y-m-d');
+		$modelInvoice->due = date('Y-m-d');
+		$this->render('create_invoice', ['model' => $modelInvoice, 'cargoplan' => $modelCargoPlan]);
+	}
+
+
+	public function actionInvLineGrid($id)
+	{
+		if (empty($_POST)) {
+			// delete
+			[$app_name, Yii::app()->name] = [Yii::app()->name, 'TLA'];
+			$line = InvLine::model()->findByPk($id);
+			$line->delete();
+			if (!empty($line->invoice)) {
+				$invoice = $line->invoice;
+				$invoice->getTotal();
+				$invoice->save();
+			}
+			Yii::app()->name = $app_name;
+		} else {
+			$model = CargoProcessPlan::model()->findByPk($id);
+			if (empty($_POST['InvLine']['tax'])) {
+				$model->addError('id', 'Tax type is required');
+			}
+			if (!empty($model->getErrors())) {
+				$this->ajaxResult($model);
+			}
+			if (empty($_POST['InvLine']['id'])) {
+				//create
+				[$app_name, Yii::app()->name] = [Yii::app()->name, 'TLA'];
+				$line = new InvLine;
+				$line->inv_id = $model->invoice_id;
+				$line->model = 'CargoProcessPlanLine';
+				$line->fid = $model->id;
+				$line->ccode = 9999;
+				$line->amount = $_POST['InvLine']['amount'];
+				$line->det = $_POST['InvLine']['det'];
+				$line->qty = $_POST['InvLine']['qty'];
+				if (!empty($_POST['InvLine']['tax'])) {
+					if (in_array($_POST['InvLine']['tax'], ['OUTPUT'])) {
+						$line->gst = round($line->amount * 10, 2) / 100;
+					} else {
+						$line->gst = 0;
+					}
+				}
+				$line->tax = $_POST['InvLine']['tax'];
+				$line->amount += $line->gst;
+				$line->mdata['items'] = [];
+				//$line->mdata['items'][] = [$model->getNo(), ucwords($model->ref), $model->compl_time, $model->getType() . ' - ' . $line->det, $line->amount - $line->gst, $line->qty, ($line->amount - $line->gst) * $line->qty];
+				$line->save();
+				Yii::app()->name = $app_name;
+			} else {
+				[$app_name, Yii::app()->name] = [Yii::app()->name, 'TLA'];
+				$line = InvLine::model()->findByPk($_POST['InvLine']['id']);
+				$line->amount = $_POST['InvLine']['amount'];
+				$line->qty = $_POST['InvLine']['qty'];
+				$line->det = $_POST['InvLine']['det'];
+				if (!empty($_POST['InvLine']['tax'])) {
+					if (in_array($_POST['InvLine']['tax'], ['OUTPUT'])) {
+						$line->gst = round($line->amount * 10, 2) / 100;
+					} else {
+						$line->gst = 0;
+					}
+				}
+				$line->amount += $line->gst;
+				$line->tax = $_POST['InvLine']['tax'];
+				$line->mdata['items'] = [];
+				//$line->mdata['items'][] = [$model->getNo(), ucwords($model->ref), $model->compl_time, $model->getType() . ' - ' . $line->det, $line->amount - $line->gst, $line->qty, ($line->amount - $line->gst) * $line->qty];
+				$line->save();
+				Yii::app()->name = $app_name;
+			}
+		}
+		$this->ajaxResult($line);
+	}
+
+	public function actionSynchronize($id)
+	{
+		if (!empty($id)) {
+			$model = $this->loadModel($id);
+			if (!empty($model)) {
+				$result = CargoProcessPlanService::toShipment($id);
+				if (!empty($result)) {
+					if ($result=="true") {
+						// $model->status = 30;
+						// $model->save();
+						echo "Successful";
+					} else {
+						echo $result;
+					}
+				}
+				Yii::app()->end();
+			}
+		}
+	}
+
+	public function _update(&$model)
+	{
+
+		$isError = CargoProcessPlanService::upDateCargoPlan($model);
+		if (isset($isError)) {
+		}
+		$this->ajaxResult($model);
+	}
+
+	public function actionAjaxGetDefaultAddress()
+	{
+		if (!empty($_POST["orgId"])) {
+			if(in_array($_POST["orgId"],["106","218","530"])){
+				$model = Org::model()->findByPk($_POST["orgId"]);
+				echo json_encode([
+					'isSuccess' => True,
+					'name' => $model->name,
+					'company' => "TOP LOGISTICS AUSTRALIA",
+					'address' => $model->address,
+					'suburb' => $model->suburb,
+					'city' => $model->suburb,
+					'state' => $model->state,
+					'postcode' => $model->postcode,
+					'country' => $model->country,
+					'tel' => $model->phone,
+					'email' => $model->email,
+				]);
+				return;
+			}else{
+				switch($_POST["orgId"]){
+					case "4PX":
+						$address = "G2/391 Park Road";
+						$suburb = "REGENTS PARK";
+						$city = "REGENTS PARK";
+						$state = "NSW";
+						$postcode = "2143";
+						$country = "AU";
+						break;
+					case "AP":
+						$address = "23 Iraking Ave";
+						$suburb = "Moorebank";
+						$city = "Moorebank";
+						$state = "NSW";
+						$postcode = "2170";
+						$country = "AU";
+						break;
+					case "Punchbowl":
+						$address = "Unit 2B&Unit 3 47-53 Moxon RD";
+						$suburb = "Punchbowl";
+						$city = "Punchbowl";
+						$state = "NSW";
+						$postcode = "2196";
+						$country = "AU";
+						break;
+					case "BWU1":
+						$address = "23 Centenary Ave";
+						$suburb = "Moorebank";
+						$city = "Moorebank";
+						$state = "NSW";
+						$postcode = "2170";
+						$country = "AU";
+						break;
+					case "BWU2":
+						$address = "13 Emporium Av";
+						$suburb = "Kemps Creek";
+						$city = "Kemps Creek";
+						$state = "NSW";
+						$postcode = "2178";
+						$country = "AU";
+						break;	
+					default:
+						$address = "";
+						$suburb = "";
+						$city = "";
+						$state = "";
+						$postcode = "";
+						$country = "";
+						break;
+				}
+				echo json_encode([
+					'isSuccess' => True,
+					'address' => $address,
+					'suburb' => $suburb,
+					'city' => $city,
+					'state' => $state,
+					'postcode' => $postcode,
+					'country' => $country,
+				]);
+				return;
+			}
+		}
+	}
+
+	public function actionAjaxCheckInvoiceNoExist()
+	{
+		if (!empty($_POST["invoiceNo"])) {
+			$strInvoiceNo = $_POST["invoiceNo"];
+			[$app_name, Yii::app()->name] = [Yii::app()->name, 'TLA'];
+			$objInvoice = Invoice::model()->find('status != 10 and no = :no', [':no' => $strInvoiceNo]);
+			if (!empty($objInvoice)) {
+				echo json_encode([
+					'isSuccess' => True,
+				]);
+			} else {
+				echo json_encode([
+					'isSuccess' => False,
+				]);
+			}
+		}
+		return;
+	}
+	
+	public function actionAjaxGetChargeByNewAddress(){
+		$amount = "";
+		$objOldShipment = ImParcel::model()->findByPk($_POST['shipment']);
+		if(!empty($objOldShipment)){
+			$objNewShipment = $objOldShipment;
+			$objNewShipment->cnee->postcode = $_POST['postcode'];
+			$objNewShipment->cnee->address = $_POST['address'];
+			$objNewShipment->cnee->state = $_POST['state'];
+			$amount = $objNewShipment->getChargeByChargecode('',false,null,true,false);
+		}
+		$stramount = strval($amount['amount']);
+		if(!empty($stramount)){
+			echo json_encode([
+				'isSuccess' => True,
+				'amount'=>$stramount
+			]);
+		}else{
+			echo json_encode([
+				'isSuccess' => True,
+				'amount'=>"0"
+			]);
+		}
+	}
+	public function loadModel($id)
+	{
+		$model = CargoProcessPlan::model()->findByPk($id);
+		if ($model === null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+
+		return $model;
+	}
+}

@@ -1,0 +1,1296 @@
+<?php
+
+/**
+ * This is the model class for table "imports_mail".
+ *
+ * The followings are the available columns in table 'imports_mail':
+ * @property integer $id
+ * @property integer $link_id
+ * @property integer $type
+ * @property integer $flag
+ * @property integer $from_flag
+ * @property string $no
+ * @property string $from_email
+ * @property string $from_name
+ * @property string $to_email
+ * @property string $to_name
+ * @property string $cc_email
+ * @property integer $op_id
+ * @property integer $uid
+ * @property string $subject
+ * @property string $plain_body
+ * @property string $body
+ * @property string $create_time
+ * @property string $date
+ * @property integer $status
+ * @property string $meta
+ */
+class ImportsMail extends CActiveRecord
+{
+	public $mdata;
+
+	public $no_status = [];
+
+	public $tempMailBody = '';
+	public $nolog = false;
+	public $custom_log_note = '';
+	public $ids;
+	public $to_time;
+	public $from_time;
+	public $key_word_search;
+	public $isHtmlBody = true;
+
+	const FLAG_FROM_CUSTOMER = 1;
+	const FLAG_FROM_OP_TO_CUSTOMER = 2;
+	const FLAG_PARK = 4;
+
+	const TYPE_UN_KNOWN = 0;
+	const TYPE_WMS_UN_KNOWN = 300;
+	const TYPE_GENERAL_QUERY = 20;
+	const TYPE_PARCEL_QUERY = 30;
+	const TYPE_CUSTOM_PROCESS = 40;
+	const TYPE_FINANCE = 50;
+
+	const STATE_NEW = 10;
+	const STATE_ALLOCATED = 20;
+	const STATE_REPLIED = 50;
+	const STATE_CLOSED = 60;
+	const STATE_CANCELLED = 100;
+	const STATE_FEEDBACK_SENT = 110;
+	const STATE_FEEDBACK_RATED = 111;
+	const NO_ONE = 80;
+	const SEARCH_PARCEL_EMAIL = 109;
+
+	public $assign_types;
+	public $emailIds,$myUserId,$myAllUserId;
+
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName()
+	{
+		return 'imports_mail';
+	}
+
+	public static $states = [
+		10 => 'New',
+		20 => 'Allocated',
+		50 => 'Replied',
+		60 => 'Close',
+		100 => 'Cancelled',
+		110 => 'Feedback Sent',
+		111 => 'Customer Rated',
+	];
+
+	public static $mailTypes = [
+		124	=> 'Air terminal billing',
+		128	=> 'Amazon Booking',
+		120	=> 'AU ENQUIRY',
+		61	=> 'Billing',
+		126	=> 'broker billing',
+		127	=> 'cartage & unpacking billing',
+		122	=> 'Cartage Booking',
+		1	=> 'Cartage UnKnown',
+		50	=> 'Consol Process',
+		123	=> 'Courier Billings',
+		40	=> 'Custom Process',
+		90	=> 'DDU',
+		91	=> 'DDU2',
+		125	=> 'Delivery & transport billing',
+		129	=> 'e-commerce prealert',
+		57	=> 'EMPP',
+		60	=> 'Finance',
+		133 => 'Ar',
+		134 => 'Ap',
+		135 => 'Finance Manager',
+		136 => 'AQIS',
+		121	=> 'INTL ENQUIRY',
+		130	=> 'Mel Parcel',
+		80	=> 'No One',
+		55	=> 'Otturn Report',
+		30	=> 'Parcel Query',
+		31	=> 'Parcel Query Frontend',
+		131	=> 'Perth Parce',
+		65	=> 'Prealert&Customs',
+		109	=> 'Search Parcel Email',
+		70	=> 'Temporary',
+		132	=> 'Manifest Error',
+		0	=> 'UnKnown',
+		137 => 'NOA',
+		999 => 'IT'
+
+	];
+
+	public static $wmsMailTypes = [
+		312 => 'BNE CARTAGE',
+		313 => 'BNE FBA',
+		310	=> '3PL Parcel Query',
+		311	=> '3PL Parcel Query Frontend',
+		306 => 'MEL 3PL',
+		303 => 'MEL CARTAGE',
+		301 => 'MEL FBA',
+		305 => 'OTHER CARTAGE',
+		302 => 'OTHER FBA',
+		309 => 'Outturn',
+		307 => 'SYD 3PL',
+		304 => 'SYD CARTAGE',
+		308 => 'WMS no one',
+		320	=> 'WMS Manifest Error',
+		300 => 'WMS UnKnown'
+	];
+
+	public static $imports_list = [
+		'michelle' => 'michelle@toplogistics.com.au',
+		'christy.yu' => 'christy.yu@toplogistics.com.au',
+	];
+	public static $importscs_list = [
+		'michelle' => 'michelle@toplogistics.com.au',
+		'christy.yu' => 'christy.yu@toplogistics.com.au',
+		'frank.liu' => 'frank.liu@toplogistics.com.au',
+		// 'felix.liu' => 'felix.hu@toplogistics.com.au',
+		'imports.ddu' => 'imports.ddu@toplogistics.com.au',
+		'imports.ddu2' => 'imports.ddu2@toplogistics.com.au',
+		'yiran.xu'=>'yiran.xu@toplogistics.com.au',
+		// 'cartage'=>'cartage@toplogistics.com.au',
+		'carmen.teh'=>'carmen.teh@toplogistics.com.au',
+		// 'felix.kong'=>'felix.kong@toplogistics.com.au',
+		'jack.wu'=>'jack.wu@toplogistics.com.au',
+		// 'tammy.ren'=>'tammy.ren@toplogistics.com.au',
+		'op'=>'op@toplogistics.com.au',
+		// 'doc'=>'doc@toplogistics.com.au',
+		// 'customs'=>'customs@toplogistics.com.au',
+		'kyle.shi'=>'kyle.shi@toplogistics.com.au',
+		//'joanna.zhang'=>'joanna.zhang@toplogistics.com.au',
+		'david.ren'=>'david.ren@toplogistics.com.au',
+		//'faye.liu' => 'faye.liu@vic.toplogistics.com.au',
+		'colin.liu' => 'colin.liu@qld.toplogistics.com.au',
+		// 'OP'=>'op@toplogistics.com.au',
+		'OP2'=>'op2@toplogistics.com.au',
+		'OP3'=>'op3@toplogistics.com.au',
+		'CS'=>'cs@toplogistics.com.au',
+		'CS2'=>'cs2@toplogistics.com.au',
+		'OP3'=>'op3@toplogistics.com.au',
+		'OP4'=>'op4@toplogistics.com.au',
+		'OP5'=>'op5@toplogistics.com.au',
+		'yiduo' => 'yiduo@vic.toplogistics.com.au',
+		// 'james' => 'James.C@vic.toplogistics.com.au',
+		'aaron' => 'aaron.liang@toplogistics.com.au',
+		'danni' => 'danni@toplogistics.com.au',
+		'levi.liu' => 'levi.liu@toplogistics.com.au',
+		// 'doris.ning' => 'doris.ning@toplogistics.com.au',
+		// 'christina'=>'cshen@toplogistics.com.au',
+		'ar2' => 'ar2@toplogistics.com.au',
+		'kelvin.li' => 'kelvin.li@toplogistics.com.au',
+		'lele.yu' => 'lele.yu@toplogistics.com.au'
+		// 'cs2' => 'cs2@toplogistics.com.au',
+		//'sunny.yang' => 'sunny.yang@toplogistics.com.au'
+		// 'AU ENQUIRY' => 'importsau@toplogistics.com.au',
+		// 'INTL ENQUIRY' => 'importsintl@toplogistics.com.au'
+	];
+
+	public static $wmscs_list = [
+		//'faye.liu' => 'faye.liu@vic.toplogistics.com.au',
+		//'joanna.zhang' => 'joanna.zhang@toplogistics.com.au',
+		'kyle.shi' => 'kyle.shi@toplogistics.com.au',
+		'david.ren'=>'david.ren@toplogistics.com.au',
+		// 'Katrina.Xu' => 'Katrina.Xu@vic.toplogistics.com.au',
+		'yiduo' => 'yiduo@vic.toplogistics.com.au',
+		'james' => 'James.C@vic.toplogistics.com.au',
+		'aaron' => 'aaron.liang@toplogistics.com.au',
+		'colin.liu' => 'colin.liu@qld.toplogistics.com.au',
+		'kelvin.li' => 'kelvin.li@toplogistics.com.au',
+		// 'doris.ning' => 'doris.ning@toplogistics.com.au',
+		'ar2' => 'ar2@toplogistics.com.au'
+	];
+
+	public static $imports_list_id = [
+		3157 => 'michelle',
+		3160 => 'christy.yu',
+		587 => 'wen.xu',
+
+	];
+	public static $importscs_list_id = [
+		3181=>'Carmen.Teh',
+		3160=>'christy.yu',
+		3175=>'david.ren',
+		//3394=>'faye.liu',
+		// 3169=>'felix.hu',
+		3166=>'frank.liu',
+		3148=>'imports.ddu',
+		3187=>'imports.ddu2',
+		//3361=>'jack.wu',
+		//3382=>'joanna.zhang',
+		3334=>'kyle.shi',
+		3157=>'michelle',
+		3487=>'colin.liu',
+		3296=>'OP',
+		3571=>'OP2',
+		3850=>'OP3',
+		3883=>'OP4',
+		3886=>'OP5',
+		3589=>'CS',
+		3592=>'CS2',
+		3631 => 'yiduo',
+		// 3358=> 'James',
+		3682=>'aaron',
+		3721=>'danni',
+		// 3553=>'Doris',
+		// 3138=>'Christina',
+		562=>'Gero',
+		3835=>'ar2',
+		3880=>'levi.liu',
+		3874=>'kelvin.li',
+		3892=>'lele.yu'
+		//3769=>'sunny'
+				// 1346=>'AU ENQUIRY',
+		// 1349=>'INTL ENQUIRY'
+		// 3178 => 'cartage',
+		// 3236=>'tammy.ren',
+		// 3293=>'doc',
+		// 3296=>'op',
+
+	];
+
+	public static $wmscs_list_id = [
+		3175 => 'david.ren',
+		//3394 => 'faye.liu',
+		//3382 => 'joanna.zhang',
+		3631 => 'yiduo',
+		3358=> 'James',	
+		3334 => 'kyle.shi',
+		// 3296 => 'OP',
+		3589 => 'CS',
+		3592 => 'CS2',
+		// 3682=>'aaron',
+		3487=>'colin.liu',
+		3874=>'kelvin.li',
+		//3553=>'Doris',
+		3835=>'ar2'
+	];
+
+	public static $allFlags = [
+		0 => 'waiting to matched',
+		1 => 'matched in the mailbox',
+		2 => 'matched in the file',
+		4 => 'park the email'
+	];
+	public function getStatus()
+	{
+		$statusStr = '';
+		if (key_exists($this->status, self::$states)) {
+			$statusStr .= self::$states[$this->status];
+		}
+		if(($this->flag&self::FLAG_PARK)>0)
+		{
+			$statusStr.='[PARK]';
+		}
+		return $statusStr;
+	}
+	public function getType()
+	{
+		$mailTypes = self::$mailTypes+self::$wmsMailTypes;
+		if (key_exists($this->type, $mailTypes)) {
+			return $mailTypes[$this->type];
+		}
+		return '';
+	}
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return [
+			['type, from_email, from_name, to_email, create_time, status', 'required'],
+			['subject', 'safe'],
+			['link_id, type,uid, op_id, status,flag,from_flag', 'numerical', 'integerOnly' => true],
+			['no', 'length', 'max' => 20],
+			['from_email,from_name,to_name', 'length', 'max' => 100],
+			['to_email', 'length', 'max' => 500],
+			['cc_email', 'length', 'max' => 500],
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			['id, link_id, type, no, from_email,from_flag,cc_email,ids,no_status,uid,to_time,from_time,plain_body,key_word_search,from_name,flag,assign_types,create_time,date, to_email, to_name, op_id, subject, date, status, meta,ticket', 'safe', 'on' => 'search'],
+		];
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return [
+			'reply_mails' => [self::HAS_MANY, 'ReplyEmail', 'email_id'],
+			'attachments' => [self::HAS_MANY, 'FileRepo', 'fid', 'on' => 'attachments.type = 28'],
+			'mail_users' => [self::HAS_MANY, 'MailUser', 'mail_id'],
+			'my_mail_users' => [self::HAS_MANY, 'MailUser', 'mail_id', 'on' => 'my_mail_users.status = 10 or my_mail_users.close_time="0000-00-00 00:00:00"']
+		];
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return [
+			'id' => 'ID',
+			'link_id' => 'Link',
+			'type' => 'Type',
+			'no' => 'No',
+			'from_email' => 'From Email',
+			'from_name' => 'From Name',
+			'to_email' => 'To Email',
+			'to_name' => 'To Name',
+			'cc_email' => 'CC Email',
+			'op_id' => 'Op',
+			'subject' => 'Subject',
+			'plain_body' => 'Plain Body',
+			'create_time' => 'Create Time',
+			'date' => 'Date',
+			'status' => 'Status',
+			'flag' => 'Flag',
+			'from_flag' => 'From Flag',
+			'meta' => 'Meta',
+			'ticket' =>'Ticket'
+		];
+	}
+
+	public static function createTicket($parser, $message,$is3PL= 0)
+	{
+		$tmp = Yii::app()->basePath . DIRECTORY_SEPARATOR . 'runtime' . DIRECTORY_SEPARATOR . 'importsmail' . DIRECTORY_SEPARATOR;
+
+		$model = new ImportsMail();
+		$fromInformation = $parser->getAddresses('from'); //arrray('display'=>'Name','address'=>'jerry@toplogistics.com.au','is_group'=>false）;
+		$addressesTo = $parser->getAddresses('to');
+		$addressesCc = $parser->getAddresses('cc');
+		$model->from_email = !empty($fromInformation[0]['address']) ? $fromInformation[0]['address'] : "unknow@unknow.com";
+		$model->from_name = substr(!empty($fromInformation[0]['display']) ? $fromInformation[0]['display'] : "unknow", 0, 100);
+		if(empty($model->from_name))
+		{
+			$model->from_name = "unknow";
+		}
+		$a = trim($parser->getHeader('subject'));
+		if (preg_match_all('/\{EM\d+\}/', $a, $ms)) {
+			$a = str_replace($ms[0], '', $a) . ' ' . implode(' ', $ms[0]);
+		}
+		$a = preg_replace('/(Reply|回复|答复):/', 'Re:', $a);
+		$a = preg_replace('/^{(Spam|Definitely Spam|Virus|Disarmed)\??} /', '', $a);
+		$a = preg_replace('/Re:\s*Re:(\s*Re:)?(\s*Re:)?(\s*Re:)?/i', 'Re:', $a);
+		$model->subject = $a;
+		$tempToEmail = ''; //the list to to mail;
+		$toEmail = ''; //reply mail. imports or importscs
+		$toEmailName = '';
+		$model->mdata['search']['from'] = trim($model->from_email);
+		$model->mdata['search']['subject'] = trim($model->subject);
+		$model->mdata['search']['message_id'] = trim($parser->getHeader("message-id"));
+		foreach ($addressesTo as $theToEmail) {
+			$tempToEmail .= $theToEmail['address'] . ';';
+			if (in_array($theToEmail['address'], ['imports@toplogistics.com.au', 'importscs@toplogistics.com.au', 'finance@toplogistics.com.au'])) {
+				$toEmail = $theToEmail['address'];
+				$toEmailName = $theToEmail['display'];
+			}
+		}
+		if (empty($toEmail)) {
+			foreach ($addressesCc as $theToEmail) {
+				if (in_array($theToEmail['address'], ['imports@toplogistics.com.au', 'importscs@toplogistics.com.au', 'finance@toplogistics.com.au'])) {
+					$toEmail = $theToEmail['address'];
+					$toEmailName = $theToEmail['display'];
+					break;
+				}
+			}
+		}
+		$model->mdata['to_email'] = $toEmail;
+		if ($toEmail == 'imports@toplogistics.com.au') {
+			$model->from_flag = 1;
+		} else {
+			$model->from_flag = 2;
+		}
+		if (empty($tempToEmail)) {
+			$tempToEmail = "notfoundAdress@notfoundAdress";
+		}
+		$model->to_email = substr($tempToEmail, 0, 500);
+		$model->to_name = substr($toEmailName, 0, 100);
+		$model->link_id = $model->getLinkId($model->subject);
+		$model->mdata['cc'] = $addressesCc;
+		$model->is3pl = $is3PL;
+		$model->status = self::STATE_NEW;
+		$tk = [];
+		if(preg_match('/ticket CS\d{1,}/i', $a,$tk))
+		{
+			$model->ticket = preg_replace('/ticket /i', '', $tk[0]);
+			$tkid = explode('CS', $model->ticket)[1]*1;
+			if($tkid<17130)
+			{
+				$model->status = self::STATE_CLOSED;
+			}
+
+			if(!empty($model->ticket)&&!preg_match('/toplogistics.com.au/i', $model->from_email))
+			{
+				$ticket = ShipmentQuestionSubmit::model()->find('ticket=:ticket',[":ticket"=>$model->ticket]);
+				if(!empty($ticket)&&!empty($ticket->shipmentQuestion))
+				{
+					$sq = $ticket->shipmentQuestion[0];
+					$sq->process_type = ShipmentQuestion::TYPE_RECEIVED;
+					$sq->save();
+				}
+			}
+		}
+		$ccEmailAddress = '';
+		if (!empty($addressesCc)) {
+			foreach ($addressesCc as $tempCC) {
+				$ccEmailAddress .= $tempCC['address'] . ';';
+			}
+		}
+		$model->cc_email = substr($ccEmailAddress, 0, 500);
+
+		//save the html to the body; we need to change the charset to utf8, otherwise it will not support Chinese;
+		$html = $parser->getMessageBody('htmlEmbedded');
+		$html = preg_replace('/\bcharset=.*(?=")/', 'charset=utf8', $html);
+		$html = preg_replace("/(?<=<style>)<!--.*(?=<\/style>)/Ums", "", $html);
+		if (empty($html)) {
+			$html = $parser->getMessageBody('text');
+		}
+		$model->plain_body = $parser->getMessageBody('text');
+		if (empty($model->plain_body)) {
+			require_once Yii::app()->basePath . '/vendor/autoload.php';
+			$model->plain_body = Html2Text\Html2Text::convert($html, true);
+		}
+		$model->create_time = date('Y-m-d H:i:s');
+		// $model->type= $model->checkTheType($model->subject);
+		
+		$model->checkTheType($is3PL);
+		if (!$model->save()) {
+			Emailog::sendEmailTo(Emailog::NOTIFY_OP_EMAIL, json_encode($model->getErrors()), "Imports Mail Save Error");
+			// Log::log2file(json_encode($model->getErrors()), 'imports_mail_error', "importsMailError");
+			return false;
+		}
+		$savePath = $parser->saveAttachments(Yii::app()->basePath . DIRECTORY_SEPARATOR . 'runtime' . DIRECTORY_SEPARATOR . 'test' . DIRECTORY_SEPARATOR);
+		if (!empty($savePath) && is_array($savePath)) {
+			foreach ($savePath as $path) {
+				$fid = FileRepo::storeFile($path, basename($path), FileRepo::FILE_TYPE_IMPORT_ATTACHMENT, $model->id);
+				if (preg_match('/^AUCustoms[ _\-]+Entry[ ]*Print.+\.pdf$/i', basename($path))) {
+					//customs entry
+					$pdf = new modiPDF($path);
+					if (preg_match('/REF : PCA ([^\s]+)/i', $pdf->rawText(), $m)) {
+						$p = ImParcel::model()->find('hbn = :n', [':n' => $m[1]]);
+						if ($p) {
+							$fr = FileRepo::model()->findBypk($fid);
+							if (FileRepo::model()->count('fid = :fid AND type = :t AND hash = :h', [':fid' => $p->id, ':t' => 19, ':h' => $fr->hash]) == 0) {
+								$fr->isNewRecord = true;
+								$fr->id = null;
+								$fr->type = 19;
+								$fr->fid = $p->id;
+								$fr->save();
+							}
+						}
+					}
+				}
+				unlink($path);
+			}
+		}
+		$model->refresh();
+		$model->newMailUser($is3PL);
+		if (!empty($model->mdata['tel_op'])) {
+			foreach (preg_split("/[;,]+/", $model->mdata['tel_op']) as $tel) {
+				if (empty($tel)) {
+					continue;
+				}
+				$model->sendMsg($tel);
+			}
+		}
+		file_put_contents($tmp . $model->no . ".emz", gzencode($message));
+		$tlaTaskService = new TlaTaskService();
+		$tlaTaskService->saveEmailToBeEmailTask($model);
+
+		$consolProcessService = new ConsolProcessService();
+		$consolProcessService->checkNOAEmail($model);
+
+		if($model->from_email=="service@paypal.com.au"&&$model->to_email=="paypal@toplogistics.com.au;"&&preg_match("/payment received from/i",$model->subject)&&preg_match('/Invoice\s(.*)\s\$([\d]+\.*\d{0,3})/',$model->plain_body,$m)&&preg_match("/Transaction ID\s+\[(.*)\]/",$model->plain_body,$n))
+		{
+			if(preg_match('/(.*)\s+\$([\d]+\.*\d{0,3})/',$m[1],$l))
+			{
+				$invoiceService = new InvoiceService();
+				$invoiceService->importEmailForPaypal($model,$l[1],$l[2],$n[1]);
+			}
+		}
+
+		return $model;
+	}
+
+
+	public static function createNewTicket($parser)
+	{
+		$model = new ImportsMail();
+		$model->from_email = $parser["from_email"];
+		$model->from_name =$parser["from_name"];
+		$model->subject = $parser["subject"];
+		$model->mdata['search']['from'] = trim($parser["from_email"]);
+		$model->mdata['search']['subject'] = trim($parser["subject"]);
+		$model->mdata['search']['message_id'] = "";
+		$model->mdata['to_email'] = trim($parser["to_email"]);
+		$model->flag = 1;
+		$model->from_flag = 2;
+		$model->no = "";
+		$model->to_email = $parser["to_email"];
+		$model->to_name = $parser["to_name"];
+		$model->link_id = $model->getLinkId($model->subject);
+		$model->cc_email = $parser["cc_email"];
+		$model->mdata['cc'] = array(["display"=>$parser["cc_email"],"address"=>$parser["cc_email"],"is_group"=>false]);
+		$model->op_id = 0;
+		$model->type=self::NO_ONE;
+		$model->plain_body =  $parser["plain_body"];
+		$model->create_time = date('Y-m-d H:i:s');
+		$model->date = date('0000-00-00 00:00:00');
+		$model->uid = User::currentUserID();
+		// $model->type= $model->checkTheType($model->subject);
+		$model->status = self::STATE_NEW;
+		if ($model->save())
+		{
+			$model->checkTheType();
+			$model->refresh();
+			$model->newMailUser();
+			return true;
+		}else
+		{
+			return false;
+		}
+	}
+
+	/**
+	 * only check type beforesave, which means all the parameters are assignment!
+	 * @param type $subject
+	 * @return type
+	 */
+	public function checkTheType($is3PL = 0)
+	{
+		$type = self::TYPE_UN_KNOWN;
+		//            $type=$this->getMatchType($this->subject); //this is used to match the type by adding our number.
+		//            if(!empty($type)) return $type;
+		$type = $this->checkTypeByFilters($is3PL);
+		$this->type = $type;
+	}
+	/***
+	 * use the database ImportsMailFilter to filter out the types.
+	 * @return Type
+	 */
+	public function checkTypeByFilters($is3PL = 0)
+	{
+		if($is3PL==1)
+		{
+			$rs = ImportsMailFilter::model()->findAll(' is3pl = 1');
+		}else
+		{
+			$rs = ImportsMailFilter::model()->findAll(' is3pl = 0');
+		}
+		foreach ($rs as $r) {
+			if (!empty($r->from_email)) {
+				$match = false;
+				foreach (preg_split("/[;]/", $r->from_email) as $reg) {
+					if (empty(trim($reg))) {
+						continue;
+					}
+					if (preg_match("/" . $reg . "/i", $this->from_email)) {
+						$match = true;
+						break;
+					}
+				}
+				if (!$match) {
+					continue;
+				}
+			}
+			if (!empty($r->subject)) {
+				$match = false;
+				foreach (preg_split("/[;]/", $r->subject) as $reg) {
+					if (empty(trim($reg))) {
+						continue;
+					}
+
+					$reg = str_replace('/', '\/', $reg);
+					$andArr = preg_split("/[&]/", $reg);
+					$match = true;
+					foreach ($andArr as $andReg) {
+						$andReg = str_replace('/', '\/', $andReg);
+						if (!preg_match("/" . $andReg . "/i", $this->subject)) {
+							$match = false;
+							break;
+						}
+					}
+					if($match)
+					{
+						break;
+					}
+				}
+				if (!$match) {
+					continue;
+				}
+			}
+			if (!empty($r->to_email)) {
+				$match = false;
+				foreach (preg_split("/[;]/", $r->to_email) as $reg) {
+					if (empty(trim($reg))) {
+						continue;
+					}
+					if (preg_match("/" . $reg . "/i", $this->to_email)) {
+						$match = true;
+						break;
+					}
+				}
+				if (!$match) {
+					continue;
+				}
+			}
+
+			if (!empty($r->cc_email)) {
+				$match = false;
+				foreach (preg_split("/[;]/", $r->cc_email) as $reg) {
+					if (empty(trim($reg))) {
+						continue;
+					}
+					if (preg_match("/" . $reg . "/i", $this->cc_email)) {
+						$match = true;
+						break;
+					}
+				}
+				if (!$match) {
+					continue;
+				}
+			}
+			
+			if (!empty($r->tel)) {
+				$this->mdata['tel_op'] = $r->tel;
+			}
+			return $r->type;
+		}
+
+		if($is3PL==1)
+		{
+			return self::TYPE_WMS_UN_KNOWN;
+		}else
+		{
+			return self::TYPE_UN_KNOWN;
+		}
+	}
+
+	/**
+	 * use this function when creating a new  importsMail
+	 */
+	public function newMailUser($is3pl = 0)
+	{
+		$importscs_list = self::$importscs_list;
+		$importscs_list_id = self::$importscs_list_id;
+		if(!empty($is3pl))
+		{
+			$importscs_list = self::$wmscs_list;
+			$importscs_list_id = self::$wmscs_list_id;
+		}
+		//match to address
+
+		$to_addr = strtolower(trim($this->to_email, ';'));
+		$email2user = array_flip($importscs_list);
+		$user2id = array_flip($importscs_list_id);
+		if (isset($email2user[$to_addr]) && isset($user2id[$email2user[$to_addr]])) {
+			$model = new MailUser;
+			$model->mail_id = $this->id;
+			$model->user_id = $user2id[$email2user[$to_addr]];
+			$model->mail_type = 0;
+			$model->status = 10;
+			$model->create_time = date('Y-m-d H:i:s');
+			$model->save();
+			if (empty($this->op_id)) {
+				$this->op_id = $model->user_id;
+				$this->save();
+			}
+		}
+		//match type
+		$rs = ImportsMailUserMap::model()->findAll('type_id=:type', [':type' => $this->type]);
+		if (!empty($rs)) {
+			$transaction = Yii::app()->db->beginTransaction();
+			try {
+				foreach ($rs as $r) {
+					$model = new MailUser;
+					$model->mail_id = $this->id;
+					$model->user_id = $r->user_id;
+					$model->mail_type = $r->type_id;
+					$model->status = 10;
+					$model->create_time = date('Y-m-d H:i:s');
+					$model->save();
+					if (!empty($r->tel)) {
+						$this->sendMsg($r->tel);
+					}
+				}
+				$transaction->commit();
+			} catch (Exception $ex) {
+				$transaction->rollback();
+			}
+		}
+	}
+
+	public function sendMsg($no)
+	{
+		$msg = "A email with Subjetct: " . $this->subject . " from: " . $this->from_email . " at:" . $this->create_time;
+		if (Sms::sendMessageLocal(trim($no), $msg)) {
+			Log::log2file($this->no . "=>" . $msg, "imports_mail_notice", 'smslog');
+		}
+	}
+	/***
+	 * $result=array('add'=>array(),'remove'=>array());
+	 */
+	public static function newMappingUserMail($result)
+	{
+		if (!empty($result['add'])) {
+			$transaction = Yii::app()->db->beginTransaction();
+			try {
+				foreach ($result['add'] as $type => $user_ids) {
+					$rs = ImportsMail::model()->findAll('type=:type AND status=10', [':type' => $type]);
+					foreach ($user_ids as $uid) {
+						foreach ($rs as $r) {
+							$p = MailUser::model()->find('user_id=:user_id AND mail_id=:mail_id', [':user_id' => $uid, ':mail_id' => $r->id]);
+							if (empty($p)) {
+								$model = new MailUser();
+								$model->mail_id = $r->id;
+								$model->user_id = $uid;
+								$model->mail_type = $r->type;
+								$model->create_time = date('Y-m-d H:i:s');
+								$model->status = 10;
+								$model->save();
+							}
+						}
+					}
+				}
+				$transaction->commit();
+			} catch (Exception $ex) {
+				$transaction->rollback();
+			}
+		}
+		//           if(!empty($result['remove'])){
+		//               //do nothing for remove now
+		//
+		//           }
+	}
+	public function assignMapping($uid)
+	{
+		$r = MailUser::model()->find('user_id=:uid AND mail_id=:mail_id', [':uid' => $uid, ':mail_id' => $this->id]);
+		if (empty($r)) {
+			$model = new MailUser();
+			$model->user_id = $uid;
+			$model->mail_id = $this->id;
+			$model->mail_type = $this->type;
+			$model->create_time = date('Y-m-d H:i:s');
+			$model->status = 10;
+			$model->save();
+		}
+		$this->close(false);
+	}
+	public function changeTypeMapping($type)
+	{
+		$rs = ImportsMailUserMap::model()->findAll('type_id=:type', [':type' => $type]);
+		if (!empty($rs)) {
+			$transaction = Yii::app()->db->beginTransaction();
+			try {
+				foreach ($rs as $r) {
+					$record = MailUser::model()->find('mail_id=:mail_id AND user_id=:user_id', [':mail_id' => $this->id, ':user_id' => $r->user_id]);
+					if (empty($record)) {
+						$record = new MailUser();
+						$record->mail_id = $this->id;
+						$record->mail_type = $this->type;
+						$record->create_time = date('Y-m-d H:i:s');
+						$record->status = 10;
+						$record->user_id = $r->user_id;
+						$record->save();
+					}
+				}
+				$transaction->commit();
+			} catch (Exception $ex) {
+				$transaction->rollback();
+			}
+		}
+		$this->close();
+	}
+	public function mailUserReply()
+	{
+		$r = MailUser::model()->find('user_id=:uid AND mail_id=:mail_id', [':uid' => Yii::app()->user->id, ':mail_id' => $this->id]);
+		if (!empty($r)) {
+			$r->status = 50;
+			$r->close_time = date('Y-m-d H:i:s');
+			$r->update(['status', 'close_time']);
+			$this->date = date('Y-m-d H:i:s');
+			$this->status = 50;
+			$this->op_id = Yii::app()->user->id;
+			$this->update(['status', 'date', 'op_id']);
+		} else {
+			$r = new MailUser();
+			$r->status = 50;
+			$r->mail_id = $this->id;
+			$r->mail_type = $this->type;
+			$r->user_id = Yii::app()->user->id;
+			$r->create_time = date('Y-m-d H:i:s');
+			$r->close_time = date('Y-m-d H:i:s');
+			$r->save();
+			$this->status = 50;
+			$this->op_id = Yii::app()->user->id;
+			$this->date = date('Y-m-d H:i:s');
+			$this->update(['status', 'date', 'op_id']);
+		}
+	}
+
+	public function close($mail = true)
+	{
+		$r = MailUser::model()->find('user_id=:uid AND mail_id=:mail_id', [':uid' => Yii::app()->user->id, ':mail_id' => $this->id]);
+		if (!empty($r)) {
+			$r->status = 60;
+			$r->close_time = date('Y-m-d H:i:s');
+			$r->update(['status', 'close_time']);
+		} else {
+			$r = new MailUser();
+			$r->status = 60;
+			$r->mail_id = $this->id;
+			$r->mail_type = $this->type;
+			$r->user_id = Yii::app()->user->id;
+			$r->create_time = date('Y-m-d H:i:s');
+			$r->close_time = date('Y-m-d H:i:s');
+			$r->save();
+		}
+		$rs = MailUser::model()->find('mail_id=:mail_id and close_time="0000-00-00 00:00:00"', [':mail_id' => $this->id]);// when it is park, the email will havn't close_time but have status
+		if (empty($rs)) {
+			$this->status = self::STATE_CLOSED;
+			$this->op_id = Yii::app()->user->id;
+			$this->date = date('Y-m-d H:i:s');
+			$this->update(['status', 'date', 'op_id']);
+		}
+		// $tlaTask = TlaTask::model()->find("task_no = :taskNo",[":taskNo"=>$this->no]);
+		// if(!empty($tlaTask))
+		// {
+		// 	$tlaTask->close();
+		// }
+	}
+
+	public function read()
+	{
+		$r = MailUser::model()->find('user_id=:uid AND mail_id=:mail_id', [':uid' => Yii::app()->user->id, ':mail_id' => $this->id]);
+		if (!empty($r)) {
+			$r->status = 60;
+			$r->close_time = date('Y-m-d H:i:s');
+			$r->update(['status', 'close_time']);
+		} else {
+			$r = new MailUser();
+			$r->status = 60;
+			$r->mail_id = $this->id;
+			$r->mail_type = $this->type;
+			$r->user_id = Yii::app()->user->id;
+			$r->create_time = date('Y-m-d H:i:s');
+			$r->close_time = date('Y-m-d H:i:s');
+			$r->save();
+		}
+		$rs = MailUser::model()->find('mail_id=:mail_id and status=10', [':mail_id' => $this->id]);
+		if (empty($rs)) {
+			if($this->status==self::STATE_NEW)
+			{
+				$this->status = self::STATE_CLOSED;
+				$this->op_id = Yii::app()->user->id;
+				$this->date = date('Y-m-d H:i:s');
+				$this->update(['status', 'date', 'op_id']);
+			}
+		}
+	}
+
+	public function replyAndPark()
+	{
+		$r = MailUser::model()->find('user_id=:uid AND mail_id=:mail_id', [':uid' => Yii::app()->user->id, ':mail_id' => $this->id]);
+		if (!empty($r)) {
+			$r->status = 50;
+			$r->park_time = date('Y-m-d H:i:s');
+			$r->update(['status','park_time']);
+		} else {
+			$r = new MailUser();
+			$r->status = 50;
+			$r->mail_id = $this->id;
+			$r->mail_type = $this->type;
+			$r->user_id = Yii::app()->user->id;
+			$r->create_time = date('Y-m-d H:i:s');
+			$r->park_time = date('Y-m-d H:i:s');
+			$r->save();
+		}
+		
+		$this->status = 50;
+		$this->op_id = Yii::app()->user->id;
+		$this->date = date('Y-m-d H:i:s');
+		$this->flag = $this->flag|self::FLAG_PARK;
+		$this->update(['status', 'date', 'op_id','flag']);
+	}
+
+	public function park()
+	{
+		$r = MailUser::model()->find('user_id=:uid AND mail_id=:mail_id', [':uid' => Yii::app()->user->id, ':mail_id' => $this->id]);
+		if (!empty($r)) {
+			$r->park_time = date('Y-m-d H:i:s');
+			$r->update([ 'park_time']);
+		} else {
+			$r = new MailUser();
+			$r->status = $this->status;
+			$r->mail_id = $this->id;
+			$r->mail_type = $this->type;
+			$r->user_id = Yii::app()->user->id;
+			$r->create_time = date('Y-m-d H:i:s');
+			$r->park_time = date('Y-m-d H:i:s');
+			$r->save();
+		}
+		$this->flag = $this->flag|self::FLAG_PARK;
+		$this->update(['flag']);
+	}
+
+	/**
+	 * we need to analyise
+	 * @param String $subject
+	 * @return String no
+	 */
+	public function parceSubject($subject)
+	{
+		$matchNo = '';
+		if (preg_match("/\{(EM\d{7})\}/", $subject, $match)) {
+			$matchNo = $match[1];
+		}
+		return $matchNo;
+	}
+	/**
+	 *
+	 */
+	public function getMatchType($subject)
+	{
+		$no = $this->parceSubject($subject);
+		if (!empty($no)) {
+			$r = self::model()->find('no=:no', [':no' => trim($no)]);
+			if (empty(!$r)) {
+				return $r->type;
+			}
+		}
+		return 0;
+	}
+	public function getLinkId($subject)
+	{
+		$no = $this->parceSubject($subject);
+		if (!empty($no)) {
+			$r = self::model()->find('no=:no', [':no' => trim($no)]);
+			if (empty(!$r)) {
+				return $r->id;
+			}
+		}
+		return 0;
+	}
+	public function getMailUserForCurrentUser()
+	{
+		$r = MailUser::model()->find('user_id=:uid AND mail_id=:mail_id', [':uid' => Yii::app()->user->id, ':mail_id' => $this->id]);
+		return $r;
+	}
+	public function getMapStatus()
+	{
+		if (!empty($r = $this->getMailUserForCurrentUser())) {
+			return $r->getStatus();
+		} else {
+			return $this->getStatus();
+		}
+	}
+
+	public function getOpName()
+	{
+		if (empty($this->op_id)) {
+			$rs = MailUser::model()->findAll('mail_id=:mail_id', [':mail_id' => $this->id]);
+			$us = [];
+			foreach ($rs as $r) {
+				if(empty($r->user)) continue;
+				$us[] = $r->user->fname . '.' . $r->user->lname;
+			}
+			return '<span title="' . implode(', ', $us) . '">' . @$us[0] . '</span>';
+		} else {
+			$user = User::model()->findByPk($this->op_id);
+			if (!empty($user)) {
+				return $user->fname . '.' . $user->lname;
+			}
+		}
+		return '';
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search($pgn = true, $ps = 30, $ec = false)
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria = new CDbCriteria;
+
+		$criteria->compare('t.id', $this->id);
+		$criteria->compare('op_id', $this->op_id);
+		if (!empty($this->assign_types)) {
+			$criteria->addInCondition('type', $this->assign_types, 'OR');
+		}
+		$criteria->compare('is3pl', $this->is3pl);
+		$criteria->compare('link_id', $this->link_id);
+		$criteria->compare('uid', $this->uid);
+		$criteria->compare('type', $this->type);
+		$criteria->compare('no', $this->no);
+		$criteria->compare('from_email', $this->from_email, true);
+		$criteria->compare('from_name', $this->from_name, true);
+		$criteria->compare('cc_email', $this->cc_email, true);
+		$criteria->compare('to_email', $this->to_email, true);
+		$criteria->compare('to_name', $this->to_name, true);
+
+		$criteria->compare('subject', $this->subject, true);
+		$criteria->compare('plain_body', $this->plain_body, true);
+		$criteria->compare('t.create_time', $this->create_time, true);
+		$criteria->compare('date', $this->date, true);
+		$criteria->compare('ticket', $this->ticket, true);
+		$criteria->compare('t.status', $this->status);
+		$with = [];
+		if(!empty($this->emailIds))
+		{
+			$criteria->addInCondition('id',$this->emailIds);
+		}
+
+		if(!empty($this->myUserId))
+		{
+			$with=['my_mail_users'];
+			$criteria->compare('my_mail_users.user_id',$this->myUserId);
+		}
+
+		if(!empty($this->myAllUserId))
+		{
+			$with=['mail_users'];
+			$criteria->compare('mail_users.user_id',$this->myAllUserId);
+		}
+		
+		if (!empty($this->from_time) || !empty($this->to_time)) {
+			$temp_from_time = empty($this->from_time) ? '0000-00-00' : $this->from_time;
+			$temp_to_time = empty($this->to_time) ? '9999-12-31' : $this->to_time;
+			$criteria->addBetweenCondition('t.create_time', $temp_from_time, $temp_to_time);
+		}
+		if (!empty($this->key_word_search)) {
+			$criteria->addCondition('subject like :key_word OR plain_body like :key_word');
+			$criteria->params += [
+				':key_word' => "%$this->key_word_search%",
+			];
+		}
+		if (!empty($this->no_status) && is_array($this->no_status)) {
+			$criteria->addNotInCondition('t.status', $this->no_status);
+		}
+		if (!empty($this->ids)) {
+			$criteria->addInCondition('id', $this->ids);
+		}
+
+		if (!empty($ec)) {
+			$criteria->mergeWith($ec);
+		}
+		$criteria->with = $with;
+		$criteria->together = true;
+		$sort = new CSort(get_called_class());
+		$sort->defaultOrder = 't.id DESC';
+		$pagerparams = $_GET;
+
+		return new CActiveDataProvider($this, array(
+			'criteria' => $criteria,
+			'sort' => $sort,
+			'pagination' => $pgn ? [
+				'pageSize' => $ps,
+				'params' => $pagerparams,
+			] : false,
+		));
+	}
+
+	public function getReplyHeader()
+	{
+		$send_time = date('l, M d, Y H:i A', strtotime($this->create_time));
+		$reply = '<br/>';
+		$sig = ImportsMailSignature::model()->find('user_id=:uid AND status=1', [':uid' => Yii::app()->user->id]);
+		if (!empty($sig)) {
+			$reply .= $sig->sig_body;
+		}
+		$reply .= "<hr><div>
+								<p>
+								<b>From:</b>&lt; $this->from_email &gt;
+								<br><b>Sent:</b> $send_time
+								<br><b>To:</b> &lt;$this->to_email&gt;";
+		if (!empty($this->mdata['cc'])) {
+			$cc = "";
+			foreach ($this->mdata['cc'] as $c) {
+				$cc = @$c['address'] . ';';
+			}
+			if (!empty($cc)) {
+				$reply .= "<br><b>Cc:</b>&lt; $cc&gt;";
+			}
+		}
+		$reply .= "<br><b>Subject:</b> $this->subject";
+		$reply .= "</div>";
+		return $reply;
+	}
+
+	public function genNo()
+	{
+		if (empty($this->no)) {
+			$this->no = "EM" . (intval(sprintf("%07s", substr($this->id,-7)))+2000000);
+			$this->update('no');
+		}
+	}
+
+	public function beforeSave()
+	{
+		if (!empty($this->mdata)) {
+			$this->meta = json_encode($this->mdata);
+		}
+		return true;
+	}
+
+	public function afterFind()
+	{
+		if (!empty($this->meta)) {
+			$this->mdata = json_decode($this->meta, true);
+		}
+		$this->genNo();
+	}
+
+	public function afterSave()
+	{
+		if (!$this->nolog && !empty($this)) {
+			$extra = empty($this->custom_log_note) ? [] : ['note' => $this->custom_log_note];
+			Log::add($this, $this->isNewRecord ? 3 : 4, array_merge(['status' => $this->getStatus()], $extra));
+		}
+	}
+
+	public function rawcontent(){
+		if (!empty($this->tempMailBody)) {
+			return;
+		}
+		$tmp = Yii::app()->basePath . DIRECTORY_SEPARATOR . 'runtime' . DIRECTORY_SEPARATOR . 'importsmail' . DIRECTORY_SEPARATOR;
+		$fileName = $tmp . $this->no . '.emz';
+		if (file_exists($fileName)) {
+			return gzdecode(file_get_contents($fileName));
+		} else {
+			$s3Service = new AwsS3Service();
+			return gzdecode($s3Service->downloadEmailAttatchment($this));
+		}
+		
+	}
+
+	public function loadContent()
+	{
+		$tmp = Yii::app()->basePath . DIRECTORY_SEPARATOR . 'runtime' . DIRECTORY_SEPARATOR . 'importsmail' . DIRECTORY_SEPARATOR;
+		$fileName = $tmp . $this->no . '.emz';
+		$s3Service = new AwsS3Service();
+		$key = $this->no . '.emz';
+		if(!file_exists($fileName) && !$s3Service->fileExist($key))
+		{
+			return false;
+		}
+
+		$message = $this->rawcontent();
+		$body = $this->getTheMailBody($message);
+		$this->tempMailBody = $body;
+		return true;
+	}
+
+	public function getTheMailBody($message)
+	{
+		require_once Yii::app()->basePath . '/vendor/autoload.php';
+		$parser = new PhpMimeMailParser\Parser();
+		$parser->setText($message);
+		$body = $this->getBodyFromParser($parser);
+		return $body;
+	}
+
+	public function getBodyFromParser($parser)
+	{
+		$html = $parser->getMessageBody('htmlEmbedded');
+		//            $html=preg_replace('/charset=[^"^\']*/','charset=utf8',$html);
+		$html = preg_replace("/(?<=<style>)<!--.*(?=<\/style>)/Ums", "", $html);
+		$html = preg_replace("/(?<=<style>).*(?=<\/style>)/Ums", "", $html);
+		$headBody = '';
+		if (empty($html)) {
+			$html = $parser->getMessageBody('text');
+			$this->isHtmlBody = false;
+		} else {
+			$html = $headBody . $html;
+		}
+		return $html;
+	}
+
+	public function getDeadline()
+	{
+		$deadlineDate = explode(" ", $this->create_time)[0];
+        $createTime = explode(" ", $this->create_time)[1];
+
+        //park
+        $isMailPark = ($this->flag&ImportsMail::FLAG_PARK)>0?1:0;
+        if(!empty($isMailPark))
+        {
+          for($i=0; $i < 2; $i++)
+          {
+            $deadlineDate = HolidayHelper::getNextWeekday($deadlineDate,null);
+          }
+
+
+        }else
+        {
+          //before 17:30
+          $bonus = 0;
+          if(strtotime($this->create_time)<strtotime($deadlineDate." "."17:30:00"))
+          {
+              $isHoliday = HolidayHelper::checkDateIsHoliday($deadlineDate);
+              if($isHoliday)
+              {
+                 $deadlineDate = HolidayHelper::getNextWeekday($deadlineDate,null);
+              }
+
+          }else//after 17:30
+          {
+              $deadlineDate = HolidayHelper::getNextWeekday($deadlineDate,null);
+          }
+        }
+        return $deadlineDate." "."18:00:00";
+	}
+
+	public function getMailRatingByOp($id)
+	{
+		$criteria = new CDbCriteria;
+		$criteria->compare('op_id', $id);
+		$criteria->compare('status', 111);
+		$sort = new CSort();
+		$sort->defaultOrder = array('date' => CSort::SORT_DESC);
+
+		return new CActiveDataProvider($this, array(
+			'criteria' => $criteria,
+			'pagination' => array('pageSize' => 25),
+			'sort' => $sort,
+		));
+	}
+
+	public function getFaqAnswerList()
+	{
+		$fl=CsFaqAnswer::model()->findAll(" status=:status ",[":status"=>CsFaq::EMAIL]);
+		$results=[];
+		foreach ($fl as $key => $value) {
+			$results[$value["content"]] = $value["content"];
+		}
+		return $results;
+	}
+
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return ImportsMail the static model class
+	 */
+	public static function model($className = __CLASS__)
+	{
+		return parent::model($className);
+	}
+}

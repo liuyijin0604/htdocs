@@ -1,0 +1,57 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Barcode Generator</title>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1/jquery.min.js" type="text/javascript"></script>
+<style type="text/css">
+* { box-sizing:border-box; }
+body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+.qbox {	width: 33.3%; padding: 2mm; float: left; text-align: center; height: 25.7mm; }
+#tpl{ display: none; }
+.l1{ font-size: 22px; line-height: 6mm; height: 6mm; text-align:center; overflow: hidden; }
+.barcode{ font-family: IDAutomationC39M; font-size: 18px; height: 12mm; overflow: hidden; }
+.clear{	clear:both;	page-break-after: always; }
+@media print {
+	@page {
+		size: 210mm 297mm;
+		margin: 0;
+		padding: 0;
+		margin-top: 12mm;
+	}
+}
+</style>
+</head>
+<body>
+<div id="tpl" class="qbox">
+<div class="barcode"></div>
+<div class="l1"></div>
+</div>
+</body>
+<script type="text/javascript">
+
+$(function(){
+	var tpl = $('#tpl');
+	var shelves = ['I'];
+	var rows = ['01', '02', '03'];
+	var lvls = [6];
+	var cells = 12;
+	var i = 1;
+	
+	for(var s in shelves){
+		for(var r in rows){
+			for(var l = 0; l < lvls.length; l++){
+				for(var c = 1; c <= cells; c++){
+					box = tpl.clone().attr('id','');
+					$('.l1', box).html(shelves[s]+rows[r]+'-'+lvls[l]+'-'+c);
+					$('.barcode', box).html('*ES-'+shelves[s]+rows[r]+'-'+lvls[l]+'-'+c+'*');
+					$('body').append(box.show());
+					if(i > 1 && i % 33 == 0) $('body').append('<div class="clear"></div>');
+					i++;
+				}
+			}
+		}
+	}
+});
+</script>
+</html>

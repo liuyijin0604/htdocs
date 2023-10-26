@@ -1,0 +1,1006 @@
+<?php 
+class TopCourierService extends Service
+{
+    public function createCargoJob($data,$jobName,$driverId,$description,$dptId,$type,$vehicleId,$region='',$directionforcustomer='',$distance='',$time='',$created='',$destination='',$isCommand = false)
+    {
+        $model = new CargoProcessJob();
+        $errors = [];
+        $newCBM = 0;
+        foreach ($data as $key => $d) {
+            $ca = CargoProcess::model()->findByPk($d[0]);
+            $newCBM+= $ca->getTotalCBM();
+            $c = CargoProcessJobRelations::model()->count('cargo_process_id=:cId and active = 1',[":cId"=>$d[0]]);
+            if($c>0)
+            {
+                return $model;
+            }
+        }
+        $vehicle= CargoProcessVehicle::model()->findByPk($vehicleId);
+
+        if($newCBM>$vehicle->max_cbm)
+        {
+            $model->addError('Max CBM:'.$vehicle->max_cbm,'Max CBM:'.$vehicle->max_cbm);
+            return $model;
+        }
+
+        if(!empty($data))//when there are data transmitted from outside
+        {
+            $model->job_name = $jobName;
+            $model->vehicle_id = $vehicleId;
+            $model->region = $region;
+
+            $cdls = CargoProcessJob::$cargoDirectionList;
+            $directions = explode(',',$directionforcustomer);
+            foreach($cdls as $k => $cdl){
+                if(in_array($k,$directions)){
+                    $model->mdata[$cdls[$k]] = 1;
+                }else{
+                    $model->mdata[$cdls[$k]] = 0;
+                }
+            }
+
+            if(!empty($distance)){
+                $model->mdata['distance']=$distance;
+            }
+
+            if(!empty($destination)){
+                $model->mdata['destination']=$destination;
+            }
+
+            if(!empty($time)){
+                $model->mdata['time']=$time;
+            }
+
+            $model->description = $description;
+            if($isCommand)
+            {
+                $model->status = CargoProcessJob::STATE_NEW;
+            }else
+            {
+                $model->status = CargoProcessJob::STATE_WAITING_WAREHOUSE_PREPARATION;
+            }
+            $model->dpt_id = $dptId;
+            $model->user_id = User::currentUserID();
+            if(!empty($created)){
+                $model->created = $created;
+            }else{
+                $model->created = date('Y-m-d H:i:s');
+            }
+            
+            $model->type = $type;
+
+            if(!empty($driverId))
+            {
+                $model->driver_id = $driverId;
+            }
+            $model->save();
+
+            if($type == CargoProcessJob::FBA_JOB)
+            {
+                $ai = AmazonInfo::model()->find('fid = :fid',[':fid'=>$data[0][0]]);
+                $newAi = new AmazonInfo();
+                if(!empty($ai))
+                {
+                    $newAi->fid = $model->id;
+                    $newAi->model='CargoProcessJob';
+                    $newAi->booking_ref = $ai->booking_ref;
+                    $newAi->amazon_booking_time = $ai->amazon_booking_time;
+                    $newAi->save();
+                }
+            }
+
+            foreach ($data as $key => $d) {
+                $c = CargoProcess::model()->findByPk($d[0]);
+                if(empty($c)) continue;
+                $re = new CargoProcessJobRelations();
+                $re->cargo_process_id = $d[0];
+                $re->sequence = $d[1];
+                $re->created = date('Y-m-d H:i:s');
+                $re->job_id = $model->id;
+                $re->save();
+
+                if(($c->mdata['PreB2c']==1 && $c->mdata['PreB2cSendSMS'] ==0)){
+                    if($c->shipment->scanCount()>0){
+						if(!empty($c->job_relation->job)){
+							EmailService::sendScanAndCjobSms($c);
+							$time = date('d-m-Y',strtotime($c->job_relation->job->created));
+							$c->shipment->addTrackingLimited(105,'Scand. Your delivery is '.$time);
+							$c->mdata['PreB2cSendSMS'] = 1;
+							$c->save();
+						}
+					}
+
+                }
+            }
+        }
+
+        return $model;
+    }
+
+    public function saveCargoJob($data,$jobName,$driverId,$description,$jobId,$vehicleId,$directionforcustomer="",$distance="",$time="",$created="",$destination="")
+    {
+        $model = CargoProcessJob::model()->findByPk($jobId);
+        $errors = [];
+        if(!empty($data))
+        {
+            $model->vehicle_id = $vehicleId;
+            $model->job_name = $jobName;
+            $model->description = $description;
+            $model->created = $created;
+            $cdls = CargoProcessJob::$cargoDirectionList;
+            $directions = explode(',',$directionforcustomer);
+            foreach($cdls as $k => $cdl){
+                if(in_array($k,$directions)){
+                    $model->mdata[$cdls[$k]] = 1;
+                }else{
+                    $model->mdata[$cdls[$k]] = 0;
+                }
+            }
+
+            if(!empty($distance)){
+                $model->mdata['distance']=$distance;
+            }
+
+            if(!empty($destination)){
+                $model->mdata['destination']=$destination;
+            }
+
+            if(!empty($time)){
+                $model->mdata['time']=$time;
+            }
+            
+            if(!empty($driverId))
+            {
+                $model->driver_id = $driverId;
+            }
+            
+            $model->save();
+
+            foreach ($data as $key => $d) {
+                $re = CargoProcessJobRelations::model()->findByPk($d[0]);
+                $re->sequence = $d[1];
+                $re->cargo_process->mdata['job_pallet_no'] = $d[2];
+                $re->cargo_process->mdata['pickup_booking_time'] = $model->created;
+                $re->cargo_process->save();
+                $re->save();
+            }
+        }
+        return $model;
+    }
+
+    public function saveCargoRelationSequence($data,$jobId){
+        $model = CargoProcessJob::model()->findByPk($jobId);
+        $errors = [];
+        if(!empty($data)){
+            foreach ($data as $key => $d) {
+                $re = CargoProcessJobRelations::model()->findByPk($d[0]);
+                $re->sequence = $d[1];
+                $re->cargo_process->save();
+                $re->save();
+            }
+        }
+        return $model;
+    }
+
+    public function modifyCargoJob($jobName,$driverId,$description,$jobId,$vehicleId,$directionforcustomer="",$distance="",$time="",$created="",$destination=""){
+        $model = CargoProcessJob::model()->findByPk($jobId);
+        $errors = [];
+        if(!empty($model)){
+            $model->vehicle_id = $vehicleId;
+            $model->job_name = $jobName;
+            $model->description = $description;
+            $model->created = $created;
+            $cdls = CargoProcessJob::$cargoDirectionList;
+            $directions = explode(',',$directionforcustomer);
+            foreach($cdls as $k => $cdl){
+                if(in_array($k,$directions)){
+                    $model->mdata[$cdls[$k]] = 1;
+                }else{
+                    $model->mdata[$cdls[$k]] = 0;
+                }
+            }
+
+            if(!empty($distance)){
+                $model->mdata['distance']=$distance;
+            }
+
+            if(!empty($destination)){
+                $model->mdata['destination']=$destination;
+            }
+
+            if(!empty($time)){
+                $model->mdata['time']=$time;
+            }
+            
+            if(!empty($driverId))
+            {
+                $model->driver_id = $driverId;
+            }
+            
+            $model->save();
+
+        }
+        return $model;
+    }
+
+    public function saveCargoIntoJob($ids,$jobId)
+    {
+        $model = CargoProcessJob::model()->findByPk($jobId);
+        $errors = [];
+        $newCBM = 0;
+        $oldCBM = 0;
+        foreach ($model->job_relations as $key => $jr) {
+            $oldCBM += $jr->cargo_process->getTotalCBM();
+        }
+        foreach ($ids as $key => $d) {
+            $ca = CargoProcess::model()->findByPk($d);
+            $newCBM+= $ca->getTotalCBM();
+            $c = CargoProcessJobRelations::model()->count('cargo_process_id=:cId and active = 1',[":cId"=>$d]);
+            if($c>0)
+            {
+                return $model;
+            }
+        }
+
+        // if(($oldCBM+$newCBM)>$model->vehicle->max_cbm)
+        // {
+        //     $model->addError('Max CBM:'.$model->vehicle->max_cbm,'Max CBM:'.$model->vehicle->max_cbm);
+        //     return $model;
+        // }
+        if(!empty($ids))
+        {
+            foreach ($ids as $key => $d) {
+                $c = CargoProcess::model()->findByPk($d);
+                if(empty($c)) continue;
+                $c->updateStatus(CargoProcess::WAITINGDELIVERY);
+
+                $re = new CargoProcessJobRelations();
+                $re->cargo_process_id = $d;
+                $re->sequence = 0;
+                $re->created = date('Y-m-d H:i:s');
+                $re->job_id = $model->id;
+                $re->save();
+
+                if(($c->mdata['PreB2c']==1 && $c->mdata['PreB2cSendSMS'] ==0)){
+                    if($c->shipment->scanCount()>0){
+						if(!empty($c->job_relation->job)){
+							EmailService::sendScanAndCjobSms($c);
+							$time = date('d-m-Y',strtotime($c->job_relation->job->created));
+							$c->shipment->addTrackingLimited(105,'Scand. Your delivery is '.$time);
+							$c->mdata['PreB2cSendSMS'] = 1;
+							$c->save();
+						}
+					}
+
+                }
+            }
+        }
+
+        return $model;
+    }
+
+    public function removeCargoJob($id)
+    {
+        $cargoRe = CargoProcessJobRelations::model()->findByPk($id);
+        $cargoRe->cargo_process->updateStatus(CargoProcess::WAITINGASSIGNDRIVER);
+        $model = $cargoRe->job;
+        $cargoRe->active = 0;
+        $cargoRe->save();
+        if( $cargoRe->cargo_process->mdata['AutoIntoJob']==1){
+            $emailService = new EmailService();
+            $emailService->sendRescheduleSms($cargoRe->cargo_process);
+            $cargoRe->cargo_process->mdata['AutoIntoJob']=0;
+            $cargoRe->cargo_process->save();
+            $cargoRe->cargo_process->shipment->addTrackingLimited(87,'Delivery delayed. waiting for reschedule.');
+        }
+       
+        //$cargoRe->delete();
+        return $model;
+    }
+
+    public function updateJobStatus($id,$newState)
+    {
+        $model = CargoProcessJob::model()->findByPk($id);
+        if($newState==CargoProcessJob::STATE_WAITING_WAREHOUSE_PREPARATION)
+        {
+            if($model->status==CargoProcessJob::STATE_NEW)
+            {
+
+            }else
+            {
+                 $jres = CargoProcessJobRelations::model()->findAll(['condition'=>'job_id = :jobId and active = 1','params'=>[":jobId"=>$model->id],'order'=>'sequence']);
+                foreach ($jres as $key => $jre)
+                {
+                     $jre->cargo_process->updateStatus(CargoProcess::WAITINGASSIGNDRIVER);
+                }
+            }
+        }else if($newState==CargoProcessJob::STATE_WAITING_FOR_DELIVERY)
+        {
+            $jres = CargoProcessJobRelations::model()->findAll(['condition'=>'job_id = :jobId and active = 1','params'=>[":jobId"=>$model->id],'order'=>'sequence']);
+            foreach ($jres as $key => $jre)
+            {
+                $jre->cargo_process->updateStatus(CargoProcess::WAITINGDELIVERY);
+                $jre->cargo_process->shipment->addTrackingLimited(73,'Warehouse preparation done. Delivery date is '.date('d-m-Y',strtotime($model->created)));
+                $emailService = new EmailService();
+                $emailService->sendprepareCargoSms($jre->cargo_process);
+                if($model->status==CargoProcessJob::STATE_WAITING_WAREHOUSE_PREPARATION)
+                {
+                    $jre->cargo_process->addAmazonBookingTime();
+                    //$jre->cargo_process->addWaitingPreparationTracking();
+                }
+            }
+        }else if($newState==CargoProcessJob::PROCESSDONE)
+        {
+            $jres = CargoProcessJobRelations::model()->findAll(['condition'=>'job_id = :jobId and active = 1','params'=>[":jobId"=>$model->id],'order'=>'sequence']);
+            foreach ($jres as $key => $jre)
+            {
+                if($model->type == CargoProcessJob::INTERSTATE_JOB &&  $jre->cargo_process->isOurWarehouse() && !empty($model->mdata['destination']) ){
+                    $jre->cargo_process->status = CargoProcess::COLLECTINFO;
+                    $jre->cargo_process->mdata["InterstateJobId"] = $id;
+                    $jre->cargo_process->setCargoType();
+                    $jre->cargo_process->dpt_id = $model->mdata['destination'];
+                    $jre->cargo_process->save();
+                    $jre->active = 0 ;
+                    // $jre->was_interstate = 1 ;
+                    $jre->save();
+                    $jre->cargo_process->shipment->ddpt_id = $model->mdata['destination'];
+                    $jre->cargo_process->shipment->save();
+                    $jre->cargo_process->shipment->addTrackingLimited(86,"Arrival to ". Cargoprocess::$Depot[$model->mdata['destination']]." Depot");
+                }else{
+                    if($model->status==CargoProcessJob::STATE_WAITING_FOR_DELIVERY)
+                    {
+                        $jre->cargo_process->processDone();
+                    }else
+                    {
+                        $jre->cargo_process->updateStatus(CargoProcess::PROCESSDONE);
+                    }
+                }
+            }
+            $model->comp_date = date('Y-m-d H:i:s');
+        }else if($newState==CargoProcessJob::DELETED)
+        {
+            foreach ($model->job_relations as $key => $jr)
+            {
+               $jr->cargo_process->updateStatus(CargoProcess::WAITINGASSIGNDRIVER);
+               $jr->delete();
+            }
+        }
+        $model->status = $newState;
+        $model->save();
+    }
+
+    public function noticeWarehouseToPrepareCargosByJob($id)
+    {
+        $job = CargoProcessJob::model()->findByPk($id);
+        $cpModels = [];
+        $jres = CargoProcessJobRelations::model()->findAll(['condition'=>'job_id = :jobId and active = 1','params'=>[":jobId"=>$job->id],'order'=>'sequence']);
+        foreach ($jres as $key => $jre) {
+              $jre->cargo_process->noticeWarehouseToPrepare();
+        }
+        $job->mdata["canBePrepared"]=1;
+        $job->save();
+        $job->log("noticeWarehouseToPrepare");
+        return $job;
+    }
+
+    public static function getTruckDeliveryRegions($podId)
+    {
+        $initDeliveryZone = [];
+        $orgRate = OrgRate::model()->find("code = :code and json_value(meta,'$.ddpt_id') = :dptId",[":code"=>ImportChargeCode::AUSTWAY_TRUCK_ZONE_CODE,":dptId"=>$podId]);
+        if(!empty($orgRate))
+        {
+            $zoneMaps = ZoneMap::model()->findAll("org_id = :orgId and zone_id = :zoneId",[":orgId"=>$orgRate->org_id,":zoneId"=>$orgRate->zone_id]);
+            foreach ($zoneMaps as $key => $z)
+            {
+                if(empty($initDeliveryZone[$z->z1]))
+                {
+                    $initDeliveryZone[$z->z1] = $z->z1;
+                }
+            }
+        }
+
+        return $initDeliveryZone;
+    }
+
+    public static function getDriverList($podId)
+    {
+        $driverType = CargoProcess::getPodDriverType($podId);
+        $orgModel= new Org();
+        $drivers =[];
+        $orgs = $orgModel->findAll(["condition"=>"(cargo_driver_type & ".$driverType.") > 0 and status = 1 ","order"=>'`by` desc']);
+        foreach ($orgs as $key => $org) {
+            if($org->by!=1)
+            {
+                $oname = 'A';
+            }else
+            {
+                $oname = 'system';
+            }
+            $drivers[$org->id] = "(".$oname.")".$org->name;
+        }
+        return $drivers;
+    }
+
+    public static function getVehicleList()
+    {
+        $vs = CargoProcessVehicle::model()->findAll('status = :status',[':status'=>CargoProcessVehicle::ACTIVE]);
+        $vehicles =[];
+        foreach ($vs as $key => $v) {
+            $vehicles[$v->id] = $v->vehicle_name;
+        }
+        return $vehicles;
+    }
+
+    public function generateCargoProcessJobAuto()
+    {
+        $initItems = CargoProcess::model()->with(['job_relation','shipment'])->findAll('t.status = :status and job_relation.id is null and t.type=:type and agent_id = 3551',[':status'=>CargoProcess::WAITINGASSIGNDRIVER,':type'=>CargoProcess::NORMAL_CARGO]);
+        //putting buttle algorithm
+        $orgRate = OrgRate::model()->findByPk(928);
+        $zoneMaps = ZoneMap::model()->findAll("org_id = :orgId and zone_id = :zoneId",[":orgId"=>$orgRate->org_id,":zoneId"=>$orgRate->zone_id]);
+
+        $used = true;
+        while($used)
+        {
+            $initButtles = [];
+            $initDeliveryZone = [];
+            foreach ($zoneMaps as $key => $z)
+            {
+                if(empty($initDeliveryZone[$z->z1]))
+                {
+                    $initDeliveryZone[$z->z1] = [$z->pc_lo];
+                }else
+                {
+                    $initDeliveryZone[$z->z1][] = $z->pc_lo;
+                }
+            }
+
+            foreach ($initDeliveryZone as $key => $dz)
+            {
+                $initButtles[$key] = CargoProcessVehicle::model()->findByPk(1);
+                $initButtles[$key]->dptId = $orgRate->mdata['ddpt_id'];
+                $initButtles[$key]->region = $key;
+                $initButtles[$key]->deliveryZone = $dz;
+            }
+            $savedVehicle = [0];
+            foreach($initButtles as $k1 => $vehicle)
+            {
+                foreach($initItems as $k2 => $cargo)
+                {
+                    if($vehicle->isFull($cargo))
+                    {
+                        continue;
+                    }else
+                    {
+                        if($vehicle->canDeliver($cargo))
+                        {
+                            $vehicle->myCargos[] = [$cargo->shipment->getDeliveryDistance(),$cargo];
+                            unset($initItems[$k2]);
+                        }
+                    }
+                }
+
+                if($vehicle->canBeSaveToJob())
+                {
+                    $data =[];
+                    $cargos = $vehicle->myCargos;
+                    $distance = [];
+                    foreach ($cargos as $key => $row)
+                    {
+                        $distance[$key] = $row[0];
+                    }
+                    array_multisort($distance, SORT_DESC, $cargos);
+                    foreach ($cargos as $kc => $ca) {
+                        $data[$kc] = [$ca[1]->id,$kc+1];
+                    }
+                    $jobName = $vehicle->region.date('YmdHis');
+                    $job = $this->createCargoJob($data,$jobName,0,'',$vehicle->dptId,CargoProcessJob::NORMAL_JOB,$vehicle->id,$vehicle->region,"","","",true);
+                    if(!empty($job->id))
+                    {
+                        $savedVehicle[] = $job->id;
+                    }
+                }
+            }
+            $size = count($savedVehicle);
+            if(($size-1)==0)
+            {
+                break;
+            }
+        }
+    }
+
+    public function getCargoProcessDeliveryDate($p)
+    {
+        $cargoProcess = $p->cargo_process;
+        if(!empty($cargoProcess))
+        {
+           $t =  Tracking::model()->find(['condition'=>'type = 90 and pid = :pid','params'=>[":pid"=>$cargoProcess->shipment_id],'order'=>'dt desc']);
+           if(!empty($t))
+           {
+             return $t->dt;
+           }
+        }
+
+        return '2090-01-01';
+    }
+
+    public function funcAddCargoProcessVehicle(
+        $enumType,
+        $strVehicleName,
+        $numNinCbm,
+        $numMaxCbm,
+        $numTopWidth,
+        $numBottomWidth,
+        $numHeight,
+        $numLength,
+        $enumStatus,
+        $numOrgId,
+        $numUserId,
+        $strPlateNumber,
+        $numDptId
+    ){
+        $objCargoProcessVehicle = new CargoProcessVehicle();
+        $objCargoProcessVehicle->type = $enumType;
+        $objCargoProcessVehicle->vehicle_name = $strVehicleName;
+        $objCargoProcessVehicle->min_cbm = $numNinCbm;
+        $objCargoProcessVehicle->max_cbm = $numMaxCbm;
+        $objCargoProcessVehicle->top_width = $numTopWidth;
+        $objCargoProcessVehicle->bottom_width = $numBottomWidth;
+        $objCargoProcessVehicle->height = $numHeight;
+        $objCargoProcessVehicle->length = $numLength;
+        $objCargoProcessVehicle->status = $enumStatus;
+        $objCargoProcessVehicle->org_id = $numOrgId;
+        $objCargoProcessVehicle->user_id = $numUserId;
+        $objCargoProcessVehicle->plate_number = $strPlateNumber;
+        $objCargoProcessVehicle->dpt_id = $numDptId;
+        
+        $objCargoProcessVehicle->save();
+    }
+
+    public function funcUpdateCargoProcessVehicle(
+        $numId,
+        $enumType,
+        $strVehicleName,
+        $numNinCbm,
+        $numMaxCbm,
+        $numTopWidth,
+        $numBottomWidth,
+        $numHeight,
+        $numLength,
+        $enumStatus,
+        $numOrgId,
+        $numUserId,
+        // $strPlateNumber,
+        $numDptId
+    ){
+        $objCargoProcessVehicle = CargoProcessVehicle::model()->findByPk($numId);
+
+        $objCargoProcessVehicle->type = $enumType;
+        $objCargoProcessVehicle->vehicle_name = $strVehicleName;
+        $objCargoProcessVehicle->min_cbm = $numNinCbm;
+        $objCargoProcessVehicle->max_cbm = $numMaxCbm;
+        $objCargoProcessVehicle->top_width = $numTopWidth;
+        $objCargoProcessVehicle->bottom_width = $numBottomWidth;
+        $objCargoProcessVehicle->height = $numHeight;
+        $objCargoProcessVehicle->length = $numLength;
+        $objCargoProcessVehicle->status = $enumStatus;
+        $objCargoProcessVehicle->org_id = $numOrgId;
+        $objCargoProcessVehicle->user_id = $numUserId;
+        // $objCargoProcessVehicle->plate_number = $strPlateNumber;
+        $objCargoProcessVehicle->dpt_id = $numDptId;
+        
+        $objCargoProcessVehicle->save();
+    }
+
+    public function cacheTLDLimitCBM($depot,$cargoType,$reportType)
+    {
+        $model = new ImParcel('search');
+        $model->unsetAttributes();
+        $model->cargoProcessPreAlert = ["podId"=>$depot,"cargoType"=>$cargoType];
+        $preCargoProcessShipments = $model->search(false, 30, false, false,false,true)->data;
+        $cargo=new CargoProcess('search');
+        $cargo->unsetAttributes();
+        $onListCargoProcessShipments = $cargo->search(false, 30, false, true, $depot, $cargoType,true)->data;
+
+        $provide = [];
+        $totalCBM = 0;
+        $totalCBMPreAlert3=0;
+        $totalCBMPreAlert37=0;
+        $totalCBMPreAlert7=0;
+        $totalCBMOnHand=0;
+        foreach ($preCargoProcessShipments as $key => $value) {
+            if(in_array($value->status,[ImParcel::STATE_COURIER,ImParcel::DELIVERED])) continue;
+            if(empty($provide[$value->id]))
+            {
+                $provide[$value->id] = $value->id;
+                $etadiff = number_format(HolidayHelper::diffBetweenTwoDays($value->consol->eta,date('Y-m-d')),0,'.','');
+                if($etadiff<=3)
+                {
+                    $totalCBMPreAlert3 += $value->cbm*$value->pkg;
+
+                }elseif($etadiff>3&&$etadiff<=7)
+                {
+                    $totalCBMPreAlert37 += $value->cbm*$value->pkg;
+                }else
+                {
+                    $totalCBMPreAlert7 += $value->cbm*$value->pkg;
+                }
+            }
+        }
+
+        foreach ($onListCargoProcessShipments as $key => $value) {
+            if(in_array($value->shipment->status,[ImParcel::STATE_COURIER,ImParcel::DELIVERED])) continue;
+            if(empty($provide[$value->shipment_id]))
+            {
+                $provide[$value->shipment_id] = $value->shipment_id;
+                $totalCBMOnHand += $value->getTotalCBM();
+            }
+        }
+        $totalCBM = $totalCBMPreAlert3+$totalCBMPreAlert37+$totalCBMPreAlert7+$totalCBMOnHand;
+
+        $service = new Service();
+        $service->setCacheDataForever($depot."TLDLimitCBM".$cargoType,[$cargoType=>$totalCBM]);
+        $reportCache = ReportCache::model()->find('type=:type',[":type"=>$reportType]);
+        if(empty($reportCache))
+        {
+            $reportCache = new ReportCache();
+        }
+        
+        $reportCache->type = $reportType;
+        $reportCache->status = 1;
+        $reportCache->meta = json_encode($provide);
+        $reportCache->create_time = date('Y-m-d H:i:s');
+        $reportCache->creater = 1;
+        $reportCache->modify_time =  date('Y-m-d H:i:s');
+        $reportCache->modifyer = 1;
+        $reportCache->save();
+
+        return [$totalCBM,$totalCBMPreAlert7,$totalCBMPreAlert37,$totalCBMPreAlert3,$totalCBMOnHand];
+
+    }
+
+    public static function getFBAPlanBook(){
+        $arrDepots = [106,218];
+        $arrBWU1 = $arrBWU2 = $arrMEL1 = $arrMEL5 = [];
+        $arrPreBWU1 = $arrPreBWU2 = $arrPreMEL1 = $arrPreMEL5 = [];
+        $numOnhandBWU1TotalCbm = $numOnhandBWU2TotalCbm = $numOnhandMEL1TotalCbm = $numOnhandMEL5TotalCbm = 0;
+        $numForcastBWU1TotalCbm = $numForcastBWU2TotalCbm = $numForcastMEL1TotalCbm = $numForcastMEL1TotalCbm = 0;
+        $i = $j = $k = $l = 1;
+        $xls = new oExcel;
+        $xls->setTitle("ONHAND");
+        $xls->addRow($i++,['Connote','Ref','Package','Total Cbm','Postcode','FBI ID','Amazon PO']);
+
+        //BWU1 2170     BWU2 2178   MEL1 3175   MEL5 3023;
+        $cargo=new CargoProcess('search');
+        $cargo->unsetAttributes();
+        $cargo->type = 2;
+        
+        
+        foreach($arrDepots as $arrDepot){
+                  //$cargo->search(false, false,false,true,$_GET['pod_id'],$_GET['typ']);
+            $dp = $cargo->search(false, false,false,true,$arrDepot,2);
+            foreach($dp->data as $r){
+                $arrAmazonPo = [];
+                if(!empty($r->shipment->mdata['amazon_po'])){
+                    $arrAmazonPo = explode(",",$r->shipment->mdata['amazon_po']);
+                }
+                if($r->status<40){
+                    switch ($r->shipment->cnee->postcode){
+                        //hbn ref pkg totalcbm postcode fbaid amazonpo
+                        case "2170":
+                            $arrBWU1[] = [$r->shipment->hbn,$r->shipment->ref,$r->shipment->pkg,$r->shipment->getTotalCBM(),$r->shipment->cnee->postcode,$r->shipment->mdata['amazon_shipment_ids'],$arrAmazonPo];
+                            $numOnhandBWU1TotalCbm += $r->shipment->getTotalCBM();
+                            break;
+                        case "2178":
+                            $arrBWU2[] = [$r->shipment->hbn,$r->shipment->ref,$r->shipment->pkg,$r->shipment->getTotalCBM(),$r->shipment->cnee->postcode,$r->shipment->mdata['amazon_shipment_ids'],$arrAmazonPo];
+                            $numOnhandBWU2TotalCbm += $r->shipment->getTotalCBM();
+                            break;
+                        case "3175":
+                            $arrMEL1[] = [$r->shipment->hbn,$r->shipment->ref,$r->shipment->pkg,$r->shipment->getTotalCBM(),$r->shipment->cnee->postcode,$r->shipment->mdata['amazon_shipment_ids'],$arrAmazonPo];
+                            $numOnhandMEL1TotalCbm += $r->shipment->getTotalCBM();
+                            break;
+                        case "3023":
+                            $arrMEL5[] = [$r->shipment->hbn,$r->shipment->ref,$r->shipment->pkg,$r->shipment->getTotalCBM(),$r->shipment->cnee->postcode,$r->shipment->mdata['amazon_shipment_ids'],$arrAmazonPo];
+                            $numOnhandMEL5TotalCbm += $r->shipment->getTotalCBM();
+                            break;
+                    }
+
+                } 
+            }
+        }
+        $arrAddresses = ["BWU1"=>$arrBWU1,"BWU2"=>$arrBWU2,"MEL1"=>$arrMEL1,"MEL5"=>$arrMEL5];
+        
+
+        foreach($arrAddresses as $name => $arrAddress){
+            if(!empty($arrAddress)){
+                $xls->addRow($i++,[$name]);
+                foreach($arrAddress as $record){
+                    if(!empty($record[6])){
+                        foreach($record[6] as $key => $value){
+                            if($key==0){
+                                $xls->addRow($i++,[$record[0],$record[1],$record[2],$record[3],$record[4],$record[5],$value]);
+                            }else{
+                                $xls->addRow($i++,[" "," "," "," "," "," ",$value]);
+                            }
+                        }
+                    }else{
+                        $xls->addRow($i++,[$record[0],$record[1],$record[2],$record[3],$record[4],$record[5]]);
+                    }
+                    
+                }
+                $xls->addRow($i++,[" "]);
+            }
+        }
+
+
+        $xls->createSheet("BWU1&2");
+        $xls->goSheet(1);
+        $xls->addRow($j++,['Est. delivery date','TLA HBN No','TLA Ref No. + Customs Status','Total CBM','Amazon Shipment Id','Amazon PO']); //,'Total CBM','Pallet','Ctn','Unit'
+        $filtersForm = new FiltersForm();
+        $reportService = new ReportService();
+        $report = $reportService->getFbaReport(106,1,date('Y-m-d'),date('Y-m-d',strtotime("14 day")),$filtersForm,1,0);
+        $datas = $report[0]->data;
+
+        foreach($datas as $key=>$data){
+            $arrAmazonPo=[];
+            if(!empty($data["hbnsOnly"])){
+
+                $strhbns = explode(",",$data["hbnsOnly"]);
+                foreach($strhbns as $strhbn){
+                    $objImParcel = ImParcel::model()->find('hbn=:hbn',[':hbn'=>$strhbn]);
+                    if(!empty($objImParcel)){
+                        $numPostcode = $objImParcel->cnee->postcode;
+                        if(!empty($objImParcel->consol)){
+                            $strState = ImParcel::$states[$objImParcel->status]."/".@Consol::$services[$objImParcel->consol->service];
+                        }
+                        $hbnstatus = $objImParcel->hbn.":".$strState;
+                        $refstatus = $objImParcel->ref.":".$strState;
+                        $dateEta = $data["eta"];
+                        $numCbm = $objImParcel->getTotalCBM();
+                        //$dateAbt = $data["abt"];
+                        $strPos = $objImParcel->mdata['amazon_po'];
+                        if(!empty($objImParcel->mdata['amazon_po'])){
+                            $arrAmazonPo = explode(",",$objImParcel->mdata['amazon_po']);
+                        }
+                        if($numPostcode==2170){
+                            $arrPreBWU1[] = [$dateEta,$strhbn,$refstatus,$numCbm,$strPos,$arrAmazonPo];
+                        }elseif($numPostcode==2178){
+                            $arrPreBWU2[] = [$dateEta,$strhbn,$refstatus,$numCbm,$strPos,$arrAmazonPo];
+                        }
+                    }
+                }
+            }
+        }
+
+        $arrSydPreWarehouses = ["BWU1"=>$arrPreBWU1,"BWU2"=>$arrPreBWU2];
+
+        foreach ($arrSydPreWarehouses as $name => $arrPreWarehouse) 
+		{
+            if(!empty($arrPreWarehouse)){
+                $xls->addRow($j++,[$name]);
+                foreach($arrPreWarehouse as $record){
+                    if(!empty($record[5])){
+                        foreach($record[5] as $key => $value){
+                            if($key==0){
+                                $xls->addRow($j++,[$record[0],$record[1],$record[2],$record[3],$record[4],$value]);
+                            }else{
+                                $xls->addRow($j++,[" "," "," "," "," ",$value]);
+                            }
+                        }
+                    }else{
+                        $xls->addRow($j++,[$record[0],$record[1],$record[2],$record[3],$record[4]]);
+                    }
+                }
+            }
+		}
+
+        $xls->createSheet("MEL1&5");
+        $xls->goSheet(2);
+        $xls->addRow($k++,['Est. delivery date','TLA HBN No','TLA Ref No. + Customs Status','Total CBM','Amazon Shipment Id','Amazon PO']);
+        $report = $reportService->getFbaReport(218,1,date('Y-m-d'),date('Y-m-d',strtotime("14 day")),$filtersForm,1,0);
+        $datas = $report[0]->data;
+
+        foreach($datas as $key=>$data){
+            $arrAmazonPo=[];
+            if(!empty($data["hbnsOnly"])){
+
+                $strhbns = explode(",",$data["hbnsOnly"]);
+                foreach($strhbns as $strhbn){
+                    $objImParcel = ImParcel::model()->find('hbn=:hbn',[':hbn'=>$strhbn]);
+                    if(!empty($objImParcel)){
+                        $numPostcode = $objImParcel->cnee->postcode;
+                        if(!empty($objImParcel->consol)){
+                            $strState = ImParcel::$states[$objImParcel->status]."/".@Consol::$services[$objImParcel->consol->service];
+                        }
+                        $hbnstatus = $objImParcel->hbn.":".$strState;
+                        $refstatus = $objImParcel->ref.":".$strState;
+                        $dateEta = $data["eta"];
+                        $dateAbt = $data["abt"];
+                        $numCbm = $objImParcel->getTotalCBM();
+                        $strPos = $objImParcel->mdata['amazon_po'];
+                        if(!empty($objImParcel->mdata['amazon_po'])){
+                            $arrAmazonPo = explode(",",$objImParcel->mdata['amazon_po']);
+                        }
+                        if($numPostcode==3175){
+                            $arrPreMEL1[] = [$dateEta,$strhbn,$refstatus,$numCbm,$strPos,$arrAmazonPo];
+                        }elseif($numPostcode==3023){
+                            $arrPreMEL5[] = [$dateEta,$strhbn,$refstatus,$numCbm,$strPos,$arrAmazonPo];
+                        }
+                    }
+                }
+            }
+        }
+
+        $arrMelPreWarehouses = ["MEL1"=>$arrPreMEL1,"MEL2"=>$arrPreMEL5];
+
+        foreach ($arrMelPreWarehouses as $name => $arrPreWarehouse) 
+		{
+            if(!empty($arrPreWarehouse)){
+                $xls->addRow($k++,[$name]);
+                foreach($arrPreWarehouse as $record){
+                    if(!empty($record[5])){
+                        foreach($record[5] as $key => $value){
+                            if($key==0){
+                                $xls->addRow($k++,[$record[0],$record[1],$record[2],$record[3],$record[4],$value]);
+                            }else{
+                                $xls->addRow($k++,[" "," "," "," "," ",$value]);
+                            }
+                        }
+                    }else{
+                        $xls->addRow($k++,[$record[0],$record[1],$record[2],$record[3],$record[4]]);
+                    }
+                }
+            }
+		}
+
+
+
+        $xls->createSheet("PLAN");
+        $xls->goSheet(3);
+        $arrTotalCbmEachAddresses = ["BWU1"=>$numOnhandBWU1TotalCbm,"BWU2"=>$numOnhandBWU2TotalCbm,"MEL1"=>$numOnhandMEL1TotalCbm,"MEL5"=>$numOnhandMEL5TotalCbm];
+
+        
+        foreach($arrSydPreWarehouses as $name => $arrPreWarehouse){
+            $dateThisSunday = date("Y-m-d",strtotime("next Sunday"));
+            $numWeek = "WK".date('W',strtotime($dateThisSunday));
+            $arrDatePeriod = [date("Y-m-d",strtotime("next Sunday")),date("Y-m-d",strtotime("+1 day",strtotime("next Sunday"))),date("Y-m-d",strtotime("+2 day",strtotime("next Sunday"))),date("Y-m-d",strtotime("+3 day",strtotime("next Sunday"))),date("Y-m-d",strtotime("+4 day",strtotime("next Sunday"))),date("Y-m-d",strtotime("+5 day",strtotime("next Sunday"))),date("Y-m-d",strtotime("+6 day",strtotime("next Sunday")))];
+            $arrCbmDaily = [];
+            $arrPlt = [];
+            $arrUnit = [];
+            
+            $arrTotalCbmEachAddresses;
+
+            foreach($arrDatePeriod as $key => $date){
+                $arrCbmDaily[$key]= self::getTotalCbmOfForcast($date,$arrPreWarehouse);
+            }
+
+            $arrtemp = self::setPltPreDay($arrDatePeriod,$arrCbmDaily,$arrTotalCbmEachAddresses[$name]);
+            $arrPlt = $arrtemp[0];
+            $arrLeft = $arrtemp[1];
+            foreach($arrPlt as $strPlt){
+                $arrUnit[] = self::PltToUnit($strPlt);
+            }
+
+            $xls->addRow($l++,[$numWeek,'Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']);
+            $xls->addRow($l++,['TLA']);
+            
+            $xls->addRow($l++,[$name,date("d-M",strtotime($dateThisSunday)),date("d-M",strtotime("+1 day",strtotime($dateThisSunday))),date("d-M",strtotime("+2 day",strtotime($dateThisSunday))),date("d-M",strtotime("+3 day",strtotime($dateThisSunday))),date("d-M",strtotime("+4 day",strtotime($dateThisSunday))),date("d-M",strtotime("+5 day",strtotime($dateThisSunday))),date("d-M",strtotime("+6 day",strtotime($dateThisSunday)))]);
+            $xls->addRow($l++,['Plt',self::getDescription($arrPlt[0]),self::getDescription($arrPlt[1]),self::getDescription($arrPlt[2]),self::getDescription($arrPlt[3]),self::getDescription($arrPlt[4]),self::getDescription($arrPlt[5]),self::getDescription($arrPlt[6])]);
+            $xls->addRow($l++,['Unit',$arrUnit[0],$arrUnit[1],$arrUnit[2],$arrUnit[3],$arrUnit[4],$arrUnit[5],$arrUnit[6]]);
+            $xls->addRow($l++,['Total Left',"","","","","","",$arrLeft[6]]);
+            $xls->addRow($l++,['']);
+            $xls->addRow($l++,['On Hand Plt',self::CbmToPlt($arrTotalCbmEachAddresses[$name])]);
+            $xls->addRow($l++,['Forcast Plt',self::CbmToPlt($arrCbmDaily[0]),self::CbmToPlt($arrCbmDaily[1]),self::CbmToPlt($arrCbmDaily[2]),self::CbmToPlt($arrCbmDaily[3]),self::CbmToPlt($arrCbmDaily[4]),self::CbmToPlt($arrCbmDaily[5]),self::CbmToPlt($arrCbmDaily[6])]);
+            $xls->addRow($l++,['']);
+        }
+       
+        $xls->goSheet(0);
+        return $xls;
+    }
+
+    public static function setPltPreDay($arrDatePeriod,$arrCbmDaily,$numTotalCbmOnHand){
+        $numleft = 0;
+        $arrPlt = [0,0,0,0,0,0,0];
+        $arrLeft = [0,0,0,0,0,0,0];
+       
+        foreach($arrDatePeriod as $key => $arrDate){
+            if($key==0){
+                $tempTotalPlt = max(self::CbmToPlt($numTotalCbmOnHand) + self::CbmToPlt($arrCbmDaily[$key]),0);
+            }else{
+                $tempTotalPlt = max(self::CbmToPlt($arrCbmDaily[$key]),0) + max($numleft,0);
+            }
+            if($tempTotalPlt > 44){
+                $arrPlt[$key] = 44;
+                $numleft = $tempTotalPlt - 44;
+                $arrLeft[$key] = $numleft;
+                continue;
+            }elseif($tempTotalPlt >=40 && $tempTotalPlt <= 44){
+                $arrPlt[$key] = $tempTotalPlt;
+                $numleft = 0;
+                $arrLeft[$key] = $numleft;
+                continue;
+            }elseif($tempTotalPlt > 36){
+                $arrPlt[$key] = 36;
+                $numleft = $tempTotalPlt - 36;
+                $arrLeft[$key] = $numleft;
+                continue;
+            }elseif($tempTotalPlt >= 32 && $tempTotalPlt <= 36){
+                $arrPlt[$key] = $tempTotalPlt;
+                $numleft = 0;
+                $arrLeft[$key] = $numleft;
+                continue;
+            }elseif($tempTotalPlt > 22){
+                $arrPlt[$key] = 22;
+                $numleft = $tempTotalPlt - 22;
+                $arrLeft[$key] = $numleft;
+                continue;
+            }elseif($tempTotalPlt >= 19 && $tempTotalPlt <= 22){
+                $arrPlt[$key] = $tempTotalPlt;
+                $numleft = 0;
+                $arrLeft[$key] = $numleft;
+                continue;
+            }elseif($tempTotalPlt > 14){
+                $arrPlt[$key] = 14;
+                $numleft = $tempTotalPlt - 14;
+                $arrLeft[$key] = $numleft;
+                continue;
+            }elseif($tempTotalPlt >= 10 && $tempTotalPlt <= 14){
+                $arrPlt[$key] = $tempTotalPlt;
+                $numleft = 0;
+                $arrLeft[$key] = $numleft;
+                continue;
+            }elseif($tempTotalPlt>0){
+                $numleft = $tempTotalPlt;
+                $arrLeft[$key] = $numleft;
+                continue;
+            }
+        }
+        return [$arrPlt,$arrLeft];
+    }
+
+    public static function PltToUnit($plt){
+        if($plt>28){
+            return 10000;
+        }elseif($plt>0){
+            return 5000;
+        } else{
+            return 0;
+        }
+    }
+
+    public static function getDescription($plt){
+        if($plt>22){
+            return "(22+".($plt-22).")";
+        }elseif($plt>0){
+            return "(".$plt.")";
+        }else{
+            return 0;
+        }
+    }
+
+    public static function CbmToPlt($cbm){
+        return max(ceil($cbm/2),0);
+    }
+
+    public static function getTotalCbmOfForcast($date,$arrs){
+        if(!empty($date)){
+            $numCbm = 0;
+            $numWeekday=date("w",strtotime($date));
+            if($numWeekday == 0){
+                foreach($arrs as $arr){
+                    if($arr[0]<=$date){
+                        $numCbm += $arr[3];
+                    }
+                }
+            }else{
+                foreach($arrs as $arr){
+                    if($arr[0]==$date){
+                        $numCbm += $arr[3];
+                    }
+                }
+            }
+            return $numCbm;
+        }
+        return 0 ;
+    }
+}
+?>

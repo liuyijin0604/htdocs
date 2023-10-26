@@ -1,0 +1,438 @@
+<?php
+$this->widget('zii.widgets.CBreadcrumbs', array(
+        'homeLink'=>CHtml::link('Home', array('site/index')),
+    'links' => array(
+        'Signature Pane',
+    ),
+));
+?>
+<div class="container">
+    <h2><?=$title?> GatePass Signature Pane</h2>
+    <div class="row">
+        <div class="col-md-7">
+            <div class="row">
+                <div class="col-md-3 from-group">
+                    <label>Type</label>
+                    <?php echo CHtml::dropDownList('type',0, GatepassCourier::$types,array('class'=>'form-control'));?>
+                </div>
+                <div class="col-md-4 from-group">
+                    <label>Warehouse</label>
+                    <?php echo CHtml::dropDownList('warehouse',empty($dptId)?106:$dptId,array(Org::TLA_DEPARTMENT_SYDNEY=>'Sydney Warehouse',Org::TLA_DEPARTMENT_MELBOURNE=>'Melbourne Warehouse',Org::TLA_DEPARTMENT_BRISBANE=>'Brisbane Warehouse'),array('class'=>'form-control'));?>
+                </div>
+                 <div class="col-md-4 from-group">
+                    <label>Courier</label>
+                    <?php echo CHtml::dropDownList('gatepass_courier',empty($direct)?106:$direct, GatepassCourier::$gatepass_courier,array('prompt'=>'Select Courier','class'=>'form-control'));?>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-7 form-group">
+                    <label>Search<span style="color: red;">(Multiple search split by ;/space/enter)</span></label>
+                    <?php echo CHtml::textArea('search_connote','',array('class'=>'form-control'));?>
+                </div> 
+                
+                <div class="col-md-7 form-group tp_form">
+                    <label>Pickup Booking Number/REGO<span style="color: red;">(Multiple search split by ;/space/enter)</span></label>
+                    <?php echo CHtml::textArea('pickupBookingNumber',@$_GET['pickup_booking_number'],array('class'=>'form-control'));?>
+                </div> 
+
+                <div class="col-md-7 form-group tp_form ot_form">
+                    <label>Prepare Gatepass No.</label>
+                    <?php echo CHtml::textField('gatepassNo','',array('class'=>'form-control'));?>
+                </div> 
+                <div class="col-md-7 form-group tp_m_form">
+                    <label>MAWB/Container No.</label>
+                    <?php echo CHtml::textField('awb','',array('class'=>'form-control'));?>
+                </div> 
+
+                <div class="col-md-7 form-group tp_form">
+                     <label>Pickup date.</label>
+                <?= CHtml::dropDownList('pickupDate','', ["today"=>"today","tomorrow"=>"tomorrow","after tomorrow"=>"after tomorrow"],['class'=>'form-control','prompt'=>'SELECT']);?>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-5">
+                    <button type="submit" class="btn btn-primary" id="load_shipments">Load</button>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-5" id = "load_btn" style="display: block;width:40em;line-height: 4em;">
+                    &nbsp;
+                </div>
+            </div>
+        </div>
+        <div class="col-md-5">
+            <div class="row">
+            <div class="form-group col-md-5">
+                    <?php echo CHtml::label('Rego:','Rego:',array('required'=>'required'));?>
+                    <?php echo CHtml::textField('driver_rego','',array('class'=>'form-control'));?>
+            </div>
+            <div class="form-group col-md-5">
+                   <label>Driver Name:</label>
+                    <?php echo CHtml::textField('driver_name','',array('class'=>'form-control'));?>
+            </div>
+            </div>
+            <div class="row tp_form">
+                   <div class="form-group col-md-8">
+                   <?php echo CHtml::label('Driver License:','Driver License:',array('required'=>'required'));?>
+                   <?php echo CHtml::hiddenField('driver_license');?>
+                    <input type="file" name="file" id="GatepassCourier_photos" style="display:none;" > 
+                    <img src="" id = "path" name="path" readonly style="width: 100%;height:20em;display: none"/>
+                    <a href="" class="form-control" id = "takePhoto" ><center><span class="glyphicon glyphicon-camera"></span>Take Photo</center></a>
+                    </div>
+            </div>
+            <div class="row">
+                   <div class="form-group col-md-8">
+                   <label>Ref:</label>
+                    <?php echo CHtml::textField('ref','',array('class'=>'form-control'));?>
+                    </div>
+            </div>
+               <div class="form-group">
+                    <div style="clear:both"></div>
+                   <?php echo CHtml::label('Signature', 'gatepass_signature'); ?>
+                   <div style="clear:both"></div>
+                   <canvas style="border: 1px solid black; background-color:beige;" ></canvas>
+                          <?php echo CHtml::hiddenField('gatepass_signature'); ?>
+                </div>
+            <div class="form-group">
+                <button type="submit" class="btn btn-primary submit_sig">Submit</button>
+                <button type="submit" class="btn btn-primary clear_btn">Clear</button>
+            </div>
+        </div>
+    </div>
+     <div class="row" id="loadingCountDiv" style="display: none;font-size:3em;">
+                <div class="col-md-5" > Loading(<span id="loadingCount">0</span>)</div>
+                <input type = 'hidden' id = "isBreak" />
+    </div>
+</div>
+<div  id="gatepass-signature-view">
+    <?php  $this->renderPartial('_sub_shipments', array(
+           'model' => $model,
+        ));
+    ?>
+</div>
+<?php  ob_start();?>
+<script type="text/javascript">
+    $(function(){
+        function compressImage(base64, callback) {
+            var targSize = 256 * 256 //1024KB
+            if(base64.length>=7000000)
+            {
+                targSize = 1024 * 1024;
+            }
+
+            if(base64.length<7000000)
+            {
+                targSize = 512 * 512;
+            }
+
+            if (base64.length <= targSize) {
+                callback(base64);
+                // console.log("直接返回")
+                return
+            }
+            var newImage = new Image();
+            console.log(targSize);
+            newImage.src = base64;
+            console.log(base64.length)
+            newImage.setAttribute("crossOrigin", 'Anonymous'); //url为外域时需要  
+            newImage.onload = function () {
+                var quality = 0.95; //压缩系数0-1之间
+                var canvas = document.createElement("canvas");
+                var ctx = canvas.getContext("2d");
+                canvas.width = parseInt(this.width/4);
+                canvas.height = parseInt(this.height/4);
+                ctx.clearRect(0, 0, canvas.width,  canvas.height);
+                ctx.drawImage(this, 0, 0, canvas.width,  canvas.height);
+                var base64 = canvas.toDataURL("image/jpeg", quality);
+                //console.log(base64.length + "循环1压缩" + (base64.length / 1024 > 512));
+                while (base64.length > targSize) {
+                    quality -= 0.05;
+                    // 如想确保图片压缩到自己想要的尺寸,如要求在5-10kb之间，请加以下语句，quality初始值根据情况自定
+                    //console.log(base64.length + "循环1压缩" + (base64.length / 1024 > 512));
+                    // console.log(base64.length + "循环压缩" + quality)
+                    base64 = canvas.toDataURL("image/jpeg", quality);
+                }
+                callback(base64); //必须通过回调函数返回，否则无法及时拿到该值
+            }
+        }
+
+
+        $('#takePhoto').on('click',function(){
+            $('#GatepassCourier_photos').click();
+            return false;
+        });
+
+        if($('#gatepass_courier').val()!="TP")
+        {
+            $('.tp_form').hide();
+        }
+
+        $('#GatepassCourier_photos').on('change',function(){
+            $('#path').val($(this).val());
+            var reader = new FileReader();  
+            reader.readAsDataURL(this.files[0]);//调用自带方法进行转换  
+            reader.onload = function(e) {
+                 compressImage(this.result,function(newBase64){
+                                $('#driver_license').val(newBase64);
+                                $('#path').attr('src',newBase64);
+                                $('#path').show();
+                            });
+            }
+        })
+
+        $('.tp_m_form').hide();
+           var MQ = [<?='"'.join('","',GatepassCourier::$gatepassMQ).'"'?>];
+           var isMQ= 0;
+           for (var i = MQ.length - 1; i >= 0; i--) {
+               if(MQ[i]=="<?=@$direct?>")
+               {
+                   $('#load_shipments').hide();
+                   isMQ = 1;
+               }
+           }
+
+        var signaturePad = new SignaturePad(document.querySelector("canvas"));
+         $('button.clear_btn').on("click", function (event) {
+             signaturePad.clear();
+            });
+           $('button.submit_sig').on("click", function (event) {
+
+               var number=$("#shipment_number").val();
+               if(number<=0&&!isMQ){
+                   alert("There are no shipments waiting for signature");
+                    $('#notifc').notify({message: {html: 'There are no shipments waiting for signature!'},type: 'danger'}).show();
+                   return false;
+               }
+             if(!$("textarea[name='search_connote']").val()&&!$("select[name='gatepass_courier']").val()){
+                 alert("Please Choose The Courier at first!");
+                 $('#notifc').notify({message: {html: 'Please Choose The Courier at first!'},type: 'danger'}).show();
+                 return false;
+             }
+
+             if(!$("input[name='driver_name']").val()){
+                  alert("Please Supply Driver Name!");
+                 $('#notifc').notify({message: {html: 'Please Supply Driver Name!'},type: 'danger'}).show();
+                 return false;
+             }
+             if(signaturePad.isEmpty()){
+                 alert("Please provide signature at first");
+                 $('#notifc').notify({message: {html: 'Please provide signature at first!'},type: 'danger'}).show();
+                 return false;
+             }
+             $('#gatepass_signature').val(signaturePad.toDataURL());
+             var gatepass_signature=$('#gatepass_signature').val();
+             var warehouse=$("select[name='warehouse']").val();
+             var courier=$("select[name='gatepass_courier']").val();
+             var type=$("select[name='type']").val();
+             var search_context=$("textarea[name='search_connote']").val();
+             var gatepass_no = $('#gatepassNo').val();
+             var pickupBookingNumber = $('#pickupBookingNumber').val();
+             var awb = $('#awb').val();
+             var driver_name=$("input[name='driver_name']").val();
+             var driver_rego=$("input[name='driver_rego']").val();
+             var pickup_date = $('#pickupDate').val();
+             //var files = $('#GatepassCourier_photos').prop('files');//获取到文件列表
+             var  fileText = $('#driver_license').val();
+
+
+             var selectedIds = "";
+             var notselectedIds ="";
+             $('input:checkbox[name=shipmentId]:checked').each(function(i){
+                if(0==i){
+                 selectedIds = $(this).val();
+                }else{
+                 selectedIds += (","+$(this).val());
+                }
+             });
+
+             $('input:checkbox[name=shipmentId]:not(:checked)').each(function(i){
+                if(0==i){
+                 notselectedIds = $(this).val();
+                }else{
+                 notselectedIds += (","+$(this).val());
+                }
+             });
+
+             if(selectedIds==""&&!isMQ)
+             {
+                 alert("Please Select Parcels!");
+                $('#notifc').notify({message: {html: 'Please Select Parcels!'},type: 'danger'}).show();
+                 return false;
+             }
+
+             $("input[name='driver_rego']").val();
+             if(type==0&&!driver_rego){
+                 alert("Please Supply Driver Rego!");
+                 $('#notifc').notify({message: {html: 'Please Supply Driver Rego!'},type: 'danger'}).show();
+                 return false;  
+              }
+             var ref=$("input[name='ref']").val();
+             var data={
+                 gatepass_signature,
+                 warehouse,
+                 courier,
+                 search_context,
+                 type,
+                 driver_name,
+                 driver_rego,
+                 ref,
+                 selectedIds,
+                 notselectedIds,
+                 gatepass_no,
+                 pickup_date,
+                 awb,
+                 isMQ,
+                 pickupBookingNumber,
+                 fileText
+             };
+             $.ajax({
+                    url:'<?=$this->createUrl("gatePass/submitGatepass");?>',
+                    method: 'POST',
+                    data:data,
+                    success:function(res){
+                         var response=JSON.parse(res);
+                              if(response.status == 1){
+//                                 alert('Done', 5000);
+                                $('#notifc').notify({message: {html: 'done!'}}).show();
+                                $("#load_shipments").trigger('click');
+                                  signaturePad.clear();
+//                                 window.open('../gatePass/genGatepassPdf/id/'+response.id+".app", '_blank');
+                              }else{
+                                 alert(response.msg);
+                                    $('#notifc').notify({message: {html: response.msg},type: 'danger'}).show();
+                              }
+                          }
+                         });
+           });
+            
+        $("#load_shipments").on('click',function(){
+            $('#isBreak').val("0");
+            $('#loadingCount').html("0");
+            $('#loadingCountDiv').show();
+             var isBreak = false;
+             var warehouse=$("select[name='warehouse']").val();
+             var courier=$("select[name='gatepass_courier']").val();
+             var search_context=$("textarea[name='search_connote']").val();
+             var gatepass_no = $('#gatepassNo').val();
+             var pickupBookingNumber = $('#pickupBookingNumber').val();
+             var awb = $('#awb').val();
+             var pickup_date = $('#pickupDate').val();
+             var data={
+                 warehouse,
+                 courier,
+                 search_context,
+                 gatepass_no,
+                 pickup_date,
+                 awb,
+                 pickupBookingNumber
+             };
+            
+             $.ajax({
+               url:"<?=$this->createUrl('gatePass/index')?>",
+               data:data,
+               method:"GET",
+               success:function(r){
+                   $("#gatepass-signature-view").html(r);
+                    $('#loadingCountDiv').hide();
+                    $('#isBreak').val("1");
+                    isBreak = true;
+               }
+             });
+
+             var tasks = function(){
+                 cv = parseInt($('#loadingCount').html())+1;
+                 $('#loadingCount').html(cv);
+                 if($('#isBreak').val()=="0")
+                 {
+                    setTimeout(tasks, 1000);
+                 }else
+                 {
+                    return "";
+                 }
+             };
+             setTimeout(tasks, 1000);
+//            gapsigApp.btnLoading($(this)); 
+            
+//            gapsigApp.btnLoading($("#manifest_shipment"),true);  
+        });
+
+
+        $('#gatepass_courier').on('change',function(){
+            if($(this).val()=="TP")
+            {
+                $('.tp_form').show();
+            }else
+            {
+                $('.tp_form').hide();
+            }
+
+            if($(this).val()=="moving")
+            {
+                $('.tp_m_form').show();
+            }else
+            {
+                $('.tp_m_form').hide();
+            }
+
+            if($(this).val()=="Other")
+            {
+                $('.ot_form').show();
+            }else
+            {
+                $('.ot_form').hide();
+            }
+
+            $('#load_shipments').show();
+            isMQ = 0;
+            for (var i = MQ.length - 1; i >= 0; i--) {
+                if(MQ[i]==$(this).val()+"")
+                {
+                    $('#load_shipments').hide();
+                    isMQ = 1;
+                }
+            }
+
+
+        });
+        var driverRegoHistory = "";
+        $('#driver_rego').on('blur',function(){
+            var rego = $('#driver_rego').val();
+            if($("#path").attr('src')==""||($("#path").attr('src')!=""&&rego!=driverRegoHistory))
+            {
+                $.ajax({
+                   url:"<?=$this->createUrl('gatePass/searchDriverLicense')?>"+"?rego="+rego,
+                   data:[],
+                   method:"GET",
+                   success:function(r){
+                        var response=JSON.parse(r);
+                        if(response.status == 1){
+                            driverRegoHistory = rego;
+                            $("#driver_name").val(response.driver_name);
+                            $("#ref").val(response.ref);
+                            compressImage(response.driver_license,function(newBase64){
+                                $("#path").attr('src',newBase64);
+                                $("#driver_license").val(newBase64);
+                                $("#path").show();
+                            });
+                        }else
+                        {
+                            $("#path").attr('src',"");
+                            $("#driver_license").val("");
+                            $("#path").hide();
+                        }
+                   }
+                 });
+            }
+
+
+        });
+
+        $('#load_btn').on('dblclick',function()
+        {
+            $('#load_shipments').show();
+        });
+
+    })
+</script>
+<?php $this->registerJS(ob_get_clean(),8); ?>
+

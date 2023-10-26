@@ -1,0 +1,286 @@
+<h3>Create C-Job</h3>
+<style>
+	.cloumn_red {
+		background-color: pink;
+	}
+
+	.column_direct {
+		color: green;
+		font-weight: bold;
+	}
+</style>
+
+<?php
+echo "Select All", CHtml::checkbox("create_job_id_all", 0, ["onChange" => " return select_all_cargo();"]);
+$this->widget('application.extensions.CSpanableGridView.CSpanableGridView', [
+	'id' => $_GET["tabid"] . '_cargo_process_for_job_grid',
+	'cssFile' => false,
+	'dataProvider' => $cargo->search(false, 30, false, true, $pod_id, $cargo_type),
+	'afterAjaxUpdate' => 'function(){initCheckBox();loadCheckBox();}',
+	'filter' => $cargo,
+	'columns' => [
+		['header' => 'select', 'type' => 'raw', 'value' => 'CHtml::checkbox("cargo_id",0,["value"=>$data->id,"class"=>"cargo_id"])'],
+		//['header' => 'sequence', 'type' => 'raw', 'value' => 'CHtml::numberField($data->id."cargo_sequence",1,array("style"=>"width:50px;"))'],
+		array('name' => 'hbn', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->createURL("imParcel/update", array("id" => $data->shipment_id))."\" class=\"tab_link\" title=\"".$data->shipment->hbn."\">".$data->shipment->hbn."</a>"',),
+		array('name' => 'ref', 'value' => '$data->getRef()'),
+		//['name' => 'agent_id', 'value' => '$data->shipment->agent_id'],
+		['name' => 'shipment.consol_no', 'type' => 'raw', 'value' => 'empty($data->shipment->consol_id)? "" : "<a href=\"".Yii::app()->createURL(Consol::getTheConsolType($data->shipment->consol_id)==70?"dmawbConsol/update":"imcoConsol/update", array("id" => $data->shipment->consol_id))."\" class=\"tab_link\" title=\"".@$data->shipment->consol->no."\">".@$data->shipment->consol->no."</a>"', 'filter' => CHtml::textField('ImParcel[consol_no]', $cargo->consol_no)],
+		//['name' => 'shipment.consol.awb', 'filter' => CHtml::hiddenField('CargoProcess[status]', @$cargo->status) . CHtml::textField('CargoProcess[awb]', @$cargo->awb)],
+		['name' => 'shipment.cnee.address', 'filter' => CHtml::textField('CargoProcess[address]', @$cargo->address)],
+		['name' => 'shipment.cnee.suburb', 'filter' => CHtml::textField('CargoProcess[suburb]', @$cargo->suburb)],
+		['name' => 'shipment.cnee.postcode', 'filter' => CHtml::textField('CargoProcess[postcode]', @$cargo->postcode)],
+		array('header' => 'region', 'type' => 'raw', 'filter' => CHtml::textField('CargoProcess[region]', @$cargo->region), 'value' => '$data->shipment->getRegion()'),
+		array('header' => 'Combined Plt Region', 'type' => 'raw', 'filter' => CHtml::textField('CargoProcess[combined_plt_region]', $cargo->combined_plt_region), 'value' => '$data->shipment->getTLDRegion()'),
+		//array('header' => 'distance', 'value' => '$data->shipment->getDeliveryDistance().\'km\''),
+		array('header' => 'zone', 'value' => '$data->getZone()." ".$data->shipment->getDeliveryDistance().\'km\''),
+		['name' => 'deliveryBookingTime', 'value' => '$data->getDeliveryBookingTime()', 'cssClassExpression' => '$data->getShowColor()', 'filter' => CHtml::textField('CargoProcess[deliveryBookingTime]', @$cargo->getBookingTime())],
+		['name' => 'shipment.can', 'filter' => CHtml::textField('CargoProcess[memo]', @$cargo->memo)],
+		'note',
+		//['header'=>'CustomerNote', 'value'=>'@$data->getCustomerResponse()'],
+		//['header' => 'extra Info', 'type' => 'raw', 'value' => '$data->shipment->getDGWarnings().($data->shipment->isOversize()?"<label style=\"color:red\">Oversize</label>":"")', 'filter' => CHtml::dropDownList('CargoProcess[exInfo]', $cargo->exInfo, $this->t(ImParcel::$exInfos), ['prompt' => 'All'])],
+		['header' => 'extra Info', 'type' => 'raw', 'value' => '$data->shipment->getDGWarnings().($data->shipment->isOversize()?"<label style=\"color:red\">Oversize</label>":"").@$data->isCustomerConfirmForklift()', 'filter' => CHtml::dropDownList('CargoProcess[exInfo]', $cargo->exInfo, $this->t(CargoProcess::$exInfos), ['prompt' => 'All'])],
+		['name'=>'customerNote', 'value'=>'@$data->getCustomerResponse()', 'filter' => CHtml::dropDownList('CargoProcess[customerNote]', $cargo->customerNote, $this->t(CargoProcess::$addressTypes), ['prompt' => 'All'])],
+		['name' => 'plt', 'type' => 'raw', 'value' => '$data->getPltStr()'],
+		['name' => 'shipment.pkg', 'cssClassExpression' => '$data->getShowColor("pkg")', 'filter' => CHtml::textField('CargoProcess[pkg]', @$cargo->pkg), 'value' => '$data->getPackages()'],
+		['name' => 'shipment.weight', 'filter' => CHtml::textField('CargoProcess[weight]', @$cargo->weight), 'value' => '$data->getWeight()'],
+		['name' => 'shipment.cbm', 'value' => '$data->getTotalCBM()', 'filter' => CHtml::textField('CargoProcess[cbm]', @$cargo->cbm)],
+		['name' => 'unpackingDate', 'value' => '@$data->shipment->consol->mdata["ContainerUnloadDate"]', 'cssClassExpression' => '$data->getShowColor("unpacking")'],
+		['name' => 'firstProcessTime', 'value' => '$data->getFirstProcessTime()', 'cssClassExpression' => '$data->getShowColor("last_process_time")'],
+		//array('name' => 'assignedAgent', 'filter' => CHtml::dropDownList('CargoProcess[assignedUser]', @$cargo->assignedUser, @User::getTruckUsers(), array('prompt' => 'Select'))),
+		['name' => 'status', 'type' => 'raw', 'value' => '$data->getFullStatus()', 'filter' => false],
+		//['name' => 'shipment.status', 'value' => '$data->shipment->getStatus()', 'cssClassExpression' => '$data->getShowColor("held")'],
+		['header' => 'goods available address', 'type' => 'raw', 'value' => '$data->shipment->getAvailabelLabel()', 'filter' => CHtml::textField('CargoProcess[goodsAvailableAddress]', @$cargo->goodsAvailableAddress)],
+		//array('header' => 'zone', 'value' => '$data->getZone()'),
+		//['header' => 'Last Process Time', 'value' => '$data->getLastProcessTime()', 'cssClassExpression' => '$data->getShowColor("last_process_time")'],
+		//['name' => 'shipment.rack', 'type' => 'raw', 'filter' => CHtml::textField('CargoProcess[rack]', @$cargo->rack), 'value' => '$data->shipment->getRackName(false,true)'],
+		//['name' => 'shipment.cnee.name', 'filter' => CHtml::textField('CargoProcess[cname]', @$cargo->cname)],
+		//['name' => 'shipment.cnee.tel', 'filter' => CHtml::textField('CargoProcess[tel]', @$cargo->tel)],
+		//['name' => 'shipment.cnee.state', 'filter' => CHtml::textField('CargoProcess[state]', @$cargo->state)],
+	],
+]);; ?>
+<div class="row" style="font-size: 2em;font-weight: bold;">
+	<div class="row buttons">
+		<div class="col-block"><?php echo CHtml::label('Job Name', 'Job Name'); ?></div>
+		<div class="col-block"><?php echo CHtml::textField('job_name', '', array('id' => 'job_name')); ?></div>
+	</div>
+	<div class="row buttons">
+		<div class="col-block"><?php echo CHtml::label('Vehicle', 'Vehicle'); ?></div>
+		<div class="col-block"><?php echo CHtml::dropDownList('vehicle_id', 1, $vehicles, array()); ?></div>
+	</div>
+	<div class="row buttons">
+		<div class="col-block"><?php echo CHtml::label('Assign Driver', 'Assign Driver'); ?></div>
+		<div class="col-block"><?php echo CHtml::dropDownList('driver_id', '', $drivers, array('prompt' => 'Select')); ?></div>
+	</div>
+
+		<div class="row buttons">
+			<div class="col-block"><?php echo CHtml::label('Region', 'Region'); ?></div>
+			<div class="col-block"><?php echo CHtml::dropDownList('region', '', $regions, array('prompt' => 'Select')); ?></div>
+		</div>
+
+	<?php if ($cargo_type != 6) { ?>
+		<div class="row buttons">
+			<div class="col-block"><?php echo CHtml::label('Direction', 'Direction'); ?></div>
+			<div class="col-block">
+				<?php
+				$ccs = CargoProcessJob::$cargoDirectionList;
+				foreach ($ccs as $k => $v) {
+					echo '<label class="check_label"><input type="checkbox" name="directioncheckbox" value="' . $k . '" ' . (!empty($cargo->mdata[$v]) ? 'checked' : '') . '/> ' . $v . '</label>  |';
+				}
+				?>
+			</div>
+		</div>
+	<?php } ?>
+	<?php if ($cargo_type == 6) { ?>
+		<div class="row buttons">
+			<div class="col-block"><?php echo CHtml::label('Destination', 'Destination'); ?></div>
+			<div class="col-block"><?php echo CHtml::dropDownList('meta[destination]',  @$model->mdata['destination'], CargoProcessJob::$destination, array('prompt' => 'Select')); ?></div>
+		</div>
+	<?php } ?>
+	<div class="row buttons">
+		<div class="col-block"><?php echo CHtml::label('Time', 'Time'); ?></div>
+		<div class="col-block"><?php echo CHtml::dropDownList('meta[time]', @$model->mdata['time'], CargoProcessJob::$cargoTimes, array('empty' => 'Select')); ?></div>
+	</div>
+
+	<div class="row buttons">
+		<div class="col-block"><?php echo CHtml::label('Effective Distance', 'Effective Distance'); ?></div>
+		<div class="col-block"><?php echo CHtml::textField('meta[distance]', isset($cargo->mdata['distance']) ? $cargo->mdata['distance'] : '0'); ?></div>
+	</div>
+
+	<div class="row buttons">
+		<div class="col-block"><?php echo CHtml::label('Delviery Date', 'Delviery Date'); ?></div>
+		<div class="col-block"><?php echo CHtml::textField('created', @$model->created, ['required' => 'required','class' => 'datetime_input', 'id' => $_GET['tabid'] . '_dt_crtd']); ?></div>
+	</div>
+<?php if($cargo_type == CargoProcess::INTERSTATE_CARGO) { ?>
+	<div class="row buttons">
+		<div class="col-block"><?php echo CHtml::label('Interstate Cost', 'interstate_cost'); ?></div>
+		<div class="col-block"><?php echo CHtml::textField('interstate_cost', @$model->mdata['interstate_cost'], array('required' => 'required', 'id' => 'interstate_cost')); ?></div>
+	</div>
+<?php } ?>
+	<div class="row buttons">
+		<div class="col-block"><?php echo CHtml::label('Description', 'Description'); ?></div>
+		<div class="col-block"><?php echo CHtml::textarea('description', '', array('id' => 'description', 'cols' => 50, 'rows' => 3)); ?></div>
+	</div>
+	<div class="row buttons">
+		<div class="col-block"><?php echo CHtml::label('ISA', 'isa'); ?></div>
+		<div class="col-block"><?php echo CHtml::textField('isa', '', array('id'=>'isa')); ?></div>
+	</div>
+	<div class="row buttons">
+		<div class="col-block"><?php echo CHtml::label('Amazon Booking Time', 'amazon_booking_time'); ?></div>
+		<div class="col-block"><?php echo CHtml::textField('amazon_booking_time', '', array('id'=>'amazon_booking_time', 'class' => 'datetime_input')); ?></div>
+	</div>
+	<div class="row buttons">
+		<div class="col-block"><?php echo CHtml::button('create cargo job', array('class' => 'create_cargo_job', 'id' => 'create_cargo_job')); ?></div>
+	</div>
+</div>
+
+<script type="text/javascript">
+	var cjo<?= $_GET["tabid"]; ?> = ",";
+
+	function select_all_cargo() {
+		var selectAll = $('#create_job_id_all');
+		var allBox = $("input[name='cargo_id']");
+		if (selectAll.prop("checked") == true) {
+			$("input[name='cargo_id']").prop("checked", true);
+			for (var i = allBox.length - 1; i >= 0; i--) {
+				cjo<?= $_GET["tabid"]; ?> += allBox[i].value + ",";
+			}
+		} else {
+			$("input[name='cargo_id']").prop("checked", false);
+			for (var i = allBox.length - 1; i >= 0; i--) {
+				cjo<?= $_GET["tabid"]; ?> = cjo<?= $_GET["tabid"]; ?>.replace("," + allBox[i].value + ",", ",");
+			}
+		}
+		return false;
+	}
+
+	function initCheckBox() {
+		$('.cargo_id').on('click', function() {
+			if ($(this).prop("checked") == true) {
+				cjo<?= $_GET["tabid"]; ?> += $(this).val() + ",";
+			} else {
+				cjo<?= $_GET["tabid"]; ?> = cjo<?= $_GET["tabid"]; ?>.replace("," + $(this).val() + ",", ",");
+			}
+		});
+	}
+
+	function loadCheckBox() {
+		$("input[name='cargo_id']").each(function() {
+			if (cjo<?= $_GET["tabid"]; ?>.indexOf("," + $(this).attr("value") + ",") > -1) {
+				$(this).prop("checked", true);
+			}
+		});
+	}
+
+	initCheckBox();
+	$(function() {
+		var tab = $('#<?= $_GET["tabid"]; ?>');
+		var panelSi = $('#<?= $_GET["tabid"]; ?>').data('panel');
+
+		function uploading_on(obj) {
+			obj.addClass('uploading');
+			obj.val('    Uploading');
+			obj.prop('disabled', 'disabled');
+		}
+
+		function uploading_off(obj) {
+			obj.removeClass('uploading');
+			obj.val('create cargo job');
+			obj.removeProp('disabled');
+		}
+
+		$('#create_cargo_job', panelSi).on('click', function(e) {
+			e.preventDefault();
+			e.stopImmediatePropagation();
+			uploading_on($('#create_cargo_job', panelSi));
+			var ids = new Array();
+			var cargoSequence = new Array();
+			var job_name = $('#job_name', panelSi).val();
+			var vehicleId = $('#vehicle_id', panelSi).val();
+			var region = $('#region', panelSi).val();
+			var job_date = $('#job_date', panelSi).val();
+			var driver_id = $('#driver_id', panelSi).val();
+			var time = $('#meta_time', panelSi).val();
+			var created = $('#<?= $_GET["tabid"]; ?>_dt_crtd').val();
+			var interstate_cost = $('#interstate_cost', panelSi).val();
+
+			if(created.length ==0){
+				myApp.alert('Please input delivery date', false);
+				uploading_off($('#create_cargo_job', panelSi));
+				return false;
+			}
+			var interstate_cost_element = document.getElementById("interstate_cost");
+			if (interstate_cost_element && interstate_cost.length == 0) {
+				myApp.alert('Please input interstate cost', false);
+				uploading_off($('#create_cargo_job', panelSi));
+				return false;
+			}
+			var directionforcustomer = "";
+			$('input:checkbox[name=directioncheckbox]:checked').each(function(k) {
+				if (k == 0) {
+					directionforcustomer = $(this).val();
+				} else {
+					directionforcustomer += ',' + $(this).val();
+				}
+			});
+			var distance = $('#meta_distance', panelSi).val();
+			var destination = $('#meta_destination', panelSi).val();
+			var description = $('#description', panelSi).val();
+			var dptId = '<?= $pod_id ?>';
+			var type = '<?= $cargo_type ?>';
+			if (cjo<?= $_GET["tabid"]; ?> != ",") {
+				cjo<?= $_GET["tabid"]; ?> = cjo<?= $_GET["tabid"]; ?>.slice(1, -1);
+				ids = cjo<?= $_GET["tabid"]; ?>.split(',');
+				for (var i = 0; i <= ids.length - 1; i++) {
+					cargoSequence.push($('#' + ids[i] + "cargo_sequence").val());
+				}
+			}
+			if (ids.length == 0) {
+				myApp.alert('select cargos first', false);
+				uploading_off($('#create_cargo_job', panelSi));
+				return false;
+			}
+			let uniqueIds = [...new Set(ids)];
+			var formData = new FormData();
+			formData.append('ids', uniqueIds);
+			formData.append('cargoSequence', cargoSequence);
+			formData.append('jobName', job_name);
+			formData.append('vehicleId', vehicleId);
+			formData.append('region', region);
+			formData.append('jobDate', job_date);
+			formData.append('driverId', driver_id);
+			formData.append('directionforcustomer', directionforcustomer);
+			formData.append('distance', distance);
+			formData.append('destination', destination);
+			formData.append('description', description);
+			formData.append('dptId', dptId);
+			formData.append('time', time);
+			formData.append('type', type);
+			formData.append('created', created);
+			formData.append('isa', $('input#isa').val());
+			formData.append('amazon_booking_time', $('input#amazon_booking_time').val());
+			formData.append('interstate_cost', interstate_cost);
+			$.ajax({
+				url: '<?= Yii::app()->createUrl("topCourierService/submitCargoJob") ?>',
+				type: 'POST',
+				data: formData,
+				processData: false,
+				contentType: false,
+				success: function(r) {
+					uploading_off($('#create_cargo_job', panelSi));
+					r = JSON.parse(r);
+					if (r.done) {
+						$('#<?= $_GET["tabid"] ?>_cargo_process_for_job_grid').yiiGridView('update');
+						myApp.notice(r.msg, 5000);
+					} else {
+						myApp.alert(r.msg, false);
+					}
+				},
+				error: function(r) {
+					uploading_off($('#create_cargo_job', panelSi));
+					myApp.alert('System error', false);
+				}
+			});
+			cjo<?= $_GET["tabid"]; ?> = ',' + cjo<?= $_GET["tabid"]; ?> + ',';
+		});
+	});
+</script>

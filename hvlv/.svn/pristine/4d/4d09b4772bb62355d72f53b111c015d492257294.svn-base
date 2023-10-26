@@ -1,0 +1,824 @@
+<?php
+
+/**
+ * This is the model class for table "shipment_scan".
+ *
+ * The followings are the available columns in table 'shipment_scan':
+ * @property integer $id
+ * @property integer $user_id
+ * @property integer $pid
+ * @property integer $pno
+ * @property integer $warehouse
+ * @property integer $type  0=>checkin 1=>resort
+ * @property string $scan_time
+ * @property integer $pkg
+ * @property double $weight
+ */
+class ShipmentScan extends CActiveRecord
+{
+	const RTS_TYPE = 4;
+	const PALLET_TYPE = 6;
+	const PALLET_CHECK_TYPE = 7;
+	const RESORT = 1;
+	const CHECKIN = 0;
+	const BAG_CHECK_TYPE = 5;
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName()
+	{
+		return 'shipment_scan';
+	}
+		
+	public static $types=[
+		0=>'check in',
+		1=>'resort',
+		2=>'status',
+		3=>'change',
+		4=>'rts',
+		5=>'bag check in',
+		6=>'pallet resorting',
+		7=>'pallet check in '
+	];
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return [
+			['user_id, pid, pno, type, scan_time, pkg, weight', 'required'],
+			['user_id, pid, pno, type, pkg', 'numerical', 'integerOnly'=>true],
+			['weight', 'numerical'],
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			['id, user_id, pid, pno, type,warehouse, scan_time, pkg, weight', 'safe', 'on'=>'search'],
+		];
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return [
+			'shipment' => [self::BELONGS_TO, 'Shipment', 'pid'],
+			'imparcel' => [self::BELONGS_TO, 'ImParcel', 'pid'],
+			'user' => [self::BELONGS_TO, 'User', 'user_id'],
+			'process' => [self::HAS_ONE, 'ShipmentScanProcess', 'shipment_scan_id'],
+		];
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return [
+			'id' => 'ID',
+			'user_id' => 'User',
+			'pid' => 'Pid',
+			'pno' => 'Pno',
+			'type' => 'Type',
+			'scan_time' => 'Scan Time',
+			'pkg' => 'Pkg',
+			'weight' => 'Weight',
+			'warehouse' => 'Warehouse'
+					
+		];
+	}
+
+	public function getUser(){
+		if(empty($this->user_id)){
+			return 'System';
+		}else{
+			if (empty($this->user)) return 'System';
+			return $this->user->getFullName();
+		}
+	}
+	
+	public function getType(){
+		return self::$types[$this->type];
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search($pgn = true, $ps = 30)
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('id', $this->id);
+		$criteria->compare('user_id', $this->user_id);
+		$criteria->compare('pid', $this->pid);
+		$criteria->compare('pno', $this->pno);
+		$criteria->compare('warehouse', $this->warehouse);
+		$criteria->compare('type', $this->type);
+		$criteria->compare('scan_time', $this->scan_time, true);
+		$criteria->compare('pkg', $this->pkg);
+		$criteria->compare('weight', $this->weight);
+
+		$sort = new CSort(get_called_class());
+		$sort->attributes = [
+			'*',
+		];
+		$sort->defaultOrder = 'scan_time DESC';
+		$pagerparams = $_GET;
+
+		return new CActiveDataProvider($this, [
+			'criteria' => $criteria,
+			'sort' => $sort,
+			'pagination' => $pgn ? [
+				'pageSize' => $ps,
+				'params' => $pagerparams,
+			] : false,
+		]);
+	}
+
+	/**
+	 * gen shipment scan based on information
+	 */
+	public static function genShipmentScan($shipment, $type, $sn, $tempWareHouse=106, $ttl = 0,$barcode="")
+	{
+		if($ttl > 0 && ShipmentScan::model()->count('user_id=:uid AND pid=:pid AND pno=:pno AND type=:type AND `scan_time` > DATE_SUB(NOW(), INTERVAL '.$ttl.' SECOND)', [':uid'=>(empty(Yii::app()->user)?0:Yii::app()->user->id),':pid'=>$shipment->id,':pno'=>$sn,':type'=>$type]) > 0) return false;
+		
+		$shipment_scan=new ShipmentScan;
+		$shipment_scan->pid=$shipment->id;
+		$shipment_scan->user_id=empty(Yii::app()->user)?0:Yii::app()->user->id;
+		$shipment_scan->type=$type;
+		$shipment_scan->weight=round($shipment->weight/$shipment->pkg, 2);
+		$shipment_scan->pno=$sn;
+		$shipment_scan->warehouse=$tempWareHouse;
+		$shipment_scan->pkg=1;
+		$shipment_scan->scan_time=date('Y-m-d H:i:s');
+		$result = $shipment_scan->save();
+		if(!empty(Yii::app()->user))
+		{
+			$shipment_scan_process=new ShipmentScanProcess;
+			$shipment_scan_process->shipment_scan_id = $shipment_scan->id;
+			$shipment_scan_process->process = 0;
+			$shipment_scan_process->barcode = $barcode;
+			$shipment_scan_process->save();
+		}
+		return $result;
+	}
+
+	/**
+	 * gen shipment scan based on information
+	 */
+	public static function genPalletScan($location, $type, $tempWareHouse=106, $ttl = 0)
+	{
+		if($ttl > 0 && ShipmentScan::model()->count('user_id=:uid AND pid=:pid AND pno=:pno AND type=:type AND `scan_time` > DATE_SUB(NOW(), INTERVAL '.$ttl.' SECOND)', [':uid'=>Yii::app()->user->id,':pid'=>$location->id,':pno'=>1,':type'=>$type]) > 0) return;
+		
+		$shipment_scan=new ShipmentScan;
+		$shipment_scan->pid=$location->id;
+		$shipment_scan->user_id=Yii::app()->user->id;
+		$shipment_scan->type=$type;
+		$shipment_scan->weight=1;
+		$shipment_scan->pno=1;
+		$shipment_scan->warehouse=$tempWareHouse;
+		$shipment_scan->pkg=1;
+		$shipment_scan->scan_time=date('Y-m-d H:i:s');
+		$shipment_scan->save();
+
+		if(!empty(Yii::app()->user))
+		{
+			$shipment_scan_process=new ShipmentScanProcess;
+			$shipment_scan_process->shipment_scan_id = $shipment_scan->id;
+			$shipment_scan_process->process = 0;
+			$shipment_scan_process->save();
+		}
+	}
+
+	/**
+	 * gen shipment scan based on information
+	 */
+	public static function genBagScan($barcode, $tempWareHouse=106, $ttl = 0)
+	{
+		$bagTag = ImportBag::model()->find("bag_tag = :bag_tag",[":bag_tag"=>$barcode]);
+		if($ttl > 0 && ShipmentScan::model()->count('user_id=:uid AND pid=:pid AND pno=:pno AND type=:type AND `scan_time` > DATE_SUB(NOW(), INTERVAL '.$ttl.' SECOND)', [':uid'=>Yii::app()->user->id,':pid'=>$bagTag->id,':pno'=>0,':type'=>5]) > 0) return;
+		$shipment_scan=new ShipmentScan;
+		$shipment_scan->pid=$bagTag->id;
+		$shipment_scan->user_id=empty(Yii::app()->user)?0:Yii::app()->user->id;
+		$shipment_scan->type=5;
+		$shipment_scan->weight=0;
+		$shipment_scan->pno=0;
+		$shipment_scan->warehouse=$tempWareHouse;
+		$shipment_scan->pkg=0;
+		$shipment_scan->scan_time=date('Y-m-d H:i:s');
+		$shipment_scan->save();
+	}
+
+
+	public static function getTodayScanInfo($dpt_id=106,$type = 0)
+	{
+		$sql='SELECT SUM(t.weight) as weight,SUM(t.pkg) as pkg FROM (SELECT s.weight, s.pkg FROM `shipment_scan` s WHERE
+				scan_time>:date and warehouse=:warehouse and type=:type GROUP BY pid,pno) t';
+		$r=Yii::app()->db->createCommand($sql)->bindValues([':date'=>date('Y-m-d'),':warehouse'=>$dpt_id,':type'=>$type])->queryAll();
+		$packgs=0;
+		$weight=0;
+		if (!empty($r[0])&&!empty($r[0]['pkg'])) {
+			$packgs=$r[0]['pkg'];
+			$weight=$r[0]['weight'];
+		}
+		return ['packs'=>$packgs,'weight'=>$weight];
+	}
+
+	public static function getDayScanInfo($dpt_id=106,$type = 0,$date,$main_type = 1)
+	{
+		$lastDate = HolidayHelper::getLastDay($date);
+		$sql='SELECT SUM(t.weight) as weight,SUM(t.pkg) as pkg FROM (SELECT s.weight, s.pkg FROM `shipment_scan` s join shipment p on s.pid =p.id WHERE
+				to_days(scan_time) = to_days(:date) and s.warehouse=:warehouse and s.type=:type and p.consol_id in (select fid from consol_process where main_type = :main_type AND status in (24,28,32,80) )GROUP BY pid,pno) t';
+		$r=Yii::app()->db->createCommand($sql)->bindValues([':date'=>$date,':warehouse'=>$dpt_id,':type'=>$type,':main_type'=>$main_type])->queryAll();
+		$packgs=0;
+		$weight=0;
+		if (!empty($r[0])&&!empty($r[0]['pkg'])) {
+			$packgs=$r[0]['pkg'];
+			$weight=$r[0]['weight'];
+		}
+		return ['packs'=>$packgs,'weight'=>$weight];
+	}
+
+	public static function getShipmentByBarcode(&$barcode, &$sn=null, &$courier_id=null, $noConsol = false,$agent_id = 0, &$changed_label=null,$containerNo = false,$isForScan = true)
+	{
+		$barcode = strtoupper(trim($barcode));
+		$consolStr= " consol_id > 0 AND ";
+		$agentStr="";
+		$containerStr="";
+		if($noConsol)
+		{
+			$consolStr = "";
+		}
+		if(!empty($agent_id))
+		{
+			$agentStr = " AND agent_id  = ".$agent_id;
+		}
+		if(!empty($containerNo))
+		{
+			$consolStr= " consol_id > 0 AND ";
+			$containerStr = " AND (consol.container_no  = '{$containerNo}' or consol.awb = '{$containerNo}') ";
+		}else
+		{
+			if($noConsol)
+			{
+				$consolStr = "";
+			}
+		}
+		
+		if(empty($barcode)) return false;
+		if (preg_match('/^T\d{6}(' . TollAPI::TOLL_SLID . '|'.TollAPI::TOLL_SLID_OFFPEAK.')\d{10}/', $barcode, $m)) { // for toll barcode
+			// toll barcode format : 'T207711AWNL5450160016';
+			$tollBarcode = $m[0];
+			$ref = substr($tollBarcode, 7, 10);
+			$sn = substr($tollBarcode, 17, 3);
+			$p = ImParcel::model()->with(['consol'])->find($consolStr.'t.status < 100 AND ref = :r'.$agentStr.$containerStr, [':r' => $ref]);
+			if (!empty($p)) {
+				$courier_id=Org::ORGID_COURIER_TOLL;
+			}
+		}elseif (preg_match('/^64(\d{4})(\d{13})(\d{3})$/', $barcode, $m)){ //AUK TOLL
+			$ref = $m[2];
+			$sn = ltrim($m[3], '0');
+			$p = ImParcel::model()->with(['consol'])->find($consolStr.'t.status < 100 AND (ref = :r or  ref = :r2)'.$agentStr.$containerStr, [':r' => $ref,':r2' => 'TOLL'.$ref]);
+			if (!empty($p)) {
+				$courier_id =Org::ORGID_COURIER_TLA;
+			}
+
+
+		}elseif (preg_match('/^(7RFZ|4XHZ)\d{8}'.StarTrackAPI::API_PRODUCT_ID.'\d{5}/', $barcode, $m)) {
+			// for startrack barcode
+			// startrack barcode : 7RFZ50000034EXP00001
+			$ssBarcode = $m[0];
+			$ref = substr($ssBarcode, 0, 12);
+			$sn = substr($ssBarcode, 15, 5);
+			$p = ImParcel::model()->with(['consol'])->find($consolStr.'t.status < 100 AND ref = :r '.$agentStr.$containerStr, [':r' => $ref]);
+			if (!empty($p)) {
+				$courier_id=Org::ORGID_COURIER_STARTRACK;
+			}
+		} elseif (preg_match('/^99700160([A-Z]{3})(\d{7})(\d{11})/', $barcode, $m)) { // for eparcel legacy barcode
+			$ref = $m[1].$m[2];
+			$sn = substr($m[3], 0, 2);
+			$p = ImParcel::model()->with(['consol'])->find($consolStr.'t.status < 100 AND ref = :r'.$agentStr.$containerStr, [':r' => $ref]);
+			if (!empty($p)) {
+				$courier_id=Org::ORGID_COURIER_AUPOST;
+			}
+		} elseif (preg_match('/^019931265099999891(((\w{3,5})\d{7})(\d{11}))(\d{23}|\d{33})?$/', preg_replace('/[^\dA-Z]+/', '', $barcode), $m)) {
+			// for eparcel barcodes
+			$barcode=$m[1];
+			$ref = $m[2];
+			$sn = substr($m[4], 0, 2);
+			$p = ImParcel::model()->with(['consol'])->find($consolStr.'t.status < 100 AND (ref = :r OR hbn=:r OR ref = :r2 OR hbn = :r2) '.$agentStr.$containerStr, [':r' => $ref, ':r2' => $m[1]]);
+			if (!empty($p)) {
+				$courier_id= Org::ORGID_COURIER_AUPOST;
+			}
+		}elseif (preg_match('/^(((\w{3,5})\d{7})(\d{11}))(\d{23}|\d{33})?$/', preg_replace('/[^\dA-Z]+/', '', $barcode), $m)) {
+			// for eparcel barcodes
+			$barcode=$m[1];
+			$ref = $m[2];
+			$sn = substr($m[4], 0, 2);
+			$p = ImParcel::model()->with(['consol'])->find($consolStr.'t.status < 100 AND (ref = :r OR hbn=:r OR ref = :r2 OR hbn = :r2) '.$agentStr.$containerStr, [':r' => $ref, ':r2' => $m[1]]);
+			if (!empty($p)) {
+				$courier_id= Org::ORGID_COURIER_AUPOST;
+			}
+		} elseif (preg_match("/^610412\d{18}0\d{4}0$/", $barcode, $m)||preg_match("/^610405\d{18}0\d{4}0$/", $barcode, $m)) { // TNT
+			$prefix= TntAPI::decodePrefix(substr($m[0], 6, 6));
+			$ref=$prefix.substr($m[0], 12, 9);
+			$sn = substr($m[0], 21, 3);
+			$ref = str_replace("[[[", "", $ref);
+			$barcode = $ref.substr($m[0], 21, 3);
+			$p = ImParcel::model()->with(['consol'])->find($consolStr.'t.status < 100 AND (ref = :r or cref = :r) '.$agentStr.$containerStr,[":r"=>$ref]);
+			if (!empty($p)) {
+				$courier_id = Org::ORGID_COURIER_TNT_TOP;
+			}
+		// } elseif (preg_match("/^64\d{4}(\d{13})(\d{3})$/", $barcode, $m)) { // shippit (Toll)
+		// 	$ref = $m[1];
+		// 	$sn = $m[2];
+		// 	$barcode = $ref.'-'.$sn;
+		// 	$p = ImParcel::model()->with(['consol'])->find($consolStr.'t.status < 100 AND ref = :r AND cbwf&'.ImParcel::CBWF_D2Z_CONSOL_NOT_FOR_SCAN.'=0'.$agentStr.$containerStr, [':r' => $ref]);
+		// 	if (!empty($p)) {
+		// 		$courier_id = Org::ORGID_COURIER_TOLL;
+		// 	}
+		// }
+		}
+		elseif (preg_match('/^(CP[A-Z]{5}\d{7})(\d{3})$/', $barcode, $m)){ //couriers please
+			$ref = $m[1];
+			$sn = $m[2];
+			$p = ImParcel::model()->with(['consol'])->find($consolStr.'t.status < 100 AND ref = :r '.$agentStr.$containerStr, [':r' => $ref]);
+			if (!empty($p)) {
+				$courier_id = 102;
+			}
+		} elseif (preg_match('/^(CP[A-Z]{3}\d{10})(\d{2})$/', $barcode, $m)){ //couriers please 2
+			$ref = $m[1];
+			$sn = $m[2];
+			$p = ImParcel::model()->with(['consol'])->find($consolStr.'t.status < 100 AND ref = :r '.$agentStr.$containerStr, [':r' => $ref]);
+			if (!empty($p)) {
+				$courier_id = 102;
+			}
+		}elseif (preg_match('/^(SCAU\d{8})(\d{3})(\d{3})$/', $barcode, $m)){ //saicheng
+			$ref = $m[1];
+			$sn = $m[2];
+			$p = ImParcel::model()->with(['consol'])->find($consolStr.'t.status < 100 AND ref = :r '.$agentStr.$containerStr, [':r' => $ref]);
+			if (!empty($p)) {
+				$courier_id = 134;
+			}
+		} elseif (preg_match('/^(('.DFEAPI::CONSIGNMENT_PREFIX.'|'.DFEAPI::CONSIGNMENT_PREFIX_TOP.'|'.DFEAPI::CONSIGNMENT_PREFIX_TOP_MEL.'|'.DFEAPI::CONSIGNMENT_PREFIX_TOP_BNE.')\d{7})(\d{3})(\d{4})$/', $barcode, $m)){ //dfe
+			$ref = $m[1];
+			$sn = ltrim($m[3], '0');
+			$p = ImParcel::model()->with(['consol'])->find($consolStr.'t.status < 100 AND ref = :r '.$agentStr.$containerStr, [':r' => $ref]);
+			if (!empty($p)) {
+				if(preg_match('/'.DFEAPI::CONSIGNMENT_PREFIX_TOP.'|'.DFEAPI::CONSIGNMENT_PREFIX_TOP_MEL.'|'.DFEAPI::CONSIGNMENT_PREFIX_TOP_BNE.'/i', $ref))
+				{
+					$courier_id = Org::ORGID_COURIER_DFE_TOP;
+				}else
+				{
+					$courier_id = Org::ORGID_COURIER_DFE;
+				}
+			}
+		}elseif (preg_match('/^((24051)\d{8})(\d{3})(\d{4})$/', $barcode, $m)){ //4px dfe
+			$ref = $m[1];
+			$sn = ltrim($m[3], '0');
+			$p = ImParcel::model()->with(['consol'])->find($consolStr.'t.status < 100 AND ref = :r '.$agentStr.$containerStr, [':r' => $ref]);
+			if (!empty($p)) {
+				$courier_id = Org::ORGID_COURIER_4PX;
+			}
+		}elseif (preg_match('/^((SHD|MHD|BHD)\d{10})-(\d{1,})$/', $barcode, $m)){ //dfe
+			$ref = $m[1];
+			$sn = ltrim($m[3], '0');
+			$p = ImParcel::model()->with(['consol'])->find($consolStr.'t.status < 100 AND ref = :r '.$agentStr.$containerStr, [':r' => $ref]);
+			$courier_id = Org::ORGID_COURIER_DFE_TOP;
+
+		}elseif (preg_match('/^((SKP|MKP|BKP|PKP|SKPX|MKPX|BKPX|PKPX)\d{10})-(\d{1,})$/', $barcode, $m)){ //dfe
+			$ref = $m[1];
+			$sn = ltrim($m[3], '0');
+			$p = ImParcel::model()->with(['consol'])->find($consolStr.'t.status < 100 AND ref = :r '.$agentStr.$containerStr, [':r' => $ref]);
+			$courier_id = Org::ORGID_COURIER_TLA;
+
+		} elseif (preg_match('/^((?:ZV|PB|DQ)\d{5,6}|UDW\d{7})(\d{3})(\d{7})$/', $barcode, $m)){ //hunter express
+			$ref = $m[1];
+			$sn = $m[2];
+			$p = ImParcel::model()->with(['consol'])->find($consolStr.'t.status < 100 AND (ref = :r OR cref = :r) '.$agentStr.$containerStr, [':r' => $ref]);
+			if (!empty($p)) {
+				$courier_id = 140;
+			}
+		} elseif (preg_match('/^(FLL\d{6})(\d{3})\d{7}$/', $barcode, $m)){ //hunter express
+			$ref = $m[1];
+			$sn = ltrim($m[2], '0');
+			$p = ImParcel::model()->with(['consol'])->find($consolStr.'t.status < 100 AND (ref = :r OR cref = :r) '.$agentStr.$containerStr, [':r' => $ref]);
+			if (!empty($p)) {
+				$courier_id = Org::ORGID_COURIER_FL_HUNTER;
+			}
+		}
+		elseif (preg_match('/^((AOE)(.*))-(\d{1,})$/', $barcode, $m)){
+			$ref = $m[1];
+			$sn = $m[4]*1;
+			$p = ImParcel::model()->with(['consol'])->find($consolStr.'t.status < 100 AND (ref = :r OR cref = :r) '.$agentStr.$containerStr, [':r' => $ref]);
+			if (!empty($p)) {
+				$courier_id = Org::ORGID_COURIER_ALLIED;
+			}
+		}elseif (preg_match('/^((CN)[a-zA-Z0-9]{9})(\d{4})$/', $barcode, $m)){
+			$ref = $m[1];
+			$sn = $m[3]*1;
+			$p = ImParcel::model()->with(['consol'])->find('t.status < 100 AND (cref = :r) '.$agentStr.$containerStr, [':r' => $ref]);
+			if (!empty($p)) {
+				$courier_id = 114;
+			}
+		}elseif (preg_match('/^((CN)[a-zA-Z0-9]{11})(\d{4})$/', $barcode, $m)){
+			$ref = $m[1];
+			$sn = $m[3]*1;
+			$p = ImParcel::model()->with(['consol'])->find('t.status < 100 AND (cref = :r) '.$agentStr.$containerStr, [':r' => $ref]);
+			if (!empty($p)) {
+				$courier_id = 114;
+			}
+		}elseif (preg_match('/^((CNSPM)[0-9]{6})(\d{3})$/', $barcode, $m)){
+			$ref = $m[1];
+			$sn = $m[3]*1;
+			$p = ImParcel::model()->with(['consol'])->find('t.status < 100 AND (cref = :r) '.$agentStr.$containerStr, [':r' => $ref]);
+			if (!empty($p)) {
+				$courier_id = 114;
+			}
+		}elseif (preg_match('/^(TLDB)BX\d{5}(\d{6})(\d{3})$/', $barcode, $m)){
+			$ref = $m[1].$m[2];
+			$sn = ltrim($m[3], '0');
+			$p = ImParcel::model()->find('t.status < 100 AND ref = :r '.$agentStr.$containerStr, [':r' => $ref]);
+			if (!empty($p)) {
+				$courier_id = Org::ORGID_COURIER_BORDER;
+			}
+		}elseif (preg_match('/^(\d{12})(\d{3})$/', $barcode, $m)){ //4px
+			$ref = $m[1];
+			$sn = ltrim($m[2], '0');
+			$p = ImParcel::model()->with(['consol'])->find($consolStr.'t.status < 100 AND ref = :r '.$agentStr.$containerStr, [':r' => $ref]);
+			if (!empty($p)) {
+				$courier_id = Org::ORGID_COURIER_4PX;
+			}
+		}elseif (preg_match('/^(SBK|MBK|BBK)(\d{7,13})[-]*\d{0,5}$/', $barcode, $m)){ //Booking
+			$ref = $m[0];
+			$sn = 0;
+			$pb = PickupBooking::model()->find("booking_number = :ref",[":ref"=>$ref]);
+			if(!empty($pb))
+			{
+				$p = ImParcel::model()->findByPk($pb->shipment_id);
+				$barcode = $p->ref;
+			}
+			if (!empty($p)) {
+				$courier_id = 114;
+			}
+		}
+		elseif (preg_match('/^(.+)#(.*)@(\d+)$/', $barcode, $m)){ //hunter express
+			$mm = [];
+			if(preg_match('/(\d{8}-\d{4,5})(.*)/', $m[2],$mm))
+			{
+				$ref = $mm[1];
+				$code = $mm[2];
+				$code = str_replace("合","H",$code);
+				$code = str_replace("拆","C",$code);
+				$code = str_replace("问","W",$code);
+				$code = preg_replace('/[^a-z0-9]/i', '', $code);
+				$ref = $ref.$code;
+				if(strlen($ref)>30)
+				{
+					$ref = substr($ref,0,30);
+					// if($ref[29]=="S")
+					// {
+					// 	$ref = substr($ref,0,29);
+					// }
+				}
+			}else
+			{
+				$ref = $m[2];
+			}
+			$sn = $m[3];
+			$p = ImParcel::model()->with(['consol'])->find($consolStr.'t.status < 100 AND (ref = :r  or hbn = :r or (cref = :r and agent_id=2716)) '.$agentStr.$containerStr, [':r' => $ref]);
+			if (!empty($p)) {
+				$courier_id = 114;
+			}
+		}elseif (preg_match('/^MIX-SEA-/', $barcode)||preg_match('/^(\d+)-(\d+){11}$/', $barcode)){ //For Bag
+			$bag = ImportBag::model()->find('bag_tag = :bag_tag', [':bag_tag' => $barcode]);
+			if(!empty($bag))
+			{
+				$p = [];
+			}else
+			{
+				return [];
+			}
+
+			$bagTagRelations=$bag->importBagTag;
+			foreach ($bagTagRelations as $key => $value) {
+				if(!empty($containerNo))
+				{
+					if($containerNo==$value->imParcel->consol->container_no)
+					{
+						$p[] = $value->imParcel;	
+					}
+				}else
+				{
+					$p[] = $value->imParcel;
+				}
+			}
+			return $p;
+			
+		}  else {
+			$bag = ImportBag::model()->find('bag_tag = :bag_tag', [':bag_tag' => $barcode]);
+			if(!empty($bag))
+			{
+				$p = [];
+				$bagTagRelations=$bag->importBagTag;
+				foreach ($bagTagRelations as $key => $value) {
+					if(!empty($containerNo))
+					{
+						if($containerNo==$value->imParcel->consol->container_no)
+						{
+							$p[] = $value->imParcel;	
+						}
+					}else
+					{
+						$p[] = $value->imParcel;
+					}
+				}
+
+				if(count($p)==1&&$barcode==$p[0]->hbn)
+				{
+					$p = $p[0];
+				}
+				return $p;
+			}
+
+			if(preg_match('/^(.+)-(\d+){1,4}$/', $barcode, $m)) {
+				$ref = $m[1];
+				$sn = $m[2];
+			} else {
+				$ref = $barcode;
+			}
+			$criteria = new CDbCriteria();
+			$criteria->addCondition("(hbn = :bc OR ref = :bc ) and t.status < 100".$agentStr.$containerStr);
+			$criteria->params = [':bc' => $ref];
+			$criteria->order='t.id desc';
+			$p = ImParcel::model()->with(['consol'])->find($criteria);
+			if(empty($p))
+			{
+				$sn = 0;
+				$ref = $barcode;
+				$criteria = new CDbCriteria();
+				$criteria->addCondition("(hbn = :bc OR ref = :bc) and t.status < 100".$agentStr.$containerStr);
+				$criteria->params = [':bc' => $ref];
+				$criteria->order='t.id desc';
+				$p = ImParcel::model()->with(['consol'])->find($criteria);
+				if(!empty($p))$sn = 1;
+			}
+		}
+		if($isForScan&&!empty($p))
+		{
+			if(($p->cbwf&ImParcel::CBWF_D2Z_CONSOL_NOT_FOR_SCAN)!=0)
+			{
+				$p = null;
+			}
+		}
+
+		//for SF or other have barcode records
+		if(empty($p)||(!empty($p)&&$sn ==0))
+		{
+			$pb = ParcelBarcode::model()->find('sub_ref=:barcode',[":barcode"=>$barcode]);
+			if(!empty($pb))
+			{
+				$p = ImParcel::model()->find("id = :id and status <100 ",[":id"=>$pb->fid]);
+				if(!empty($p))
+				{
+					if($p->ref==$pb->main_ref)
+					{
+						if(!empty($p->trans))
+						{
+							$tran = $p->trans;
+							$tran = end($tran);
+							$courier_id = $tran->org_id;
+						}else
+						{
+							$courier_id = 114;
+						}
+						$sn = $pb->sn;
+					}else
+					{
+						$p=null;
+					}
+				}
+			}
+		}
+
+		if(empty($p) && isset($changed_label)){
+			$csl = ChangeShipmentLabel::model()->find('pref=:pref OR phbn = :pref or pref = :prefsn', [':pref'=>$ref,':prefsn'=>$ref."-".$sn]);
+			if(!empty($csl)){
+				$p = $csl->shipment;
+				if(!empty($p)) $changed_label = true;
+			}
+		}
+		if(!empty($sn)) $sn = ltrim($sn, '0');
+		if(!empty($p->trans) && empty($courier_id)){
+			$courier_id = $p->trans[0]->org_id;
+		}
+		return empty($p)? false : $p;
+	}	
+
+	public static function getDFEShipmentByBarcode(&$barcode, &$sn=null, &$courier_id=null, $noConsol = false,$agent_id = 0, &$changed_label=null)
+	{
+		$barcode = strtoupper(trim($barcode));
+		$agentStr="";
+		if(!empty($agent_id))
+		{
+			$agentStr = " AND agent_id  = ".$agent_id;
+		}
+		if(empty($barcode)) return false;
+
+		if (preg_match('/^(('.DFEAPI::CONSIGNMENT_PREFIX.'|'.DFEAPI::CONSIGNMENT_PREFIX_TOP.'|'.DFEAPI::CONSIGNMENT_PREFIX_TOP_MEL.'|'.DFEAPI::CONSIGNMENT_PREFIX_TOP_BNE.')\d{7})(\d{3})(\d{4})$/', $barcode, $m)){ //dfe
+			$ref = $m[1];
+			$sn = ltrim($m[3], '0');
+			$p = ImParcel::model()->find('t.status < 100 AND ref = :r AND cbwf&'.ImParcel::CBWF_D2Z_CONSOL_NOT_FOR_SCAN.'=0'.$agentStr, [':r' => $ref]);
+			if (!empty($p)) {
+				if(preg_match('/'.DFEAPI::CONSIGNMENT_PREFIX_TOP.'|'.DFEAPI::CONSIGNMENT_PREFIX_TOP_MEL.'|'.DFEAPI::CONSIGNMENT_PREFIX_TOP_BNE.'/i', $ref))
+				{
+					$courier_id = Org::ORGID_COURIER_DFE_TOP;
+				}else
+				{
+					$courier_id = Org::ORGID_COURIER_DFE;
+				}
+			}
+		}elseif (preg_match('/^(('.DFEAPI::CONSIGNMENT_PREFIX.'|'.DFEAPI::CONSIGNMENT_PREFIX_TOP.'|'.DFEAPI::CONSIGNMENT_PREFIX_TOP_MEL.'|'.DFEAPI::CONSIGNMENT_PREFIX_TOP_BNE.')\d{7})-(\d{1,})$/', $barcode, $m)){ //dfe
+			$ref = $m[1];
+			$sn = ltrim($m[3], '0');
+			$p = ImParcel::model()->find('t.status < 100 AND ref = :r AND cbwf&'.ImParcel::CBWF_D2Z_CONSOL_NOT_FOR_SCAN.'=0'.$agentStr, [':r' => $ref]);
+			if (!empty($p)) {
+				if(preg_match('/'.DFEAPI::CONSIGNMENT_PREFIX_TOP.'|'.DFEAPI::CONSIGNMENT_PREFIX_TOP_MEL.'|'.DFEAPI::CONSIGNMENT_PREFIX_TOP_BNE.'/i', $ref))
+				{
+					$courier_id = Org::ORGID_COURIER_DFE_TOP;
+				}else
+				{
+					$courier_id = Org::ORGID_COURIER_DFE;
+				}
+			}
+		}elseif (preg_match('/^((SHD|MHD|BHD)\d{10})-(\d{1,})$/', $barcode, $m)){ //dfe
+			$ref = $m[1];
+			$sn = ltrim($m[3], '0');
+			$p = ImParcel::model()->find('t.status < 100 AND ref = :r AND cbwf&'.ImParcel::CBWF_D2Z_CONSOL_NOT_FOR_SCAN.'=0'.$agentStr, [':r' => $ref]);
+			$courier_id = Org::ORGID_COURIER_DFE_TOP;
+
+		}elseif (preg_match('/^((AOE)(.*))-(\d{1,})$/', $barcode, $m)){
+			$ref = $m[1];
+			$sn = $m[4]*1;
+			$p = ImParcel::model()->find('t.status < 100 AND (ref = :r OR cref = :r) AND cbwf&'.ImParcel::CBWF_D2Z_CONSOL_NOT_FOR_SCAN.'=0'.$agentStr, [':r' => $ref]);
+			if (!empty($p)) {
+				$courier_id = Org::ORGID_COURIER_ALLIED;
+			}
+		}else
+		{
+			$ref = $barcode;
+		}
+
+		if(empty($p) && isset($changed_label)){
+			$csl = ChangeShipmentLabel::model()->find('pref=:pref OR phbn = :pref or pref = :prefsn', [':pref'=>$ref,':prefsn'=>$ref."-".$sn]);
+			if(!empty($csl)){
+				$p = $csl->shipment;
+				if(!empty($p)) $changed_label = true;
+			}
+		}
+
+		if(!empty($sn)) $sn = ltrim($sn, '0');
+		if(!empty($p->trans) && empty($courier_id)){
+			$courier_id = $p->trans[0]->org_id;
+		}
+		return empty($p)? false : $p;
+	}
+
+	public static function getImpShipmentByBarcode(&$barcode, &$sn=null, &$courier_id=null, $noConsol = false,$agent_id = 0, &$changed_label=null)
+	{
+		$barcode = strtoupper(trim($barcode));
+		$agentStr="";
+		if(!empty($agent_id))
+		{
+			$agentStr = " AND agent_id  = ".$agent_id;
+		}
+		if(empty($barcode)) return false;
+
+		if (preg_match('/^64(\d{4})(\d{13})(\d{3})$/', $barcode, $m)){ //dfe
+			$ref = $m[2];
+			$sn = ltrim($m[3], '0');
+			$p = ImParcel::model()->find('t.status < 100 AND (ref = :r or ref = :r2) AND cbwf&'.ImParcel::CBWF_D2Z_CONSOL_NOT_FOR_SCAN.'=0'.$agentStr, [':r' => $ref,':r2' => 'TOLL'.$ref]);
+			if (!empty($p)) {
+				$courier_id =Org::ORGID_COURIER_TLA;
+			}
+		}else
+		{
+			$ref = $barcode;
+		}
+
+		if(empty($p) && isset($changed_label)){
+			$csl = ChangeShipmentLabel::model()->find('pref=:pref OR phbn = :pref or pref=:pref2 OR phbn = :pref2 or pref = :prefsn', [':pref'=>$ref,':pref2'=>'TOLL'.$ref,':prefsn'=>$ref."-".$sn]);
+			if(!empty($csl)){
+				$p = $csl->shipment;
+				$courier_id =Org::ORGID_COURIER_TLA;
+				if(!empty($p)) $changed_label = true;
+			}
+		}
+
+		if(!empty($sn)) $sn = ltrim($sn, '0');
+		if(!empty($p->trans)){
+			$courier_id = $p->trans[0]->org_id;
+		}
+		return empty($p)? false : $p;
+	}
+
+	public static function getChangeLabelShipmentByBarcode(&$barcode, &$sn=null, &$courier_id=null, $noConsol = false,$agent_id = 0, &$changed_label=null)
+	{
+		$barcode = strtoupper(trim($barcode));
+		$agentStr="";
+		if(!empty($agent_id))
+		{
+			$agentStr = " AND agent_id  = ".$agent_id;
+		}
+		if(empty($barcode)) return false;
+
+		if (preg_match('/^((PICKUP)\d{7})-(\d{1,})$/', $barcode, $m)){
+			$ref = $m[1];
+			$sn = ltrim($m[3], '0');
+			$p = ImParcel::model()->find('t.status !=100 AND ref = :r '.$agentStr, [':r' => $ref]);
+			if (!empty($p)) {
+				$courier_id = Org::ORGID_COURIER_TLA;
+			}
+
+		}elseif (preg_match('/^((PICKUP)\d{8})-(\d{1,})$/', $barcode, $m)){
+			$ref = $m[1];
+			$sn = ltrim($m[3], '0');
+			$p = ImParcel::model()->find('t.status !=100 AND ref = :r '.$agentStr, [':r' => $ref]);
+			if (!empty($p)) {
+				$courier_id = Org::ORGID_COURIER_TLA;
+			}
+
+		}elseif (preg_match('/^((ACWL)\d{10})-(\d{1,})$/', $barcode, $m)){
+			$ref = $m[1];
+			$sn = ltrim($m[3], '0');
+			$p = ImParcel::model()->find('t.status !=100 AND cref = :r '.$agentStr, [':r' => $ref]);
+			if (!empty($p)) {
+				[$p,$sn] = ShipmentChangedService::getParentIndex($p,$sn);
+				$barcode = $p->ref."-".$sn;
+				$courier_id = Org::ORGID_COURIER_TLA;
+			}
+
+		}else
+		{
+			$ref = $barcode;
+		}
+
+		if(!empty($sn)) $sn = ltrim($sn, '0');
+		if(!empty($p->trans) && empty($courier_id)){
+			$courier_id = $p->trans[0]->org_id;
+		}
+		return empty($p)? false : $p;
+	}
+
+
+	public static function checkRefCourierId($barcode)
+	{
+		$courier_id = 0;
+		if(preg_match('/SKP|MKP|BKP/i', $barcode)){ //hunter express
+			$courier_id = Org::ORGID_SUPPLIER_AUSTWAY;
+		}
+		return $courier_id;
+	}
+	
+	public static function getShipmentByJavaAPI(&$barcode, &$sn=null, &$courier_id=null, $noConsol = false,$agent_id = 0, &$changed_label=null,$containerNo = false)
+	{
+		$barcode = strtoupper(trim($barcode));
+		$api = new HvlvJavaAPI();
+		$result = $api->recognize($barcode);
+		$p = null;
+		if($result['code']=="60000")
+		{
+			$courier_id = $result["data"]["courierId"];
+			$sn = $result["data"]["sn"];
+			if($result["data"]["type"]==0)
+			$p = Shipment::model()->findByPk($result["data"]["shipments"][0]["id"]);
+		}
+		return $p;
+	}	
+
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return ShipmentScan the static model class
+	 */
+	public static function model($className=__CLASS__)
+	{
+		return parent::model($className);
+	}
+}

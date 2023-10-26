@@ -1,0 +1,3829 @@
+<?php
+
+/**
+ * This is the model class for table "consol".
+ *
+ * The followings are the available columns in table 'consol':
+ * @property string $id
+ * @property string $pc_id
+ * @property string $no
+ * @property string $owner_id
+ * @property string $dpt_id
+ * @property string $carrier_id
+ * @property integer $type
+ * @property integer $service
+ * @property string $awb
+ * @property string $airline
+ * @property string $flight
+ * @property string $pol
+ * @property string $pod
+ * @property string $etd
+ * @property string $eta
+ * @property string $created
+ * @property integer $status
+ * @property string $meta
+ * @property string $container_no
+ */
+class Consol extends MetaModel
+{
+
+	const AU_LOCAL_DELIVERY_COST_GL_CODE = '91031';
+	const DELIVERY_3PL_COST_GL_CODE = '94031';
+	const DELIVERY_COURIER_SERVCE_COST_GL_CODE = '96031';
+	const DELIVERY_COURIER_SERVCE_INCOME_GL_CODE = '84000';
+	const DELIVERY_COURIER_SERVCE_INCOME_CCODE = 'GL123';
+	const DELIVERY_COURIER_SERVCE_INCOME_GST_CCODE = 'GL124';
+	const CUSTOM_CLEARANCE_GL_CODE = '91032';
+	const AIR_STORAGE_COST_GL_CODE = '91038';
+	const STORAGE_COST_GL_CODE = '91037';
+
+	const DMAWBCONSOLTYPE = 70;
+	const IMCOCONSOLTYPE = 15;
+	const ELMSCONSOLTYPE = 80;
+	const CONFIRM_STATUS = 20;
+	const AIRCONSOL = 10;
+	const SEACONSOL = 20;
+	const NOA_BWF = 256;
+
+	const POD_AUSYD='AUSYD';
+	const NOA_SENT_UB = 'NOA_SENT_UB';
+
+	public static $types = array(
+		10 => 'ImacConsol',
+		15 => 'ImcoConsol',
+		20 => 'ExacConsol',
+		25 => 'ExcoConsol',
+		30 => 'LocoConsol',
+		35 => 'CustomerConsol',
+		50 => 'ExdirConsol',
+		60 => 'EdiAwbConsol',
+		70 => 'DmawbConsol',
+		80 => 'ElmsConsol',
+		90 => 'ShadowConsol'
+	);
+
+	public static $consolPrefix = [
+		Org::PCAE_DEPARTMENT_SYDNEY => 'TS',
+		Org::PCAE_DEPARTMENT_MELBOURNE => 'TM',
+		Org::PCAE_DEPARTMENT_BRISBANE => 'TB',
+		Org::PCAE_DEPARTMENT_ADELAIDE => 'TA',
+		Org::PCAE_DEPARTMENT_PERTH => 'TP',
+		Org::PCAE_DEPARTMENT_FREMANTLE => 'TF'
+	];
+
+	public static $services = array(
+		10 => 'Air',
+		20 => 'Sea',
+	);
+
+	public static $servicePrefix = array(
+		10 => 'A',
+		20 => 'S',
+	);
+
+	public static $fakService = array(
+		1 => 'Yes',
+		0 => 'No'
+	);
+
+	Const AIR_TYPE = array(
+		1=>'PMC',
+		2=>'AKE',
+		3=>'loose',
+		4=>'DQF'
+	);
+
+	Const SEA_TYPE = array(
+		1=>'20',
+		2=>'40',
+		3=>'40',
+		4=>'40'
+	);
+
+	public static $exInfos = [
+		8388608=>'DG',// this is only used for showing the extra info in shipment list, it is not the bwf type
+		ImParcel::DAMAGEBWFCODE=>'DAMAGE',
+		'NOA_SENT_UB'=>"NOA_SENT_UB"
+	];
+
+	public static $states = array();
+	public static $pocs = array();
+	public static $bwfs = array();
+	public static $my_type = 0;
+
+	public $nolog = false;
+	public $custom_log_note = '';
+	public $mdata = array();
+	public $owner_name, $process_status, $process_not_status, $process_statuses, $sea_process_status, $process_types, $process_airport, $process_airport_dead,$exInfo;
+	public $checkAgentId;
+	private $totRevenue, $totCost,$real;
+	public $cargoType = '';
+	public $isBackend = false;
+	public $mabws;
+	public $container_no;
+
+	public function __construct($scenario = 'insert')
+	{
+		parent::__construct($scenario);
+		if (static::$my_type > 0) {
+			$this->type = static::$my_type;
+		}
+
+	}
+
+	protected function instantiate($attr)
+	{
+		$cls = isset(self::$types[$attr['type']]) ? self::$types[$attr['type']] : get_class($this);
+		return new $cls(null);
+	}
+
+	public function defaultScope()
+	{
+		return empty(static::$my_type) ? [] : ['condition' => $this->dbConnection->quoteColumnName($this->getTableAlias(false, false) . '.type') . '=' . static::$my_type];
+	}
+
+	public function unsetAttributes($names = null)
+	{
+		parent::unsetAttributes($names);
+		if (static::$my_type > 0) {
+			$this->type = static::$my_type;
+		}
+
+	}
+
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName()
+	{
+		return 'consol';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		return array(
+			array('dpt_id, pc_id, no, owner_id, carrier_id, type, service, awb, airline, flight, pol, pod, poc, exrate, eta, etd, created, status, bwf, meta, mdata', 'safe'),
+			array('status, type, service, bwf', 'numerical', 'integerOnly' => true),
+			array('dpt_id, carrier_id', 'length', 'max' => 10),
+			array('no', 'length', 'max' => 30),
+			array('pol, pod, poc', 'length', 'max' => 5),
+			array('awb, flight', 'length', 'max' => 50),
+			array('airline', 'length', 'max' => 100),
+			array('eta, etd', 'default', 'setOnEmpty' => true, 'value' => null),
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, pc_id, no, owner_id, dpt_id, carrier_id,bwf,process_airport,process_airport_dead,sea_process_status,process_status,process_types,process_not_status,process_statuses,type, service, awb, airline, flight, pol, pod, poc, exrate, etd, eta, created, status, bwf, meta, owner_name, mdata, mabws,exInfo, container_no', 'safe', 'on' => 'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+			'depot' => array(self::BELONGS_TO, 'Org', 'dpt_id'),
+			'shipments' => array(self::HAS_MANY, 'Shipment', 'consol_id'),
+			'owner' => array(self::BELONGS_TO, 'Org', 'owner_id'),
+			'parent' => array(self::BELONGS_TO, 'Consol', 'pc_id'),
+			'process' => array(self::HAS_ONE, 'ConsolProcess', 'fid'),
+			'linkShipment'=>array(self::MANY_MANY,'Shipment','consol_shipment_map(cid,sid)'),
+			'allShipments' => array(self::HAS_MANY, 'AllShipment', 'consol_id'),
+			'shadowMap'=>array(self::HAS_MANY,'ConsolShadowMap','consol_id'),
+			'shadowParentMap'=>array(self::HAS_ONE,'ConsolShadowMap','shadow_id'),
+		);
+	}
+
+	public function getOwnerName($type = false,$isAll = false)
+	{
+		// get owner name directly
+		if (!empty($this->owner_id) && isset($this->owner)) {
+			if($type)
+			{
+				return [$this->owner_id];
+			}
+			return $this->owner->name;
+		}
+
+		// get owner name from shipments
+		if($isAll)
+		{
+			$rs = AllShipment::model()->findAll(['condition' => 'consol_id = :c', 'params' => [':c' => $this->id], 'group' => 'agent_id']);
+		}else
+		{
+			$rs = Shipment::model()->findAll(['condition' => 'consol_id = :c', 'params' => [':c' => $this->id], 'group' => 'agent_id']);
+		}
+
+		$ownerNames = array();
+		$ownerIds = [];
+		foreach ($rs as $shipment) {
+			if (!empty($shipment->agent)) {
+				$ownerNames[] = $shipment->agent->shortName(2);
+				$ownerIds[] = $shipment->agent_id;
+			}
+		}
+
+		if($type)
+		{
+			return $ownerIds;
+		}
+
+		return implode(', ', $ownerNames);
+	}
+	public function getAllAgentId()
+	{
+		// get owner name from shipments
+		$rs = Shipment::model()->findAll(['condition' => 'consol_id = :c', 'params' => [':c' => $this->id], 'group' => 'agent_id']);
+		$ownerIds = [];
+		foreach ($rs as $shipment) {
+			if (!empty($shipment->agent)) {
+				$ownerIds[] = $shipment->agent_id;
+			}
+		}
+		return $ownerIds;
+	}
+
+	public function AwbTracking($targetBlank=false)
+	{
+		if (empty($this->awb)) {
+			return '';
+		}
+		
+		if (AwbTracking::canTrack($this->awb)) {
+			return '<a'.($targetBlank? '' : ' class="jqm_link"').' href="'.yii::app()->createURL('tracking/awb',['id'=>$this->awb]).'"'.($targetBlank? ' target="_blank"' : '').'>' . $this->awb . '</a> &#8599';
+		} elseif(preg_match('/^(DHL|UPS|FEDEX)([A-Z\+, \d]+)/i', $this->awb, $m)) { // express
+			$awbs = preg_replace('/[\+, ]+/', ' ', $m[2]);
+			switch($m[1]){
+				case 'DHL':
+					$url = 'http://www.dhl.com.au/en/express/tracking.html?AWB=' . $awbs . '&brand=DHL';
+				break;
+				case 'UPS':
+					$url = 'https://www.ups.com/track?loc=en_AU&tracknum=' . $awbs . '&requester=WT/trackdetails';
+				break;
+				case 'FEDEX':
+					$url = 'https://www.fedex.com/apps/fedextrack/?tracknumbers=' . $awbs . '&language=en&cntry_code=au';
+				break;
+			}
+			return '<a href="'.$url.'" target="_blank">' . $this->awb . '</a> &#8599';
+		} elseif(preg_match('/^(OOLU|HDMU|EGLV|SUDU|COSU|ALAU)([A-Z\d]+)/', $this->awb, $m)) { // sea freight
+			$sfc = function($c){
+				$m = ['OOLU' => 'oocl','HDMU' => 'hmm21', 'EGLV' => 'evergreen', 'SUDU' => 'hamburgsudline', 'COSU' => 'cosco', 'ALAU' => 'zim'];
+				return isset($m[$c])? $m[$c] : '';
+			};
+			return '<a href="https://wheremy.com/bill-of-lading-tracking/show-tracking-info/'.$sfc($m[1]).'/'.$this->awb.'" target="_blank">' . $this->awb . '</a> &#8599';
+		}else{
+			return $this->awb;
+		}
+	}
+
+	public function totWeight($wid = 0,$isAll = false)
+	{
+		if($isAll)
+		{
+			$sql = 'SELECT SUM(weight) FROM all_shipment WHERE status!=100 and consol_id = ' . $this->id;
+		}else
+		{
+			$sql = 'SELECT SUM(weight) FROM shipment WHERE status!=100 and consol_id = ' . $this->id;
+		}
+
+		if (!empty($wid)) {
+			$sql .= ' AND odpt_id = ' . $wid;
+		}
+
+		$c = Yii::app()->db->createCommand($sql);
+		return $c->queryScalar();
+	}
+
+	public function totOrg($wid = 0,$isAll = false)
+	{
+		if($isAll)
+		{
+			$sql = 'SELECT DISTINCT(agent_id) as org_id FROM all_shipment WHERE status!=100 and consol_id = ' . $this->id;
+		}else
+		{
+			$sql = 'SELECT DISTINCT(agent_id) as org_id FROM shipment WHERE status!=100 and consol_id = ' . $this->id;
+		}
+
+		if (!empty($wid)) {
+			$sql .= ' AND odpt_id = ' . $wid;
+		}
+
+		$c = Yii::app()->db->createCommand($sql);
+		return $c->queryAll();
+	}
+
+	public function totWtck($wid = 0)
+	{
+		if($isAll)
+		{
+			$sql = 'SELECT SUM(if(wtck>0,wtck,weight)) from all_shipment WHERE status!=100 and consol_id = ' . $this->id;
+		}else
+		{
+			$sql = 'SELECT SUM(if(wtck>0,wtck,weight)) from shipment WHERE status!=100 and consol_id = ' . $this->id;
+		}
+
+		if (!empty($wid)) {
+			$sql .= ' AND odpt_id = ' . $wid;
+		}
+
+		$c = Yii::app()->db->createCommand($sql);
+		return $c->queryScalar();
+	}
+
+	public function totPacks($wid = 0,$isAll = false)
+	{
+		if($isAll)
+		{
+			$sql = 'SELECT SUM(pkg) AS t FROM all_shipment WHERE status!=100 and consol_id = ' . $this->id;
+		}else
+		{
+			$sql = 'SELECT SUM(pkg) AS t FROM shipment WHERE status!=100 and consol_id = ' . $this->id;
+		}
+
+		if (!empty($wid)) {
+			$sql .= ' AND odpt_id = ' . $wid;
+		}
+
+		$c = Yii::app()->db->createCommand($sql);
+		return $c->queryScalar();
+	}
+
+	public function customsClearTime($wid = 0)
+	{
+		$sql = "SELECT dt from tracking tr join (SELECT id from shipment where consol_id = {$this->id} and status !=100) s on tr.pid = s.id where tr.type = 55 order by tr.dt limit 1";
+		$c = Yii::app()->db->createCommand($sql);
+		$dt = $c->queryScalar();
+		if(empty($dt))
+		{
+			$sql = "SELECT dt from tracking tr join (SELECT id from shipment where consol_id = {$this->id} and status !=100) s on tr.pid = s.id where tr.type = 60 order by tr.dt limit 1";
+			$c = Yii::app()->db->createCommand($sql);
+			$dt = $c->queryScalar();
+		}
+		return $dt;
+	}
+
+	public function recoveryTime($wid = 0)
+	{
+		$sql = "SELECT time from log where lid in (SELECT id FROM `consol_process` where fid = {$this->id}) and meta like '%Wating for WH scan%' limit 1";
+		$c = Yii::app()->db->createCommand($sql);
+		return $c->queryScalar();
+	}
+
+
+	public function totPacksTCK($wid = 0)
+	{
+		$totPacksTCK = 0;
+		$shipments = $this->shipments;
+		foreach ($shipments as $key => $shipment) {
+			$totPacksTCK+=@$shipment["mdata"]["pkgtck"]>0?$shipment["mdata"]["pkgtck"]:$shipment["pkg"];
+		}
+		return $totPacksTCK;
+	}
+
+	public function totShipments($wid = 0,$isAll = false)
+	{
+		if($isAll)
+		{
+			$sql = 'SELECT COUNT(id) AS t FROM all_shipment WHERE consol_id = ' . $this->id.' AND status < 100';
+		}else
+		{
+			$sql = 'SELECT COUNT(id) AS t FROM shipment WHERE consol_id = ' . $this->id.' AND status < 100';
+		}
+
+		if (!empty($wid)) {
+			$sql .= ' AND odpt_id = ' . $wid;
+		}
+
+		$c = Yii::app()->db->createCommand($sql);
+		return $c->queryScalar();
+	}
+
+	public function totScanPacks($wid = 0,$isAll = false)
+	{
+		if($isAll)
+		{
+			$sql = 'SELECT SUM(pkg)-SUM(scan_no) AS t FROM all_shipment WHERE consol_id = ' . $this->id.' AND status < 100';
+		}else
+		{
+			$sql = 'SELECT SUM(pkg)-SUM(scan_no) AS t FROM shipment WHERE consol_id = ' . $this->id.' AND status < 100';
+		}
+
+		if (!empty($wid)) {
+			$sql .= ' AND odpt_id = ' . $wid;
+		}
+
+		$c = Yii::app()->db->createCommand($sql);
+		return $c->queryScalar();
+	}
+
+	public function totLeftPacks($wid = 0,$isAll = false)
+	{
+		if($isAll)
+		{
+			$sql = 'SELECT SUM(scan_no) AS t FROM all_shipment WHERE consol_id = ' . $this->id.' AND status < 100';
+		}else
+		{
+			$sql = 'SELECT SUM(scan_no) AS t FROM shipment WHERE consol_id = ' . $this->id.' AND status < 100';
+		}
+
+		if (!empty($wid)) {
+			$sql .= ' AND odpt_id = ' . $wid;
+		}
+
+		$c = Yii::app()->db->createCommand($sql);
+		return $c->queryScalar();
+	}
+	public function totLeftWeight($wid = 0,$isAll = false)
+	{
+		if($isAll)
+		{
+			$sql = 'SELECT SUM(weight*scan_no/pkg) as t FROM all_shipment WHERE consol_id=' . $this->id.' AND status < 100';
+		}else
+		{
+			$sql = 'SELECT SUM(weight*scan_no/pkg) as t FROM shipment WHERE consol_id=' . $this->id.' AND status < 100';
+		}
+
+		if (!empty($wid)) {
+			$sql .= ' AND odpt_id = ' . $wid;
+		}
+
+		$c = Yii::app()->db->createCommand($sql);
+		return $c->queryScalar();
+	}
+	public function totCBM($wid = 0,$isAll = false)
+	{
+		if($isAll)
+		{
+			$sql = 'SELECT SUM(cbm) AS t FROM all_shipment WHERE consol_id = ' . $this->id.' AND status < 100';
+		}else
+		{
+			$sql = 'SELECT SUM(cbm) AS t FROM shipment WHERE consol_id = ' . $this->id.' AND status < 100';
+		}
+
+		if (!empty($wid)) {
+			$sql .= ' AND odpt_id = ' . $wid;
+		}
+
+		$c = Yii::app()->db->createCommand($sql);
+		return round($c->queryScalar() * 1000) / 1000;
+	}
+
+	public function totImCBM($wid = 0,$isAll = false)
+	{
+		if($isAll)
+		{
+			$sql = 'SELECT SUM(cbm*pkg) AS t FROM all_shipment WHERE consol_id = ' . $this->id.' AND status < 100';
+		}else
+		{
+			$sql = 'SELECT SUM(cbm*pkg) AS t FROM shipment WHERE consol_id = ' . $this->id.' AND status < 100';
+		}
+
+		if (!empty($wid)) {
+			$sql .= ' AND odpt_id = ' . $wid;
+		}
+
+		$c = Yii::app()->db->createCommand($sql);
+		return round($c->queryScalar() * 1000) / 1000;
+	}
+
+	public function totImCBMTCK($wid = 0)
+	{
+		$totImCBMTCK = 0;
+		$shipments = $this->shipments;
+		foreach ($shipments as $key => $shipment) {
+			$totImCBMTCK+=@$shipment["mdata"]["total_cbmtck"]>0?$shipment["mdata"]["total_cbmtck"]:($shipment["cbm"]*$shipment["pkg"]);
+		}
+		return round($totImCBMTCK * 1000) / 1000;
+	}
+
+	public function totValue($wid = 0,$isAll = false)
+	{
+		if($isAll)
+		{
+			$sql = 'SELECT SUM(value) AS t FROM all_shipment WHERE consol_id = ' . $this->id.' AND status < 100';
+		}else
+		{
+			$sql = 'SELECT SUM(value) AS t FROM shipment WHERE consol_id = ' . $this->id.' AND status < 100';
+		}
+
+		if (!empty($wid)) {
+			$sql .= ' AND odpt_id = ' . $wid;
+		}
+
+		$c = Yii::app()->db->createCommand($sql);
+		return round($c->queryScalar() * 100) / 100;
+	}
+
+	public function totDValue($wid = 0,$isAll = false)
+	{
+		if($isAll)
+		{
+			$sql = 'SELECT SUM(dvalue) AS t FROM all_shipment WHERE consol_id = ' . $this->id.' AND status < 100';
+		}else
+		{
+			$sql = 'SELECT SUM(dvalue) AS t FROM shipment WHERE consol_id = ' . $this->id.' AND status < 100';
+		}
+
+		if (!empty($wid)) {
+			$sql .= ' AND odpt_id = ' . $wid;
+		}
+
+		$c = Yii::app()->db->createCommand($sql);
+		return round($c->queryScalar() * 100) / 100;
+	}
+
+	/**
+	 * get total invoice amount
+	 * just get from related invoice directly
+	 * we don't calculate it again
+	 */
+	public function getTotalInvoice()
+	{
+		$this->totRevenue = 0;
+
+		// [$app_name, Yii::app()->name] = [Yii::app()->name, 'HVLV APP'];
+		// $r1 = $this->_getTotalInvoice();
+		// Yii::app()->name = $app_name;
+		[$app_name, Yii::app()->name] = [Yii::app()->name, 'TLA'];
+		$r2 = $this->_getTotalInvoice();
+		Yii::app()->name = $app_name;
+		$this->totRevenue = $r2;
+		// $this->totRevenue = $r1+$r2;
+		return $this->totRevenue;
+	}
+
+	public function _getTotalInvoice()
+	{
+		$totRevenue = 0;
+		// ignore cancelled invoice
+		//        $sql = 'SELECT SUM(total-gst) FROM invoice WHERE status < 10 AND consol_id = '.$this->id;
+		//        $c = Yii::app()->db->createCommand($sql);
+		//        $this->totRevenue = round(floatval($c->queryScalar()),2);
+		//        return  $this->totRevenue;
+		$invs = Invoice::model()->findAll('consol_id=:consol_id and status NOT IN (10)', array('consol_id' => $this->id));
+		$temp = [];
+		$other = [];
+		if (!empty($invs)) {
+			foreach ($invs as $i => $inv) {
+				// if (preg_match("/$inv->id/i", $inv->no)) {
+				// 	$temp[$inv->no][$inv->no] = $inv;
+				// } else {
+					$other[$inv->no] = $inv;
+				// }
+			}
+			/*if (!empty($temp) && !empty($other)) {
+				foreach ($temp as $no => $t) {
+					foreach ($other as $k => $ot) {
+						if (preg_match("/$no/", $k)) {
+							$temp[$no][$ot->no] = $ot;
+							unset($other[$k]);
+						}
+					}
+				}
+			}*/
+			$total = 0;
+			/*foreach ($temp as $no => $t) {
+				if (sizeof($t) > 1) {
+					ksort($t);
+					$t = array_reverse($t);
+					foreach ($t as $k) {
+						$total += ($k->total - $k->gst - $k->getCreditByConsol());
+						break;
+					}
+				} else {
+					foreach ($t as $m) {
+						$total += ($m->total - $m->gst - $m->getCreditByConsol());
+					}
+				}
+			}*/
+			if (!empty($other)) {
+				foreach ($other as $o) {
+					$total += ($o->total - $o->gst); // - $o->getCreditByConsol()
+				}
+			}
+			$totRevenue = round(floatval($total), 2);
+
+		}
+
+		// add rts invoice
+		foreach ($this->getRTSInvoices() as $invoice) {
+			$totRevenue += $invoice->getTotalByConsol($this->id, false);
+		}
+
+		if (preg_match('/RTS/', $this->no)) {
+			$invoices = Invoice::model()->findAll('type = 36');
+			foreach ($invoices as $invoice) {
+				$totRevenue -= $invoice->total - $invoice->gst;
+			}
+		}
+
+		// minus credit note
+		$creditnotes = Payment::model()->findAll('type = 5 AND (ref LIKE :ref or JSON_VALUE(meta, "$.consol") LIKE :ref) AND status = 6', [':ref' => '%' . $this->no . '%']);
+		foreach ($creditnotes as $creditnote) {
+			$totRevenue -= $creditnote->amount;
+		}
+
+		// minus auto credit note
+		foreach ($invs as $invoice) {
+			if ($invoice->status == 8) {
+				foreach ($invoice->payments as $payInv) {
+					if ($payInv->payment->type == 5 && $payInv->payment->bank == 90 && $payInv->payment->status == 6) {
+						$totRevenue -= $payInv->amount;
+					}
+				}
+			}
+		}
+
+		$totRevenue = round(floatval($totRevenue), 2);
+
+		if (empty($totRevenue)) {
+			$totRevenue = 0;
+		}
+
+		return $totRevenue;
+	}
+
+	public function getTotalInvoiceByOrg($oid)
+	{
+		$invoices = Invoice::model()->findAll('consol_id=:consol_id and status not in (1,8,10) AND to_id=:oid', array('consol_id' => $this->id, ':oid' => $oid));
+		$total = 0;
+		foreach ($invoices as $i => $inv) {
+			$total += ($inv->total - $inv->gst - $inv->getCredit());
+		}
+		return $total;
+	}
+
+	public function getTotalInvoiceOutDates($dateFrom, $dateTo)
+	{
+		$total = 0;
+		// ignore cancelled invoice
+		// 2020-04-17 and ignore fully credit and pending invoice
+		$invoices = Invoice::model()->findAll('consol_id = :cid and status NOT IN (1,8,10)', [':cid' => $this->id]);
+		foreach ($invoices as $invoice) {
+			if ($invoice->date < $dateFrom || $invoice->date > $dateTo) {
+				$total += ($invoice->total - $invoice->gst);
+			}
+			// $dates .= $invoice->no . '[' . $invoice->total. ']' . '('. $invoice->date . '),';
+		}
+		return round($total, 2);
+	}
+
+	public function getInvoices()
+	{
+		// ignore cancelled invoice
+		$invoices = Invoice::model()->findAll('consol_id = :cid and status NOT IN (1,8,10)', [':cid' => $this->id]);
+		$rs = [];
+		foreach ($invoices as $invoice) {
+			$rs[] = [$this->no, $invoice->no, $invoice->date, $invoice->total - $invoice->gst, $invoice->gst, $invoice->getCredit()];
+		}
+		return $rs;
+	}
+
+	public function totCharge()
+	{
+		$tot = 0;
+		foreach ($this->shipments as $p) {
+			$tot += $p->getCharge($this->owner);
+		}
+		return $tot;
+	}
+
+	public function updateWmsDeliveryCost($cid, $rec)
+	{
+		$ss = [];
+		$shipment_left = [];
+		$transaction = Yii::app()->db->beginTransaction();
+		try {
+			foreach ($this->shipments as $p) {
+				if (!empty($p->trans) && $p->trans[0]->org_id == $cid) {
+					if (isset($p->mdata['import_billing_id'])) {
+						$billingline = BillingLine::model()->findByPk($p->mdata['import_billing_id']);
+						if (!empty($billingline) && $billingline->status != 11 && $billingline->actual_amount != 0) continue;
+					}
+					$cond = 'shipment_id = :ship AND parent_id = :pid';
+					$params = array(':ship' => $p->id, ':pid' => $rec);
+					if ($cid == Org::ORGID_COURIER_STARTRACK) {
+						$cond .= ' AND JSON_VALUE(meta, "$.st_type") = :type';
+						$params[':type'] = 'Shipment';
+					}
+					$rs = ReconciliationLine::model()->findAll($cond, $params);
+					if (!empty($rs)) {
+						$p->mdata['actual_delivery_cost'] = 0;
+						foreach ($rs as $r) {
+							$p->mdata['actual_delivery_cost'] += round(floatval(min($r->value, $r->my_value)) * 100, 2) / 100;
+						}
+						$p->updateMeta();
+						$ss[] = $p;
+					}
+				}
+			}
+
+			$r = Reconciliation::model()->findByPk($rec);
+			foreach ($ss as $s) {
+				if (preg_match('/^T(\d{6,7})$/', $s->cref, $m)) {
+					$wmstask = WmsTask::model()->findByPk($m[1]);
+				} else {
+					$wmstask = WmsTask::model()->with('deliveryTask')->find('JSON_QUERY(deliveryTask.meta, "$.shipment_id") LIKE "%' . $s->id . '%"');
+				}
+
+				if (!empty($wmstask)) {
+					$billing = BillingLine::model()->find('link_id = :id AND billing_ref = :ref AND org_id = :oid AND billing_cref = :cref AND `desc` = :desc', array(':id' => $this->id, ':ref' => $wmstask->getNo(), ':oid' => $cid, ':cref' => $this->no, ':desc' => $r->invoice_no . ' - ' . $this->no));
+					if (empty($billing)) {
+						$billing = new BillingLine;
+						$billing->status = 1;
+						$billing->link_id = $this->id;
+						$billing->org_id = $cid;
+						$billing->op_id = empty(Yii::app()->user->id) ? 0 : Yii::app()->user->id;
+						$billing->charge_code = Consol::DELIVERY_3PL_COST_GL_CODE;
+						$billing->billing_cref = $r->invoice_no;
+						$billing->billing_ref = $wmstask->getNo();
+						$billing->awb = '';
+						$billing->dpt_id = 106;
+						$billing->date = $r->invoice_date;
+						$billing->created = $r->invoice_date;
+						$billing->transaction_date = $r->invoice_date;
+						$billing->due = $r->invoice_date;
+						$billing->type = BillingLine::BILLING_TYPE_3PL;
+						$billing->dpmt = Invoice::DPMT_3PL;
+						$billing->actual_amount = 0;
+						$billing->gst = 'INPUT';
+						$billing->desc = $r->invoice_no . ' - ' . $this->no;
+						$billing->accrual_amount = 0;
+						$billing->actual_amount = 0;
+						$billing->save();
+					}
+					if (empty($billing->getErrors())) {
+						$theCost = 0;
+						$s->mdata['import_billing_id'] = $billing->id;
+						$s->updateMeta();
+						foreach ($s->trans as $ts) {
+							if ($ts->type == 80) {
+								$theCost += $ts->cost;
+							}
+						}
+						$billing->accrual_amount += number_format($s->mdata['actual_delivery_cost'], 2, '.', '');
+						$billing->actual_amount += number_format($s->mdata['actual_delivery_cost'], 2, '.', '');
+						$billing->actual_amount = number_format(round($billing->actual_amount * 100) / 100, 2, '.', '');
+						$billing->gst = 'INPUT';
+						$billing->gst_amount = $billing->getGSTValue();
+						$billing->save();
+					}
+
+					// link billing and check
+					Billing::linkLine($billing);
+				}
+			}
+			$transaction->commit();
+		} catch (Exception $ex) {
+			$transaction->rollback();
+			throw $ex;
+		}
+	}
+
+	public function updateWmsRTSCost($rec)
+	{
+		$cid = Org::ORGID_COURIER_AUPOST;
+		$transaction = Yii::app()->db->beginTransaction();
+		try {
+			$sql = 'SELECT rl.shipment_no AS shipment_no, r.manifest_no AS manifest_no, r.invoice_date AS invoice_date, SUM(rl.value) AS sum FROM reconciliation_line rl JOIN reconciliation r ON r.id = rl.parent_id WHERE r.client_type = 10 AND rl.consol_id = :consol_id GROUP BY rl.shipment_no';
+			$rs = Yii::app()->db->createCommand($sql)->bindValues([':consol_id' => $this->id])->queryAll();
+			foreach ($rs as $r) {
+				$shipment = ImParcel::model()->find('ref = :ref', [':ref' => $r['shipment_no']]);
+				if (preg_match('/^T(\d{6,7})$/', $shipment->cref, $m)) {
+					$task = WmsTask::model()->findByPk($m[1]);
+				} else {
+					$task = WmsTask::model()->with('deliveryTask')->find('JSON_QUERY(deliveryTask.meta, "$.shipment_id") LIKE "%' . $shipment->id . '%"');
+				}
+				if (!empty($task)) {
+					$billing = BillingLine::model()->find('billing_ref = :ref AND org_id = :oid AND charge_code = :ccode AND JSON_VALUE(meta, "$.rts_manifest_no") = :manifest_no', [':ref' => $task->getNo(), ':oid' => $cid, ':ccode' => self::DELIVERY_3PL_COST_GL_CODE, ':manifest_no' => $r['manifest_no']]);
+					if (empty($billing)) {
+						$billing = new BillingLine;
+						$billing->status = 1;
+						$billing->link_id = 0;
+						$billing->org_id = $cid;
+						$billing->charge_code = Consol::DELIVERY_3PL_COST_GL_CODE;
+						$billing->billing_cref = $r['manifest_no'];
+						$billing->currency = 1; // AUD default
+						$billing->weight = 0;
+						$billing->charge_weight = 0;
+						$billing->billing_ref = $task->getNo();
+						$billing->awb = $this->awb;
+						$billing->dpt_id = empty($this->dpt_id) ? Org::PCAE_DEPARTMENT_SYDNEY : $this->dpt_id;
+						$billing->date = $r['invoice_date'];
+						$billing->created = date('Y-m-d');
+						$billing->transaction_date = $r['invoice_date'];
+						$billing->due = $r['invoice_date'];
+						$billing->type = BillingLine::BILLING_TYPE_3PL; // for 3pl type
+						$billing->dpmt = Invoice::DPMT_3PL;
+						$billing->mdata['rts_manifest_no'] = $r['manifest_no'];
+					}
+					$billing->actual_amount = 0;
+					$billing->gst = 'INPUT';
+					$billing->gst_amount = $billing->getGSTValue();
+					$billing->accrual_amount = number_format(round($r['sum'], 2), 2, '.', '');
+					$billing->save();
+				}
+			}
+			$transaction->commit();
+		} catch (Exception $ex) {
+			$transaction->rollback();
+			throw $ex;
+		}
+	}
+
+	/**
+	 * update aupost real cost
+	 * @throws CDbException
+	 */
+	public function updateAupostRealCost()
+	{
+		$totalCost = [];
+		$totalAccrual = [];
+		$shipment_left = [];
+		$ss = [];
+		$cid = Org::ORGID_COURIER_AUPOST;
+		$billings = BillingLine::model()->findAll([
+			'condition' => 'billing_ref = :cref AND org_id = :oid AND charge_code = :ccode AND JSON_VALUE(meta, "$.rts_manifest_no%") IS NULL',
+			'params' => [':cref' => $this->no, ':oid' => $cid, ':ccode' => self::AU_LOCAL_DELIVERY_COST_GL_CODE],
+			'order' => 'id ASC'
+		]);
+		$transaction = Yii::app()->db->beginTransaction();
+		try {
+			$invoice_no = '';
+			$invoice_date = '';
+			foreach ($this->shipments as $p) {
+				if (preg_match('/^AMQ\d{7}|^333UF\d{7}|^33EVJ\d{7}|^33EVH\d{7}/', $p->ref) || (!empty($p->trans) && $p->trans[0]->org_id == 101)) {
+					// only for eParcel shipment
+					// if (isset($p->mdata['import_billing_id']) && sizeof($billings) >= 1) {
+					// 	continue;
+					// }
+					if (isset($p->mdata['import_billing_id'])) {
+						$billingline = BillingLine::model()->findByPk($p->mdata['import_billing_id']);
+						if (!empty($billingline) && $billingline->status != 11 && $billingline->actual_amount != 0) {
+							// $consol = Consol::model()->find('no = :no', [':no' => $billingline->billing_ref]);
+							// if ($consol->id == $p->consol_id) {
+							// 	continue;
+							// } else {
+							// 	$p->mdata['old_import_billing_id'] = $p->mdata['import_billing_id'];
+							// 	unset($p->mdata['import_billing_id']);
+							// }
+							// cause duplicate actual_amount in origin and new consol
+							continue;
+						}
+					}
+					// set import_billing_id means we have account this cost to the billing before.
+					// $r = ReconciliationLine::model()->find(array('condition' => 'shipment_no=:ship', 'params' => array(':ship' => $p->ref), 'order' => 'id desc'));
+					// if (!empty($r)) {
+					// 	$invoice_no = $r->parent->invoice_no;
+					// 	$invoice_date = $r->parent->invoice_date;
+					// }
+					// if (isset($p->mdata['actual_delivery_cost'])) {
+					// 	$totalCost += floatval($p->mdata['actual_delivery_cost']);
+					// 	$ss[] = $p;
+					// } else {
+					// 	if (!empty($r)) {
+					// 		$totalCost += floatval($r->value);
+					// 		$p->mdata['actual_delivery_cost'] = floatval($r->value);
+					// 		$p->updateMeta();
+					// 		$ss[] = $p;
+					// 	} else {
+					// 		$shipment_left[] = $p;
+					// 	}
+					// }
+
+					$rs = ReconciliationLine::model()->with('parent')->findAll('t.shipment_no = :ship AND parent.client_type = :type', array(':ship' => $p->ref, ':type' => Reconciliation::AUPOST_TYPE));
+					if (!empty($rs)) {
+						$p->mdata['actual_delivery_cost'] = 0;
+						foreach ($rs as $r) {
+							$invoice_no = $r->parent->manifest_no;
+							$invoice_date = $r->parent->invoice_date;
+							if (empty($totalCost[$invoice_no])) $totalCost[$invoice_no] = 0;
+							$totalCost[$invoice_no] += floatval($r->value);
+							if (empty($totalAccrual[$invoice_no])) $totalAccrual[$invoice_no] = 0;
+							$totalAccrual[$invoice_no] += floatval($r->my_value);
+							$p->mdata['actual_delivery_cost'] += floatval($r->value);
+						}
+						$p->updateMeta();
+						$ss[$invoice_no][] = $p;
+					} else {
+						$shipment_left[] = $p;
+					}
+				}
+			}
+
+			foreach ($ss as $$invoice_no => $sub_ss) {
+				if ($totalCost[$$invoice_no] > 0) {
+					if (!empty($billings)) {
+						$billing = end($billings);
+						if ($billing->actual_amount > 0) {
+							$billing = null;
+						}
+					}
+					if (empty($billing)) {
+						$billing = new BillingLine();
+						$billing->status = 1; // initial pending status
+						$billing->link_id = 0;
+						$billing->org_id = $cid;
+						$billing->charge_code = Consol::AU_LOCAL_DELIVERY_COST_GL_CODE;
+						if ($this->owner_id == 114) {
+							$billing->charge_code = Consol::DELIVERY_3PL_COST_GL_CODE;
+						}
+						$billing->currency = 1; // AUD default
+						$billing->weight = 0;
+						$billing->charge_weight = 0;
+						$billing->billing_ref = $this->no;
+						$billing->awb = $this->awb;
+						$billing->dpt_id = empty($this->dpt_id) ? Org::PCAE_DEPARTMENT_SYDNEY : $this->dpt_id;
+						$billing->type = BillingLine::BILLING_TYPE_IMPORT; // for import type
+						$billing->dpmt = Invoice::DPMT_IMPORT;
+						if ($this->owner_id == 114) {
+							$billing->type = BillingLine::BILLING_TYPE_3PL;
+							$billing->dpmt = Invoice::DPMT_3PL;
+						}
+					}
+					$billing->actual_amount = number_format(round($totalCost[$$invoice_no], 2), 2, '.', '');
+					$billing->accrual_amount = number_format(round($totalAccrual[$$invoice_no], 2), 2, '.', '');
+					$billing->gst = 'INPUT';
+					$billing->gst_amount = $billing->getGSTValue();
+					$billing->desc = 'total shipment: ' . sizeof($sub_ss);
+					$billing->billing_cref = $invoice_no;
+					$billing->date = $invoice_date;
+					$billing->created = $invoice_date;
+					$billing->transaction_date = $invoice_date;
+					$billing->due = $invoice_date;
+					if ($billing->save()) {
+						foreach ($sub_ss as $p) {
+							$p->mdata['import_billing_id'] = $billing->id;
+							$p->updateMeta();
+						}
+					}
+
+					// link billing and check
+					Billing::linkLine($billing);
+				}
+			}
+
+			if (sizeof($shipment_left) > 0) {
+				$theCost = 0;
+				foreach ($shipment_left as $shipment) {
+					// get all tranships
+					$tss = $shipment->trans;
+					foreach ($tss as $ts) {
+						if ($ts->type == 80) {
+							$theCost += $ts->cost;
+						}
+					}
+				}
+
+				$newBilling = new BillingLine();
+				$newBilling->status = 1; // initial pending status
+				$newBilling->link_id = 0;
+				$newBilling->org_id = $cid;
+				$newBilling->charge_code = Consol::AU_LOCAL_DELIVERY_COST_GL_CODE;
+				if ($this->owner_id == 114) {
+					$newBilling->charge_code = Consol::DELIVERY_3PL_COST_GL_CODE;
+				}
+				$newBilling->billing_cref = $this->no;
+				$newBilling->currency = 1; // AUD default
+				$newBilling->weight = 0;
+				$newBilling->charge_weight = 0;
+
+				// normally billing reference will be awb no , if not set we set job ID as reference
+				$newBilling->billing_ref = $this->no;
+				$newBilling->awb = $this->awb;
+				$newBilling->dpt_id = empty($this->dpt_id) ? Org::PCAE_DEPARTMENT_SYDNEY : $this->dpt_id;
+				$newBilling->date = date('Y-m-d');
+				$newBilling->created = date('Y-m-d');
+				$newBilling->transaction_date = date('Y-m-d');
+				$newBilling->due = date('Y-m-d');
+				$newBilling->type = BillingLine::BILLING_TYPE_IMPORT; // for import type
+				$newBilling->dpmt = Invoice::DPMT_IMPORT;
+				if ($this->owner_id == 114) {
+					$newBilling->type = BillingLine::BILLING_TYPE_3PL;
+					$newBilling->dpmt = Invoice::DPMT_3PL;
+				}
+				$newBilling->actual_amount = 0;
+				$newBilling->gst = 'INPUT';
+				$newBilling->desc = "left shipment " . sizeof($shipment_left);
+				$newBilling->accrual_amount = number_format($theCost, 2, '.', '');
+				$newBilling->save();
+			}
+			$transaction->commit();
+		} catch (Exception $ex) {
+			$transaction->rollback();
+			throw $ex;
+		}
+	}
+
+	public function updateAupostRealCostRTS()
+	{
+		$cid = Org::ORGID_COURIER_AUPOST;
+		$transaction = Yii::app()->db->beginTransaction();
+		try {
+			$sql = 'SELECT r.manifest_no AS manifest_no, r.invoice_date AS invoice_date, SUM(rl.value) AS sum FROM reconciliation_line rl JOIN reconciliation r ON r.id = rl.parent_id WHERE r.client_type = 10 AND rl.consol_id = :consol_id GROUP BY r.id';
+			$rs = Yii::app()->db->createCommand($sql)->bindValues([':consol_id' => $this->id])->queryAll();
+			foreach ($rs as $r) {
+				$billing = BillingLine::model()->find('billing_ref = :ref AND org_id = :oid AND charge_code = :ccode AND JSON_VALUE(meta, "$.rts_manifest_no") = :manifest_no', [':ref' => $this->no, ':oid' => $cid, ':ccode' => self::AU_LOCAL_DELIVERY_COST_GL_CODE, ':manifest_no' => $r['manifest_no']]);
+				if (empty($billing)) {
+					$billing = new BillingLine;
+					$billing->status = 1;
+					$billing->link_id = 0;
+					$billing->org_id = $cid;
+					$billing->charge_code = Consol::AU_LOCAL_DELIVERY_COST_GL_CODE;
+					$billing->billing_cref = $r['manifest_no'];
+					$billing->currency = 1; // AUD default
+					$billing->weight = 0;
+					$billing->charge_weight = 0;
+					$billing->billing_ref = $this->no;
+					$billing->awb = $this->awb;
+					$billing->dpt_id = empty($this->dpt_id) ? Org::PCAE_DEPARTMENT_SYDNEY : $this->dpt_id;
+					$billing->date = $r['invoice_date'];
+					$billing->created = date('Y-m-d');
+					$billing->transaction_date = $r['invoice_date'];
+					$billing->due = $r['invoice_date'];
+					$billing->type = BillingLine::BILLING_TYPE_IMPORT; // for import type
+					$billing->dpmt = Invoice::DPMT_IMPORT;
+					$billing->mdata['rts_manifest_no'] = $r['manifest_no'];
+				}
+				$billing->actual_amount = 0;
+				$billing->gst = 'INPUT';
+				$billing->gst_amount = $billing->getGSTValue();
+				$billing->accrual_amount = number_format(round($r['sum'], 2), 2, '.', '');
+				$billing->save();
+			}
+			$transaction->commit();
+		} catch (Exception $ex) {
+			$transaction->rollback();
+			throw $ex;
+		}
+	}
+
+	public function getEstID(){
+		$ub_other_depot = (!empty($this->mdata['ubmsent']) && $this->mdata['ubmsent'] == 9) && (!empty($this->mdata['ubm_dest']) && !empty(IcsService::getIcsConfig($this->mdata['ubm_dest'])));
+	
+		$thisIcsSetting = Yii::app()->params['ics'];
+		if($ub_other_depot) $thisIcsSetting = IcsService::getIcsConfig($this->mdata['ubm_dest']);
+
+		$dpt = 'AUSYD';
+		if($this->dpt_id == 218){
+			$dpt = 'AUMEL';
+		}
+
+		if($this->dpt_id == 530){
+			$dpt = 'AUBNE';
+		}
+
+		if(empty($this->mdata['ubm_dest']))
+		{
+			if($dpt=='AUSYD')
+			{
+				return 'GP29H';
+			}elseif($dpt == 'AUMEL')
+			{
+				return 'GP47K';
+			}elseif($dpt == 'AUBNE')
+			{
+				return 'GQ48B';
+			}
+		}
+		return $thisIcsSetting['est_id_'.$dpt];
+	}
+
+	public function updateStarTrackRealCost($rec_id = null)
+	{
+		$totalCost = [0, 0];
+		$shipment_left = [[], []];
+		$ss = [[], []];
+
+		$cid[0] = Org::ORGID_COURIER_STARTRACK;
+		$billings[0] = BillingLine::model()->findAll('billing_ref = :cref AND org_id = :oid AND charge_code = :ccode AND status = 1 order by id', [':cref' => $this->no, ':oid' => $cid[0], ':ccode' => self::AU_LOCAL_DELIVERY_COST_GL_CODE]);
+		$cid[1] = Org::ORGID_COURIER_STARTRACK;
+		$billings[1] = BillingLine::model()->findAll('billing_ref = :cref AND org_id = :oid AND charge_code = :ccode AND status = 1 order by id', [':cref' => $this->no, ':oid' => $cid[1], ':ccode' => self::AU_LOCAL_DELIVERY_COST_GL_CODE]);
+
+		$transaction = Yii::app()->db->beginTransaction();
+		try {
+			$invoice_no = '';
+			$invoice_date = '';
+			foreach ($this->shipments as $p) {
+				if (preg_match('/(7RFZ)\d{8}/', $p->ref)) {
+					if (isset($p->mdata['import_billing_id'])) {
+						// foreach ($billings[0] as $billingline) {
+						// 	if ($p->mdata['import_billing_id'] == $billingline->id && $billingline->actual_amount != 0) {
+						// 		continue 2;
+						// 	}
+						// }
+						$billingline = BillingLine::model()->findByPk($p->mdata['import_billing_id']);
+						if (!empty($billingline) && $billingline->status != 11 && $billingline->actual_amount != 0) continue;
+					}
+					// set import_billing_id means we have account this cost to the billing before.
+					if (empty($rec_id)) {
+						$r = ReconciliationLine::model()->find(array('condition' => 'shipment_no = :ship AND JSON_VALUE(meta, "$.st_type") = "Shipment"', 'params' => array(':ship' => $p->ref), 'order' => 'id desc'));
+						if (!empty($r)) {
+							$invoice_no = $r->parent->invoice_no;
+							$invoice_date = $r->parent->invoice_date;
+						}
+						/**
+						 * 2020-06-16
+						 * only record min(value, my_value)
+						 */
+						if (!empty($r)) {
+							$amount = floatval($r->my_value * 1.05 < $r->value || $r->my_value + 10 < $r->value ? $r->my_value : $r->value);
+							$totalCost[0] += $amount;
+							$p->mdata['actual_delivery_cost'] = $amount;
+							$p->updateMeta();
+							$ss[0][$p->hbn] = $p;
+						} else {
+							$shipment_left[0][] = $p;
+						}
+					} else {
+						// one shipment charge multiple times in one invoice
+						$rs = ReconciliationLine::model()->findAll('shipment_no = :ship AND parent_id = :invid AND JSON_VALUE(meta, "$.st_type") = "Shipment"', [':ship' => $p->ref, ':invid' => $rec_id]);
+						if (!empty($rs)) {
+							$invoice_no = $rs[0]->parent->invoice_no;
+							$invoice_date = $rs[0]->parent->invoice_date;
+							foreach ($rs as $r) {
+								$amount = floatval($r->my_value * 1.05 < $r->value || $r->my_value + 10 < $r->value ? $r->my_value : $r->value);
+								$totalCost[0] += $amount;
+								$p->mdata['actual_delivery_cost'] = $amount;
+								$p->updateMeta();
+								$ss[0][$p->hbn] = $p;
+							}
+						} else {
+							$shipment_left[0][] = $p;
+						}
+					}
+				} else if (preg_match('/(4XHZ)\d{8}/', $p->ref)) {
+					if (isset($p->mdata['import_billing_id'])) {
+						// foreach ($billings[1] as $billingline) {
+						// 	if ($p->mdata['import_billing_id'] == $billingline->id && $billingline->actual_amount != 0) {
+						// 		continue 2;
+						// 	}
+						// }
+						$billingline = BillingLine::model()->findByPk($p->mdata['import_billing_id']);
+						if (!empty($billingline) && $billingline->status != 11 && $billingline->actual_amount != 0) continue;
+					}
+					// set import_billing_id means we have account this cost to the billing before.
+					if (empty($rec_id)) {
+						$r = ReconciliationLine::model()->find(array('condition' => 'shipment_no = :ship AND JSON_VALUE(meta, "$.st_type") = "Shipment"', 'params' => array(':ship' => $p->ref), 'order' => 'id desc'));
+						if (!empty($r)) {
+							$invoice_no = $r->parent->invoice_no;
+							$invoice_date = $r->parent->invoice_date;
+						}
+						if (!empty($r)) {
+							$amount = floatval($r->my_value * 1.05 < $r->value || $r->my_value + 10 < $r->value ? $r->my_value : $r->value);
+							$totalCost[1] += $amount;
+							$p->mdata['actual_delivery_cost'] = $amount;
+							$p->updateMeta();
+							$ss[1][$p->hbn] = $p;
+						} else {
+							$shipment_left[1][] = $p;
+						}
+					} else {
+						// one shipment charge multiple times in one invoice
+						$rs = ReconciliationLine::model()->findAll('shipment_no = :ship AND parent_id = :invid AND JSON_VALUE(meta, "$.st_type") = "Shipment"', [':ship' => $p->ref, ':invid' => $rec_id]);
+						if (!empty($rs)) {
+							$invoice_no = $rs[0]->parent->invoice_no;
+							$invoice_date = $rs[0]->parent->invoice_date;
+							foreach ($rs as $r) {
+								$amount = floatval($r->my_value * 1.05 < $r->value || $r->my_value + 10 < $r->value ? $r->my_value : $r->value);
+								$totalCost[1] += $amount;
+								$p->mdata['actual_delivery_cost'] = $amount;
+								$p->updateMeta();
+								$ss[1][$p->hbn] = $p;
+							}
+						} else {
+							$shipment_left[1][] = $p;
+						}
+					}
+				}
+			}
+			foreach ($totalCost as $k => $v) {
+				if ($totalCost[$k] > 0) {
+					$billing = null;
+					if (!empty($billings[$k])) {
+						foreach ($billings[$k] as $bill) {
+							if (empty($bill->mdata['from_rec'])) {
+								continue;
+							}
+
+							if ($bill->actual_amount > 0) {
+								continue;
+							}
+
+							$billing = $bill;
+						}
+					}
+					if (!empty($billing)) {
+						$billing->actual_amount = number_format(round($totalCost[$k], 2), 2, '.', '');
+						$billing->gst = 'INPUT';
+						$billing->gst_amount = $billing->getGSTValue();
+						$billing->desc = 'total shipment: ' . sizeof($ss[$k]);
+						$billing->mdata['from_rec'] = 0;
+						$billing->updateMeta();
+						$billing->billing_cref = $invoice_no;
+						$billing->date = $invoice_date;
+						$billing->created = $invoice_date;
+						$billing->transaction_date = $invoice_date;
+						$billing->due = $invoice_date;
+						if ($billing->update(['actual_amount', 'gst', 'gst_amount', 'desc', 'billing_cref', 'date', 'created', 'transaction_date', 'due'])) {
+							foreach ($ss[$k] as $p) {
+								if (isset($p->mdata['import_billing_id']) && $p->mdata['import_billing_id'] != $billing->id) {
+									$p->mdata['import_billing_id_prev'][] = $p->mdata['import_billing_id'];
+								}
+								$p->mdata['import_billing_id'] = $billing->id;
+								$p->updateMeta();
+							}
+						}
+					} else {
+						$billing = new BillingLine();
+						$billing->mdata['from_rec'] = 0; //1 new  'from_rec' 0=>already used!
+						$billing->status = 1; // initial pending status
+						$billing->link_id = 0;
+						$billing->org_id = $cid[$k];
+						$billing->charge_code = Consol::AU_LOCAL_DELIVERY_COST_GL_CODE;
+						$billing->billing_cref = $invoice_no;
+						$billing->currency = 1; // AUD default
+						$billing->weight = 0;
+						$billing->charge_weight = 0;
+						$billing->billing_ref = $this->no;
+						$billing->awb = $this->awb;
+						$billing->dpt_id = empty($this->dpt_id) ? Org::PCAE_DEPARTMENT_SYDNEY : $this->dpt_id;
+						$billing->date = $invoice_date;
+						$billing->created = $invoice_date;
+						$billing->transaction_date = $invoice_date;
+						$billing->due = $invoice_date;
+						$billing->type = BillingLine::BILLING_TYPE_IMPORT; // for import type
+						$billing->dpmt = Invoice::DPMT_IMPORT;
+						$billing->actual_amount = number_format(round($totalCost[$k], 2), 2, '.', '');
+						$billing->gst = 'INPUT';
+						$billing->gst_amount = $billing->getGSTValue();
+						$billing->desc = 'total shipment: ' . sizeof($ss[$k]);
+						$billing->accrual_amount = 0;
+						if ($billing->save()) {
+							$theCost = 0;
+							foreach ($ss[$k] as $p) {
+								if (isset($p->mdata['import_billing_id']) && $p->mdata['import_billing_id'] != $billing->id) {
+									$p->mdata['import_billing_id_prev'][] = $p->mdata['import_billing_id'];
+								}
+								$p->mdata['import_billing_id'] = $billing->id;
+								$p->updateMeta();
+								foreach ($p->trans as $ts) {
+									if ($ts->type == 80) {
+										$theCost += $ts->cost;
+									}
+								}
+							}
+							$billing->accrual_amount = number_format($theCost, 2, '.', '');
+							$billing->save();
+						}
+					}
+
+					// link billing and check
+					Billing::linkLine($billing);
+
+					if (sizeof($shipment_left[$k]) > 0) {
+						$theCost = 0;
+						foreach ($shipment_left[$k] as $shipment) {
+							// get all tranships
+							$tss = $shipment->trans;
+							foreach ($tss as $ts) {
+								if ($ts->type == 80) {
+									$theCost += $ts->cost;
+								}
+							}
+						}
+
+						$newBilling = new BillingLine();
+						$newBilling->mdata['from_rec'] = 1; //1 new  'from_rec' 0=>already used!
+						$newBilling->status = 1; // initial pending status
+						$newBilling->link_id = 0;
+						$newBilling->org_id = $cid[$k];
+						$newBilling->charge_code = Consol::AU_LOCAL_DELIVERY_COST_GL_CODE;
+						$newBilling->billing_cref = $this->no;
+						$newBilling->currency = 1; // AUD default
+						$newBilling->weight = 0;
+						$newBilling->charge_weight = 0;
+
+						// normally billing reference will be awb no , if not set we set job ID as reference
+						$newBilling->billing_ref = $this->no;
+						$newBilling->awb = $this->awb;
+						$newBilling->dpt_id = empty($this->dpt_id) ? Org::PCAE_DEPARTMENT_SYDNEY : $this->dpt_id;
+						$newBilling->date = date('Y-m-d');
+						$newBilling->created = date('Y-m-d');
+						$newBilling->transaction_date = date('Y-m-d');
+						$newBilling->due = date('Y-m-d');
+						$newBilling->type = BillingLine::BILLING_TYPE_IMPORT; // for import type
+						$newBilling->dpmt = Invoice::DPMT_IMPORT;
+						$newBilling->actual_amount = 0;
+						$newBilling->gst = 'INPUT';
+						$newBilling->desc .= 'left shipment ' . sizeof($shipment_left[$k]);
+						$newBilling->accrual_amount = number_format($theCost, 2, '.', '');
+						$newBilling->save();
+					}
+				}
+			}
+			$transaction->commit();
+		} catch (Exception $ex) {
+			$transaction->rollback();
+			throw $ex;
+		}
+	}
+   /**
+    * current just support D2Z and TNT and Hunter and ECOF and Globavend
+    * @throws Exception
+    */
+	public function updateCourierRealCost($cid,$refReg,$declare = false, $rts = false)
+	{
+		$totalCost = 0;
+		$shipment_left = [];
+		$ss = [];
+		$billings = BillingLine::model()->findAll('billing_ref = :cref AND org_id = :oid AND charge_code = :ccode order by id', [':cref' => $this->no, ':oid' => $cid, ':ccode' => self::AU_LOCAL_DELIVERY_COST_GL_CODE]);
+		$transaction = Yii::app()->db->beginTransaction();
+		try {
+			$invoice_no = '';
+			$invoice_date = '';
+			foreach ($this->shipments as $p) {
+				$trans = $p->trans;
+				$oid = 0;
+				if(!empty($trans))
+				{
+					$tran = end($trans);
+					$oid = $tran->org_id;
+				}
+
+				if (preg_match('/'.$refReg.'/', $p->ref) || preg_match('/'.$refReg.'/', $p->hbn)||$oid==$cid) {
+					if(!$declare && !$rts)
+					{
+						// check if this consol has billing for this parcel
+						if (isset($p->mdata['import_billing_id'])) {
+							// foreach ($billings as $billingline) {
+							// 	if ($p->mdata['import_billing_id'] == $billingline->id) {
+							// 		continue 2;
+							// 	}
+							// }
+							$billingline = BillingLine::model()->findByPk($p->mdata['import_billing_id']);
+							if (!empty($billingline) && $billingline->status != 11 && $billingline->actual_amount != 0) continue;
+						}
+						// if (!empty($p->mdata['import_billing_id']) && sizeof($billings) >= 1) {
+						// 	continue;
+						// }
+						// else
+						// {
+							// set import_billing_id means we have account this cost to the billing before.
+							$r = ReconciliationLine::model()->find(array('condition' => 'shipment_no=:ship OR shipment_no=:hbn', 'params' => array(':ship' => $p->ref, ':hbn' => $p->hbn), 'order' => 'id desc'));
+							if (!empty($r)) {
+								$invoice_no = $r->parent->invoice_no;
+								$invoice_date = $r->parent->invoice_date;
+							}
+							if (isset($p->mdata['actual_delivery_cost'])) {
+								$totalCost += floatval($p->mdata['actual_delivery_cost']);
+								$ss[] = $p;
+							} else {
+								if (!empty($r)) {
+									$rvalue = empty($r->mdata['total_invoice'])?$r->value:$r->mdata['total_invoice'];
+									$totalCost += floatval($rvalue);
+									$p->mdata['actual_delivery_cost'] = floatval($rvalue);
+									$p->updateMeta();
+									$ss[] = $p;
+								} else {
+									$shipment_left[] = $p;
+								}
+							}
+						// }
+					}
+
+					if($declare)
+					{
+
+						if (!empty($p->mdata['declare_billing_id']) && sizeof($billings) >= 1) {
+							continue;
+						}else
+						{
+							// set import_billing_id means we have account this cost to the billing before.
+							$r = ReconciliationLineDeclare::model()->find(array('condition' => 'shipment_no=:ship and client_type >=:type and client_type <=:typeMax', 'params' => array(':ship' => $p->ref,':type'=>Reconciliation::DECLARE_TYPE,':typeMax'=>Reconciliation::DECLARE_TYPE_MAX), 'order' => 'id desc'));
+							if (!empty($r)) {
+								$invoice_no = $r->parent->invoice_no;
+								$invoice_date = $r->parent->invoice_date;
+							}
+							if (isset($p->mdata['under_declare_cost'])) {
+								$totalCost += floatval($p->mdata['under_declare_cost']);
+								$ss[] = $p;
+							}
+						}
+					}
+
+
+					if($rts)
+					{
+
+						if (!empty($p->mdata['rts_billing_id']) && sizeof($billings) >= 1) {
+							continue;
+						}else
+						{
+							// set import_billing_id means we have account this cost to the billing before.
+							$r = ReconciliationLineDeclare::model()->find(array('condition' => 'shipment_no=:ship and client_type >=:type and client_type <=:typeMax', 'params' => array(':ship' => $p->ref,':type'=>Reconciliation::RTS_TYPE,':typeMax'=>Reconciliation::RTS_TYPE_MAX), 'order' => 'id desc'));
+							if (!empty($r)) {
+								$invoice_no = $r->parent->invoice_no;
+								$invoice_date = $r->parent->invoice_date;
+							}
+							if (isset($p->mdata['RTS_cost'])) {
+								$totalCost += floatval($p->mdata['RTS_cost']);
+								$ss[] = $p;
+							}
+						}
+					}
+
+
+
+				}
+			}
+			if ($totalCost > 0) {
+				$billing = null;
+				if (!empty($billings)) {
+					foreach ($billings as $bill) {
+						if (empty($bill->mdata['from_rec'])) {
+							continue;
+						}
+
+						if ($bill->actual_amount > 0) {
+							continue;
+						}
+
+						$billing = $bill;
+					}
+				}
+				if (!empty($billing)) {
+					$billing->actual_amount = number_format(round($totalCost, 2), 2, '.', '');
+					if ($cid == Org::ORGID_COURIER_D2Z) {
+						$billing->gst = 'INPUT';
+					} else if ($cid === Org::ORGID_COURIER_TNT||$cid === Org::ORGID_COURIER_HUNTER||$cid === Org::ORGID_COURIER_ECOF||$cid === ORG::ORGID_COURIER_UBI) {
+						$billing->gst = 'INPUT';
+					}
+					$billing->gst_amount = $billing->getGSTValue();
+					$billing->desc = 'total shipment: ' . sizeof($ss);
+					
+					if($declare)
+					{
+						$billing->desc .= " under declare ";
+					}
+
+					if($rts)
+					{
+						$billing->desc .= " RTS ";
+					}
+
+					$billing->mdata['from_rec'] = 0;
+					$billing->updateMeta();
+					$billing->billing_cref = $invoice_no;
+					$billing->date = $invoice_date;
+					$billing->created = $invoice_date;
+					$billing->transaction_date = $invoice_date;
+					$billing->due = $invoice_date;
+					if ($billing->update(['actual_amount', 'gst', 'gst_amount', 'desc', 'billing_cref', 'date', 'created', 'transaction_date', 'due'])) {
+						foreach ($ss as $p) {
+							if(!$declare && !$rts)
+							{
+								$p->mdata['import_billing_id'] = end($billings)->id;
+							}
+
+							if($declare)
+							{
+								$p->mdata['declare_billing_id'] = end($billings)->id;
+							}
+
+							if($rts)
+							{
+								$p->mdata['rts_billing_id'] = end($billings)->id;
+							}
+							$p->updateMeta();
+						}
+					}
+				} else {
+					$billing = new BillingLine();
+					$billing->mdata['from_rec'] = 0; //1 new  'from_rec' 0=>already used!
+					$billing->status = 1; // initial pending status
+					$billing->link_id = 0;
+					$billing->org_id = $cid;
+					$billing->charge_code = Consol::AU_LOCAL_DELIVERY_COST_GL_CODE;
+					$billing->billing_cref = $invoice_no;
+					$billing->currency = 1; // AUD default
+					$billing->weight = 0;
+					$billing->charge_weight = 0;
+					$billing->billing_ref = $this->no;
+					$billing->awb = $this->awb;
+					$billing->dpt_id = empty($this->dpt_id) ? Org::PCAE_DEPARTMENT_SYDNEY : $this->dpt_id;
+					$billing->date = $invoice_date;
+					$billing->created = $invoice_date;
+					$billing->transaction_date = $invoice_date;
+					$billing->due = $invoice_date;
+					$billing->type = BillingLine::BILLING_TYPE_IMPORT; // for import type
+					$billing->dpmt = Invoice::DPMT_IMPORT;
+					if ($cid == Org::ORGID_SUPPLIER_GLOBAVEND) {
+						$billing->actual_amount = number_format(round($totalCost / 1.1, 2), 2, '.', '');
+					} else {
+						$billing->actual_amount = number_format(round($totalCost, 2), 2, '.', '');
+					}
+					if ($cid == Org::ORGID_COURIER_D2Z) {
+						$billing->gst = 'INPUT';
+					} else if ($cid === Org::ORGID_COURIER_TNT||$cid === Org::ORGID_COURIER_HUNTER||$cid === Org::ORGID_COURIER_ECOF||$cid === Org::ORGID_SUPPLIER_GLOBAVEND||$cid === Org::ORGID_COURIER_UBI) {
+						$billing->gst = 'INPUT';
+					}
+					$billing->gst_amount = $billing->getGSTValue();
+					$billing->desc = 'total shipment: ' . sizeof($ss);
+					if($declare)
+					{
+						$billing->desc .= " under declare ";
+					}
+
+					if($rts)
+					{
+						$billing->desc .= " RTS ";
+					}
+					$billing->accrual_amount = 0;
+
+					if ($billing->save()) {
+						$theCost = 0;
+						foreach ($ss as $p) {
+							$p->mdata['import_billing_id'] = $billing->id;
+							if(!$declare && !$rts)
+							{
+								$p->mdata['import_billing_id'] = $billing->id;
+							}
+
+							if($declare)
+							{
+								$p->mdata['declare_billing_id'] = $billing->id;
+							}
+
+							if($rts)
+							{
+								$p->mdata['rts_billing_id'] = $billing->id;
+							}
+
+							$p->updateMeta();
+							foreach ($p->trans as $ts) {
+								if ($ts->type == 80) {
+									$theCost += $ts->cost;
+								}
+							}
+						}
+						$billing->accrual_amount = number_format($theCost, 2, '.', '');
+						$billing->save();
+					}
+				}
+
+				// link billing and check
+				Billing::linkLine($billing);
+
+				if (sizeof($shipment_left) > 0) {
+					$theCost = 0;
+					foreach ($shipment_left as $shipment) {
+						// get all tranships
+						$tss = $shipment->trans;
+						foreach ($tss as $ts) {
+							if ($ts->type == 80) {
+								$theCost += $ts->cost;
+							}
+						}
+					}
+
+					$newBilling = new BillingLine();
+					$newBilling->mdata['from_rec'] = 1; //1 new  'from_rec' 0=>already used!
+					$newBilling->status = 1; // initial pending status
+					$newBilling->link_id = 0;
+					$newBilling->org_id = $cid;
+					$newBilling->charge_code = Consol::AU_LOCAL_DELIVERY_COST_GL_CODE;
+					$newBilling->billing_cref = $this->no;
+					$newBilling->currency = 1; // AUD default
+					$newBilling->weight = 0;
+					$newBilling->charge_weight = 0;
+
+					// normally billing reference will be awb no , if not set we set job ID as reference
+					$newBilling->billing_ref = $this->no;
+					$newBilling->awb = $this->awb;
+					$newBilling->dpt_id = empty($this->dpt_id) ? Org::PCAE_DEPARTMENT_SYDNEY : $this->dpt_id;
+					$newBilling->date = date('Y-m-d');
+					$newBilling->created = date('Y-m-d');
+					$newBilling->transaction_date = date('Y-m-d');
+					$newBilling->due = date('Y-m-d');
+					$newBilling->type = BillingLine::BILLING_TYPE_IMPORT; // for import type
+					$newBilling->dpmt = Invoice::DPMT_IMPORT;
+					$newBilling->actual_amount = 0;
+					if ($cid == Org::ORGID_COURIER_D2Z) {
+						$newBilling->gst = 'EXEMPTEXPENSES';
+					} else if ($cid === Org::ORGID_COURIER_TNT||$cid === Org::ORGID_COURIER_HUNTER||$cid === Org::ORGID_COURIER_ECOF||$cid === Org::ORGID_COURIER_UBI) {
+						$newBilling->gst = 'INPUT';
+					}
+					$newBilling->desc .= "left shipment " . sizeof($shipment_left);
+					$newBilling->accrual_amount = number_format($theCost, 2, '.', '');
+					$newBilling->save();//Gero found
+				}
+			}
+			$transaction->commit();
+		} catch (Exception $ex) {
+			$transaction->rollback();
+			throw $ex;
+		}
+	}
+
+	public function updateTntRealCost($cid, $refReg, $rec = null)
+	{
+		$totalCost = 0;
+		$shipment_left = [];
+		$ss = [];
+		$billings = BillingLine::model()->findAll('billing_ref = :cref AND org_id = :oid AND charge_code = :ccode AND status = 1 order by id', [':cref' => $this->no, ':oid' => $cid, ':ccode' => self::AU_LOCAL_DELIVERY_COST_GL_CODE]);
+		$transaction = Yii::app()->db->beginTransaction();
+		try {
+			$invoice_no = '';
+			$invoice_date = '';
+			foreach ($this->shipments as $p) {
+				$trans = $p->trans;
+				$oid = 0;
+				if(!empty($trans))
+				{
+					$tran = end($trans);
+					$oid = $tran->org_id;
+				}
+
+				if (preg_match('/'.$refReg.'/', $p->ref) || preg_match('/'.$refReg.'/', $p->hbn)||$oid==$cid) {
+					// set import_billing_id means we have account this cost to the billing before.
+					if ($rec) {
+						$r = ReconciliationLine::model()->find(array('condition' => '(shipment_no=:ship OR shipment_no=:hbn) AND JSON_VALUE(meta, "$.tnt_type") = "Shipment" AND parent_id = :pid', 'params' => array(':ship' => $p->ref, ':hbn' => $p->hbn, ':pid' => $rec), 'order' => 'id desc'));
+					} else {
+						$r = ReconciliationLine::model()->find(array('condition' => '(shipment_no=:ship OR shipment_no=:hbn) AND JSON_VALUE(meta, "$.tnt_type") = "Shipment"', 'params' => array(':ship' => $p->ref, ':hbn' => $p->hbn), 'order' => 'id desc'));
+					}
+					// check if this consol has billing for this parcel
+					if (isset($p->mdata['import_billing_id'])) {
+						$billingline = BillingLine::model()->findByPk($p->mdata['import_billing_id']);
+						if (!empty($billingline) && $billingline->status != 11 && $billingline->actual_amount != 0 && $billing->billing_cref == $r->invoice_no) continue;
+					}
+					if (!empty($r)) {
+						$invoice_no = $r->parent->invoice_no;
+						$invoice_date = $r->parent->invoice_date;
+					}
+					/**
+					 * 2020-06-16
+					 * only record min(value, my_value)
+					 */
+					if (!empty($r)) {
+						$amount = floatval($r->my_value * 1.05 < $r->value || $r->my_value + 10 < $r->value ? $r->my_value : $r->value);
+						$totalCost += $amount;
+						$p->mdata['actual_delivery_cost'] = $amount;
+						$p->updateMeta();
+						$ss[] = $p;
+					} else {
+						$shipment_left[] = $p;
+					}
+				}
+			}
+			if ($totalCost > 0) {
+				$billing = null;
+				if (!empty($billings)) {
+					foreach ($billings as $bill) {
+						if (empty($bill->mdata['from_rec'])) {
+							continue;
+						}
+
+						if ($bill->actual_amount > 0) {
+							continue;
+						}
+
+						$billing = $bill;
+					}
+				}
+				if (!empty($billing)) {
+					$billing->actual_amount = number_format(round($totalCost, 2), 2, '.', '');
+					$billing->gst = 'INPUT';
+					$billing->gst_amount = $billing->getGSTValue();
+					$billing->desc = 'total shipment: ' . sizeof($ss);
+					$billing->mdata['from_rec'] = 0;
+					$billing->updateMeta();
+					$billing->billing_cref = $invoice_no;
+					$billing->date = $invoice_date;
+					$billing->created = $invoice_date;
+					$billing->transaction_date = $invoice_date;
+					$billing->due = $invoice_date;
+					if ($billing->update(['actual_amount', 'gst', 'gst_amount', 'desc', 'billing_cref', 'date', 'created', 'transaction_date', 'due'])) {
+						foreach ($ss as $p) {
+							$p->mdata['import_billing_id'] = end($billings)->id;
+							$p->updateMeta();
+						}
+					}
+				} else {
+					$billing = new BillingLine();
+					$billing->mdata['from_rec'] = 0; //1 new  'from_rec' 0=>already used!
+					$billing->status = 1; // initial pending status
+					$billing->link_id = 0;
+					$billing->org_id = $cid;
+					$billing->charge_code = Consol::AU_LOCAL_DELIVERY_COST_GL_CODE;
+					$billing->billing_cref = $invoice_no;
+					$billing->currency = 1; // AUD default
+					$billing->weight = 0;
+					$billing->charge_weight = 0;
+					$billing->billing_ref = $this->no;
+					$billing->awb = $this->awb;
+					$billing->dpt_id = empty($this->dpt_id) ? Org::PCAE_DEPARTMENT_SYDNEY : $this->dpt_id;
+					$billing->date = $invoice_date;
+					$billing->created = $invoice_date;
+					$billing->transaction_date = $invoice_date;
+					$billing->due = $invoice_date;
+					$billing->type = BillingLine::BILLING_TYPE_IMPORT; // for import type
+					$billing->dpmt = Invoice::DPMT_IMPORT;
+					$billing->actual_amount = number_format(round($totalCost, 2), 2, '.', '');
+					$billing->gst = 'INPUT';
+					$billing->gst_amount = $billing->getGSTValue();
+					$billing->desc = 'total shipment: ' . sizeof($ss);
+					$billing->accrual_amount = 0;
+
+					if ($billing->save()) {
+						$theCost = 0;
+						foreach ($ss as $p) {
+							$p->mdata['import_billing_id'] = $billing->id;
+							$p->updateMeta();
+							foreach ($p->trans as $ts) {
+								if ($ts->type == 80) {
+									$theCost += $ts->cost;
+								}
+							}
+						}
+						$billing->accrual_amount = number_format($theCost, 2, '.', '');
+						$billing->save();
+					}
+				}
+
+				// link billing and check
+				Billing::linkLine($billing);
+
+				if (sizeof($shipment_left) > 0) {
+					$theCost = 0;
+					foreach ($shipment_left as $shipment) {
+						// get all tranships
+						$tss = $shipment->trans;
+						foreach ($tss as $ts) {
+							if ($ts->type == 80) {
+								$theCost += $ts->cost;
+							}
+						}
+					}
+
+					$newBilling = new BillingLine();
+					$newBilling->mdata['from_rec'] = 1; //1 new  'from_rec' 0=>already used!
+					$newBilling->status = 1; // initial pending status
+					$newBilling->link_id = 0;
+					$newBilling->org_id = $cid;
+					$newBilling->charge_code = Consol::AU_LOCAL_DELIVERY_COST_GL_CODE;
+					$newBilling->billing_cref = $this->no;
+					$newBilling->currency = 1; // AUD default
+					$newBilling->weight = 0;
+					$newBilling->charge_weight = 0;
+
+					// normally billing reference will be awb no , if not set we set job ID as reference
+					$newBilling->billing_ref = $this->no;
+					$newBilling->awb = $this->awb;
+					$newBilling->dpt_id = empty($this->dpt_id) ? Org::PCAE_DEPARTMENT_SYDNEY : $this->dpt_id;
+					$newBilling->date = date('Y-m-d');
+					$newBilling->created = date('Y-m-d');
+					$newBilling->transaction_date = date('Y-m-d');
+					$newBilling->due = date('Y-m-d');
+					$newBilling->type = BillingLine::BILLING_TYPE_IMPORT; // for import type
+					$newBilling->dpmt = Invoice::DPMT_IMPORT;
+					$newBilling->actual_amount = 0;
+					$newBilling->gst = 'INPUT';
+					$newBilling->desc = "left shipment " . sizeof($shipment_left);
+					$newBilling->accrual_amount = number_format($theCost, 2, '.', '');
+					$newBilling->save();//Gero found
+				}
+			}
+			$transaction->commit();
+		} catch (Exception $ex) {
+			$transaction->rollback();
+			throw $ex;
+		}
+	}
+
+	/**
+	 * update fastway real cost
+	 * @throws CDbException
+	 */
+	public function updateFastWayRealCost($rec = null)
+	{
+		$totalCost = 0;
+		$shipment_left = [];
+		$ss = [];
+		$cid = Org::ORGID_COURIER_FASTWAY;
+		$billings = BillingLine::model()->findAll('billing_ref = :cref AND org_id = :oid AND charge_code = :ccode AND status = 1 order by id', [':cref' => $this->no, ':oid' => $cid, ':ccode' => self::AU_LOCAL_DELIVERY_COST_GL_CODE]);
+		$transaction = Yii::app()->db->beginTransaction();
+		try {
+			$invoice_no = '';
+			$invoice_date = '';
+			foreach ($this->shipments as $p) {
+				if ((isset($p->trans) && !empty($p->trans) && $p->trans[0]->org_id == Org::ORGID_COURIER_FASTWAY)) {
+					// check if this consol has billing for this parcel
+					if (isset($p->mdata['import_billing_id'])) {
+						// foreach ($billings as $billingline) {
+						// 	if ($p->mdata['import_billing_id'] == $billingline->id) {
+						// 		continue 2;
+						// 	}
+						// }
+						$billingline = BillingLine::model()->findByPk($p->mdata['import_billing_id']);
+						if (!empty($billingline) && $billingline->status != 11 && $billingline->actual_amount != 0) continue;
+					}
+
+					// if parcel in this reconciliation
+					if ($rec) {
+						$r = ReconciliationLine::model()->find('shipment_id = :ship AND parent_id = :pid', array(':ship' => $p->id, ':pid' => $rec));
+					} else {
+						$r = ReconciliationLine::model()->find('shipment_id = :ship', array(':ship' => $p->id));
+					}
+					if (!empty($r)) {
+						$invoice_no = $r->parent->invoice_no;
+						$invoice_date = $r->parent->invoice_date;
+					}
+					// if (!empty($r)) {
+					/**
+					 * 2020-06-16
+					 * only record min(value, my_value)
+					 */
+					if (!empty($r)) {
+						$totalCost += floatval(min($r->value, $r->my_value));
+						$p->mdata['actual_delivery_cost'] = floatval(min($r->value, $r->my_value));
+						$p->updateMeta();
+						$ss[] = $p;
+					} else {
+						$shipment_left[] = $p;
+					}
+				}
+			}
+
+			if ($totalCost > 0) {
+				//logic we only update the last one of the billig line
+				$billing = null;
+				if (!empty($billings)) {
+					$billing = end($billings);
+					if ($billing->actual_amount > 0) {
+						$billing = null;
+					}
+				}
+				if (!empty($billing)) {
+					$billing->actual_amount = number_format(round($totalCost, 2), 2, '.', '');
+					$billing->gst = 'INPUT';
+					$billing->gst_amount = $billing->getGSTValue();
+					$billing->desc = 'total shipment: ' . sizeof($ss);
+					$billing->billing_cref = $invoice_no;
+					$billing->date = $invoice_date;
+					$billing->created = $invoice_date;
+					$billing->transaction_date = $invoice_date;
+					$billing->due = $invoice_date;
+					$billing->update(['actual_amount', 'gst', 'gst_amount', 'desc', 'billing_cref', 'date', 'created', 'transaction_date', 'due']);
+				} else {
+					$billing = new BillingLine();
+					$billing->status = 1; // initial pending status
+					$billing->link_id = 0;
+					$billing->org_id = $cid;
+					$billing->charge_code = Consol::AU_LOCAL_DELIVERY_COST_GL_CODE;
+					if ($this->owner_id == 114) {
+						$billing->charge_code = Consol::DELIVERY_3PL_COST_GL_CODE;
+					}
+					$billing->billing_cref = $invoice_no;
+					$billing->currency = 1; // AUD default
+					$billing->weight = 0;
+					$billing->charge_weight = 0;
+					$billing->billing_ref = $this->no;
+					$billing->awb = $this->awb;
+					$billing->dpt_id = empty($this->dpt_id) ? Org::PCAE_DEPARTMENT_SYDNEY : $this->dpt_id;
+					$billing->date = $invoice_date;
+					$billing->created = $invoice_date;
+					$billing->transaction_date = $invoice_date;
+					$billing->due = $invoice_date;
+					$billing->type = BillingLine::BILLING_TYPE_IMPORT; // for import type
+					$billing->dpmt = Invoice::DPMT_IMPORT;
+					if ($this->owner_id == 114) {
+						$billing->type = BillingLine::BILLING_TYPE_3PL;
+						$billing->dpmt = Invoice::DPMT_3PL;
+					}
+					$billing->actual_amount = number_format(round($totalCost, 2), 2, '.', '');
+					$billing->gst = 'INPUT';
+					$billing->gst_amount = $billing->getGSTValue();
+					$billing->desc = 'total shipment: ' . sizeof($ss);
+					$billing->accrual_amount = 0;
+					$billing->save();
+				}
+
+				if (empty($billing->getErrors())) {
+					$theCost = 0;
+					foreach ($ss as $p) {
+						if (isset($p->mdata['import_billing_id']) && $p->mdata['import_billing_id'] != $billing->id) {
+							$p->mdata['import_billing_id_prev'][] = $p->mdata['import_billing_id'];
+						}
+						$p->mdata['import_billing_id'] = $billing->id;
+						$p->updateMeta();
+						foreach ($p->trans as $ts) {
+							if ($ts->type == 80) {
+								$theCost += $ts->cost;
+							}
+						}
+					}
+					$billing->accrual_amount = number_format($theCost, 2, '.', '');
+					$billing->save();
+				}
+
+				// link billing and check
+				Billing::linkLine($billing);
+
+				if (sizeof($shipment_left) > 0) {
+					$theCost = 0;
+					foreach ($shipment_left as $shipment) {
+						// get all tranships
+						$tss = $shipment->trans;
+						foreach ($tss as $ts) {
+							if ($ts->type == 80) {
+								$theCost += $ts->cost;
+							}
+						}
+					}
+					$newBilling = new BillingLine();
+					$newBilling->status = 1; // initial pending status
+					$newBilling->link_id = 0;
+					$newBilling->org_id = 115;
+					$newBilling->charge_code = Consol::AU_LOCAL_DELIVERY_COST_GL_CODE;
+					if ($this->owner_id == 114) {
+						$newBilling->charge_code = Consol::DELIVERY_3PL_COST_GL_CODE;
+					}
+					$newBilling->billing_cref = $this->no;
+					$newBilling->currency = 1; // AUD default
+					$newBilling->weight = 0;
+					$newBilling->charge_weight = 0;
+
+					// normally billing reference will be awb no , if not set we set job ID as reference
+					$newBilling->billing_ref = $this->no;
+					$newBilling->awb = $this->awb;
+					$newBilling->dpt_id = empty($this->dpt_id) ? Org::PCAE_DEPARTMENT_SYDNEY : $this->dpt_id;
+					$newBilling->date = date('Y-m-d');
+					$newBilling->created = date('Y-m-d');
+					$newBilling->transaction_date = date('Y-m-d');
+					$newBilling->due = date('Y-m-d');
+					$newBilling->type = BillingLine::BILLING_TYPE_IMPORT; // for import type
+					$newBilling->dpmt = Invoice::DPMT_IMPORT;
+					if ($this->owner_id == 114) {
+						$newBilling->type = BillingLine::BILLING_TYPE_3PL;
+						$newBilling->dpmt = Invoice::DPMT_3PL;
+					}
+					$newBilling->actual_amount = 0;
+					$newBilling->gst = 'INPUT';
+					$newBilling->desc .= "left shipment " . sizeof($shipment_left);
+					$newBilling->accrual_amount = number_format($theCost, 2, '.', '');
+					$newBilling->save();
+				}
+			}
+			$transaction->commit();
+		} catch (Exception $ex) {
+			$transaction->rollback();
+			throw $ex;
+		}
+	}
+	public function totCost($isFlash = false)
+	{
+		$totalCost = SystemSetting::getConsolTotCost();
+		$thisTotalCost = 0;
+		if(empty($totalCost[$this->no]))
+		{
+			$thisTotalCost = $this->_totCost();
+			$totalCost[$this->no] = $thisTotalCost;
+			SystemSetting::setConsolTotCost($totalCost);
+		}else
+		{
+			$thisTotalCost = $totalCost[$this->no];
+		}
+
+		$this->totCost =$thisTotalCost;
+		return $this->totCost;
+	}
+	/**
+	 * calculate total of cost amount for client reporting
+	 * @return int
+	 */
+	public function _totCost()
+	{
+		$totCost = 0;
+		$tabBillings = $this->getTabBilling(true);
+		foreach ($tabBillings['data'] as $key1 => $billing) {
+				if($billing['currency']=='AUD')
+				{
+					if($billing['confirm_payable']>0)
+					{
+						$totCost+=floatval($billing['confirm_payable']);
+					}else
+					{
+						$totCost+=floatval($billing['accrual']);
+					}
+				}else
+				{
+					if($billing['confirm_payable']>0)
+					{
+						$totCost+=BillingLine::getByCurrency(floatval($billing['confirm_payable']), array_search($billing['currency'], Invoice::$currencies));
+					}else
+					{
+						$totCost+=BillingLine::getByCurrency(floatval($billing['accrual']), array_search($billing['currency'], Invoice::$currencies));
+					}
+				}
+		}
+		return  $totCost;
+	}
+
+	public function totAccrualCost()
+	{
+		$billingLines = BillingLine::model()->findAll("billing_ref = '" . $this->no . "' AND status != 11");
+		$totCost = 0;
+		foreach ($billingLines as $key => $r) {
+			$totCost+=BillingLine::getByCurrency($r->accrual_amount,$r);
+		}
+		$this->totCost = $totCost;
+		return $this->totCost;
+	}
+
+	public function getProfitGP()
+	{
+		return $this->totRevenue - $this->totCost;
+	}
+
+	public function getSeaProcessStatus()
+	{
+		return isset(ConsolProcess::$newSeaStates[isset($this->process->status)?$this->process->status:-1])? Yii::t(strtolower(__CLASS__), ConsolProcess::$newSeaStates[$this->process->status]) : $this->process->status;
+	}
+
+	// public function getSeaProcessStatus()
+	// {
+	// 	$status = "";
+	// 	$i = 0;
+	// 	foreach (ConsolProcess::$seaStatesShort as $key => $value) {
+	// 		if (($this->process->status & $key) == 0) {
+	// 			$status .= "<span class='warn'>$value</span>";
+	// 			$i++;
+	// 			if ($i % 5 == 0) {
+	// 				$status .= "<br/>";
+	// 			}
+	// 		}
+	// 	}
+	// 	return $status;
+	// }
+
+	public function getProfitRate()
+	{
+		$allRevenue = $this->totRevenue <= 0 ? 1 : $this->totRevenue;
+		$profitRate = round(($this->totRevenue - $this->totCost) / $allRevenue * 10000) / 10000;
+		return $profitRate;
+	}
+
+	public function getStatus()
+	{
+		$t = isset(self::$types[$this->type]) ? self::$types[$this->type] : __CLASS__;
+		$states = empty($t::$states) ? self::$states : $t::$states;
+		return isset($states[$this->status]) ? Yii::t(strtolower(__CLASS__), $states[$this->status]) : $this->status;
+	}
+
+	public function getType()
+	{
+		return Yii::t(strtolower(__CLASS__), static::$types[$this->type]);
+	}
+
+	public function getService()
+	{
+		return Yii::t(strtolower(__CLASS__), isset(self::$services[$this->service])? self::$services[$this->service] : '');
+	}
+
+	public function billingList()
+	{
+		$criteria = new CDbCriteria();
+		$criteria->addInCondition("id", $this->getRecIds());
+		return new CActiveDataProvider(new Manifest('search'), array(
+			'criteria' => $criteria,
+		));
+	}
+
+	public function getRecIds()
+	{
+		$db = Yii::app()->db;
+		$sql = 'SELECT DISTINCT(rec_id) AS id FROM shipment WHERE consol_id = ' . $this->id;
+		$c = $db->createCommand($sql);
+		$rs = $c->queryAll();
+		$ids = array();
+		foreach ($rs as $r) {
+			if ($r['id'] > 0) {
+				$ids[] = $r['id'];
+			}
+
+		}
+		return $ids;
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return AppHelper::tArray(strtolower(__CLASS__), array(
+			'id' => 'ID',
+			'No' => 'No.',
+			'owner_id' => 'Owner',
+			'dpt_id' => 'Depot',
+			'carrier_id' => 'Carrier',
+			'type' => 'Type',
+			'service' => 'Service',
+			'awb' => 'AWB No.',
+			'airline' => 'Airline',
+			'flight' => 'Flight No.',
+			'pol' => 'POL',
+			'pod' => 'POD',
+			'exrate' => 'Ex. Rate',
+			'poc' => 'Channel',
+			'etd' => 'ETD',
+			'eta' => 'ETA',
+			'created' => 'Created',
+			'status' => 'Status',
+			'meta' => 'Meta',
+			'mdata[atd]' => 'ATD',
+			'mdata[ata]' => 'ATA',
+			'mabws' => 'Multiple AWBs',
+			'exInfo' => 'ExInfo'
+		));
+	}
+
+	public function beforeSave()
+	{
+		$this->awb = trim($this->awb);
+		$this->airline = trim($this->airline);
+		$this->flight = trim($this->flight);
+		if(!empty($this->mdata)&&!empty($this->mdata['container_no']))
+		{
+			$this->mdata['container_no'] = trim($this->mdata['container_no']);
+		}
+
+		if(!empty($this->mdata)&&!empty($this->mdata['house_bill']))
+		{
+			$this->mdata['house_bill'] = trim($this->mdata['house_bill']);
+		}
+
+
+		if (empty($this->created)) {
+			$this->created = date('Y-m-d H:i:s');
+		}
+
+		if (empty($this->status)) {
+			$this->status = 10;
+		}
+
+		if (empty($this->no)) {
+			$this->no = $this->genNo();
+		}
+
+		if($this->service == 20) $this->awb = preg_replace('/\s+/', '', $this->awb);
+		
+		if (!empty($this->mdata)) {
+			$this->meta = json_encode($this->mdata);
+		}
+
+		return true;
+	}
+
+	public function genNo()
+	{
+		$pfx = 'C';
+		if(strtotime($this->eta) >= strtotime('2020-08-01')) $pfx = 'TC';
+		if(strtotime($this->eta) >= strtotime('2020-12-30'))
+		{
+			$pfx = 'TC';
+			if(!empty(self::$consolPrefix[$this->dpt_id]))
+			{
+				$pfx = self::$consolPrefix[$this->dpt_id];
+			}
+		}
+
+		if(!empty(self::$servicePrefix[$this->service]))
+		{
+			$pfx .= self::$servicePrefix[$this->service];
+		}
+
+		$n = $pfx . date('ymd', strtotime($this->created));
+		if ($this->owner_id == Org::ORGID_CLIENT_TLA&&empty($this->mdata['for3PL'])) {
+			$n = '3PL' . date('ymd', strtotime($this->created));
+		}
+		$s = self::model()->count('no LIKE :n', [':n' => $n . '%']) + 1;
+		return $n . sprintf('%02d', $s) . substr($this->pol, 2);
+	}
+
+	public function getServiceTag()
+	{
+		if(!empty(self::$servicePrefix[$this->service]))
+		{
+			return self::$servicePrefix[$this->service];
+		}
+		return "";
+	}
+
+	public function afterSave()
+	{
+		if (!$this->nolog && !empty($this)) {
+			$extra = empty($this->custom_log_note) ? array() : array('note' => $this->custom_log_note);
+			if(!empty($this->mdata['available_date']))
+			{
+				$extra['available_date'] = $this->mdata['available_date'];
+			}
+
+			if(!empty($this->eta))
+			{
+				$extra['eta'] = $this->eta;
+			}
+
+
+			Log::add($this, $this->isNewRecord ? 3 : 4, array_merge(array('status' => $this->getStatus()), $extra));
+		}
+	}
+
+	public function afterFind()
+	{
+
+		if (Yii::app() instanceof CWebApplication) {
+			if ($this->isTLA()) [$app_name, Yii::app()->name] = [Yii::app()->name, 'TLA'];
+			else [$app_name, Yii::app()->name] = [Yii::app()->name, 'HVLV APP'];
+		}
+
+		return parent::afterFind();
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @forgp search for gate pass
+	 * @bydate search for all after of specified date
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search($pgn = true, $ps = 30, $ec = false, $forgp = false, $bydate = false,$bySea = false)
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria = new CDbCriteria;
+
+		$criteria->compare('t.id', $this->id);
+		$criteria->compare('t.no', $this->no, true);
+		$criteria->compare('t.owner_id', $this->owner_id);
+		$criteria->compare('t.dpt_id', $this->dpt_id);
+		$criteria->compare('carrier_id', $this->carrier_id);
+
+		if (!empty($this->container_no)) {
+			$cawb = new CDbCriteria;
+			$cawb->compare('t.container_no', $this->container_no, true);
+			$cawb->compare('t.meta', $this->container_no, true, 'OR');
+			$criteria->mergeWith($cawb);
+		}
+
+		if(!empty($this->service)&&$this->service==ImcoConsol::AIRCONSOL&&$this->dpt_id==Org::TLA_DEPARTMENT_SYDNEY)
+		{
+			$criteria->addCondition('t.service=10 or (t.service=0 and awb like "Direct%")');
+		}else
+		{
+			$criteria->compare('service', $this->service);
+		}
+		
+		if(!empty($this->dpt_id)&&$this->canUserCheckAll())
+		{
+			$criteria->compare('t.dpt_id', $this->dpt_id);
+		}else
+		{
+			if($this->isBackend)
+			{
+				if(!empty($this->dpt_id))
+				{
+					$criteria->compare('t.dpt_id', $this->dpt_id);
+				}
+			}else
+			{
+				$criteria->compare('t.dpt_id', $this->getUserDptId());
+			}
+		}
+
+		if (empty($this->status)) {
+			if(!$this->isBackend)// occupation control
+			{
+				$permissionArr = ConsolProcessService::getUserPermission();
+				$serviceStr = "";
+				$statusStr = "";
+				if(!empty($permissionArr[0]))
+				{
+					$criteria->addCondition(" service in (".join(',',$permissionArr[0]).")" );
+				}
+
+				if(!empty($permissionArr[1]))
+				{
+					$criteria->addCondition(" t.status".$permissionArr[1]);
+				}
+			}
+			$criteria->addCondition('t.status != 100');
+		}
+
+		$with = [];
+		if (!empty($this->process_not_status)) {
+			$with[] = 'process';
+			$criteria->addNotInCondition('process.status', $this->process_not_status);
+		}
+		if (!empty($this->process_status)) {
+			$with[] = 'process';
+			$criteria->compare('process.status', $this->process_status);
+		}
+		if (!empty($this->process_statuses)) {
+			$with[] = 'process';
+			$criteria->addInCondition('process.status', $this->process_statuses);
+		}
+		if (!empty($this->sea_process_status)) {
+			$with[] = 'process';
+			$criteria->addCondition('process.status&' . $this->sea_process_status . "=0");
+		}
+		if (!empty($this->process_types)) {
+			$with[] = 'process';
+			$criteria->addInCondition('process.type', $this->process_types);
+		}
+		if (!empty($this->bwf)) {
+			$criteria->addCondition('t.bwf&' . $this->bwf . ">0");
+		}
+		if (!empty($this->process_airport)) {
+			$with[] = 'process';
+			$criteria->compare('process.airport', $this->process_airport, true);
+		}
+		if (!empty($this->process_airport_dead)) {
+			$with[] = 'process';
+			$criteria->compare('process.airport', $this->process_airport_dead, true);
+
+		}
+		if (!empty($this->owner_name)) {
+			//$criteria->compare('owner.name',$this->owner_name,true);
+			$sql = 'SELECT s.consol_id FROM shipment s INNER JOIN org o on s.agent_id = o.id WHERE o.name LIKE :n GROUP BY s.agent_id, s.consol_id';
+			$rs = Yii::app()->db->createCommand($sql)->bindValues([':n' => '%' . $this->owner_name . '%'])->queryAll();
+			$cids = [];
+			$anotherSql = 'SELECT s.id FROM consol s INNER JOIN org o ON s.owner_id=o.id WHERE s.owner_id>0 AND o.name LIKE :n';
+			$rs1 = Yii::app()->db->createCommand($anotherSql)->bindValues([':n' => '%' . $this->owner_name . '%'])->queryAll();
+			foreach ($rs as $r) {
+				if (empty($r['consol_id'])) {
+					continue;
+				}
+
+				$cids[] = $r['consol_id'];
+			}
+			foreach ($rs1 as $r) {
+				if (empty($r['id'])) {
+					continue;
+				}
+
+				$cids[] = $r['id'];
+			}
+			$criteria->addInCondition("t.id", $cids);
+		}
+
+		if (!empty($this->awb)) {
+			$cawb = new CDbCriteria;
+			$cawb->compare('t.awb', $this->awb, true);
+			$cawb->compare('t.meta', $this->awb, true, 'OR');
+			$criteria->mergeWith($cawb);
+		} else {
+			if ($forgp) {
+				$criteria->addCondition('awb is not NULL');
+			}
+		}
+		if (!empty($this->mabws)) {
+			$ns = preg_split('/[\s,;]+/', trim($this->mabws));
+			if (sizeof($ns) > 1000) {
+				$ns = array_slice($ns, 0, 1000);
+			}
+			$sc1 = new CDbCriteria;
+			$sc1->addCondition('t.awb REGEXP "' . implode('|', $ns) . '"');
+			$sc1->addCondition('t.meta REGEXP "' . implode('|', $ns) . '"', 'OR');
+			$sc1->addCondition('t.no REGEXP "' . implode('|', $ns) . '"', 'OR');
+			$criteria->mergeWith($sc1);
+		}
+		$criteria->compare('exrate', $this->exrate, true);
+		$criteria->compare('airline', $this->airline, true);
+		$criteria->compare('flight', $this->flight, true);
+		$criteria->compare('pol', $this->pol);
+		$criteria->compare('pod', $this->pod);
+		$criteria->compare('poc', $this->poc, true);
+		$criteria->compare('etd', $this->etd, true);
+		$criteria->compare('eta', $this->eta, true);
+
+		if (!empty($this->cargoType)) {
+			$criteria->addCondition('JSON_VALUE(t.meta,"$.cargo_type") = "'.$this->cargoType.'"');
+
+		}
+
+		if ($forgp) {
+			// in case searching for GatePass
+			// we only show not cleared console
+			$criteria->addCondition('t.status < 90');
+		} else {
+			$criteria->compare('t.status', $this->status);
+		}
+		if ($bydate) {
+			$criteria->addCondition("t.created >= '2017-01-01'");
+		} else {
+			$criteria->compare('t.created', $this->created, true);
+		}
+		if (!empty($this->bwf)) {
+			$criteria->addCondition('bwf & ' . $this->bwf . ' > 0');
+		}
+
+		if($this->exInfo==ImParcel::DGBWFCODE)
+		{
+			$with[] = 'shipments';
+			$criteria->addCondition('json_value(shipments.meta,"$.is_dg") = 1');
+		}
+		if($this->exInfo==ImParcel::DAMAGEBWFCODE)
+		{
+			$with[] = 'shipments';
+			$criteria->addCondition('shipments.bwf & ' . $this->exInfo . ' > 0');
+		}
+		if($this->exInfo==self::NOA_SENT_UB)
+		{
+			$criteria->addCondition('json_value(t.meta,"$.NOA_SENT_UB")=1');
+		}
+
+
+
+		if ($ec) {
+			$criteria->mergeWith($ec);
+		}
+
+		$sort = new CSort(get_called_class());
+		$sort->attributes = array(
+			'owner_name' => array(
+				'asc' => 'owner.name',
+				'desc' => 'owner.name DESC',
+			),
+			'process_airport' => array(
+				'asc' => 'process.airport',
+				'desc' => 'process.airport DESC',
+			),
+			'process_airport_dead' => array(
+				'asc' => 'process.pick_dead_date',
+				'desc' => 'process.pick_dead_date DESC',
+			),
+			'*',
+		);
+
+		if($bySea)
+		{
+			$sort->defaultOrder = 't.eta ASC, t.airline,t.flight';
+		}else
+		{
+
+			$sort->defaultOrder = 't.id DESC';
+		}
+		$sob = $sort->getOrderBy();
+		$sobs = preg_split('/, */', $sob);
+		foreach ($sobs as $ob) {
+			if (!strpos($ob, '.')) {
+				continue;
+			}
+
+			list($m, $f) = explode('.', $ob);
+			if (str_replace('`', '', $m) == 't') {
+				continue;
+			}
+
+			$with[] = $m;
+		}
+		if (!empty($with)) {
+			$criteria->with = array_unique($with);
+			$criteria->together = true;
+		}
+
+		return new CActiveDataProvider($this, array(
+			'criteria' => $criteria,
+			'sort' => $sort,
+			'pagination' => $pgn ? array(
+				'pageSize' => $ps,
+			) : false,
+		));
+	}
+
+	public static function getTheConsolType($id)
+	{
+		$sql = "SELECT type FROM `consol` WHERE id=" . $id;
+		$type = Yii::app()->db->createCommand($sql)->queryScalar();
+		return $type;
+	}
+
+	public function getBLpcs()
+	{
+		if ($this->type == 15) {
+			return @$this->mdata['b&l_pcs'];
+		} else if ($this->type == 70) {
+			return @$this->mdata['shipments'];
+		} else {
+			return '';
+		}
+	}
+
+	public function updateMeta()
+	{
+		$this->meta = json_encode($this->mdata);
+		$this->update(['meta']);
+	}
+
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return Consol the static model class
+	 */
+	public static function model($className = __CLASS__)
+	{
+		return parent::model(get_called_class());
+	}
+
+
+
+	public function calculateInvoiceExtendFee(&$inv,&$items,&$owner,&$tot,&$errors)
+	{
+		if ($this->service == self::SEACONSOL&&($this->type == self::IMCOCONSOLTYPE||$this->type == self::DMAWBCONSOLTYPE)) //2019-07-26 gero ,moved from DmawbConsol for Dmawb and ImcoConsol
+		{//sea delivery
+			// 4 container types:  20 GP|40GP|40HQ|LCL     and LCL charge by cbm, others charge on the same type.
+			//1 Customs Declaration mdata[inv_item_cd_sea]
+			
+			$inv->mdata['delivery_method']=2;
+			$inv->mdata['container_info']=(!empty($this->mdata['container_no'])?$this->mdata['container_no']:'').'-'.(!empty($this->mdata['sea_type'])?DmawbConsol::$containerTypes[$this->mdata['sea_type']]:'').'-'.(!empty($this->mdata['cargo_type'])?$this->mdata['cargo_type']:'');
+			
+			//2022-08-04 gero
+			// if (isset($this->mdata['inv_item_custom_lines_sea'])&& intval($this->mdata['inv_item_custom_lines_sea'])>0) {
+			// 	$lineNumber=intval($this->mdata['inv_item_custom_lines_sea']);
+			// 	$orgRate = OrgRate::model()->find('type=40 and org_id=:oid', [':oid' =>$owner->id]);
+			// 	$rateInfo = json_decode($orgRate['meta']);
+			// 	if (empty($rateInfo->AU->csdcRate)||empty($rateInfo->AU->csdclRate)||empty($rateInfo->AU->csdcapRate)) {
+			// 		$errors[]='Custom declaration line rate is not set in the org rate!';
+			// 	} else {
+			// 		if ($lineNumber<=10) {
+			// 			$amount=floatval($rateInfo->AU->csdcRate);
+			// 			$tot += $amount;
+			// 			$items[] = [$this->awb, 'Customs Declaration', 1, 0, $rateInfo->AU->csdcRate, $amount];
+			// 		} else {
+			// 			$amount= number_format(($lineNumber-10)*floatval($rateInfo->AU->csdclRate), 2, '.', '')+ floatval($rateInfo->AU->csdcRate);
+			// 			if ($amount>floatval($rateInfo->AU->csdcapRate)) {
+			// 				$amount= floatval($rateInfo->AU->csdcapRate);
+			// 			}
+			// 			$tot+=$amount;
+			// 			$items[] = [$this->awb, 'Customs Declaration', 1, 0, $amount, $amount];
+			// 		}
+			// 	}
+			// } else {
+			// 	if (isset($this->mdata['inv_item_cd_sea']) && $this->mdata['inv_item_cd_sea'] > 0) {
+			// 		$amount = floatval($this->mdata['inv_item_cd_sea']);
+			// 		$tot += $amount;
+			// 		$items[] = [$this->awb, 'Customs Declaration', 1, 0, $amount, $amount];
+			// 	}
+			// }
+			// //2.Document fee mdata[inv_item_ad_sea]
+			// if (isset($this->mdata['inv_item_ad_sea']) && $this->mdata['inv_item_ad_sea'] > 0) {
+			// 	$amount = floatval($this->mdata['inv_item_ad_sea']);
+			// 	$tot += $amount;
+			// 	$items[] = [$this->awb, 'Sea Document Fee', 1, 0, $amount ,$amount];
+			// }
+			
+			// //3.CMR  mdata[inv_item_cmr_sea]
+			// if (isset($this->mdata['inv_item_cmr_sea']) && $this->mdata['inv_item_cmr_sea'] > 0) {
+			// 	$amount = floatval($this->mdata['inv_item_cmr_sea']);
+			// 	$tot += $amount;
+			// 	$items[] = [$this->awb, 'CMR Fee', 1, 0, $amount,$amount];
+			// }
+			
+			// //4.SCA   mdata[inv_item_sca]
+			// // if (isset($this->mdata['inv_item_sca']) && $this->mdata['inv_item_sca'] > 0) {
+			// // 	$amount = floatval($this->mdata['inv_item_sca']);
+			// // 	$tot += $amount;
+			// // 	$items[] = [$this->awb, 'SCA Fee', 1, 0, $amount,$amount];
+			// // }
+			
+			// //.5.Time slot  mdata[inv_item_tsl]
+			// if (isset($this->mdata['inv_item_tsl']) && $this->mdata['inv_item_tsl'] > 0) {
+			// 	$amount = floatval($this->mdata['inv_item_tsl']);
+			// 	$tot += $amount;
+			// 	$items[] = [$this->awb, 'Time Slot Fee', 1, 0, $amount,$amount];
+			// }
+			
+			// $delivery_fee=0;
+			// if (isset($this->mdata['cargo_type'])&&$this->mdata['cargo_type']=='LCL') {
+			// 	//LCL type: mdata[inv_item_pf] /cbm  and mdata[inv_item_dlv_sea]/cbm
+			// 	if (empty($this->mdata['cbm'])) {
+			// 		$errors[]='for the LCL, the CBM need to be valid!';
+			// 	} else {
+			// 		if (isset($this->mdata['inv_item_pf']) && $this->mdata['inv_item_pf'] > 0) {
+			// 			$amount = floatval($this->mdata['inv_item_pf'])*$this->mdata['cbm'];
+			// 			$tot += $amount;
+			// 			$items[] = [$this->awb, 'Port Fee', 1, $this->mdata['cbm'], $this->mdata['inv_item_pf'],$amount];
+			// 		}
+			// 		if (isset($this->mdata['inv_item_dlv_sea']) && $this->mdata['inv_item_dlv_sea'] > 0) {
+			// 			$amount = floatval($this->mdata['inv_item_dlv_sea'])*$this->mdata['cbm'];
+			// 			$delivery_fee=$amount;
+			// 			$tot += $amount;
+			// 			$items[] = [$this->awb, 'Delivery Fee', 1, $this->mdata['cbm'], $this->mdata['inv_item_dlv_sea'],$amount];
+			// 		}
+			// 	}
+			// } else {
+			// 	if (isset($this->mdata['inv_item_pf']) && $this->mdata['inv_item_pf'] > 0) {
+			// 		$amount = floatval($this->mdata['inv_item_pf']);
+			// 		$tot += $amount;
+			// 		$items[] = [$this->awb, 'Port Fee', 1,0, $amount,$amount];
+			// 	}
+			// 	if (isset($this->mdata['inv_item_dlv_sea']) && $this->mdata['inv_item_dlv_sea'] > 0) {
+			// 		$amount = floatval($this->mdata['inv_item_dlv_sea']);
+			// 		$delivery_fee=$amount;
+			// 		$tot += $amount;
+			// 		$items[] = [$this->awb, 'Delivery Fee', 1, 0,$amount,$amount];
+			// 	}
+				
+			// 	//type: mdata[inv_item_pf]  mdata[inv_item_dlv_sea]
+			// }
+			// //8 fuel sucharge fee mdata[inv_item_fls]
+			// if (isset($this->mdata['inv_item_fls']) && $this->mdata['inv_item_fls'] > 0) {
+			// 	$amount =round(floatval($this->mdata['inv_item_fls'])*$delivery_fee/100, 2);
+			// 	$tot += $amount;
+			// 	$items[] = [$this->awb, 'Fuel Surcharge', 1,0, $amount,$amount];
+			// }
+						
+			// //9 custome duties
+			// if (isset($this->mdata['inv_item_cdty_sea']) && $this->mdata['inv_item_cdty_sea'] > 0) {
+			// 	$amount = floatval($this->mdata['inv_item_cdty_sea']);
+			// 	$tot += $amount;
+			// 	$items[] = [$this->awb, 'Customs Duties & Fees', 1, 0, $amount,$amount];
+			// }
+
+		} else if($this->service == self::AIRCONSOL&&$this->type == self::DMAWBCONSOLTYPE){
+			$inv->mdata['delivery_method']=1;
+			//airline delivery keep without change
+
+			if (isset($this->mdata['inv_item_custom_lines'])&& intval($this->mdata['inv_item_custom_lines'])>0) {
+				$lineNumber=intval($this->mdata['inv_item_custom_lines']);
+				$orgRate = OrgRate::model()->find('type=40 and org_id=:oid', [':oid' =>$owner->id]);
+				$rateInfo = json_decode($orgRate['meta']);
+				if (empty($rateInfo->AU->csdcRate)||empty($rateInfo->AU->csdclRate)||empty($rateInfo->AU->csdcapRate)) {
+					$errors[]='Custom declaration line rate is not set in the org rate!';
+				} else {
+					if ($lineNumber<=10) {
+						$amount=floatval($rateInfo->AU->csdcRate);
+						$tot += $amount;
+						$items[] = [$this->awb, 'Customs Declaration', 1, 0, $rateInfo->AU->csdcRate, $amount];
+					} else {
+						$amount= number_format(($lineNumber-10)*floatval($rateInfo->AU->csdclRate), 2, '.', '')+floatval($rateInfo->AU->csdcRate);
+						if ($amount>$rateInfo->AU->csdcapRate) {
+							$amount= floatval($rateInfo->AU->csdcapRate);
+						}
+						$tot+=$amount;
+						$items[] = [$this->awb, 'Customs Declaration', 1, 0, $amount, $amount];
+					}
+				}
+			} else {
+				if (isset($this->mdata['inv_item_cd']) && $this->mdata['inv_item_cd'] > 0) {
+					$amount = floatval($this->mdata['inv_item_cd']);
+					$tot += $amount;
+					$items[] = [$this->awb, 'Customs Declaration', 1, 0, $amount, $amount];
+				}
+			}
+			if (isset($this->mdata['inv_item_ad']) && $this->mdata['inv_item_ad'] > 0) {
+				$amount = floatval($this->mdata['inv_item_ad']);
+				$tot += $amount;
+				$items[] = [$this->awb, 'Airline Document Fee', 1, 0, $amount ,$amount];
+			}
+			if (isset($this->mdata['inv_item_cmr']) && $this->mdata['inv_item_cmr'] > 0) {
+				$amount = floatval($this->mdata['inv_item_cmr']);
+				$tot += $amount;
+				$items[] = [$this->awb, 'CMR Fee', 1, 0, $amount,$amount];
+			}
+			if (isset($this->mdata['inv_item_cdty']) && $this->mdata['inv_item_cdty'] > 0) {
+				$amount = floatval($this->mdata['inv_item_cdty']);
+				$tot += $amount;
+				$items[] = [$this->awb, 'Customs Duties & Fees', 1, 0, $amount,$amount];
+			}
+
+			$cgb_wt = 0.0;
+			if (isset($this->mdata['cgb_wt'])) {
+				$cgb_wt = $this->mdata['cgb_wt'];
+			}
+			if ($cgb_wt > 0.0) {
+				if (isset($this->mdata['inv_item_at']) && $this->mdata['inv_item_at'] > 0) {
+					$rate = floatval($this->mdata['inv_item_at']);
+					$amount = $rate * $cgb_wt;
+					$tot += $amount;
+					$items[] = [$this->awb, 'Airline Terminal Fee', 1, $cgb_wt, $rate, $amount];
+				}
+				if (isset($this->mdata['inv_item_ab']) && $this->mdata['inv_item_ab'] > 0) {
+					$rate = floatval($this->mdata['inv_item_ab']);
+					$amount = $rate * $cgb_wt;
+					$tot += $amount;
+					$items[] = [$this->awb, 'Airline Breakbulk Fee', 1, $cgb_wt, $rate, $amount];
+				}
+				if (isset($this->mdata['inv_item_dlv']) && $this->mdata['inv_item_dlv'] > 0) {
+					$rate = floatval($this->mdata['inv_item_dlv']);
+					$amount = $rate * $cgb_wt;
+					$tot += $amount;
+					$items[] = [$this->awb, 'Delivery Fee', 1, $cgb_wt,$rate,$amount];
+				}
+			}
+		}
+
+		// return ['inv'=>$inv,'items'=>$items,'owner'=>$owner,'tot'=>$tot,'errors'=>$errors];
+	}
+
+	public function getReportDetailByCourier()
+	{
+		$data=[];
+		$data['Truck Delivery']['number'] = 0;
+		$data['Truck Delivery']['weight'] = 0;
+		$data['Truck Delivery']['revenue'] = 0;
+		$data['Truck Delivery']['cost'] = 0;
+		$data['Self Pickup']['number'] = 0;
+		$data['Self Pickup']['weight'] = 0;
+		$data['Self Pickup']['revenue'] = 0;
+		$data['Self Pickup']['cost'] = 0;
+		$pids = [];
+		foreach ($this->shipments as $p) {
+			$pids[] = $p->id;
+		}
+		$sis = [];
+		$siIds = [];
+		$mysis = SiReconcileLine::model()->with('parent')->findAll('fid in ('.join(',',$pids).') and parent.status !=100 and item_code = "item"');
+		foreach ($sis as $key => $si) {
+			if(!empty($sis[$si->fid]))
+			{
+				$sis[$si->fid][] = $si;
+			}else
+			{
+				$sis[$si->fid] = [$si];
+			}
+			$siIds[] = $si->id;
+		}
+		$disputes = [];
+		if(!empty($siIds))
+		{
+			$myDisputes = DisputeLine::model()->find('si_reconcile_line_id in ('.join(',',$siIds).') and status<99');
+			foreach ($myDisputes as $key => $md)
+			{
+				$dispute[$si->fid] = $md;
+			}
+		}
+
+		foreach ($this->shipments as $p) {
+			if (empty($p->mdata['charge_client_amount'])) {
+				$revenue=0;
+				if (!empty($mdata['chargecode'])) {
+					$revenue=$p->getChargeByChargecode();
+					if ($revenue>0) {
+						$p->mdata['charge_client_amount']=$revenue;
+						$p->updateMeta();
+					}
+				}
+				if ($revenue==0) {
+					continue;
+				}
+			}
+			if (in_array($p->agent_id, [1426,1427])) {
+				continue;
+			}
+			if(!empty($this->checkAgentId))
+			{
+				if($p->agent_id!=$this->checkAgentId)
+				{
+					continue;
+				}
+			}
+			if(!empty($p->trans[0])){
+				$mySis = @$sis[$p->id];
+				if($p->trans[0]->org_id==Org::ORGID_COURIER_EIZ)
+				{
+					$thisCost = 0;
+					if(!empty($mySis))
+					{
+						foreach ($mySis as $key => $si) {
+							$dl = $disputes[$si->id];
+							$thisCost+=$si->value;
+
+							if(!empty($dl))
+							{
+								$thisCost -=$dl->dispute_amount_ex_gst;
+							}
+						}
+
+						$lis = $mySis[0]->getOtherChargeInvoiceLine();
+						if(!empty($lis))
+						{
+							foreach ($lis as $key => $li) {
+								$thisCost = $thisCost-$li->amount-$li->gst;
+							}
+						}
+						
+					}else
+					{
+						$thisCost=Shipment::getCourierCostByShipment($p->trans[0]->connote, $p->mdata['org_rate_id'], $p->getCubeWeight())['price'];
+					}
+
+					if (preg_match("/AOE\d{7}/i", $p->ref))
+					{
+
+						if (key_exists('EIZ Express Allied', $data)) {
+							$data['EIZ Express Allied']['number']+=1;
+							$data['EIZ Express Allied']['weight']+=$p->weight;
+							$data['EIZ Express Allied']['revenue']+=$p->mdata['charge_client_amount'];
+							$data['EIZ Express Allied']['cost']+=$thisCost;
+						} else {
+							$data['EIZ Express Allied']['number']=1;
+							$data['EIZ Express Allied']['weight']=$p->weight;
+							$data['EIZ Express Allied']['revenue']=$p->mdata['charge_client_amount'];
+							$data['EIZ Express Allied']['cost']=$thisCost;
+						}
+
+					}else
+					{
+						if (key_exists('EIZ Express Toll', $data)) {
+							$data['EIZ Express Toll']['number']+=1;
+							$data['EIZ Express Toll']['weight']+=$p->weight;
+							$data['EIZ Express Toll']['revenue']+=$p->mdata['charge_client_amount'];
+							$data['EIZ Express Toll']['cost']+=$thisCost;
+						} else {
+							$data['EIZ Express Toll']['number']=1;
+							$data['EIZ Express Toll']['weight']=$p->weight;
+							$data['EIZ Express Toll']['revenue']=$p->mdata['charge_client_amount'];
+							$data['EIZ Express Toll']['cost']=$thisCost;
+						}
+					}
+					continue;
+				}
+				
+				$otherCharge = 0;
+				if(!empty($mySis))
+				{
+					foreach ($mySis as $key => $si) {
+						$dl =  @$disputes[$si->id];
+						if(!empty($dl))
+						{
+							$otherCharge -= $dl->dispute_amount_ex_gst;
+						}
+					}
+
+					$lis = $mySis[0]->getOtherChargeInvoiceLine();
+					if(!empty($lis))
+					{
+						foreach ($lis as $key => $li) {
+							$otherCharge += ($li->amount-$li->gst);
+						}
+					}
+				}
+
+				if (key_exists($p->trans[0]->org_id, $data)) {
+					$data[$p->trans[0]->org_id]['number']+=1;
+					$data[$p->trans[0]->org_id]['weight']+=$p->weight;
+					$data[$p->trans[0]->org_id]['revenue']+=$p->mdata['charge_client_amount']+$otherCharge;
+				} else {
+					$data[$p->trans[0]->org_id] = ['number' => 1, 'weight' => $p->weight, 'revenue' => $p->mdata['charge_client_amount'], 'cost' => 0];
+				}
+			}else
+			{
+				//check truck delivery
+				if(!empty($p->cargo_process))
+				{
+					if($p->cargo_process->type== CargoProcess::PICKUP_CARGO)
+					{
+						$data['Truck Delivery']['number']+=1;
+						$data['Truck Delivery']['weight']+=$p->weight;
+						$data['Truck Delivery']['revenue']+=$p->mdata['charge_client_amount'];
+					}
+					else
+					{
+						$data['Self Pickup']['number']+=1;
+						$data['Self Pickup']['weight']+=$p->weight;
+						$data['Self Pickup']['revenue']+=$p->mdata['charge_client_amount'];
+					}
+				}
+			}
+			if (preg_match("/LET\d{7}/i", $p->ref)) {
+				if (key_exists(Org::ORGID_COURIER_AUSLETTER, $data)) {
+					$data[Org::ORGID_COURIER_AUSLETTER]['number']+=1;
+					$data[Org::ORGID_COURIER_AUSLETTER]['weight']+=$p->weight;
+					$data[Org::ORGID_COURIER_AUSLETTER]['revenue']+=$p->mdata['charge_client_amount'];
+				} else {
+					$data[Org::ORGID_COURIER_AUSLETTER]['number']=1;
+					$data[Org::ORGID_COURIER_AUSLETTER]['weight']=$p->weight;
+					$data[Org::ORGID_COURIER_AUSLETTER]['revenue']=$p->mdata['charge_client_amount'];
+				}
+			}
+
+		}
+
+		if(empty($data)&&preg_match("/^EL\d{5}/i", $this->no))//special for BFE EL letter consol
+		{
+			$data[Org::ORGID_COURIER_AUSLETTER]['number']=number_format($this->totShipments(), 0);
+			$data[Org::ORGID_COURIER_AUSLETTER]['weight']=$this->totWeight();
+			$data[Org::ORGID_COURIER_AUSLETTER]['revenue']=$this->getTotalInvoice();
+			$data[Org::ORGID_COURIER_AUSLETTER]['cost']=$this->totCost();
+			return $data;
+		}
+
+		$costData = $this->getTabBilling(true);
+		$costData = $costData['data'];
+		// $sql="SELECT org_id, SUM(IF(actual_amount> 0 , actual_amount,accrual_amount) ) as sumData FROM `billing_line` WHERE billing_ref = '".$this->no . "' GROUP by org_id ";
+		// $all = Yii::app()->db->createCommand($sql)->queryAll();
+		foreach ($costData as $key => $row) 
+		{
+			if($row['supplier_id']==Org::ORGID_COURIER_EIZ) continue;
+			if (key_exists($row['supplier_id'], $data)) 
+			{
+				if(preg_match("/^EL\d{5}/i", $this->no)&&$row['supplier_id']==Org::ORGID_COURIER_AUPOST)
+				{
+					$data[Org::ORGID_COURIER_AUSLETTER]['cost']= $row['sumData'];
+				}else
+				{
+					if(empty($data[$row['supplier_id']]['cost']))
+					{
+						$data[$row['supplier_id']]['cost']= 0;
+					}
+					$data[$row['supplier_id']]['cost']+=empty($row['confirm_payable'])?$row['accrual']:$row['confirm_payable'];
+				}
+			}
+		}
+		
+		unset($this->shipments);
+		return $data;
+	}
+
+	public function updateFlight($backend=false)
+	{
+		if($this->service!=self::AIRCONSOL) return;
+		$flag = $this->getflightTracking();
+		if ($flag == 0) {
+			return;
+		} elseif ($flag == 1) {
+			if (!empty($this->etd) && !empty($this->flight)) {
+				$data = Tracking::flight($this->flight, $this->etd);
+				if ($data[7] > 0) {
+					//update all the dispatch info
+					foreach ($this->shipments as $p) {
+						$tracking = Tracking::model()->find('pid=:pid and activity=:ac', [':pid' => $p->id, ':ac' => 'Flight dispatched']);
+						if (!empty($tracking)) {
+							$tracking->dt = $data[4];
+							$tracking->save();
+						}
+					}
+					$this->mdata['updatedEtd'] = 0;
+					$this->save();
+				}
+			}
+		} elseif ($flag == 2) {
+			if (!empty($this->etd) && !empty($this->flight)) {
+				$data = Tracking::flight($this->flight, $this->etd);
+				if ($data[7] > 0) {
+					//update all the dispatch info
+					foreach ($this->shipments as $p) {
+						$tracking = Tracking::model()->find('pid=:pid and activity=:ac', [':pid' => $p->id, ':ac' => 'Flight dispatched']);
+						if (!empty($tracking)) {
+							$tracking->dt = $data[4];
+							$tracking->save();
+						}
+						$tracking = Tracking::model()->find('pid=:pid and activity=:ac', [':pid' => $p->id, ':ac' => 'Flight arrived']);
+						if (!empty($tracking)) {
+							$tracking->dt = $data[5];
+							$tracking->save();
+						}
+					}
+					$this->mdata['updatedEtd'] = 0;
+					$this->save();
+				}
+			}
+		}
+
+		if($backend)
+		{
+			if ($flag == 0) {
+				return;
+			} elseif ($flag == 1) {
+				if (!empty($this->etd) && !empty($this->flight)) {
+					foreach ($this->shipments as $p) {
+					$tracking = Tracking::model()->find('pid=:pid and activity=:ac', [':pid' => $p->id, ':ac' => 'Flight dispatched']);
+						if (!empty($tracking)) {
+							$replaced = preg_replace('/\d{4}-\d{2}-\d{2}/', $this->etd, $tracking->dt);
+							$tracking->dt = $replaced;
+							$tracking->save();
+						}
+					}
+				}
+			} elseif ($flag == 2) {
+				if (!empty($this->etd) && !empty($this->flight)) {
+					foreach ($this->shipments as $p) {
+						$tracking = Tracking::model()->find('pid=:pid and activity=:ac', [':pid' => $p->id, ':ac' => 'Flight dispatched']);
+						if (!empty($tracking)) {
+							$replaced = preg_replace('/\d{4}-\d{2}-\d{2}/', $this->etd, $tracking->dt);
+							$tracking->dt = $replaced;
+							$tracking->save();
+						}
+						$tracking = Tracking::model()->find('pid=:pid and activity=:ac', [':pid' => $p->id, ':ac' => 'Flight arrived']);
+						if (!empty($tracking)) {
+							$tracking->dt = $this->eta.' '.date('H:i:s');
+							$tracking->save();
+						}
+					}
+				}
+			}
+		}
+	}
+
+	public function updateSea()
+	{
+		if($this->service!=self::SEACONSOL) return;
+		$flag = $this->getSeaTracking();
+		$vesselInfo = " ".@$this->mdata['sea_vessel']."/".@$this->flight;
+		if ($flag == 0) {
+			return;
+		} elseif ($flag == 1) {
+			if (!empty($this->etd) && !empty($this->flight)) {
+				$polInfor = SystemSetting::getPodSetting(substr($this->pol,0,2),$this->pol);
+				foreach ($this->shipments as $p) {
+					$tracking = Tracking::model()->find('pid=:pid and activity like :ac', [':pid' => $p->id, ':ac' => '%Sea vessel dispatched%']);
+					if (!empty($tracking)) {
+						$tracking->dt = $this->etd;
+						$tracking->activity = 'Sea vessel dispatched'.$vesselInfo;
+						$tracking->save();
+					}else
+					{
+						$p->addTracking(38, 'Sea vessel dispatched'.$vesselInfo, $polInfor[0], $r->etd);
+					}
+				}
+				$this->mdata['updatedEtd'] = 0;
+				$this->save();
+			}
+		} elseif ($flag == 2) {
+			if (!empty($this->etd) && !empty($this->flight)) {
+				foreach ($this->shipments as $p) {
+						$tracking = Tracking::model()->find('pid=:pid and activity like :ac', [':pid' => $p->id, ':ac' => '%Sea vessel dispatched%']);
+						if (!empty($tracking)) {
+							$tracking->dt =  $this->etd;
+							$tracking->activity = 'Sea vessel dispatched'.$vesselInfo;
+							$tracking->save();
+						}
+						$tracking = Tracking::model()->find('pid=:pid and activity like :ac', [':pid' => $p->id, ':ac' => '%Sea arrived%']);
+						if (!empty($tracking)) {
+							$tracking->dt =  $this->eta;
+							$tracking->activity = 'Sea arrived'.$vesselInfo;
+							$tracking->save();
+						}
+					}
+					$this->mdata['updatedEtd'] = 0;
+					$this->save();
+			}
+		}
+	}
+
+		/*to check if the consol shipment have flight dispatched
+	 * 0: no dispatch and arrive
+	 * 1. dispatch but not arrive
+	 * 2. dispatch and arrive
+	 *
+	 */
+	public function getflightTracking()
+	{
+		if (empty($this->shipments)) {
+			return 0;
+		}
+		$p=$this->shipments[0];
+		if (empty($p->tracks)) {
+			return 0;
+		}
+		$flag=0;
+		foreach ($p->tracks as $t) {
+			if (preg_match('/Flight dispatched/i', $t->activity)) {
+				$flag=$flag|1;
+			}
+			if (preg_match('/Flight arrived/i', $t->activity)) {
+				$flag=$flag|2;
+			}
+		}
+		if ($flag==0) {
+			return 0;
+		} elseif ($flag==1) {
+			return 1;
+		} else {
+			return 2;
+		}
+	}
+	public function getSeaTracking()
+	{
+		if (empty($this->shipments)) {
+			return 0;
+		}
+		$p=$this->shipments[0];
+		if (empty($p->tracks)) {
+			return 0;
+		}
+		$flag=0;
+		foreach ($p->tracks as $t) {
+			if (preg_match('/Sea vessel dispatched/i', $t->activity)) {
+				$flag=$flag|1;
+			}
+			if (preg_match('/Sea arrived/i', $t->activity)) {
+				$flag=$flag|2;
+			}
+		}
+		if ($flag==0) {
+			return 0;
+		} elseif ($flag==1) {
+			return 1;
+		} else {
+			return 2;
+		}
+	}
+
+	public function isOurWarehouse()
+	{
+		return Org::isOurWarehouse($this->pod);
+	}
+
+	public function isSYDWarehouse()
+	{
+		if($this->pod=="AUSYD")
+		{
+			return true;
+		}else
+		{
+			return false;
+		}
+	}
+
+	public function isSYDMELWarehouse()
+	{
+		if($this->pod=="AUSYD"||$this->pod=="AUMEL"||$this->pod=="AUBNE")
+		{
+			return true;
+		}else
+		{
+			return false;
+		}
+	}
+
+	public function getRTSInvoices()
+	{
+		$invoices = [];
+		$sql = 'SELECT invoice.* FROM invoice JOIN inv_line ON invoice.id = inv_line.inv_id JOIN shipment ON shipment.id = inv_line.fid JOIN consol ON shipment.consol_id = consol.id WHERE inv_line.model = "ImParcel" AND invoice.type IN (36) AND consol.id = :cid';
+		$param = [':cid' => $this->id];
+		$rs = Yii::app()->db->createCommand($sql)->bindValues($param)->queryAll();
+		if (!empty($rs)) {
+			$inv_ids = [];
+			foreach ($rs as $r) {
+				$inv_ids[] = $r['id'];
+			}
+			if (!empty($inv_ids)) {
+				$invoices = Invoice::model()->findAll('id IN (' . implode(',', $inv_ids) . ')');
+			}
+		}
+
+		return $invoices;
+	}
+
+	public function is3PL()
+	{
+		if($this->is3PLOnly()||$this->isWDT())
+		{
+			return true;
+		}
+		return false;
+	}
+
+	public function is3PLOnly()
+	{
+		if (($this->owner_id == Org::ORGID_CLIENT_TLA)&&empty($this->mdata['for3PL']))
+		{
+			return true;
+		}
+		if(preg_match('/^3PL/', $this->no))
+		{
+			return true;
+		}
+		return false;
+	}
+	public function isWDT()
+	{
+		if(preg_match('/^WDT/', $this->no))
+		{
+			return true;
+		}
+		return false;
+	}
+
+	
+
+	public function getConsolDGWarnings($isAll = false,$isHtml=true)
+	{
+		if($isAll)
+		{
+			$shipments = AllShipment::model()->findAll('consol_id = :cid AND (JSON_VALUE(meta,"$.is_dg") = 1 or (bwf&:bwf)>0)', [':cid' => $this->id,':bwf'=>ImParcel::DAMAGEBWFCODE]);
+		}else
+		{
+			$shipments = Shipment::model()->findAll('consol_id = :cid AND (JSON_VALUE(meta,"$.is_dg") = 1 or (bwf&:bwf)>0)', [':cid' => $this->id,':bwf'=>ImParcel::DAMAGEBWFCODE]);
+		}
+
+		$pro = [];
+		if(!empty($this->mdata['isAutoGen']))
+		{
+			if($isHtml)
+			{
+				$pro['auto_inv']='<span>&nbsp;</span> <span class="green">AUTO INV</span>';
+			}else
+			{
+				$pro['auto_inv']='AUTO INV';
+			}
+		}
+
+		if(!empty($this->mdata['NOA_SENT_UB']))
+		{
+			if($isHtml)
+			{
+				if(empty($this->mdata['ubmerror'])||$this->mdata['ubmsent']==9)
+				{
+					$pro['noa_sent_ub']='<span>&nbsp;</span> <span class="green">NOA_SENT_UB</span>';
+				}else
+				{
+					$pro['noa_sent_ub']='<span>&nbsp;</span> <span class="red">NOA_SENT_UB</span>';
+				}
+			}else
+			{
+				$pro['noa_sent_ub']='NOA_SENT_UB';
+			}
+		}
+
+		if(!empty($this->mdata['prealert']))
+		{
+			if($isHtml)
+			{
+				$pro['prealert']='<span>&nbsp;</span> <span class="orange">PREALERT</span>';
+			}else
+			{
+				$pro['prealert']='PREALERT';
+			}
+		}
+
+		if(!empty($this->mdata['NOA_DMAWBCONSOL']))
+		{
+			if($isHtml)
+			{
+				$pro['noa_dmawbconsol']='<span>&nbsp;</span> <span class="green">NOA_DMAWBCONSOL</span>';
+			}else
+			{
+				$pro['noa_dmawbconsol']='NOA_DMAWBCONSOL';
+			}
+		}
+
+		foreach ($shipments as $key => $p) {
+			if(!empty($p->mdata['is_dg']))
+			{
+				if($isHtml)
+				{
+					$pro['dg']='<span>&nbsp;</span> <span class="warn_red">DG</span>';
+				}else
+				{
+					$pro['dg']='DG';
+				}
+			}
+			if(($p->bwf&ImParcel::DAMAGEBWFCODE)>0)
+			{
+				if($isHtml)
+				{
+					$pro['dm']='<span>&nbsp;</span> <span class="warn_red">DAMAGE</span>';
+				}else
+				{
+					$pro['dm']='DAMAGE';
+				}
+			}
+		}
+		return join('',$pro);
+
+	}
+
+	public function isTLA()
+	{
+		if (in_array($this->type, [Consol::DMAWBCONSOLTYPE, Consol::IMCOCONSOLTYPE, Consol::ELMSCONSOLTYPE]) && (strtotime($this->eta) >= strtotime('2020-08-01') || strtotime($this->created) >= strtotime('2020-08-01'))) return true;
+		return false;
+	}
+	
+	public function cleanDuplicatedBillingLine(&$provide)
+	{
+		$has = false;
+		if(array_key_exists(Org::ORGID_COURIER_TNT_TOP,$provide)&&array_key_exists(Org::ORGID_COURIER_TNT,$provide))
+		{
+			unset($provide[Org::ORGID_COURIER_TNT]);
+		}
+
+		if(!empty($provide[Org::ORGID_AIRPORT_QANTAS]))
+		{
+			$checkKey = "";
+			$has = false;
+			foreach ($provide[Org::ORGID_AIRPORT_QANTAS] as $key => $value) {
+				if(!empty($key))
+				{
+					$checkKey = $key;
+				}else
+				{
+					$has = true;
+				}
+			}
+			if(!empty($checkKey)&&$has)
+			{
+				unset($provide[Org::ORGID_AIRPORT_QANTAS]['']);
+			}
+		}
+	}
+
+
+	public function getTabBilling($backend = false)
+	{
+		$provide = [];
+		if($this->isTLA())
+		{
+			$sql = 'SELECT * FROM hvlv_top.billing_line WHERE billing_ref = :no AND status != 11 AND accrual_amount != 0 AND org_id!=3937';
+		}else
+		{
+			$sql = 'SELECT * FROM hvlv_db.billing_line WHERE billing_ref = :no AND status != 11 AND accrual_amount != 0  AND org_id!=3937';
+		}
+
+		$rs = Yii::app()->db->createCommand($sql)->bindValues([':no' => $this->no])->queryAll();
+		foreach ($rs as $r) {
+			if (empty($provide[$r['org_id']][$r['billing_cref']])) {
+				$provide[$r['org_id']][$r['billing_cref']] = ['id' => $r['org_id'] . $r['billing_cref'], 'inv_no' => $r['billing_cref'] == $this->no ? '' : $r['billing_cref'], 'supplier_id' => $r['org_id'], 'supplier' => Org::model()->findByPk($r['org_id'])->name, 'accrual' => 0, 'invoice_payable' => 0, 'dispute' => 0, 'confirm_payable' => 0, 'currency' => Invoice::$currencies[$r['currency']],'glcode'=>$r['charge_code'],'billing_id'=>$r['id'],'dpt_id'=>$r['dpt_id'],'dpmt'=>$r['dpmt']];
+			}
+
+			$provide[$r['org_id']][$r['billing_cref']]['accrual'] += $r['accrual_amount'];
+
+			// old billing actual
+			if ($r['actual_amount'] > 0) {
+				$sql = 'SELECT * FROM hvlv_db.supplier_invoice WHERE inv_no = :no UNION SELECT * FROM hvlv_top.supplier_invoice WHERE inv_no = :no';
+				$si = Yii::app()->db->createCommand($sql)->bindValues([':no' => $r['billing_cref']])->queryAll();
+				if (empty($si)) {
+					$provide[$r['org_id']][$r['billing_cref']]['invoice_payable'] += $r['actual_amount'];
+					$provide[$r['org_id']][$r['billing_cref']]['confirm_payable'] += $r['actual_amount'];
+				}
+			}
+		}
+		$this->cleanDuplicatedBillingLine($provide);
+		// if (!empty($provide[Org::ORGID_COURIER_AUSLETTER])) {
+		// 	foreach ($provide[Org::ORGID_COURIER_AUSLETTER] as $inv_no => $v) {
+		// 		$provide[Org::ORGID_COURIER_AUPOST][$inv_no]['accrual'] += $provide[Org::ORGID_COURIER_AUSLETTER][$inv_no]['accrual'];
+		// 	}
+		// 	unset($provide[Org::ORGID_COURIER_AUSLETTER]);
+		// }
+		foreach ($provide as $org_id => $lines) {
+			// if (!in_array($org_id, array_merge(Org::$couriers, Org::$airports))) {
+			// 	unset($provide[$org_id]);
+			// 	continue;
+			// }
+			foreach ($lines as $inv_no => $line) {
+				// valid inv_no = except couriers
+				if (!empty($inv_no) && $inv_no != $this->no) {
+					if ($org_id == Org::ORGID_COURIER_TNT) {
+						$payable = Billing::getPayableFromSiReconcile([Org::ORGID_COURIER_TNT,Org::ORGID_COURIER_TNT_TOP], $this->id, false, $inv_no, 'exclude');
+						$dispute = Billing::getDisputeFromSiReconcile([Org::ORGID_COURIER_TNT,Org::ORGID_COURIER_TNT_TOP], $this->id, $inv_no, 'exclude');
+					}
+					else if ($org_id != Org::ORGID_COURIER_AUSLETTER) {
+						$payable = Billing::getPayableFromSiReconcile($org_id, $this->id, false, $inv_no, 'exclude');
+						$dispute = Billing::getDisputeFromSiReconcile($org_id, $this->id, $inv_no, 'exclude');
+					} else {
+						$payable = Billing::getPayableFromSiReconcile(Org::ORGID_COURIER_AUPOST, $this->id, false, $inv_no, 'only');
+						$dispute = Billing::getDisputeFromSiReconcile(Org::ORGID_COURIER_AUPOST, $this->id, $inv_no, 'only');
+					}
+					$provide[$org_id][$inv_no]['invoice_payable'] += $payable;
+					$provide[$org_id][$inv_no]['dispute'] = $dispute;
+					$provide[$org_id][$inv_no]['confirm_payable'] += $payable - $dispute;
+					if(empty($provide[$org_id][$inv_no]['accrual']))
+					{
+						$provide[$org_id][$inv_no]['confirm_payable / accrual'] =  '0%';
+					}else
+					{
+						$provide[$org_id][$inv_no]['confirm_payable / accrual'] = number_format($provide[$org_id][$inv_no]['confirm_payable'] / $provide[$org_id][$inv_no]['accrual'] * 100, 2, '.', '') . '%';
+					}
+
+					if ($provide[$org_id][$inv_no]['dispute'] <= 0) $provide[$org_id][$inv_no]['dispute'] = '';
+				} else {
+					if ($org_id == Org::ORGID_COURIER_TNT) {
+						$payables = Billing::getPayableFromSiReconcile([Org::ORGID_COURIER_TNT,Org::ORGID_COURIER_TNT_TOP], $this->id, true, null, 'exclude');
+					}elseif ($org_id != Org::ORGID_COURIER_AUSLETTER) {
+						$payables = Billing::getPayableFromSiReconcile($org_id, $this->id, true, null, 'exclude');
+					} else {
+						$payables = Billing::getPayableFromSiReconcile(Org::ORGID_COURIER_AUPOST, $this->id, true, null, 'only');
+					}
+					foreach ($payables as $payable) {
+						if($payable['invoice_no']!=$inv_no&&!empty($provide[$org_id][$payable['invoice_no']]))continue;
+						if (empty($provide[$org_id][$payable['invoice_no']])) $provide[$org_id][$payable['invoice_no']] = ['id' => $org_id . $payable['invoice_no'], 'inv_no' => $payable['invoice_no'],'supplier_id'=>$org_id, 'supplier' => Org::model()->findByPk($org_id)->name, 'accrual' => 0, 'invoice_payable' => 0, 'dispute' => 0, 'confirm_payable' => 0, 'currency' => $line['currency']];
+						if ($org_id == Org::ORGID_COURIER_TNT) {
+							$dispute = Billing::getDisputeFromSiReconcile([Org::ORGID_COURIER_TNT,Org::ORGID_COURIER_TNT_TOP], $this->id, $payable['invoice_no'], 'exclude');
+						}elseif ($org_id != Org::ORGID_COURIER_AUSLETTER) {
+							$dispute = Billing::getDisputeFromSiReconcile($org_id, $this->id, $payable['invoice_no'], 'exclude');
+						} else {
+							$dispute = Billing::getDisputeFromSiReconcile(Org::ORGID_COURIER_AUPOST, $this->id, $payable['invoice_no'], 'only');
+						}
+
+						$provide[$org_id][$payable['invoice_no']]['accrual'] += $payable['accrual'] > 0 ? $payable['accrual'] : $payable['payable'];
+						$provide[$org_id][$payable['invoice_no']]['invoice_payable'] += $payable['payable'];
+						$provide[$org_id][$payable['invoice_no']]['dispute'] = $dispute;
+						$provide[$org_id][$payable['invoice_no']]['confirm_payable'] += $payable['payable'] - $dispute;
+						if(empty($provide[$org_id][$payable['invoice_no']]['accrual']))
+						{
+							$provide[$org_id][$payable['invoice_no']]['confirm_payable / accrual'] = '0%';
+						}else
+						{
+							$provide[$org_id][$payable['invoice_no']]['confirm_payable / accrual'] = number_format($provide[$org_id][$payable['invoice_no']]['confirm_payable'] / $provide[$org_id][$payable['invoice_no']]['accrual'] * 100, 2, '.', '') . '%';
+						}
+
+						$provide[$org_id][$inv_no]['accrual'] -= $payable['accrual'];
+					}
+				}
+			}
+		}
+		$total = [];
+		$notAUD = false;
+		$found = false;
+		foreach ($provide as $org_id => $line) {
+			foreach ($provide[$org_id] as $inv_no => $line) {
+				if(preg_match('/-RE/i',$inv_no))
+				{
+					unset($provide[$org_id][$inv_no]);
+					continue;
+				}
+
+				if (!empty($line['inv_no'])) {
+					$sql = 'SELECT currency FROM hvlv_db.supplier_invoice WHERE inv_no = :no AND status < 100 AND org_id = :org_id UNION SELECT currency FROM hvlv_top.supplier_invoice WHERE inv_no = :no AND status < 100 AND org_id = :org_id';
+					$rs = Yii::app()->db->createCommand($sql)->bindValues([':no' => $inv_no, ':org_id' => $org_id])->queryAll();
+					if (!empty($rs)) {
+						$provide[$org_id][$inv_no]['currency'] = Invoice::$currencies[$rs[0]['currency']];
+					}
+				}
+				if (number_format($line['accrual'], 2, '.', '') <= 0&&$inv_no==$this->no&&$line['confirm_payable']==0) {
+					unset($provide[$org_id][$inv_no]);
+					continue;
+				}
+				foreach ($provide[$org_id][$inv_no] as $key => $value) {
+					if (in_array($key, ['accrual', 'invoice_payable', 'dispute', 'confirm_payable'])) {
+						if(in_array($provide[$org_id][$inv_no]['supplier_id'],Org::$airportsCal)&&$key=='accrual')
+						{
+							if(!empty($provide[Org::ORGID_AIRPORT_PCAETEMP][$this->no]))
+							{
+								$thisValue = str_replace('<div style="width: 100%; text-align: right">', '', $provide[Org::ORGID_AIRPORT_PCAETEMP][$this->no]['accrual']);
+								$thisValue = str_replace('</div>', '', $thisValue);
+								$thisValue = str_replace(',', '', $thisValue);
+								$total[$key] = $total[$key]-$thisValue;
+								unset($provide[Org::ORGID_AIRPORT_PCAETEMP]);
+							}
+						}
+
+						if($backend)
+						{
+							$provide[$org_id][$inv_no][$key] = $value;
+						}else
+						{
+							$provide[$org_id][$inv_no][$key] = '<div style="width: 100%; text-align: right">' . AppHelper::money_format('%i', $value) . '</div>';
+						}
+						if (empty($total[$key])) $total[$key] = 0;
+						if ($provide[$org_id][$inv_no]['currency'] != 'AUD') {
+							$notAUD = true;
+							$total[$key] += BillingLine::getByCurrency(floatval($value), array_search($provide[$org_id][$inv_no]['currency'], Invoice::$currencies));
+						} else {
+							$total[$key] += floatval($value);
+						}
+					} else if (in_array($key, ['dispute'])) {
+						if ($provide[$org_id][$inv_no][$key] <= 0)
+						{
+							$provide[$org_id][$inv_no][$key] = '';
+						}
+						else
+						{
+							if($backend)
+							{
+								$provide[$org_id][$inv_no][$key] = $value;
+							}else
+							{
+								$provide[$org_id][$inv_no][$key] = '<div style="width: 100%; text-align: right"><span style="color: red">(' . AppHelper::money_format('%i', $value) . ')</span></div>';
+							}
+						}
+						if (empty($total[$key])) $total[$key] = 0;
+						if ($provide[$org_id][$inv_no]['currency'] != 'AUD') {
+							$notAUD = true;
+							$total[$key] += BillingLine::getByCurrency(floatval($value), array_search($provide[$org_id][$inv_no]['currency'], Invoice::$currencies));
+						} else {
+							$total[$key] += floatval($value);
+						}
+					} else if (in_array($key, ['confirm_payable / accrual'])) {
+						if($backend)
+						{
+							$provide[$org_id][$inv_no][$key] = $value;
+						}else
+						{
+							$provide[$org_id][$inv_no][$key] = '<div style="width: 100%; text-align: right">' . $value . '</div>';
+						}
+					}
+				}
+
+				if (empty($provide[$org_id][$inv_no]['desc'])) {
+					$provide[$org_id][$inv_no]['desc'] = Billing::getDescFromSiReconcile($org_id, $this->id, $inv_no);
+				}
+			}
+		}
+
+
+
+		if ($notAUD) {
+			foreach ($total as $key => $value) {
+				$total[$key] = '~' . $value;
+			}
+		}
+
+		$rs = [];
+		foreach (array_values($provide) as $v) {
+			$rs = array_merge($rs, array_values($v));
+		}
+		return ['data' => array_values($rs), 'total' => $total];
+	}
+
+	public function getDest()
+	{
+		$destArr = [106=>'SYD',218=>'MEL',529=>'ADL',530=>'BNE',811=>'PER',2936=>'FRE'];
+		return $destArr[$this->dpt_id];
+	}
+
+	public function getMinScanTime()
+	{
+		$sql = 'SELECT min(json_value(meta,"$.scan_time")) FROM shipment WHERE status != 100 and consol_id = ' . $this->id;
+		$c = Yii::app()->db->createCommand($sql);
+		return $c->queryScalar();
+	}
+
+	public function linkShipment($update=true)
+	{
+		if (!empty($this->linkShipment)&&!$update) {
+			return $this->linkShipment[0];
+		}
+		if (empty($this->linkShipment)) {
+			$model=new ImParcel();
+			$model->agent_id= $this->owner_id;
+			$cnor = new Addr;
+			$cnee=new Addr();
+		} else {
+			$model= $this->linkShipment[0];
+			$cnor=$model->cnor;
+			$cnee=$model->cnee;
+		}
+		$model->hbn= $this->no;
+		$model->currency=2;
+		$model->consol_id= $this->id;
+		if(empty($cnor->name))
+		{
+			$cnor->name= isset($this->mdata['cnor'])?$this->mdata['cnor']:'';
+		}
+
+		if(empty($cnor->address))
+		{
+			$cnor->address=isset($this->mdata['cnor_addr'])?$this->mdata['cnor_addr']:'';
+		}
+		$cnor->save();
+		
+		$model->cnor_id=$cnor->id;
+		if(empty($cnee->name))
+		{
+			$cnee->name=isset($this->mdata['cnee'])?$this->mdata['cnee']:'';
+		}
+		if(empty($cnee->address))
+		{
+			$cnee->address=isset($this->mdata['cnee_addr'])?$this->mdata['cnee_addr']:'';
+		}
+		if(empty($cnee->postcode))
+		{
+			$cnee->postcode=isset($this->mdata['cnee_postcode'])?$this->mdata['cnee_postcode']:'';
+		}
+		if(empty($cnee->suburb))
+		{
+			$cnee->suburb=isset($this->mdata['cnee_suburb'])?$this->mdata['cnee_suburb']:'';
+		}
+		if(empty($cnee->state))
+		{
+			$cnee->state=isset($this->mdata['cnee_state'])?$this->mdata['cnee_state']:'';
+		}
+		if(empty($cnee->country))
+		{
+			$cnee->country=isset($this->mdata['cnee_country'])?$this->mdata['cnee_country']:'';
+		}
+
+		if (empty($cnee->state)) {
+			$cnee->state='NSW';
+		}
+		$cnee->save();
+		$model->cnee_id=$cnee->id;
+		if (!empty($this->mdata['rece'])) {
+			if (empty($model->receiver)) {
+				$receiver=new Addr();
+			} else {
+				$receiver=$model->receiver;
+			}
+			$receiver->name=$this->mdata['rece'];
+			$receiver->address=isset($this->mdata['rece_addr'])?$this->mdata['rece_addr']:'';
+			$receiver->save();
+			$model->rec_id=$receiver->id;
+		}
+		$model->pkg= isset($this->mdata['shipments'])?intval($this->mdata['shipments']):1;
+		$model->dvalue= isset($this->mdata['dvalue'])?floatval($this->mdata['dvalue']):0;
+		$model->weight= isset($this->mdata['awb_wt'])?floatval($this->mdata['awb_wt']):0;
+		if(empty($model->ref))
+		{
+			if ($this->service == 20) {
+				$model->ref=isset($this->mdata['house_bill'])?$this->mdata['house_bill']:$this->awb;
+			} else {
+				$model->ref= $this->awb;
+			}
+		}
+		$model->cref=isset($this->mdata['house_bill'])?$this->mdata['house_bill']:'';
+		$model->eitems['type'][0]='O';
+		$model->eitems['g'][0]=@$this->mdata['item'];
+		$model->eitems['q'][0]=isset($this->mdata['shipments'])?intval($this->mdata['shipments']):1;
+		$model->eitems['v'][0]= sprintf("%.2f", (isset($this->mdata['dvalue'])?floatval($this->mdata['dvalue']):0)/(!empty($this->mdata['shipments'])?intval($this->mdata['shipments']):1));
+		$model->cbwf=$model->cbwf|ImParcel::CBWF_DIRECT_CONSOL_BASE;
+		$model->save();
+		if (empty($this->linkShipment)) {
+			$link=new ConsolShipmentMap();
+			$link->cid=$this->id;
+			$link->sid=$model->id;
+			$link->save();
+		}
+		return $model;
+	}
+
+	public function getDDUStorageBase()
+	{
+		$base = 80;
+		$minimum = 0;
+		$rate = 30; 
+		if(!empty($this->mdata['goods_available_address']))
+		{
+			switch ($this->mdata['goods_available_address']) {
+				case 3:
+					if(!empty($this->mdata['arrival_cfs']))
+					{
+						if(preg_match('/CITO/i', $this->mdata['arrival_cfs']))
+						{
+							$base = 25;
+							$rate = 65;
+							$minimum = 220;
+						}elseif(preg_match('/PORTGATE/i', $this->mdata['arrival_cfs']))
+						{
+							$base = 55;
+							$rate = 45;
+							$minimum = 125;
+						}elseif(preg_match('/XLI/i', $this->mdata['arrival_cfs']))
+						{
+							$base = 40;
+							$rate = 50;
+							$minimum = 200;
+						}
+					}
+					break;
+				case 1://CITO
+					$base = 25;
+					$rate = 65;
+					$minimum = 220;
+					# code...
+					break;
+				case 13://portgate
+					$base = 55;
+					$rate = 45;
+					$minimum = 125;
+					break;
+				case 14://PER XLI
+					$base = 40;
+					$rate = 50;
+					$minimum = 200;
+					break;
+				
+				default:
+					# code...
+					break;
+			}
+		}
+		return ['base'=>$base,'rate'=>$rate,'minimum'=>$minimum];
+	}
+
+	public function getAOutStatus(){
+		$result="";
+		if(!empty($this->mdata['aoutsent'])&&$this->mdata['aoutsent']==1){
+			$result = "Y[D]";
+		}elseif (!empty($this->mdata['isclickunpack'])&&$this->mdata['isclickunpack']==1){
+			$result = "Y";
+		}
+		if($this->service==10){
+			if(!empty($this->mdata['seaoutreceipt'])&&$this->mdata['seaoutreceipt']==1){
+				$result.="[R]";
+			}
+		}
+		return $result;
+	}
+
+
+	public function log($action)
+	{
+		$extra =["action"=>$action];
+		Log::add($this, $this->isNewRecord? 3 : 4, array_merge(['status' => $this->getStatus()], $extra));
+	}
+
+	public function getNoticeEmail()
+	{
+		if($this->is3PL())
+		{
+			$email = '3pl@toplogistics.com.au';
+		}else
+		{
+			$email = 'imports@toplogistics.com.au';
+		}
+		return $email;
+	}
+
+	public function getReal()
+	{
+		if(empty($this->real))
+		{
+			if(!empty($this->shadowParentMap))
+			{
+				$this->real = $this->shadowParentMap->consol;
+			}else
+			{
+				$this->real = $this;
+			}
+		}
+		return $this->real;
+	}
+	
+	public function getDeportOrigin()
+	{
+		$depotOrigin = "";
+		if($this->service==Consol::AIRCONSOL)
+		{
+			$airlineData = SystemSetting::getAirlineAgentSetting();
+			foreach ($airlineData as $key => $value) {
+				if(preg_match("/{$value[0]}-/", $this->awb)&&$this->airline==$value[1])
+				{
+					if($value[2]=="all"||$value[2]==$this->dpt_id)
+					{
+						$type = $value[3];
+						$airportOriginalList = SystemSetting::getAirportOriginalSetting($type);
+						foreach ($airportOriginalList as $key2 => $value2) {
+							if($value2[0]=="all")
+							{
+								if($value2[1]==$this->dpt_id)
+								{
+									$depotOrigin = $value2[2];
+									break;
+								}
+							}else
+							{
+								if($value2[0]=="LOOSE"&&@$this->mdata['air_type']==ImcoConsol::AIR_TYPE_LOOSE)
+								{
+									if($value2[1]==$this->dpt_id)
+									{
+										$depotOrigin = $value2[2];
+										break;
+									}
+								}elseif($value2[0]!="LOOSE"&&@$this->mdata['air_type']!=ImcoConsol::AIR_TYPE_LOOSE)
+								{
+									if($value2[1]==$this->dpt_id)
+									{
+										$depotOrigin = $value2[2];
+										break;
+									}
+								}
+							}
+						}
+						break;
+					}
+				}
+			}
+		}
+		return $depotOrigin;
+	}
+
+	public function getDeportOriginList()
+	{
+		if($this->service==Consol::AIRCONSOL)
+		{
+			$list = ImcoConsol::$deportOrigin[$this->pod];
+		}else
+		{
+			$list = ImcoConsol::$deportOriginSea[$this->pod];
+		}
+		return $list;
+	}
+
+}

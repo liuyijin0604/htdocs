@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+</head>
+
+<body>
+    <h1>Export Cargo Cost</h1>
+    <br />
+    <div class="container">
+        <form id="export_cost_form">
+            <div class="row">
+                <div class="col-lg-4">
+                    <div class="input-group">
+                        <label for="driver_id" class="form-label">Select Driver</label>
+                        <br />
+                        <select name="driver_id" id="driver_id">
+                            <option value="">Select</option>
+                            <option value="3662">(A)DFE</option>
+                            <option value="2827">(system)sam zheng removals trading pty ltd</option>
+                            <option value="4369">(system)TOT Transport</option>
+                            <option value="2584">(system)TLA TRUCK DELIVERY</option>
+                            <option value="2593">(system)Easygo Transport Solution Pty Ltd</option>
+                            <option value="4399">(system)LCK Integrity logistics pty ltd</option>
+                            <option value="4144">(system)Railer</option>
+                            <option value="1587">(system)Wiseway</option>
+                            <option value="4405">(system)Cameron Interstate from syd</option>
+                            <option value="2622">(system)Mirarchi Transport PTY LTD</option>
+                            <option value="4423">(system)MadeSpeedy Pty Ltd</option>
+                            <option value="2650">(system)Shining 666 Pty Ltd</option>
+                            <option value="4459">(system)tnvexpress</option>
+                            <option value="4528">(system)Amir-Samra Roadways</option>
+                            <option value="2497">(system)Bonds Transport Group</option>
+                            <option value="4297">(system)AUSTRALIA METRO LOGISTIC SOLUTION PTY LTD</option>
+                            <option value="4561">(system)BNM EXPRESS PTY LTD</option>
+                            <option value="4072">(system)Tony Syd</option>
+                            <option value="2815">(system)RSF LOGISTICS PTY LTD</option>
+                            <option value="3533">(A)PDK LOGISTICS</option>
+                            <option value="2848">(system)Kevin-zhaokai huang</option>
+                            <option value="3119">(system)TENG&amp;SONS CRANE CONTAINER TRANSPORT PTY.LTD</option>
+                            <option value="4159">(system)YFH Removal</option>
+                            <option value="1897">(system)CITO TRANSPORT</option>
+                            <option value="4465">(system)Henrey Glcwacki</option>
+                            <option value="4474">(system)AFX LOGISTICS PTY LTD</option>
+                            <option value="4486">(system)JOSH-NEED FORK-MEL</option>
+                            <option value="4234">(system)Alex</option>
+                            <option value="4498">(system)Sun</option>
+                            <option value="3991">(system)TONYMEL YQ LOGISTICS PTY LTD</option>
+                            <option value="4021">(system)LE QIN MOVE VAN</option>
+                            <option value="1482">(system)Ultra Transport &amp; Logistics</option>
+                            <option value="4567">(system)TK EXPRESS</option>
+                            <option value="4570">(system)Cameron Interstate from MEL</option>
+                            <option value="4573">(system)YING ZHANG</option>
+                            <option value="1774">(system)Xtreme Freight </option>
+                            <option value="3838">(system)Ben&amp;Aya Pty Ltd</option>
+                            <option value="4102">(system)Top Logistics QLD </option>
+                            <option value="4111">(system)Hvya International</option>
+                            <option value="4183">(system)Mingming Ye</option>
+                            <option value="4189">(system)Eastwood Technology Pty Ltd</option>
+                            <option value="4033">(system)listentobaibai pty ltd</option>
+                            <option value="4351">(system)Unicorn Logistic Pty Ltd</option>
+                            <option value="4726">(system)daniel huang</option>
+                            <option value="4723">(system)warsan logistics</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="col-lg-4">
+                    <div class="input-group">
+                        <label for="cost_type" class="form-label">Select a Type</label>
+                        <br />
+                        <select id="cost_type" name="cost_type">
+                            <option value="B2B">B2B/FBA</option>
+                            <option value="B2C">B2C</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="col-lg-4">
+                    <div class="input-group">
+                        <label for="from_date" class="form-label">From</label>
+                        <br />
+                        <input type="date" class="form-control" id="from_date" name="from_date" autocomplete="off" required>
+                    </div>
+                </div>
+                <div class="col-lg-4">
+                    <div class="input-group">
+                        <label for="to_date" class="form-label">To</label>
+                        <br />
+                        <input type="date" class="form-control" id="to_date" name="to_date" autocomplete="off" required>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-lg-3">
+                    <input type="submit" value="Export" class="btn btn-primary" style="margin-top: 25px;">
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <script>
+        $(function() {
+            $('#export_cost_form').on('submit', function(e) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                var formData = $(this)
+                $.ajax({
+                    type: "POST",
+                    url: "<?= $this->createUrl('report/cargoInvoice'); ?>",
+                    data: formData.serialize(),
+                    dataType: "json",
+                    encode: true,
+                    success: function(res) {
+                        var response = res;
+                        location.href = "https://os.toplogistics.com.au/report/downloadCost?costType=" + response.costType + "&dateFrom=" + response.dateFrom + "&dateTo=" + response.dateTo + "&driverId=" + response.driverId;
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+
+</html>

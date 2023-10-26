@@ -1,0 +1,154 @@
+<?php
+
+class ReportsController extends Controller{
+	/**
+	 * Declares class-based actions.
+	 */
+	protected $nonAjax=array('export');
+
+	/**
+	 * This is the default 'index' action that is invoked
+	 * when an action is not explicitly requested by users.
+	 */
+	public function actionIndex(){
+		$this->render('index');
+	}
+
+	public function actionView($id){
+		if(empty($_GET['t'])) return;
+
+		if($_GET['t'] == 'pl'){
+			$model = PickupList::model()->findByPk($id);
+			$this->render('pl', ['model' => $model]);
+		}
+	}
+
+	public function actionExport($id){
+		if(empty($_GET['t'])) return;
+
+		if($_GET['t'] == 'pl'){
+			$model = PickupList::model()->findByPk($id);
+
+			$xls = new oExcel;
+			$i = 1;
+			$xls->addRow($i++, array($model->ref, $model->created));
+			$xls->addRow($i++, array('Connote', 'Cust Ref', 'Status', 'Sender', 'Sender Tel', 'Cnee Name', 'Cnee Tel', 'Address', 'State', 'Weight'));
+
+			foreach($model->lines as $l){
+				$r = $l->mm();
+				$xls->addRow($i++, array('="'.$r->hbn.'"', empty($r->cref)? '' : '="'.$r->cref.'"', $r->getStatus(), $r->cnor->name, '="'.$r->cnor->tel.'"', $r->cnee->name, '="'.$r->cnee->tel.'"', $r->cnee->address, $r->cnee->state, $r->weight));
+			}
+			$xls->output('pickup_'.$model->ref.'.xlsx');
+		}
+	}
+	
+	
+	public function actionConsol(){
+		if(in_array(User::currentUserOrgId(),[Org::ORGID_COURIER_UBI_CLIENT,Org::ORGID_CLIENT_SF,Org::ORGID_CLIENT_ZTO]))
+		{
+			$this->actionImClientConsolReport();
+			return;
+		}
+
+		$strTbody='';
+		$this->render('report_consol',['strTbody'=>$strTbody]);
+	}
+	
+	public function actionConsolReportSearch(){
+		$strFrom = $_GET['from'];
+		$strTo = $_GET['to'];
+		$listStatus = [];
+		$strConsolId ='';
+		$listAirSea = [];
+		if(!empty($_GET['air_sea'])){
+			$listAirSea[] = $_GET['air_sea'];
+		}
+		$strOwnerId = Org::model()->findByPk(Yii::app()->user->org)->code;
+		// $strOwnerId = '';
+		$strState = $_GET['state'];
+		$strByUrgent = $_GET['by_urgent'];
+		
+		foreach($_GET as $k=>$v){
+			if(in_array($k,ImcoConsol::$states)){
+				$listStatus[] = $v;
+			}
+			if(in_array($k,ImcoConsol::$services)){
+				$listAirSea[]=$v;
+			}
+		}
+		
+		$objModelReport = new ModelReport($strFrom,$strTo,$listStatus,$listAirSea,$strConsolId,$strOwnerId,$strState,$strByUrgent,null);
+		$listRecord = $objModelReport->funcRecords();
+		
+		// $this->renderPartial('report_consol_table_content',['listRecord'=>$listRecord]);
+		echo $objModelReport->funcListRecords2Tbody($listRecord);
+	}
+
+	public function actionImClientConsolReport()
+	{
+		$filtersForm = new FiltersForm;
+		$provide = [];
+		$model = new ImcoConsol('search');
+		$model->unsetAttributes();
+
+		$filteredData = $filtersForm->filter([]);
+		$dataprovider = new CArrayDataProvider($filteredData);
+		$this->render('im_client_consol_rpt', ['model' => $dataprovider, 'filter' => $filtersForm]);
+	}
+
+
+	public function actionAjaxExportImClientConsolReport()
+	{
+		[$provide,$sortAttributes,$sortNumberAttributes] = $this->_funImClientConsolReport();
+		$xls = new oExcel;
+		$i = 1;
+		$xls->addRow($i++, $sortAttributes);
+		foreach ($provide as $key => $d) {
+			$xls->addRow($i++,[$d['mawb'],$d['dest'],$d['pkg'],$d['eta'],$d['ata'],$d['customs_cleared'],$d["recovery_date"],$d["hand_over_aup"],$d["hand_over_pp"]]);
+		}
+
+
+		$tempfile = Yii::app()->basePath . DIRECTORY_SEPARATOR . "runtime" . DIRECTORY_SEPARATOR . 'im_client_consol_report_result'.User::getCurrentUser()->org_id.'.xlsx';
+
+		$xls->output($tempfile, null, false);
+		echo $this->createUrl('reports/downloadImClientConsolReportResult',['id'=>User::getCurrentUser()->org_id]);
+	}
+
+	public function actionAjaxImClientConsolReport()
+	{
+		$reportService = new ReportService();
+		$filtersForm = new FiltersForm;
+				if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters = $_GET['FiltersForm'];
+		}
+		[$provide,$sortAttributes,$sortNumberAttributes] = $this->_funImClientConsolReport();
+		$dataprovider = $reportService->preDataProvider($filtersForm, $provide, $sortAttributes, $sortNumberAttributes);
+
+		$this->renderPartial('im_pl_rpt_partial', ['model' => $dataprovider, 'filter' => $filtersForm, 'total' => 0, 'attributes' => $sortAttributes, 'model2' => @$dataprovider2], false, true);
+	}
+
+	private function _funImClientConsolReport()
+	{
+		$reportService = new ReportService();
+		return $reportService->_funImClientConsolReport();
+	}
+
+	public function actionDownloadImClientConsolReportResult($id)
+	{
+		$this->downloadReportFile('im_client_consol_report_result'.$id.'.xlsx');
+	}
+
+	private function downloadReportFile($filename)
+	{
+		$tempfile = Yii::app()->basePath . DIRECTORY_SEPARATOR . "runtime" . DIRECTORY_SEPARATOR . $filename;
+		header("Cache-Control: maxage=1");
+		header("Content-Type: application/force-download");
+		header("Content-Type: application/octet-stream");
+		header("Content-Type: application/download");
+		header("Content-Disposition: attachment;filename=\"" . urldecode(basename($tempfile)) . '"');
+		header("Content-Transfer-Encoding: binary");
+		readfile($tempfile);
+		unlink($tempfile);
+		Yii::app()->end();
+	}
+}

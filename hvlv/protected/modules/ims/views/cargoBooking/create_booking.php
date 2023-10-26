@@ -1,0 +1,521 @@
+<?php
+?>
+<!DOCTYPE html>
+
+<head>
+    <style>
+        .cargo-booking-form-container {
+            display: none;
+        }
+
+        .input-group {
+            width: 90%;
+        }
+
+        .input-group-4 {
+            width: 80%;
+        }
+
+        .datepicker {
+            background: #fff;
+        }
+
+        .hide-block {
+            display: none;
+        }
+
+        .result-container {
+            display: none;
+            width: 80%;
+        }
+
+        #price {
+            font-family: Arial, Helvetica, sans-serif;
+            border-collapse: collapse;
+            width: 100%;
+        }
+
+        #price td,
+        #price th {
+            border: 1px solid #ddd;
+            padding: 8px;
+        }
+
+        #price tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+
+        #price tr:hover {
+            background-color: #ddd;
+        }
+
+        #price th {
+            padding-top: 12px;
+            padding-bottom: 12px;
+            text-align: left;
+            background-color: #337ab7;
+            color: white;
+        }
+
+        .file_uploader {
+            width: 90%;
+        }
+
+        .error-box {
+            display: none;
+        }
+
+        #error_message {
+            color: red;
+        }
+    </style>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+
+<body>
+    <form id="search_form">
+        <div class="row">
+            <div class="col-lg-3">
+                <div class="input-group">
+                    <label for="depot">Depot</label><br />
+                    <select name="depot" id="depot" style="height: 34px; width: 100%;">
+                        <option value="Sydney">Sydney</option>
+                        <option value="Melbourne">Melbourne</option>
+                        <option value="Brisbane">Brisbane</option>
+                        <option value="Perth">Perth</option>
+                    </select>
+                </div>
+            </div>
+            <div class="col-lg-3">
+                <div class="input-group">
+                    <label for="container_no">Container Number / AWB</label>
+                    <input type="text" class="form-control" id="container_no" name="container_no">
+                </div>
+            </div>
+            <div class="col-lg-3">
+                <div class="input-group">
+                    <label for="hbn">House BL</label>
+                    <input type="text" class="form-control" id="hbn" name="hbn">
+                </div>
+            </div>
+            <div class="col-lg-3">
+                <input type="submit" value="Search" class="btn btn-primary" style="margin-top: 25px;">
+            </div>
+        </div>
+    </form>
+
+    <div class="container cargo-booking-form-container">
+        <form id="booking_info">
+            <h3>Shipment Information:</h3>
+            <div class="row shipment-info">
+                <div class="col-lg-3">
+                    <div class="input-group-4">
+                        <label for="weight">Weight</label>
+                        <input type="text" class="form-control" id="weight" name="weight" disabled>
+                    </div>
+                </div>
+                <div class="col-lg-3">
+                    <div class="input-group-4">
+                        <label for="volume">Volume</label>
+                        <input type="text" class="form-control" id="volume" name="volume" disabled>
+                    </div>
+                </div>
+                <div class="col-lg-3">
+                    <div class="input-group-4">
+                        <label for="packages">Packages</label>
+                        <input type="text" class="form-control" id="packages" name="packages" disabled>
+                    </div>
+                </div>
+                <div class="col-lg-3">
+                    <div class="input-group-4">
+                        <label for="pallets">Pallets</label>
+                        <input type="number" class="form-control" id="pallets" name="pallets" min="0">
+                    </div>
+                </div>
+            </div>
+            <div class="row hide-block">
+                <div class="col-lg-6">
+                    <div class="input-group">
+                        <label for="shipment_id">Shipment Id</label>
+                        <input type="text" class="form-control" id="shipment_id" name="shipment_id">
+                    </div>
+                </div>
+                <div class="col-lg-6">
+                    <div class="input-group">
+                        <label for="shipment_hbn">Shipment hbn</label>
+                        <input type="text" class="form-control" id="shipment_hbn" name="shipment_hbn">
+                    </div>
+                </div>
+            </div>
+            <h3>Delivery Information:</h3>
+            <div class="row">
+                <div class="col-lg-6">
+                    <div class="input-group">
+                        <label for="cnee_name">Receiver Name</label>
+                        <input type="text" class="form-control" id="cnee_name" name="cnee_name" required>
+                    </div>
+                </div>
+                <div class="col-lg-6">
+                    <div class="input-group">
+                        <label for="cnee_company">Receiver Company</label>
+                        <input type="text" class="form-control" id="cnee_company" name="cnee_company">
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-lg-12">
+                    <div class="input-group" style="width: 95%;">
+                        <label for="cnee_address">Receiver Address</label>
+                        <input type="text" class="form-control" id="cnee_address" name="cnee_address" required>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-lg-6">
+                    <div class="input-group">
+                        <label for="cnee_suburb">Receiver Suburb</label>
+                        <input type="text" class="form-control" id="cnee_suburb" name="cnee_suburb" required>
+                    </div>
+                </div>
+                <div class="col-lg-6">
+                    <div class="input-group">
+                        <label for="cnee_city">Receiver City</label>
+                        <input type="text" class="form-control" id="cnee_city" name="cnee_city" required>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-lg-6">
+                    <div class="input-group">
+                        <label for="cnee_state">Receiver State</label>
+                        <input type="text" class="form-control" id="cnee_state" name="cnee_state" required>
+                    </div>
+                </div>
+                <div class="col-lg-6">
+                    <div class="input-group">
+                        <label for="cnee_postcode">Receiver Postcode</label>
+                        <input type="text" class="form-control" id="cnee_postcode" name="cnee_postcode" required>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-lg-6">
+                    <div class="input-group">
+                        <label for="cnee_tel">Receiver Telephone</label>
+                        <input type="text" class="form-control" id="cnee_tel" name="cnee_tel" required>
+                    </div>
+                </div>
+                <div class="col-lg-6">
+                    <div class="input-group">
+                        <label for="cnee_email">Receiver Email</label>
+                        <input type="text" class="form-control" id="cnee_email" name="cnee_email">
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-lg-6" id="file_upload_container">
+                    <label for="file_1">Upload Files</label>
+                    <input class="form-control file_uploader" type="file" id="file_1" name="file_1">
+                </div>
+                <div class="col-lg-6">
+                    <div class="input-group">
+                        <label for="other_reference">Other Reference</label>
+                        <input type="text" class="form-control" id="other_reference" name="other_reference">
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <button type="button" class="btn btn-primary" id="add_file_btn" onclick="addFile()" style="margin-left: 14px;">Add File</button>
+            </div>
+            <h3>Booking Information:</h3>
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="input-group">
+                        <label for="booking_date_1" class="form-label">First Choice</label>
+                        <input type="text" class="form-control" id="booking_date_1" name="booking_date_1" autocomplete="off" required>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="input-group">
+                        <label for="booking_date_2" class="form-label">Second Choice</label>
+                        <input type="text" class="form-control" id="booking_date_2" name="booking_date_2" autocomplete="off">
+                    </div>
+                </div>
+            </div>
+            <h3>Special Requirements:</h3>
+            <div class="row">
+                <div class="col-lg-6">
+                    <div class="input-group">
+                        <label for="delivery_time">Delivery Before<span style="color:red">&nbsp;*Extra surcharge may apply</span></label><br />
+                        <select name="delivery_time" id="delivery_time">
+                            <option value="none">None</option>
+                            <option value="10:00">10:00</option>
+                            <option value="11:00">11:00</option>
+                            <option value="12:00">12:00</option>
+                            <option value="13:00">13:00</option>
+                            <option value="14:00">14:00</option>
+                            <option value="15:00">15:00</option>
+                            <option value="16:00">16:00</option>
+                            <option value="17:00">17:00</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="col-lg-6">
+                    <div class="input-group">
+                        <label for="folk">Need Folklift<span style="color:red">&nbsp;*Extra surcharge may apply</span></label><br />
+                        <select name="folk">
+                            <option value="false">No Need Folklift</option>
+                            <option value="true">Need Folklift</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <br />
+            <div class="row">
+                <div class="col-lg-12">
+                    <div class="input-group">
+                        <label for="other">Other Needs<span style="color:red">&nbsp;*Extra surcharge may apply</span></label><br />
+                        <textarea id="other" name="other" rows="4" cols="100"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-lg-3">
+                    <input type="submit" value="Calculate Price" class="btn btn-primary" style="margin-top: 25px;">
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <br />
+    <div class="container result-container" style="margin-left: -1px;">
+        <p style="color: red;">This price is calculated based on the shipment information you provide, if the information is incomplete or inaccurate, extra surcharge fees may be incurred.</p>
+        <table id="price">
+            <tr>
+                <th>Charge Items</th>
+                <th>Price</th>
+            </tr>
+            <tr>
+                <td>Base Price</td>
+                <td id="base_price"></td>
+            </tr>
+            <tr>
+                <td>Oversize Fee</td>
+                <td id="oversize"></td>
+            </tr>
+            <tr>
+                <td>Timed Delivery Fee</td>
+                <td id="time_fee"></td>
+            </tr>
+            <tr>
+                <td>Unloading Fee</td>
+                <td id="unloading"></td>
+            </tr>
+            <tr>
+                <td>GST</td>
+                <td id="gst"></td>
+            </tr>
+            <tr>
+                <td>Total</td>
+                <td id="total"></td>
+            </tr>
+        </table>
+        <form id="final_form">
+            <input type="text" class="hide-block" id="final_booking_base_fee" name="final_booking_base_fee">
+            <input type="text" class="hide-block" id="final_booking_oversize_fee" name="final_booking_oversize_fee">
+            <input type="text" class="hide-block" id="final_booking_time_fee" name="final_booking_time_fee">
+            <input type="text" class="hide-block" id="final_booking_unloading_fee" name="final_booking_unloading_fee">
+            <input type="text" class="hide-block" id="final_booking_fee" name="final_booking_fee">
+            <input type="text" class="hide-block" id="final_booking_date_1" name="final_booking_date_1">
+            <input type="text" class="hide-block" id="final_booking_date_2" name="final_booking_date_2">
+            <input type="text" class="hide-block" id="final_booking_special_time" name="final_booking_special_time">
+            <input type="text" class="hide-block" id="final_booking_special_unloading" name="final_booking_special_unloading">
+            <input type="text" class="hide-block" id="final_booking_special_other" name="final_booking_special_other">
+            <input type="text" class="hide-block" id="final_booking_cnee_name" name="final_booking_cnee_name">
+            <input type="text" class="hide-block" id="final_booking_cnee_company" name="final_booking_cnee_company">
+            <input type="text" class="hide-block" id="final_booking_cnee_address" name="final_booking_cnee_address">
+            <input type="text" class="hide-block" id="final_booking_cnee_suburb" name="final_booking_cnee_suburb">
+            <input type="text" class="hide-block" id="final_booking_cnee_city" name="final_booking_cnee_city">
+            <input type="text" class="hide-block" id="final_booking_cnee_state" name="final_booking_cnee_state">
+            <input type="text" class="hide-block" id="final_booking_cnee_postcode" name="final_booking_cnee_postcode">
+            <input type="text" class="hide-block" id="final_booking_cnee_tel" name="final_booking_cnee_tel">
+            <input type="text" class="hide-block" id="final_booking_cnee_email" name="final_booking_cnee_email">
+            <input type="text" class="hide-block" id="final_booking_shipment_id" name="final_booking_shipment_id">
+            <input type="text" class="hide-block" id="final_booking_other_ref" name="final_booking_other_ref">
+            <input type="submit" value="Confirm" class="btn btn-primary" style="margin-top: 25px;">
+        </form>
+
+    </div>
+
+    <div class="container error-box">
+        <h5 id="error_message"></h5>
+    </div>
+
+    <script>
+        var fileCount = 1;
+
+        $(document).on('change', '.file_uploader', function() {
+            var fileExtension = ['jpeg', 'jpg', 'png', 'gif', 'bmp', 'pdf','JPEG','JPG','PNG','GIF','BMP','PDF'];
+            if ($.inArray($(this).val().split('.').pop().toLowerCase(), fileExtension) == -1) {
+                alert("Only formats are allowed : " + fileExtension.join(', '));
+                $(this).val('');
+            }
+        });
+
+        function addFile() {
+            fileCount++;
+            var strHtmlFile = '<input class="form-control file_uploader" type="file" id="file_' + fileCount + '" name="file_' + fileCount + '">';
+            $('#file_upload_container').append(strHtmlFile);
+        }
+
+        $(function() {
+            const today = new Date();
+            const tomorrow = new Date(today);
+            const lastDay = new Date(today);
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            lastDay.setDate(lastDay.getDate() + 8);
+            //console.log(tomorrow);
+            //console.log(lastDay);
+            var exclude = [];
+            $("#booking_date_1").datepicker({
+                autoclose: true,
+                startDate: '+2d',
+                endDate: '+8d',
+                format: "dd-mm-yyyy",
+                daysOfWeekDisabled: [0, 6],
+            });
+            $("#booking_date_2").datepicker({
+                autoclose: true,
+                startDate: '+2d',
+                endDate: '+8d',
+                format: "dd-mm-yyyy",
+                daysOfWeekDisabled: [0, 6],
+            });
+
+            $("form#search_form").submit(function(e) {
+                //debugger;
+                e.preventDefault();
+                var form = $(this);
+                $.ajax({
+                    url: "<?= $this->createUrl('cargoBooking/search') ?>",
+                    type: 'POST',
+                    data: form.serialize(),
+                    success: function(res) {
+                        //console.log(formData);
+                        var response = jQuery.parseJSON(res);
+                        //console.log(response);
+                        if (response.success == true) {
+                            $('.error-box').hide();
+                            $('#shipment_id').val(response.shipment_id);
+                            $('#shipment_hbn').val(response.hbn);
+                            $('#weight').val(response.weight);
+                            $('#volume').val((Number(response.cbm) * Number(response.packages)).toFixed(2));
+                            $('#packages').val(response.packages);
+                            if (response.pallets == 0 || response.pallets == '' || response.pallets == null) {
+                                $('#pallets').val(Math.ceil((Number(response.cbm) * Number(response.packages)) / 1.9));
+                            } else {
+                                $('#pallets').val(response.pallets);
+                            }
+                            $('#cnee_name').val(response.cnee.name);
+                            $('#cnee_company').val(response.cnee.company);
+                            $('#cnee_address').val(response.cnee.address);
+                            $('#cnee_suburb').val(response.cnee.suburb);
+                            $('#cnee_city').val(response.cnee.city);
+                            $('#cnee_state').val(response.cnee.state);
+                            $('#cnee_postcode').val(response.cnee.postcode);
+                            $('#cnee_tel').val(response.cnee.tel);
+                            $('#cnee_email').val(response.cnee.email);
+                            $('.cargo-booking-form-container').show();
+                        } else {
+                            $('#error_message').text(response.msg);
+                            $('.error-box').show();
+                        }
+                    }
+                });
+            });
+
+            $("form#booking_info").submit(function(e) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                var formData = new FormData(this);
+                $.ajax({
+                    url: "<?= $this->createUrl('cargoBooking/showPrice') ?>",
+                    type: 'POST',
+                    data: formData,
+                    enctype: 'multipart/form-data',
+                    cache: false,
+                    contentType: false,
+                    processData: false,
+                    success: function(res) {
+                        var response = jQuery.parseJSON(res);
+                        //console.log(response);
+                        if (response.success == true) {
+                            if (Number(response.basePrice) != 0) {
+                                $('#base_price').html("$ " + response.basePrice);
+                                $('#oversize').html("$ " + response.oversize);
+                                $('#time_fee').html("$ " + response.specificDeliveryTimeFee);
+                                $('#unloading').html("$ " + response.unloadingFee);
+                                $('#gst').html("$ " + response.gst);
+                                $('#total').html("$ " + response.total);
+                            } else {
+                                $('#base_price').html("TBC");
+                                $('#oversize').html("TBC");
+                                $('#time_fee').html("TBC");
+                                $('#unloading').html("TBC");
+                                $('#gst').html("TBC");
+                                $('#total').html("TBC");
+                            }
+
+                            $('#search_form').hide();
+                            //$('.cargo-booking-form-container').hide();
+                            $('.result-container').show();
+
+                            //$('#booking_id').val(response.booking_id);
+                            $('#final_booking_base_fee').val(response.basePrice);
+                            $('#final_booking_oversize_fee').val(response.oversize);
+                            $('#final_booking_time_fee').val(response.specificDeliveryTimeFee);
+                            $('#final_booking_unloading_fee').val(response.unloadingFee);
+                            $('#final_booking_fee').val(response.booking.fee);
+                            $('#final_booking_date_1').val(response.booking.booking_date_1);
+                            $('#final_booking_date_2').val(response.booking.booking_date_2);
+                            $('#final_booking_special_time').val(response.booking.delivery_period);
+                            $('#final_booking_special_unloading').val(response.booking.need_unloading);
+                            $('#final_booking_special_other').val(response.booking.special_need_other);
+                            $('#final_booking_cnee_name').val(response.cnee.name);
+                            $('#final_booking_cnee_company').val(response.cnee.company);
+                            $('#final_booking_cnee_address').val(response.cnee.address);
+                            $('#final_booking_cnee_suburb').val(response.cnee.suburb);
+                            $('#final_booking_cnee_city').val(response.cnee.city);
+                            $('#final_booking_cnee_state').val(response.cnee.state);
+                            $('#final_booking_cnee_postcode').val(response.cnee.postcode);
+                            $('#final_booking_cnee_tel').val(response.cnee.tel);
+                            $('#final_booking_cnee_email').val(response.cnee.email);
+                            $('#final_booking_other_ref').val(response.booking.other_ref);
+                            $('#final_booking_shipment_id').val(response.booking.shipment_id);
+                            $('#final_booking_other_ref').val(response.booking.other_ref);
+                        } else {
+                            console.log(response);
+                        }
+                    }
+                });
+            });
+
+            $('#final_form').submit(function(e) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                var form = $(this);
+                $.ajax({
+                    url: "<?= $this->createUrl('cargoBooking/createBooking') ?>",
+                    type: 'POST',
+                    data: form.serialize(),
+                    success: function(res) {
+                        var response = jQuery.parseJSON(res);
+                        alert(response.message);
+                    }
+                });
+            });
+        });
+    </script>
+</body>

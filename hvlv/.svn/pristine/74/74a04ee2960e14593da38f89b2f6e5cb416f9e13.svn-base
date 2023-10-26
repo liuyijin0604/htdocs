@@ -1,0 +1,100 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<!--Created with Liquid Studio 2018 (https://www.liquid-technologies.com)-->
+<xs:schema attributeFormDefault="unqualified" elementFormDefault="qualified" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+    <xs:element name="request">
+        <xs:complexType>
+            <xs:sequence>
+                <xs:element name="orderCode" type="xs:string" minOccurs="1" />
+                <xs:element name="operateTime" type="xs:string" minOccurs="1" />
+                <xs:element name="operateTimezone" type="xs:string" minOccurs="1" />
+                <xs:element name="remark" type="xs:string" minOccurs="0" />
+                <xs:element name="cargo" minOccurs="0">
+                    <xs:complexType>
+                        <xs:sequence>
+                            <xs:element name="totalPackages" type="xs:unsignedInt" minOccurs="0" />
+                            <xs:element name="totalUnits" type="xs:unsignedInt" minOccurs="0" />
+                            <xs:element name="totalVolume" type="xs:decimal" minOccurs="1" />
+                            <xs:element name="totalGrossWeight" type="xs:decimal" minOccurs="1" />
+                            <xs:element name="chargeWeight" type="xs:unsignedInt" minOccurs="0" />
+                            <xs:element name="chargeVolume" type="xs:decimal" minOccurs="0" />
+                        </xs:sequence>
+                    </xs:complexType>
+                </xs:element>
+                <xs:element name="documentList" minOccurs="0">
+                    <xs:complexType>
+                        <xs:sequence>
+                            <xs:element name="document" minOccurs="0" maxOccurs="unbounded">
+                                <xs:complexType>
+                                    <xs:sequence>
+                                        <xs:element name="type" minOccurs="1">
+                                            <xs:simpleType>
+                                                <xs:restriction base="xs:string">
+                                                    <xs:enumeration value="PL" />
+                                                    <xs:enumeration value="BILL_OF_LADING" />
+                                                    <xs:enumeration value="CONTAINER_MANIFEST" />
+                                                    <xs:enumeration value="POD" />
+                                                    <xs:enumeration value="TRUCK_MANIFEST" />
+                                                    <xs:enumeration value="ROAD_MANIFEST" />
+                                                    <xs:enumeration value="OTHER" />
+                                                </xs:restriction>
+                                            </xs:simpleType>
+                                        </xs:element>
+                                        <xs:element name="fileType" type="xs:string" minOccurs="1" />
+                                        <xs:element name="fileData" type="xs:string" minOccurs="1" />
+                                        <xs:element name="remark" type="xs:string" minOccurs="0" />
+                                    </xs:sequence>
+                                </xs:complexType>
+                            </xs:element>
+                        </xs:sequence>
+                    </xs:complexType>
+                </xs:element>
+                <xs:element name="containerList" minOccurs="0">
+                    <xs:complexType>
+                        <xs:sequence>
+                            <xs:element name="container" minOccurs="0" maxOccurs="unbounded">
+                                <xs:complexType>
+                                    <xs:sequence>
+                                        <xs:element name="type" minOccurs="1">
+                                            <xs:simpleType>
+                                                <xs:restriction base="xs:string">
+                                                    <xs:enumeration value="GP" />
+                                                    <xs:enumeration value="HQ" />
+                                                </xs:restriction>
+                                            </xs:simpleType>
+                                        </xs:element>
+                                        <xs:element name="size" minOccurs="1">
+                                            <xs:simpleType>
+                                                <xs:restriction base="xs:string">
+                                                    <xs:enumeration value="20" />
+                                                    <xs:enumeration value="40" />
+                                                    <xs:enumeration value="45" />
+                                                </xs:restriction>
+                                            </xs:simpleType>
+                                        </xs:element>
+                                        <xs:element name="containerNo" type="xs:string" minOccurs="1" />
+                                    </xs:sequence>
+                                </xs:complexType>
+                            </xs:element>
+                        </xs:sequence>
+                    </xs:complexType>
+                </xs:element>
+                <xs:element name="palletList" minOccurs="0">
+                    <xs:complexType>
+                        <xs:all>
+                            <xs:element name="pallet" minOccurs="1">
+                                <xs:complexType>
+                                    <xs:all>
+                                        <xs:element name="palletNo" type="xs:string" />
+                                        <xs:element name="height" type="xs:int" />
+                                        <xs:element name="width" type="xs:int" />
+                                        <xs:element name="length" type="xs:int" />
+                                    </xs:all>
+                                </xs:complexType>
+                            </xs:element>
+                        </xs:all>
+                    </xs:complexType>
+                </xs:element>
+            </xs:sequence>
+        </xs:complexType>
+    </xs:element>
+</xs:schema>

@@ -1,0 +1,531 @@
+<?php
+
+/**
+ * This is the model class for table "filerepo".
+ *
+ * The followings are the available columns in table 'filerepo':
+ * @property integer $id
+ * @property string $name
+ * @property string $hash
+ * @property string $mime
+ * @property integer $size
+ * @property string $date
+ * @property string $meta
+ * @property integer $type
+ * @property integer $fid
+ *
+ */
+class FileRepo extends CActiveRecord
+{	
+	public static $types = array(//0 => system
+		10 => 'Manifest',
+		15 => 'Credit Note Files',
+		17 => 'Letter Manifest',
+		18 => 'import custom required document from consignee',
+		19 => 'import custom document by op',
+		20 => 'import custom required document from sender',
+		21 => 'import custom invoice receipt',
+		25 => 'import POD FILE',
+		28 => 'import mail attachments', 
+		29 => 'import reply attachments',
+		30 => 'Org Files',
+		35 => 'AF Billing Report',
+		36 => 'AF Billing Attachment',
+		50 => 'Other',
+		54 => 'Intl Courier Zone Map',
+		55 => 'Courier Zone Map',
+		56 => 'Balance Report Details',
+		57 => 'Occurring Invoice Amount',
+		58 => 'Occurring Payment Amount',
+		59 => 'Balance Movement by Customer',
+		60 => 'CnID',
+		61 => 'Courier Remote Cost Rate',
+		62 => 'Courier Remote Charge Rate',
+		70 => 'Connotes',
+		80 => 'Attachment',
+		81 => 'consol Attachment',
+		83 => 'WMS Job Attachment',
+		self::WMS_TASK_ATTACHMENT => 'WMS Task Attachment',
+		85 => 'WMS Task Shipping Label',
+		86 => 'WMS Task Commercial Invoice',
+		87 => 'WMS Task Packing Slip',
+		88 => 'CWC Attachment',
+		89 => 'Air Freight Attachment',
+		90 => 'Templates',
+		91 => 'Bank Statements',
+		92 => 'Cartage Attachment',
+		93 => 'Delivery Record',
+		100 => 'CRM Ticket attachment',
+		101 => 'CRM Msg attachment',
+		110 => 'CNL Doc',
+		120 => 'Billing attachment',
+		130 => 'Cargo Process FBA Pod',
+		131	=> 'Cargo Process file',
+		132	=> 'Delivery Record File',
+		133	=> 'Customer Service File',
+		134 => 'WMS Task Manifest',
+		135 => 'Wms Product Attachment',
+		self::CONTAINER_CARTAGE_ATTACHMENT => 'Container Cartage Attachment',
+		self::COURIER_INVOICE_ATTACHMENT => 'Courier Invoice Attachment',
+		self::SI_CONFIRM_FILE => 'Si Confirm File',
+		self::SUPPLIER_INVOICE_ATTACHMENT => 'Original Supplier Invoice',
+		self::CONSOL_CARGO_RECEIPT=> 'Consol Cargo Recept',
+		self::type_marketing_picture=>'marketing picture',
+		self::type_price_enquiry=>'price enquiry',
+		self::CARGOPLAN_ATTACHMENT=>'Cargo Process Plan Attachment',
+		150 => 'Cargo Process Job FBA Pod',
+		151	=> 'Cargo Process Job file',
+		300 => 'Austway Packages Import',
+		152 => 'Task File',
+		156 => 'TLA Customer Dispute File',
+		157 => 'Driver License',
+		158 => 'Shipment Damage Photo',
+		200 => 'Booking DO File',
+		self::INBOUND_ERROR_BOOKING_DO_FILE => 'Inbound Error Booking DO File',
+		self::UNKNOWN_RTS => 'Unknown RTS',
+		self::KNOWN_RTS => 'known RTS',
+		self::FORCE_GATEPASS => 'Force Gatepass',
+		self::CONTAINER_PHOTO => 'Container Photos',
+		self::UNKNOWN_SHIPMENT_PHOTO => 'UnKnown Shipment Photos',
+		self::UNPACK_CONTAINER_SEAL_PHOTO => 'Unpack Container Seal Photo',
+		self::UNPACK_CONTAINER_LEFT_PHOTO => 'Unpack Container Left Photo',
+		self::UNPACK_CONTAINER_RIGHT_PHOTO => 'Unpack Container Right Photo',
+		self::UNPACK_CONTAINER_FRONT_PHOTO => 'Unpack Container Front Photo',
+		self::UNPACK_CONTAINER_BACK_PHOTO => 'Unpack Container Back Photo',
+		self::UNPACK_CONTAINER_100PROCESS_PHOTO => 'Unpack 100% Process Photo',
+		self::UNPACK_CONTAINER_50PROCESS_PHOTO => 'Unpack 50% Process Photo',
+		self::UNPACK_CONTAINER_0PROCESS_PHOTO => 'Unpack 0% Process Photo',
+		self::UNPACK_CONTAINER_EXTRA_PHOTO => 'Unpack Extra Info Photo',
+		self::DAIPOST_MANIFEST_FILE=>'Daipost Manifest File',
+		self::AQIS_INSPECTION_FORM=>'Aqis Inspection Form',
+		self::AQIS_DISPOSAL_FORM=>'Aqis Disposal Form',
+		self::LCL_SEIZE_FILE => 'LCL Seize File',
+	);
+		
+		const FILE_TYPE_IMPORT_ATTACHMENT=28;
+		const FILE_TYPE_IMPORT_REPLY_ATTACHMENT=29;
+		const PENDING = 10;
+		const ACTIVE = 20;
+		const DELETED = 0;
+		const CUSTOMSSENDERFILE = 20;
+		const IMPORTPODFILE = 25;
+		const CARGOPROCESSPOD = 130;
+		const CARGOPROCESSFILETYPE = 131;
+		const DELIVERYRECORDFILE = 132;
+		const CUSTOMERSERVICEFILE = 133;
+		const WMS_TASK_MANIFEST = 134;
+		const CONTAINER_CARTAGE_ATTACHMENT = 136;
+		const COURIER_INVOICE_ATTACHMENT = 137;
+		const SI_CONFIRM_FILE = 138;
+		const CREDIT_NOTE_FILE = 15;
+		const WMS_TASK_ATTACHMENT = 84;
+		const SUPPLIER_INVOICE_ATTACHMENT = 139;
+		const CONSOL_CARGO_RECEIPT = 140;
+		const type_marketing_picture = 141;
+		const type_price_enquiry = 142;
+		const CARGOPLAN_ATTACHMENT = 143;
+		const CARGOPROCESSJOBPOD = 150;
+		const CARGOPROCESSJOBFILETYPE = 151;
+		const TLATASKFILETYPE = 152;
+		const TLACUSTOMERDISPUTEFILETYPE = 156;
+		const INSPECTIONFILETYPE = 157;
+		const CONSOL_ATTACHMENT = 81;
+		const ATTACHMENT = 80;
+		const SHIPMENT_DAMAGE = 158;
+		const BOOKING_DO_FILE = 200;
+		const UNKNOWN_RTS = 159;
+		const KNOWN_RTS = 160;
+		const FORCE_GATEPASS = 161;
+		const CONTAINER_PHOTO = 162;
+		const UNKNOWN_SHIPMENT_PHOTO = 163;
+		const UNPACK_CONTAINER_SEAL_PHOTO = 180;
+		const UNPACK_CONTAINER_LEFT_PHOTO = 181;
+		const UNPACK_CONTAINER_RIGHT_PHOTO = 182;
+		const UNPACK_CONTAINER_FRONT_PHOTO = 183;
+		const UNPACK_CONTAINER_BACK_PHOTO = 184;
+		const UNPACK_CONTAINER_100PROCESS_PHOTO = 185;
+		const UNPACK_CONTAINER_50PROCESS_PHOTO = 186;
+		const UNPACK_CONTAINER_0PROCESS_PHOTO = 187;
+		const UNPACK_CONTAINER_EXTRA_PHOTO = 188;
+		const INBOUND_ERROR_BOOKING_DO_FILE = 201;
+		const DAIPOST_MANIFEST_FILE = 189;
+		const AQIS_INSPECTION_FORM = 190;
+		const AQIS_DISPOSAL_FORM = 200;
+		const LCL_SEIZE_FILE = 210;
+		public static $custom_type=array(
+		   18 => 'Documents from consignee',
+		   19 => 'Documents from op',
+		   20 => 'Documents from sender',
+		   21 => 'Payment receipt',
+		);
+		const STATUS_ACTIVE = 20;
+		const STATUS_ARCHIVED = 90;
+		public static $states = array(
+		10 => 'Pending',
+		self::STATUS_ACTIVE => 'Active',
+		30 => 'Confirm', //flag that need to send 
+		self::STATUS_ARCHIVED => 'Archived',
+		0 => 'Deleted',
+	);
+
+	public $mdata = array();
+		public $theTypes=array();
+		public $non_status=array();
+		public $theStatus=array();
+	
+	/**
+	 * Returns the static model of the specified AR class.
+	 * @param string $className active record class name.
+	 * @return FileRepo the static model class
+	 */
+	public static function model($className=__CLASS__){
+		return parent::model($className);
+	}
+
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName(){
+		return 'filerepo';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules(){
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('name, hash, mime, size, date, type', 'required'),
+			array('meta, fid, status', 'safe'),
+			array('size, type, fid, status', 'numerical', 'integerOnly'=>true),
+			array('name, hash, mime', 'length', 'max'=>255),
+			// The following rule is used by search().
+			// Please remove those attributes that should not be searched.
+			array('id, name, hash,theTypes,non_status, mime, size, date, meta, status', 'safe', 'on'=>'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations(){
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+		);
+	}
+	
+	public function getType(){
+		return Yii::t(strtolower(__CLASS__), $this->type == 0? 'System' : self::$types[$this->type]);
+	}
+	
+	public function getStatus(){
+		return Yii::t(strtolower(__CLASS__), self::$states[$this->status]);
+	}
+	
+	public static function links($rs){
+		$r = '';
+		foreach($rs as $f){
+			$r .= '<a href="'.Yii::app()->baseUrl."/filerepo/".$f->hash."/".$f->name.'" title="'.$f->name.'" target="_blank">'.$f->name.' </a> &nbsp; ';
+		}
+		return empty($r)? Yii::t(strtolower(__CLASS__), 'none') : $r;
+	}
+	
+	public function getUrl(){
+		return Yii::app()->baseUrl."/filerepo/".$this->hash."/".urlencode($this->name);
+	}
+
+	public function getOutUrl(){
+		return "https://file.toplogistics.com.au/".$this->hash."/".urlencode($this->name)."?t=1";
+	}
+	public function getUrlRelate(){
+		return "filerepo/".$this->hash."/".urlencode($this->name);
+	}
+	public static function gallery($rs, $rel='gallery', $tp = ''){
+		$r = '';
+		foreach($rs as $i=>$f){
+			$r .= '<a href="'.Yii::app()->baseUrl."/filerepo/".$f->hash."/".$f->name.'" rid="'.$f->id.'" rel="'.$rel.'" title="'.$tp.$f->name.'">'.($i==0? '<div class="icon" style="background-position:-48px -560px"></div>' : '').'</a>';
+		}
+		return $r;
+	}
+	
+	
+	public function formatSize(){
+		$bytes = $this->size;
+		if ($bytes >= 1073741824){
+			$bytes = number_format($bytes / 1073741824, 2) . ' GB';
+		} elseif ($bytes >= 1048576){
+			$bytes = number_format($bytes / 1048576, 2) . ' MB';
+		} elseif ($bytes >= 1024){
+			$bytes = number_format($bytes / 1024, 2) . ' KB';
+		} elseif ($bytes > 1){
+			$bytes = $bytes . ' bytes';
+		} elseif ($bytes == 1){
+			$bytes = $bytes . ' byte';
+		} else {
+			$bytes = '0 bytes';
+		}
+
+		return $bytes;
+	}
+	
+	public function store($f, $hash){//uploaded file
+		if(!is_uploaded_file($f['tmp_name'])) return false;
+		$this->name = $f['name'];
+		$this->size = filesize($f['tmp_name']);
+		$this->date = date('Y-m-d H:i:s');
+		$this->hash = hash_file('crc32b', $f['tmp_name']).hash('crc32b', $this->size).rand(1000,5000);
+		$sup = Yii::app()->session['uploads'][$hash];
+		$this->type = $sup[0];
+		$finfo = finfo_open(FILEINFO_MIME_TYPE);
+		$mime = finfo_file($finfo, $f['tmp_name']);
+		$this->mime = empty($mime)? 'application/octet-stream' : $mime;
+		$d = Yii::app()->params['fileRepoPath'].DIRECTORY_SEPARATOR.substr($this->hash,0,2);
+		if(!is_dir($d)) mkdir($d);
+		try
+		{
+			move_uploaded_file($f['tmp_name'], $d.DIRECTORY_SEPARATOR.$this->hash);
+		}catch(Exception $e)
+		{
+
+		}
+		if(empty($sup[1])){
+			$this->fid = 0;
+			$this->save();
+			if(!isset($sup[2])) $sup[2] = array();
+			$sup[2][] = $this->id;
+			$su = Yii::app()->session['uploads'];
+			$su[$hash] = $sup;
+			Yii::app()->session['uploads'] = $su;
+		}else{
+			$this->fid = $sup[1];
+			$this->save();
+			if(!isset($sup[2])) $sup[2] = array();
+			$sup[2][] = $this->id;
+		}
+	}
+
+	
+	public static function storeFile($f, $name, $type, $fid){
+		$fr = new FileRepo;
+		$fr->name = $name;
+		$fr->size = filesize($f);
+		$fr->date = date('Y-m-d H:i:s');
+		$fr->hash = hash_file('crc32b', $f).hash('crc32b', $fr->size).rand(1000,5000).'tla';
+		$fr->type = $type;
+		if($r = self::model()->findByAttributes(array('hash' => $fr->hash, 'type' => $type, 'fid' => $fid))) return $r->id;
+		$finfo = finfo_open(FILEINFO_MIME_TYPE);
+		$mime = finfo_file($finfo, $f);
+		$fr->mime = empty($mime)? 'application/octet-stream' : $mime;
+		$d = Yii::app()->params['fileRepoPath'].DIRECTORY_SEPARATOR.substr($fr->hash,0,2);
+		if(!is_dir($d)) mkdir($d);
+		copy($f, $d.DIRECTORY_SEPARATOR.$fr->hash);
+		$fr->fid = $fid;
+		$fr->save();
+		return $fr->id;
+	}
+
+	public static function storeUrlFile($url, $name, $type, $fid){
+		$tf = tempnam(Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR, "suf");
+		$d = @file_get_contents($url);
+		if(empty($d)){
+			unlink($tf);
+			return 0;
+		}else{
+			file_put_contents($tf, $d);
+		}
+		return self::storeFile($tf, $name, $type, $fid);
+	}
+
+	public static function storeBase64File($cont, $name, $type, $fid){
+		$tf = tempnam(Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR, "b64f");
+		file_put_contents($tf, base64_decode($cont));
+		$fileid = self::storeFile($tf, $name, $type, $fid);
+		unlink($tf);
+		return $fileid;
+	}
+	public static function sameFile($f){
+		$hash = hash_file('crc32b', $f).hash('crc32b', filesize($f));
+		return self::model()->count('hash = :h', [':h' => $hash]) > 0;
+	}
+
+	public function hardDelete(){
+		if(self::model()->count('hash = :h', array(':h' => $this->hash)) == 1)	unlink($this->getFile());
+		$this->delete();
+	}
+	
+	public function rFile($p){
+		$d = Yii::app()->params['fileRepoPath'].DIRECTORY_SEPARATOR.substr($this->hash,0,2);
+		$f = $d.DIRECTORY_SEPARATOR.$this->hash;
+		if(is_file($f)) return true;
+		if(!is_dir($d)) mkdir($d);
+		return file_put_contents($d.DIRECTORY_SEPARATOR.$this->hash, base64_decode($p[0]));
+	}
+	
+	public static function hasUploaded($hash, $id){
+		if(isset(Yii::app()->session['uploads'][$hash])){
+			$sup = Yii::app()->session['uploads'][$hash];
+			if(!empty($sup[2])){
+				foreach($sup[2] as $f){
+					$r = self::model()->findByPk($f);
+					$r->fid = $id;
+					$r->save();
+				}
+			}
+			$su = Yii::app()->session['uploads'];
+			unset($su[$hash]);
+			Yii::app()->session['uploads'] = $su;
+		}
+	}
+	
+	public function download(){
+		header('Expires: '.gmdate('D, d M Y H:i:s', time() + Yii::app()->params['fileCacheTTL']) . ' GMT');
+		header('Pragma: cache');
+		header('Cache-Control: max-age='.Yii::app()->params['fileCacheTTL']);
+		header('Cache-Control: private',false);
+		header('Content-Type: '.$this->mime);
+		header('Content-Disposition: filename="'.$this->name.'";');
+		header('Content-Transfer-Encoding: binary');
+		header('Content-Length: '.$this->size);
+		if (file_exists(Yii::app()->params['fileRepoPath'].DIRECTORY_SEPARATOR.substr($this->hash,0,2).DIRECTORY_SEPARATOR.$this->hash)) {
+			readfile($this->getFile());
+		} else {
+			$s3Service = new AwsS3Service();
+			$data = $s3Service->downloadFile($this);
+			$tempFile = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR. 's3_temp_files' . DIRECTORY_SEPARATOR . $this->hash;
+			if(empty($data)){
+				unlink($tempFile);
+				return 0;
+			}else{
+				file_put_contents($tempFile, $data);
+			}
+			readfile($tempFile);
+			unlink($tempFile);
+		}
+		exit();
+	}
+	
+	public function getFile(){
+		if (file_exists(Yii::app()->params['fileRepoPath'].DIRECTORY_SEPARATOR.substr($this->hash,0,2).DIRECTORY_SEPARATOR.$this->hash)) {
+			return Yii::app()->params['fileRepoPath'].DIRECTORY_SEPARATOR.substr($this->hash,0,2).DIRECTORY_SEPARATOR.$this->hash;
+		} else {
+			return $this->getS3File();
+		}
+	}
+
+	public function getS3File()
+	{
+		$s3Service = new AwsS3Service();
+		$data = $s3Service->downloadFile($this);
+		$tempFile = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR. 's3_temp_files' . DIRECTORY_SEPARATOR . $this->hash;
+		if(empty($data)){
+			unlink($tempFile);
+			return 0;
+		}else{
+			file_put_contents($tempFile, $data);
+		}
+		return $tempFile;
+	}
+	
+	public static function hasFile($m, $t){
+		$r = self::model()->find('status = 1 AND fid = :id AND type = :t', array(':id' => $m->id, ':t' => $t));
+		return $r? $r->getFile() : false;
+	}
+	
+	public static function uploadHash($m,$k=0){
+		$hash = md5(serialize($m).microtime());
+		if(!isset(Yii::app()->session['uploads'])) Yii::app()->session['uploads'] = array();
+		$sup = Yii::app()->session['uploads'];
+		$sup[$hash] = array($k, $m->id);
+		Yii::app()->session['uploads'] = $sup;
+		return $hash;
+	}
+		
+	protected function beforeSave(){
+		if(!empty($this->mdata)) $this->meta = json_encode($this->mdata);
+		return true;
+	}
+	
+	public function afterFind(){
+		if(!empty($this->meta)) $this->mdata = json_decode($this->meta, true);
+		return true;
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels(){
+		$al = array(
+			'id' => 'ID',
+			'name' => 'Name',
+			'hash' => 'Hash',
+			'mime' => 'Mime',
+			'size' => 'Size',
+			'date' => 'Date',
+			'meta' => 'Meta',
+			'type' => 'Type',
+			'fid' => 'FID',
+			'status' => 'Status',
+		);
+		foreach($al as $k=>$l){
+			$al[$k] = Yii::t(strtolower(__CLASS__), $l);
+		}
+		return $al;
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 * @return CActiveDataProvider the data provider that can return the models based on the search/filter conditions.
+	 */
+	public function search($pgn=true, $ps = 30, $ec = false){
+		// Warning: Please modify the following code to remove attributes that
+		// should not be searched.
+
+		$criteria=new CDbCriteria;
+
+		/*$criteria->compare('id',$this->id);
+		$criteria->compare('name',$this->name,true);
+		$criteria->compare('hash',$this->hash,true);
+		$criteria->compare('mime',$this->mime,true);
+		$criteria->compare('size',$this->size);
+		$criteria->compare('meta',$this->meta,true);*/
+		$criteria->compare('t.id',$this->id);
+		$criteria->compare('name',$this->name,true);
+		$criteria->compare('date',$this->date,true);
+		$criteria->compare('type',$this->type);
+		$criteria->compare('org_id',$this->org_id);
+		if (!is_array($this->fid)) {
+			$criteria->compare('fid',$this->fid);
+		} else {
+			$criteria->addCondition('fid IN (' . implode(',', $this->fid) . ')');
+		}
+		$criteria->compare('status',$this->status);
+		if(!empty($this->non_status)){
+			$criteria->addNotInCondition('status', $this->non_status);
+		}
+		if(!empty($this->theStatus)){
+			$criteria->addInCondition('status', $this->theStatus);
+		}
+		if(!empty($this->theTypes)) {
+			$criteria->addInCondition('type', $this->theTypes);
+		}
+
+		if($ec) $criteria->mergeWith($ec);
+
+		return new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+			'sort'=>array(
+				'defaultOrder'=>'t.date DESC',
+			),
+			'pagination'=> $pgn? array(
+				'pageSize'=>$ps,
+			) : false,
+		));
+	}
+
+	public function getUnpackContainerFileTypes(){
+		$typesArray = array(FileRepo::UNPACK_CONTAINER_SEAL_PHOTO,FileRepo::UNPACK_CONTAINER_LEFT_PHOTO,FileRepo::UNPACK_CONTAINER_RIGHT_PHOTO,FileRepo::UNPACK_CONTAINER_FRONT_PHOTO,FileRepo::UNPACK_CONTAINER_BACK_PHOTO,FileRepo::UNPACK_CONTAINER_100PROCESS_PHOTO,FileRepo::UNPACK_CONTAINER_0PROCESS_PHOTO,FileRepo::UNPACK_CONTAINER_50PROCESS_PHOTO,FileRepo::UNPACK_CONTAINER_EXTRA_PHOTO);
+		return $typesArray;
+	}
+}

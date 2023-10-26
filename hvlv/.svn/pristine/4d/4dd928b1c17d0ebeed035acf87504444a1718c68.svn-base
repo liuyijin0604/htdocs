@@ -1,0 +1,180 @@
+<?php
+
+/**
+ * This is the model class for table "cargo_process_job_relations".
+ *
+ * The followings are the available columns in table 'cargo_process_job_relations':
+ * @property integer $id
+ * @property integer $job_id
+ * @property integer $cargo_process_id
+ * @property string $created
+ */
+class CargoProcessJobRelations extends CActiveRecord
+{
+	public $driverId;//cjob driverid
+	public $week;//current week = 0 last week = -1 ....-2 -3 -4...
+	public $enable;
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName()
+	{
+		return 'cargo_process_job_relations';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('job_id, cargo_process_id, created', 'required'),
+			array('job_id, cargo_process_id', 'numerical', 'integerOnly'=>true),
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, job_id, cargo_process_id, created,sequence,active,isredelivery', 'safe', 'on'=>'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+			'job' => [self::BELONGS_TO, 'CargoProcessJob', 'job_id'],
+			'cargo_process' => [self::BELONGS_TO, 'CargoProcess', 'cargo_process_id'],
+		);
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return array(
+			'id' => 'ID',
+			'job_id' => 'Job',
+			'cargo_process_id' => 'Cargo Process',
+			'created' => 'Created',
+			'sequence' => 'Sequence',
+			'active' => 'Active',
+		);
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search($pgn = true, $ps = 50)
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$with=[];
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('id',$this->id);
+		$criteria->compare('job_id',$this->job_id);
+		$criteria->compare('cargo_process_id',$this->cargo_process_id);
+		$criteria->compare('created',$this->created,true);
+
+		if(isset($this->enable)){
+			$criteria->compare('active',$this->enable);
+		}
+
+		if (!empty($this->driverId)) {
+			$with[] = 'job';
+			$criteria->addCondition('job.driver_id = ' . $this->driverId);
+		}
+
+		if (is_int(intval($this->week))) {
+			$with[] = 'job';
+			$dateStart = date('Y-m-d', (time() - ((date('w') == 0 ? 7 : date('w')) - 1) * 24 * 3600));
+			$dataEnd = date('Y-m-d', (time() + (7 - (date('w') == 0 ? 7 : date('w'))) * 24 * 3600));
+			$dateStart = date("Y-m-d",strtotime((intval($this->week) * 7)." day",strtotime($dateStart)));
+			$dataEnd =  date("Y-m-d",strtotime((intval($this->week) * 7)." day",strtotime($dataEnd)));
+			$criteria->addCondition('job.created >= "'.$dateStart.' 00:00:00" and job.created <= "'.$dataEnd.' 23:59:59"');
+		}
+
+		$criteria->with = $with;
+
+		return new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+			'pagination' => $pgn ? [
+				'pageSize' => $ps,
+				'params' => $_GET,
+			] : false,
+		));
+		
+	}
+
+	public function getCargoProcessDeliveryDate(){
+		return $this->job->created;
+	}
+
+	public function getAllCargoByWeek(){
+		$result = [];
+		for($i=0;$i>=-26;$i--){
+			$result[$i] =  date("Y-m-d",strtotime(($i * 7)." day",strtotime(date('Y-m-d', (time() - ((date('w') == 0 ? 7 : date('w')) - 1) * 24 * 3600)))))." - ".date("Y-m-d",strtotime(($i * 7)." day",strtotime(date('Y-m-d', (time() + (7 - (date('w') == 0 ? 7 : date('w'))) * 24 * 3600)))));
+		}
+		return $result;
+	}
+
+	public function getCargoCost(){
+		$amount = 0;
+		$modelCargoProcess = $this->cargo_process;
+		if(!empty($modelCargoProcess)){
+			if($this->active == 1){
+				$amount = round($modelCargoProcess->getCargoProcessFeeReCal(),2);
+			}else{
+				if($this->isredelivery==1){
+					$amount = round($modelCargoProcess->getCargoProcessFeeReCal() * 0.4,2);
+				}
+			}
+		}
+		return ($amount=="n/a")? 0:$amount;
+	}
+
+	public function isRelivery(){
+		if($this->active==0){
+			if($this->isredelivery==1){
+				return "✔";
+			}
+		}
+	}
+
+	public function isGoodDelivery(){
+		if($this->active==0){
+			return "False";
+		}else{
+			return $this->cargo_process->isGoodDelivery();
+		}
+	}
+
+	public function getDriverName(){
+		return empty(Org::model()->findByPk($this->job->driver_id)->name)? "":Org::model()->findByPk($this->job->driver_id)->name;
+	}
+
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return CargoProcessJobRelations the static model class
+	 */
+	public static function model($className=__CLASS__)
+	{
+		return parent::model($className);
+	}
+}

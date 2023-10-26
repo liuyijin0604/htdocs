@@ -1,0 +1,235 @@
+<h3>
+    <?= 'TLA' ?>
+</h3>
+<style>
+    .cloumn_red_1 {
+        color: red;
+        font-weight: bold;
+    }
+
+    .cloumn_orange_1 {
+        color: orange;
+        font-weight: bold;
+    }
+
+    .cloumn_red {
+        background-color: pink;
+    }
+
+    .column_direct {
+        color: green;
+        font-weight: bold;
+    }
+
+    .deconsolidation-report-table {
+        font-family: Arial, Helvetica, sans-serif;
+        border-collapse: collapse;
+        width: 100%
+    }
+
+    .deconsolidation-report-table td,
+    .deconsolidation-report-table th {
+        border: 1px solid #ddd;
+        padding: 8px;
+    }
+
+    .deconsolidation-report-table tr:nth-child(even) {
+        background-color: #f2f2f2;
+    }
+
+    .deconsolidation-report-table tr:hover {
+        background-color: #ddd;
+    }
+
+    .deconsolidation-report-table th {
+        padding-top: 12px;
+        padding-bottom: 12px;
+        text-align: left;
+        background-color: #04AA6D;
+        color: white;
+    }
+
+    .hidden-block {
+        display: none;
+    }
+</style>
+
+<?php
+
+
+/* $this->widget('zii.widgets.jui.CJuiTabs', array(
+    'tabs' => array(
+        'New' => array(
+            'id' => 'new-deconsolidation-id',
+            'content' => $this->render(
+                '_list',
+                //array('cargo' =>  $cargo, 'cargo_type' => 3, 'pod_id' => $pod_id, 'deconsolidation' => 1),
+                array('deconsolidation' => $deconsolidation, 'depot' => $dpt_id, 'status' => Deconsolidation::STATUS_NEW),
+                TRUE
+            )
+        ),
+        // 'Reminder' => array('id' => 'reminder-id', 'content' => $this->render(
+        // 	'list_temp',
+        // 	array('pod_id'=> $dpt_id,'deconsolidation'=>2),
+        // 	TRUE
+        // )),
+        'Warehouse' => array(
+            'id' => 'warehouse-deconsolidation-id',
+            'content' => $this->render(
+                '_list',
+                array('deconsolidation' => $deconsolidation, 'depot' => $dpt_id, 'status' => Deconsolidation::STATUS_WAREHOUSE_PROCESSING),
+                true
+            )
+        ),
+        'Error' => array(
+            'id' => 'error-deconsolidation-id',
+            'content' => $this->render(
+                '_list',
+                array('deconsolidation' => $deconsolidation, 'depot' => $dpt_id, 'status' => Deconsolidation::STATUS_WAITING_ERROR_CHECK),
+                true
+            )
+        ),
+        'Completed' => array(
+            'id' => 'complete-deconsolidation-id',
+            'content' => $this->render(
+                '_list',
+                array('deconsolidation' => $deconsolidation, 'depot' => $dpt_id, 'status' => Deconsolidation::STATUS_COMPLETE),
+                true
+            )
+        ),
+    ),
+    'options' => array(
+        //'collapsible' => true,
+    ),
+    'id' => $_GET["tabid"] . '_mytab-menu',
+) 
+); */ ?>
+<div class="container" id="deconsolidation_summary" style="display:block; width:50%;">
+    <a href="#" id="expand_deconsolidation_summary_description"> + Description</a>
+    <div class="container hidden-block" id="description_container">
+        <p>Display format: Tasks completed / Tasks need to be done</p>
+        <p>Tasks completed: Tasks completed this day / this month (tasks overdue will not be count as completed)</p>
+        <p>Tasks need to be done: Tasks due today</p>
+    </div>
+    <table class="deconsolidation-report-table" id="deconsolidation_report_table">
+        <tr>
+            <th></th>
+            <th>Today (Tasks completed / Tasks need to be done)</th>
+            <th>This Month (Tasks completed / Tasks need to be done)</th>
+        </tr>
+        <tr>
+            <td>New</td>
+            <td><?= $summary->todayOpDone . " / " . ($summary->new + $summary->todayOpDone) ?></td>
+            <td><?= $summary->mtdOpDone . " / " . ($summary->new + $summary->mtdOpDone) . "   (" . $summary->mtdOpDonePercentage . "%)"?></td>
+        </tr>
+        <tr>
+            <td>Warehouse</td>
+            <td><?= $summary->todayWarehouseDone . " / " . ($summary->warehouse + $summary->todayWarehouseDone)?></td>
+            <td><?= $summary->mtdWarehouseDone . " / " . ($summary->warehouse + $summary->mtdWarehouseDone) . "   (" . $summary->mtdWarehouseDonePercentage . "%)"?></td>
+        </tr>
+        <tr>
+            <td>Error</td>
+            <td><?= $summary->todayErrorCheckAssignDone . " / " . ($summary->error + $summary->todayErrorCheckAssignDone) ?></td>
+            <td><?= $summary->mtdErrorCheckAssignDone . " / " . ($summary->error + $summary->mtdErrorCheckAssignDone) . "   (" . $summary->mtdErrorCheckAssignDonecentage . "%)"?></td>
+        </tr>
+        <tr>
+            <td>Error Check</td>
+            <td><?= $summary->todayErrorCheckDone . " / " . ($summary->errorChecking + $summary->todayErrorCheckDone) ?></td>
+            <td><?= $summary->mtdErrorCheckDone . " / " . ($summary->errorChecking + $summary->mtdErrorCheckDone) . "   (" . $summary->mtdErrorCheckDonePercentage . "%)"?></td>
+        </tr>
+        <tr>
+            <td>Waiting Scan</td>
+            <td><?= $summary->todayComplete . " / " . ($summary->waitingScan + $summary->todayComplete) ?></td>
+            <td><?= $summary->mtdComplete . " / " . ($summary->waitingScan + $summary->mtdComplete) . "   (" . $summary->mtdScanDonePercentage . "%)"?></td>
+        </tr>
+        <tr>
+            <td>Complete</td>
+            <td><?= $summary->todayComplete . " / " . ($summary->dueToday + $summary->todayComplete) ?></td>
+            <td><?= ($summary->mtdComplete - $summary->mtdOverDue) . " / " . ($summary->dueThisMonth) . "   (" . $summary->mtdCompletePercentage . "%)"?></td>
+        </tr>
+    </table>
+</div>
+<br />
+<div id="parcel-tabs">
+    <ul>
+        <?php
+        $tabs = array(
+            array('new', $this->t('New'), true),
+            array('warehouse', $this->t('Warehouse'), true),
+            array('error', $this->t('Error'), true),
+            array('error_checking', $this->t('Error Checking'), true),
+            array('waiting_scan_all', $this->t('Waiting Scan'), true),
+            array('completed', $this->t('Completed'), true)
+        );
+        foreach ($tabs as $tab) {
+            $href = strpos($tab[0], '/') === false ? $this->createUrl('deconsolidation/list', array('dpt_id' => $dpt_id, 'tab' => $tab[0], "tabid" => $_GET["tabid"])) : $tab[0];
+            echo '<li><a href="' . $href . '">' . $tab[1] . '</a></li>';
+        }
+        ?>
+    </ul>
+</div>
+
+<script>
+    function initPickup() {
+        var tab = $('#<?= $_GET["tabid"]; ?>');
+        $('input.plts-input').keypress(function(e) {
+            if (e.which == 13) {
+                let formData = new FormData();
+                let shipmentId = this.id.slice(5);
+                formData.append('shipment_id', shipmentId);
+                formData.append('plts', $('input#' + this.id).val());
+                $.ajax({
+                    url: '<?= $this->createUrl('cargoProcess/updatePallets') ?>',
+                    type: 'post',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    success: function(r) {
+                        if (r == 'done') {
+                            myApp.notice('Done', 5000);
+                        } else {
+                            myApp.alert(r, false);
+                        }
+                        tab.trigger('reload_deconsolidation_grid');
+                    },
+                    error: function(event) {
+                        console.log(event);
+                    }
+                });
+            }
+        });
+    }
+    $(function() {
+        var tab = $('#<?= $_GET["tabid"]; ?>');
+
+        tab.unbind('reload_deconsolidation_grid').bind('reload_deconsolidation_grid', function() {
+            $('#<?= $_GET["tabid"]; ?>_deconsolidation_grid_new', tab.data('panel')).yiiGridView('update');
+            $('#<?= $_GET["tabid"]; ?>_deconsolidation_grid_warehouse', tab.data('panel')).yiiGridView('update');
+            $('#<?= $_GET["tabid"]; ?>_deconsolidation_grid_error', tab.data('panel')).yiiGridView('update');
+            $('#<?= $_GET["tabid"]; ?>_deconsolidation_grid_complete', tab.data('panel')).yiiGridView('update');
+            return false;
+        });
+
+        //initPickup();
+    })
+
+    $(function() {
+        var tab = $('#<?= $_GET["tabid"]; ?>');
+        $('#parcel-tabs', tab.data('panel')).tabs({
+            active: <?php echo empty($_GET['actab']) ? 0 : $_GET['actab']; ?>,
+            load: function(event, ui) {
+                myApp.ajaxifyForm(this);
+            }
+        });
+    });
+
+    $(function() {
+        $('#expand_deconsolidation_summary_description').on('click', function(e) {
+            if (!$('#description_container').hasClass("hidden-block")) {
+                $('#description_container').addClass("hidden-block");
+            } else {
+                $('#description_container').removeClass("hidden-block");
+            }
+        });
+    });
+</script>

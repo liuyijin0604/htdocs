@@ -1,0 +1,1318 @@
+<?php
+
+class MQCommand extends CConsoleCommand
+{
+	private $db;
+	private $args;
+	private $debug = false;
+	public $ts;
+	public $day;
+	public $hr;
+	public $mn;
+
+	public function run($args)
+	{
+		Yii::app()->name = 'TLA';
+		$this->db = Yii::app()->getDb();
+		$this->args = $args;
+		$this->ts = time();
+		$this->day = date('N');
+		$this->hr = date('G');
+		$this->mn = intval(date('i'));
+		Yii::app()->request->hostInfo = 'https://os.toplogistics.com.au';
+		
+		if (empty($this->mn)) {
+			$this->mn = 0;
+		}
+
+		foreach ($this->args as $ag) {
+			if ($ag == '-d') {
+				$this->debug = true;
+			}
+		}
+
+		if (!empty($args[0]) && method_exists($this, $args[0])) {
+			$this->{$args[0]}();
+		} else {
+			set_error_handler(function($errno, $errstr, $errfile, $errline, $errcontext) {
+				if (!(error_reporting() & $errno)) return false;
+				throw new ErrorException($errstr, 0, $errno, $errfile, $errline);
+			});
+			try{
+			// if ($this->mn % 25 == 0) {
+			// 	$this->log('Start checkMultiID');
+			// 	$this->checkMultiID();
+			// 	$this->openChaseIdTickets();
+			// 	$this->closeIdTickets();
+			// 	$this->log('Finish checkMultiID');
+			// }
+
+			// if ($this->mn % 25 == 0) {
+			// 	$this->log('Start fix0wt');
+			// 	$this->fix0wt();
+			// 	$this->log('Finish fix0wt');
+			// }
+
+			// currently send UBM by checking status: DCLALLOWED return by CARST command
+			// so don't call this function now
+
+			// //call TLA cron
+			$this->tlaMQ();
+
+			} catch( Exception $e) {
+				$trace = $e->getTrace();
+				Emailog::sendEmailTo('dev@toplogistics.com.au', $e->getCode().PHP_EOL.$e->getMessage().PHP_EOL.print_r($trace, true)," MQ error");
+			}
+		}
+	}
+
+
+	public function tlaMQ(){
+		//set app name
+		[$app_name, Yii::app()->name] = [Yii::app()->name, 'TLA'];
+		
+		if ($this->mn % 5 == 0) {
+			$this->log('Start sequenceHandlingGatepassSubmition');
+			$this->sequenceHandlingGatepassSubmition();
+			$this->log('Finish sequenceHandlingGatepassSubmition');
+			
+			$this->log('Start cacheEmailDetailsEvery5Minutes');
+			$this->cacheEmailDetailsEvery5Minutes();
+			$this->log('Finish cacheEmailDetailsEvery5Minutes');
+
+			$this->log('Start cacheTaskDashEvery5Minutes');
+			$this->cacheTaskDashEvery5Minutes();
+			$this->log('Finish cacheTaskDashEvery5Minutes');
+
+			$this->log('Start cacheWarehouseProcessEvery5Minutes');
+			$this->cacheWarehouseProcessEvery5Minutes();
+			$this->log('Finish cacheWarehouseProcessEvery5Minutes');
+
+			$this->log('Start checkScheduledTlaTask');
+			$this->checkScheduledTlaTask();
+			$this->log('Finish checkScheduledTlaTask');
+
+			$this->log('Start bwtrunkUpdate');
+			$this->bwtrunkUpdate();
+			$this->log('Finish bwtrunkUpdate');
+			
+		}
+
+
+
+		if ($this->mn % 12 == 0) {
+			$this->log('Start custom process cache');
+			$this->customProcessCache();
+			$this->log('Finish custom process cache');
+		}
+
+		if ($this->mn % 5 == 0) {
+
+			$this->log('Start pushHeldShipmentsToCustomProcessNew');
+			$this->pushHeldShipmentsToCustomProcessNew();
+			$this->log('Finish pushHeldShipmentsToCustomProcessNew');
+
+			$this->log('Start processingMqProcess');
+			$this->processingMqProcess();
+			$this->log('Finish processingMqProcess');
+		}
+		
+
+		if ($this->mn % 30 == 0) {
+			$this->log('Start fixBagScanData');
+			$this->fixBagScanData();
+			$this->log('Finish fixBagScanData');
+
+			$this->log('Start deleteDuplicateCustomProcess');
+			$this->deleteDuplicateCustomProcess();
+			$this->log('Finish deleteDuplicateCustomProcess');
+
+
+			$this->log('Start cacheWarehouseProcessEvery30Minutes');
+			$this->cacheWarehouseProcessEvery30Minutes();
+			$this->log('Finish cacheWarehouseProcessEvery30Minutes');
+
+		}
+
+		$this->cargoProcessHandler();
+
+		$this->taskHandler();
+
+		if (($this->hr == 23 && $this->mn == 30)) {
+			$this->log('Start pushDirectConsolIntoConsolProcessForInvoice');
+			$this->pushDirectConsolIntoConsolProcessForInvoice();
+			$this->log('Finish pushDirectConsolIntoConsolProcessForInvoice');
+
+			$this->log('calculateMTDEveryDay');
+			$this->calculateMTDEveryDay();
+			$this->log('calculateMTDEveryDay');
+
+
+			$this->log('handlingCheckingShipmentToBeInspection');
+			//$this->handlingCheckingShipmentToBeInspection();
+			$this->log('handlingCheckingShipmentToBeInspection');
+		}
+
+		if (($this->hr == 23 && $this->mn == 50)) {
+			$this->log('createLiveChatEmailDaily');
+			$this->createLiveChatEmailDaily();
+			$this->log('createLiveChatEmailDaily');
+
+			$this->log('cacheKpiReportMonthly');
+			$this->cacheKpiReportMonthly();
+			$this->log('cacheKpiReportMonthly');
+		}
+
+		if($this->hr == 1 && $this->mn == 20)
+		{
+			$this->log('Start generateConsolProcessWaitingInvoiceInvoice');
+			$this->generateConsolProcessWaitingInvoiceInvoice();
+			$this->log('End generateConsolProcessWaitingInvoiceInvoice');
+		}
+
+		if($this->hr == 3 && $this->mn == 20)
+		{
+			$this->log('Start sendCheckConnoteRangeDaily');
+			$this->sendCheckConnoteRangeDaily();
+			$this->log('End sendCheckConnoteRangeDaily');
+		}
+
+		if($this->hr == 6 && $this->mn == 30)
+		{
+			$this->log('Start sendFakEmailDaily');
+			$this->sendFakEmailDaily();
+			$this->log('End sendFakEmailDaily');
+
+			$this->log('sendDailyConfirmationSms');
+			$this->sendDailyConfirmationSms();
+			$this->log('sendDailyConfirmationSms');
+
+            $this->log('getWhscanDetailReport');
+			$this->getWhscanDetailReport();
+			$this->log('getWhscanDetailReport');
+
+		}
+
+		if($this->hr == 23 && $this->mn == 30)
+		{
+			$this->log('Start generateConsolProcessWaitingInvoiceInvoiceToday');
+			$this->generateConsolProcessWaitingInvoiceInvoiceToday();
+			$this->log('End generateConsolProcessWaitingInvoiceInvoiceToday');
+		}
+
+		// if($this->hr == 2 && $this->mn == 20)
+		// {
+		// 	$this->log('Start pushHeldShipmentsToCustomProcess');
+		// 	$this->pushHeldShipmentsToCustomProcess();
+		// 	$this->log('End pushHeldShipmentsToCustomProcess');
+		// }
+
+		if($this->hr == 3 && $this->mn == 50)
+		{
+			$this->log('Start generateConsolProcessWaitingInvoiceInvoice');
+			$this->generateConsolProcessWaitingInvoiceInvoice();
+			$this->log('End generateConsolProcessWaitingInvoiceInvoice');
+		}
+
+
+		if($this->hr == 7 && $this->mn == 00)
+		{
+			$this->log('Start generateConsolProcessWaitingInvoiceInvoice');
+			$this->generateConsolProcessWaitingInvoiceInvoice();
+			$this->log('End generateConsolProcessWaitingInvoiceInvoice');
+		}
+
+		if($this->mn%10==0 && $this->hr > 8 && $this->hr < 18)
+		{
+			$this->log('refreshGatepassSignSummary');
+			$this->refreshGatepassSignSummary();
+			$this->log('refreshGatepassSignSummary');
+		}
+
+		if($this->hr == 20 && $this->mn==0)
+		{
+			$this->log('refreshTodayHeldSummary');
+			$this->refreshTodayHeldSummary();
+			$this->log('refreshTodayHeldSummary');
+		}
+
+		Yii::app()->name = $app_name;
+	}
+	
+	public function bwtrunkUpdate(){
+		 function funBwtrunkUpdate(){
+			$service =new BwtrunkService();
+			$service->updateData();
+		}
+		funBwtrunkUpdate();
+	}
+
+
+	public function getWhscanDetailReport(){
+		 function funGetWhscanDetailReport(){		 	
+            $timestamp = time();
+            $date = date('Y-m-d H:i:s', $timestamp);
+		 	$date = date('Y-m-d', strtotime($date . ' -1 day'));
+			$serviceAir = new WarehouseProcessService();
+			$serviceAir->getWhscanDetailReport($date, $date, 0, false, Consol::AIRCONSOL, 1);
+			$serviceSea = new WarehouseProcessService();
+			$serviceSea->getWhscanDetailReport($date, $date, 0, false, Consol::SEACONSOL, 1);
+		}
+		funGetWhscanDetailReport();
+	}
+
+	public function sendDailyConfirmationSms(){
+		 function funSendDailyConfirmationSms(){
+			$service =new EmailService();
+			$service->sendDailyConfirmationSms();
+		}
+		funSendDailyConfirmationSms();
+	}
+
+	public function cargoProcessHandler()
+	{
+		if ($this->mn % 10 == 0) {
+			$this->log('Start sequenceHandlingGatepassSubmition');
+			$this->puttingAllPickupCargoprocessWithGPToDeliveried();
+			$this->log('Finish sequenceHandlingGatepassSubmition');
+		}
+	}
+
+	public function taskHandler()
+	{
+		if ($this->hr == 12 && $this->mn % 50 == 0) {
+			$this->log('Start cleanClosedEmailTask');
+			$this->cleanClosedEmailTask();
+			$this->log('Finish cleanClosedEmailTask');
+		}
+	}
+
+
+	public function sequenceHandlingGatepassSubmition()
+	{
+		Yii::app()->name = "TLA";
+		$allMQCourierSubmit = GatepassCourier::model()->findAll("json_value(meta,'$.isMQ') is not null and json_value(meta,'$.isMQ_handle') is null");
+		$handleSubmit = null;
+		foreach ($allMQCourierSubmit as $key => $submit)
+		{
+			$status = $this->checkMQProcessing('MQCourerSubmit'.$submit->mdata['ocourier_id']);
+			if(!empty($status))
+			{
+				echo "processing";
+				continue;
+			}
+			$handleSubmit = $submit;
+			break;
+		}
+
+		if(!empty($handleSubmit))
+		{
+			$this->setMQProcessing('MQCourerSubmit'.$handleSubmit->mdata['ocourier_id'],3600);
+			$postData = json_decode($handleSubmit->mdata['postData'],true);
+			$gatepassService = new GatepassService();
+			$result = $gatepassService->handlingGatepassSubmit($postData,$handleSubmit);
+			if($result['status']==0)
+			{
+				print_r($result);
+				Emailog::sendEmailTo('dev@toplogistics.com.au', json_encode($result),$handleSubmit->id." gatepass MQ error");
+			}
+
+			$handleSubmit->mdata['isMQ_handle'] = 1;
+			$handleSubmit->save();
+			$this->deleteMQProcessing('MQCourerSubmit'.$handleSubmit->mdata['ocourier_id']);
+		}
+	}
+
+	public function customProcessCache()
+	{
+		function funcCustomProcessCache()
+		{
+			$tableTwoInfo = [];
+			$sql = 'SELECT COUNT(*) as number, user_id, type FROM `process_log` WHERE time<=SUBDATE(CURDATE(),INTERVAL -1080 MINUTE) AND time>=SUBDATE(CURDATE(),INTERVAL 360 MINUTE) AND status=1 GROUP BY user_id,type';
+			$open_info = Yii::app()->db->createCommand($sql)->queryAll();
+			foreach ($open_info as $oneOpenInfo) {
+				$tableTwoInfo[$oneOpenInfo['user_id']][$oneOpenInfo['type']] = ['type' => $oneOpenInfo['type'], 'open' => $oneOpenInfo['number'], 'close' => 0, 'total' => 0, 'close_avg' => 0, 'close_avg_percent' => 0];
+			}
+			$sql = 'SELECT COUNT(*) as number,p.type,p.user_id FROM `shipment_process` t INNER JOIN `process_log` p ON t.id=p.fid  WHERE date<=SUBDATE(CURDATE(),INTERVAL -1080 MINUTE) AND date>=SUBDATE(CURDATE(),INTERVAL 360 MINUTE) AND t.status=24 GROUP by p.type,p.user_id';
+			$close_info = Yii::app()->db->createCommand($sql)->queryAll();
+			foreach ($close_info as $oneCloseInfo) {
+				$tableTwoInfo[$oneCloseInfo['user_id']][$oneCloseInfo['type']]['close'] = $oneCloseInfo['number'];
+			}
+			$sql = "SELECT count(*) as number, p.user_id,p.type FROM `shipment_process` t INNER JOIN `process_log` p ON t.id=p.fid WHERE t.status<24 AND p.status=1 GROUP by p.user_id , p.type";
+			$totalHeldInfo = Yii::app()->db->createCommand($sql)->queryAll();
+			$totalHelshipments = 0;
+			foreach ($totalHeldInfo as $oneHeldInfo) {
+				$totalHelshipments += intval($oneHeldInfo['number']);
+				$tableTwoInfo[$oneHeldInfo['user_id']][$oneHeldInfo['type']]['total'] = $oneHeldInfo['number'];
+			}
+
+			$sql = 'SELECT MAX(number) FROM (SELECT COUNT(*)/DAY(LAST_DAY(`date`)) * 1.4 as number FROM `shipment_process` WHERE type&4>0 AND status=24 AND `date` > DATE_SUB(DATE_FORMAT(NOW() ,"%Y-%m-01"), INTERVAL 6 MONTH) GROUP BY MONTH(`date`) LIMIT 6) t';
+			${'4' . 'close_avg'} = 12;
+			ceil(Yii::app()->db->createCommand($sql)->queryScalar());
+			$sql = 'SELECT MAX(number) FROM (SELECT COUNT(*)/DAY(LAST_DAY(`date`)) * 1.4 as number FROM `shipment_process` WHERE type&1>0 AND status=24 AND `date` > DATE_SUB(DATE_FORMAT(NOW() ,"%Y-%m-01"), INTERVAL 6 MONTH) GROUP BY MONTH(`date`) LIMIT 6) t';
+			${'1' . 'close_avg'} = 3; //ceil(Yii::app()->db->createCommand($sql)->queryScalar());
+			$sql = 'SELECT MAX(number) FROM (SELECT COUNT(*)/DAY(LAST_DAY(`date`)) * 1.4 as number FROM `shipment_process` WHERE type&2>0 AND status=24 AND `date` > DATE_SUB(DATE_FORMAT(NOW() ,"%Y-%m-01"), INTERVAL 6 MONTH) GROUP BY MONTH(`date`) LIMIT 6) t';
+			${'2' . 'close_avg'} = 3; //ceil(Yii::app()->db->createCommand($sql)->queryScalar());
+			$sql = 'SELECT MAX(number) FROM (SELECT COUNT(*)/DAY(LAST_DAY(`date`)) * 1.4 as number FROM `shipment_process` WHERE type&8>0 AND status=24 AND `date` > DATE_SUB(DATE_FORMAT(NOW() ,"%Y-%m-01"), INTERVAL 6 MONTH) GROUP BY MONTH(`date`) LIMIT 6) t';
+			${'8' . 'close_avg'} = ceil(Yii::app()->db->createCommand($sql)->queryScalar());
+			${'16' . 'close_avg'} = ceil(Yii::app()->db->createCommand($sql)->queryScalar());
+			$sql = 'SELECT COUNT(*) FROM `consol` t INNER JOIN `shipment` s ON t.id=s.consol_id WHERE t.eta>=SUBDATE(CURDATE(),INTERVAL 29 DAY) AND t.eta<=CURDATE()';
+			$totalShipment = Yii::app()->db->createCommand($sql)->queryScalar();
+			$totalShipment = ceil($totalShipment / 30);
+
+			foreach ($tableTwoInfo as $user_id => $typeInfo) {
+				foreach (ShipmentProcess::$the_types as $key => $name) {
+					if (key_exists($key, $typeInfo)) {
+						$tableTwoInfo[$user_id][$key]['close_avg'] = ${$key . 'close_avg'};
+						$tableTwoInfo[$user_id][$key]['close_avg_percent'] = (${$key . 'close_avg'} > 0 ? number_format(@intval($tableTwoInfo[$user_id][$key]['close']) / ${$key . 'close_avg'} * 100, 2, '.', '') : 0);
+						$tableTwoInfo[$user_id][$key]['totalPercent'] = ($totalShipment > 0 ? number_format(@$tableTwoInfo[$user_id][$key]['total'] / $totalShipment * 100, 2, '.', '') : 0);
+						$tableTwoInfo[$user_id][$key]['percent'] = ($totalHelshipments > 0 ? number_format(@$tableTwoInfo[$user_id][$key]['total'] / $totalHelshipments * 100, 2, '.', '') : 0);
+					}
+				}
+			}
+			$info = ['tableTwoInfo' => $tableTwoInfo, 'totalShipment' => $totalShipment];
+			Service::setCacheData('CustomProcessInfo',$info,86400);
+		}
+		$this->funcDoMQ('funcCustomProcessCache','funcCustomProcessCache');
+	}
+
+
+	public function puttingAllPickupCargoprocessWithGPToDeliveried()
+	{
+		function mqgpca()
+		{
+			$gatepassCouriers = GatepassCourier::model()->findAll("json_value(meta,'$.is_tp') is not null and json_value(meta,'$.is_tp') ='TP' and json_value(meta,'$.isMQ_handle') is null and create_time>'2022-02-01'");
+			$fids = [];
+			foreach ($gatepassCouriers as $key => $gc) {
+				foreach ($gc->lines as $key => $line) {
+					$fids[$line->fid] = $line->fid;
+				}
+			}
+			$cargoProcesses = CargoProcess::model()->findAll('type = :type and status<100 and shipment_id in ("'.join('","',$fids).'")',[":type"=>CargoProcess::PICKUP_CARGO]);
+			foreach ($cargoProcesses as $key => $ca)
+			{
+				$ca->processDone();
+			}
+			foreach ($gatepassCouriers as $key => $gc) {
+				$gc->mdata['isMQ_handle'] =1;
+				$gc->save();
+			}
+		}
+		$this->funcDoMQ('MQGPCA_PICKUP','mqgpca');
+	}
+
+	public function cleanClosedEmailTask()
+	{
+		function cleanEmailTask()
+		{
+			$emailTasks = EmailTask::model()->findAll('t.type=10 and status <100');
+			foreach ($emailTasks as $key => $emailTask) {
+				if(!empty($emailTask->getLinkObj())&&$emailTask->getLinkObj()->status==ImportsMail::STATE_CLOSED)
+				{
+					$emailTask->status = TlaTask::CLOSE;
+					$emailTask->save();
+				}
+			}
+		}
+
+		$this->funcDoMQ('cleanEmailTask','cleanEmailTask');
+	}
+
+
+	public function pushDirectConsolIntoConsolProcessForInvoice()
+	{
+		function functionPushDirectConsolIntoConsolProcessForInvoice()
+		{
+			$consols = ImcoConsol::model()->with('process')->findAll("t.awb like 'Direct%' and process.id is null and t.eta >='2021-01-01'");
+			foreach ($consols as $key => $consol)
+			{
+				$consol->newConsolProcess(ConsolProcess::STATE_WAITING_CREATE_INVOICE);
+			}
+		}
+
+		$this->funcDoMQ('functionPushDirectConsolIntoConsolProcessForInvoice','functionPushDirectConsolIntoConsolProcessForInvoice');
+	}
+
+	public function cacheEmailDetailsEvery5Minutes()
+	{
+		function funcCacheEmailDetailsEvery5Minutes()
+		{
+			$_POST['backend_command'] = 1;
+			$_POST['refreshMailCache'] = 1;
+			Yii::import('application.controllers.ImportsMailController');
+			$mail = new ImportsMailController('default');
+			$mail->actionList();
+			$mail->actionWmsList();
+		}
+
+		$this->funcDoMQ('funcCacheEmailDetailsEvery5Minutes','funcCacheEmailDetailsEvery5Minutes');
+	}
+
+	public function cacheTaskDashEvery5Minutes()
+	{
+		function funcCacheTaskDashEvery5Minutes()
+		{
+			$service = new TlaTaskService();
+			$service->getTlaTaskDashBoardKPI(true);
+		}
+
+		$this->funcDoMQ('funcCacheTaskDashEvery5Minutes','funcCacheTaskDashEvery5Minutes');
+	}
+
+
+	public function cacheWarehouseProcessEvery5Minutes()
+	{
+		function funcWarehouseProcessEvery5Minutes()
+		{
+			$service2 = new WarehouseProcessService();
+			$service2->getPreparationOldGatepassWithoutResorting(0,"");
+			$service2->getPreparationOldGatepassWithoutResorting(106);
+			$service2->getPreparationOldGatepassWithoutResorting(218);
+			$service2->getPreparationOldGatepassWithoutResorting(530);
+		}
+
+		$this->funcDoMQ('funcWarehouseProcessEvery5Minutes','funcWarehouseProcessEvery5Minutes');
+
+	}
+
+	public function cacheWarehouseProcessEvery30Minutes()
+	{
+
+		function funcWarehousePutawaySortHeld30Minutes()
+		{
+			$service2 = new WarehouseProcessService();
+			$service2->getPutawaySortHeldList(106,true);
+			$service2->getPutawaySortHeldList(218,true);
+			$service2->getPutawaySortHeldList(530,true);
+		}
+
+		$this->funcDoMQ('funcWarehousePutawaySortHeld30Minutes','funcWarehousePutawaySortHeld30Minutes',7200);
+	}
+
+
+	public function calculateMTDEveryDay()
+	{
+		function funcCalculateMTDEveryDay()
+		{
+			$kpiService = new KpiService();
+			$kpiService->calculateMonthEmailKPI(date("Y-m"),1);
+			$kpiService->calculateMonthTaskKPI(date("Y-m"),1);
+		}
+
+		$this->funcDoMQ('funcCalculateMTDEveryDay','funcCalculateMTDEveryDay');
+	}
+
+	public function handlingCheckingShipmentToBeInspection()
+	{
+		function funcHandlingCheckingShipmentToBeInspection()
+		{
+			$warehouseProcessService = new WarehouseProcessService();
+			//$warehouseProcessService->checkInShipmentToBeInspection(106);
+			// $warehouseProcessService->checkInShipmentToBeInspection(218);
+			// $warehouseProcessService->checkInShipmentToBeInspection(530);
+		}
+		funcHandlingCheckingShipmentToBeInspection();
+		//$this->funcDoMQ('funcHandlingCheckingShipmentToBeInspection','funcHandlingCheckingShipmentToBeInspection');
+	}
+
+	public function refreshGatepassSignSummary()
+	{
+		function funcRefreshGatepassSignSummary()
+		{
+			$warehouseProcessService = new WarehouseProcessService();
+			$warehouseProcessService->getGapsignSummeryList(Org::TLA_DEPARTMENT_SYDNEY,true);
+			$warehouseProcessService->getGapsignSummeryList(Org::TLA_DEPARTMENT_MELBOURNE,true);
+			$warehouseProcessService->getGapsignSummeryList(Org::TLA_DEPARTMENT_BRISBANE,true);
+		}
+		$this->funcDoMQ('funcRefreshGatepassSignSummary','funcRefreshGatepassSignSummary');
+	}
+
+	public function refreshTodayHeldSummary()
+	{
+		function funcRefreshTodayHeldSummary()
+		{
+			$warehouseProcessService = new WarehouseProcessService();
+			$warehouseProcessService->saveTodayHeldShipments(Org::TLA_DEPARTMENT_SYDNEY);
+			$warehouseProcessService->saveTodayHeldShipments(Org::TLA_DEPARTMENT_MELBOURNE);
+			$warehouseProcessService->saveTodayHeldShipments(Org::TLA_DEPARTMENT_BRISBANE);
+		}
+		$this->funcDoMQ('funcRefreshTodayHeldSummary','funcRefreshTodayHeldSummary');
+	}
+
+	public function cacheKpiReportMonthly()
+	{
+		function funcCacheKpiReportMonthly()
+		{
+			$kpiService = new KpiService();
+			$kpiService->cacheKpiReportMonthly(date("Y-m"));
+		}
+		funcCacheKpiReportMonthly();
+		//$this->funcDoMQ('funcCacheKpiReportMonthly','funcCacheKpiReportMonthly');
+	}
+
+	public function createLiveChatEmailDaily()
+	{
+		function funCreateLiveChatEmailDaily()
+		{
+			$liveChatService = new LiveChatService();
+	        $liveChatService->createChatEmailDaily(Date("Y-m-d"));
+		}
+		funCreateLiveChatEmailDaily();
+	}
+
+	public function sendFakEmailDaily()
+	{
+		function funSendFakEmailDaily()
+		{
+			$imparcelService = new ImParcelService();
+			$imparcelService->sendFakEmailDaily();
+		}
+		funSendFakEmailDaily();
+	}
+
+	public function cacheKpiReportByMonth()
+	{
+		$month = $this->prompt('Month: ');
+		function funcCacheKpiReportMonth($month)
+		{
+			$kpiService = new KpiService();
+			$kpiService->cacheKpiReportMonthly($month);
+		}
+		funcCacheKpiReportMonth($month);
+		//$this->funcDoMQ('funcCacheKpiReportMonthly','funcCacheKpiReportMonthly');
+	}
+
+	public function handlingCheckingShipmentToBeInspectionByDay()
+	{
+		$day = $this->prompt('day: ');
+		function funcHandlingCheckingShipmentToBeInspection($day)
+		{
+			$warehouseProcessService = new WarehouseProcessService();
+			$warehouseProcessService->checkInShipmentToBeInspection(106,$day);
+			// $warehouseProcessService->checkInShipmentToBeInspection(218,$day);
+			// $warehouseProcessService->checkInShipmentToBeInspection(530,$day);
+		}
+		funcHandlingCheckingShipmentToBeInspection($day);
+	}
+
+	public function pushingAllScanedConsolToAoutAndManifest106()
+	{
+		function funcPushingAllScanedConsolToAoutAndManifest106()
+		{
+			$imConsolService = new ImConsolService();
+			$imConsolService->pushingAllScanedConsolToAoutAndManifest(106);
+		}
+
+		$this->funcDoMQ('funcPushingAllScanedConsolToAoutAndManifest106','funcPushingAllScanedConsolToAoutAndManifest106',240);
+
+	}
+
+	public function pushingAllScanedConsolToAoutAndManifest218()
+	{
+
+
+		function funcPushingAllScanedConsolToAoutAndManifest218()
+		{
+			$imConsolService = new ImConsolService();
+			$imConsolService->pushingAllScanedConsolToAoutAndManifest(218);
+		}
+
+
+		$this->funcDoMQ('funcPushingAllScanedConsolToAoutAndManifest218','funcPushingAllScanedConsolToAoutAndManifest218',240);
+
+	}
+
+
+	public function pushingAllScanedConsolToAoutAndManifest530()
+	{
+
+		function funcPushingAllScanedConsolToAoutAndManifest530()
+		{
+			$imConsolService = new ImConsolService();
+			$imConsolService->pushingAllScanedConsolToAoutAndManifest(530);
+		}
+
+		$this->funcDoMQ('funcPushingAllScanedConsolToAoutAndManifest530','funcPushingAllScanedConsolToAoutAndManifest530',240);
+
+	}
+
+	public function fixZeroValueInvoice()
+	{
+		Yii::app()->name = "TLA";
+		$invoices = Invoice::model()->findAll('total = 0 and status in (1,2,3)');
+		foreach ($invoices as $key => $invoice) {
+			$invoice->getTotal();
+			$invoice->save();
+		}
+	}
+
+	public function fixBagScanData()
+	{
+		Yii::import('application.modules.whscan.controllers.ShipmentController');
+		$cc = new ShipmentController('default');
+		$sql = 'SELECT t.id,pid,warehouse,user_id from `shipment_scan` t left join `shipment_scan_process` s on t.id = s.shipment_scan_id where type =5 and scan_time>"'.date('Y-m-d').'" and (s.process=0 or s.process is null)';
+		$pids = $this->db->createCommand($sql)->queryAll();
+		foreach ($pids as $key => $value) {
+
+			$bagTagCount = ImportBagTag::model()->with('imParcel')->count(["condition"=>"import_bag_id = :import_bag_id and (json_value(imParcel.meta,'$.scan_time') is not null and imParcel.scan_no<imParcel.pkg) ","params"=>[":import_bag_id"=>$value["pid"]],"order"=>'id desc']);
+			if($bagTagCount>0)
+			{
+				$shipmentScanProcess = ShipmentScanProcess::model()->find("shipment_scan_id = ".$value["id"]);
+				if(empty($shipmentScanProcess))
+				{
+					$shipmentScanProcess = new ShipmentScanProcess();
+					$shipmentScanProcess->shipment_scan_id = $value["id"];
+				}
+				$shipmentScanProcess->process = 1;
+				$shipmentScanProcess->save();
+				continue;
+			}
+
+			$importBag = ImportBag::model()->findByPk($value["pid"]);
+			$_GET['op']='checkin';
+			$_POST['sound'] = "";
+			$_POST['location'] = "";
+			$_POST['search_container_no'] = "";
+			$_POST['barcode'] = $importBag->bag_tag;
+			$_POST['tempWarehouse'] = $value["warehouse"];
+			$_POST['backend_commend_MQbag'] = 1;
+			$cc->actionScan();
+			$shipmentScanProcess = ShipmentScanProcess::model()->find("shipment_scan_id = ".$value["id"]);
+			if(empty($shipmentScanProcess))
+			{
+				$shipmentScanProcess = new ShipmentScanProcess();
+				$shipmentScanProcess->shipment_scan_id = $value["id"];
+			}
+			$shipmentScanProcess->process = 1;
+			$shipmentScanProcess->save();
+		}
+	}
+
+
+
+	public function checkScheduledTlaTask()
+	{
+		function funcCheckScheduledTlaTask()
+		{
+			$tlaTaskService = new TlaTaskService();
+			$tlaTaskAll = TlaTask::model()->findAll("status = :status and ((json_value(meta,'$.next_generate_date') is null and ((json_value(meta,'$.reoccuring_start_date') is not null and json_value(meta,'$.reoccuring_start_date')<=:date) or (json_value(meta,'$.reoccuring_start_date') is null and json_value(meta,'$.reoccuring_run') >0))) or json_value(meta,'$.next_generate_date') = :date)",[":status"=>TlaTask::SCHEDULED,':date'=>date("Y-m-d")]);
+			foreach ($tlaTaskAll as $key => $tlaTask) {
+				$reoccuring = $tlaTask['mdata']['reoccuring'];
+				$startDate = !empty($tlaTask->mdata['next_generate_date'])?$tlaTask->mdata['next_generate_date']:date("Y-m-d");
+
+				if(!empty($tlaTask->mdata['reoccuring_start_date']))
+				{
+					if(strtotime($tlaTask->mdata['reoccuring_start_date'])>strtotime(date('Y-m-d')))
+					{
+						continue;
+					}
+
+				}else
+				{
+					$tlaTask->mdata['reoccuring_run'] -= 1;
+
+				}
+
+				$ete = $startDate;
+				for ($i=0; $i < $tlaTask['mdata']['reoccuring_deadline_days']; $i++) {
+					$ete = HolidayHelper::getNextWeekday($ete,'AUSYD');
+				}
+				
+				$ete = $ete." 18:00:00";
+
+				$meta = ["agent_id"=>"".@$tlaTask->mdata["agent_id"]];
+				$createdTask= $tlaTaskService->createNewTlaTask($tlaTask->type,"",'',0,$tlaTask->dpt_id,$tlaTask->user_id,$tlaTask->comment,$meta,[],@$tlaTask->mdata['assigned_user'],$ete);
+
+				$fr = new FileRepo('search');
+				$fr->unsetAttributes();
+				$fr->theTypes[] = FileRepo::TLATASKFILETYPE;
+				$fr->fid = $tlaTask->id;
+				$files = $fr->search(false)->data;
+				foreach ($files as $key => $file) {
+					$newFile = new FileRepo();
+					$newFile->name = $file->name;
+					$newFile->hash = $file->hash;
+					$newFile->mime = $file->mime;
+					$newFile->size = $file->size;
+					$newFile->date = $file->date;
+					$newFile->meta = $file->meta;
+					$newFile->status = $file->status;
+					$newFile->type = $file->type;
+					$newFile->fid = $file->fid;
+					$newFile->org_id = $file->org_id;
+					$newFile->user_id = $file->user_id;
+					$newFile->save();
+				}
+
+				$nextGenerateDate = "";
+				switch ($reoccuring) {
+					case TlaTask::WEEKLY:
+						$nextGenerateDate = HolidayHelper::next_weeks($startDate);
+						break;
+					case TlaTask::MONTHLY:
+						$nextGenerateDate = HolidayHelper::next_months($startDate);
+						break;
+					case TlaTask::FORTNIGHTLY:
+						$nextGenerateDate = HolidayHelper::next_fortnight($startDate);
+						break;
+					case TlaTask::DAILY:
+						$nextGenerateDate = HolidayHelper::getNextWeekday($startDate,'AUD');
+						break;
+					
+					default:
+						# code...
+						break;
+				}
+				$tlaTask->mdata['next_generate_date'] = $nextGenerateDate;
+
+				if(!empty($tlaTask->mdata['reoccuring_start_date']))
+				{
+					if(strtotime($nextGenerateDate)>strtotime($tlaTask->mdata['reoccuring_end_date']))
+					{
+						$tlaTask->mdata['next_generate_date'] = "";
+					}
+					
+				}else
+				{
+					if($tlaTask->mdata['reoccuring_run']==0)
+					{
+						$tlaTask->mdata['next_generate_date'] = "";
+					}
+				}
+
+				$tlaTask->save();
+			}
+		}
+		// funcCheckScheduledTlaTask();
+		$this->funcDoMQ('funcCheckScheduledTlaTask','funcCheckScheduledTlaTask');
+	}
+
+	/* pushEmppToCustomProcess()  is used to check if there are some EMPP,AQIS,Other SHIPMENT NOT go to the Custom Process,
+	* if not, create ShipmentProcess and set a flag cbwf|128 to the Shipment
+	* ShipmentProcess Params @type =1
+	*
+	*/
+	public function pushHeldShipmentsToCustomProcess()
+	{
+		function funcPushHeldShipmentsToCustomProcess()
+		{
+			$sql="SELECT id FROM `shipment` WHERE type=10 AND status in (55,57,58,59,60) AND (bwf&512)>0 AND (cbwf&128)=0";
+			$rs=Yii::app()->db->createCommand($sql)->queryAll();
+			foreach ($rs as $r) {
+				$process= ShipmentProcess::model()->find('pid=:pid', [':pid'=>$r['id']]);
+				$shipment= ImParcel::model()->findByPk($r['id']);
+				if (empty($process)) {
+					$shipment->newShipmentProcess(ShipmentProcess::MSG_NEW, ShipmentProcess::TYPE_EMPP);
+				}
+				$shipment->cbwf=$shipment->cbwf|128;
+				$shipment->update('cbwf');
+			}
+			$sql="SELECT id FROM `shipment` WHERE type=10 AND status in (55,57,58,59,60) AND (bwf&32)>0 AND (cbwf&128)=0";   //push aquis
+			$rs=Yii::app()->db->createCommand($sql)->queryAll();
+			foreach ($rs as $r) {
+				$process= ShipmentProcess::model()->find('pid=:pid', [':pid'=>$r['id']]);
+				$shipment= ImParcel::model()->findByPk($r['id']);
+				if (empty($process)) {
+					$shipment->newShipmentProcess(ShipmentProcess::MSG_NEW, ShipmentProcess::TYPE_AQIS);
+				}
+				$shipment->cbwf=$shipment->cbwf|128;
+				$shipment->update('cbwf');
+
+			}
+
+			$sql="SELECT id FROM `shipment` WHERE type=10 AND status in (55,57,58,59,60) AND (bwf&4)>0 AND (cbwf&128)=0";   //push high value
+			$rs=Yii::app()->db->createCommand($sql)->queryAll();
+			foreach ($rs as $r) {
+				$process= ShipmentProcess::model()->find('pid=:pid', [':pid'=>$r['id']]);
+				$shipment= ImParcel::model()->findByPk($r['id']);
+				if (empty($process)) {
+					$shipment->newShipmentProcess(ShipmentProcess::MSG_NEW, ShipmentProcess::TYPE_HV);
+				}
+				$shipment->refresh();
+				$shipment->cbwf=$shipment->cbwf|128;
+				$shipment->update('cbwf');
+				
+			}
+
+			$sql="SELECT id FROM `shipment` WHERE type=10 AND status in (55,57,58,59,60) AND (bwf&8)>0 AND (cbwf&128)=0";   //push aquis
+			$rs=Yii::app()->db->createCommand($sql)->queryAll();
+			foreach ($rs as $r) {
+				$process= ShipmentProcess::model()->find('pid=:pid', [':pid'=>$r['id']]);
+				$shipment= ImParcel::model()->findByPk($r['id']);
+				if (empty($process)) {
+					echo "xxxx";
+					$shipment->newShipmentProcess(ShipmentProcess::MSG_NEW, ShipmentProcess::TYPE_SAC);
+				}
+				$shipment->cbwf=$shipment->cbwf|128;
+				$shipment->update('cbwf');
+			}
+
+			$sql="SELECT id from `shipment` WHERE type=10 AND ((status=55 OR (status>=50 AND (bwf&1024)>0)) AND ((bwf&4)=0 AND (bwf&32)=0 AND (bwf&512)=0 AND (bwf&8)=0)) AND (cbwf&128)=0";
+			$rs=Yii::app()->db->createCommand($sql)->queryAll();
+			foreach ($rs as $r)
+			{
+				$shipment=ImParcel::model()->findByPk($r['id']);
+				$time=$shipment->getHeldTrackingTime();
+				if ((!empty($time)&&(time()- strtotime($time))>86400*7)||($shipment->bwf&ImParcel::BWF_HELD_OTHER)>0) {
+					$process= ShipmentProcess::model()->find('pid=:pid', [':pid'=>$r['id']]);
+					if (empty($process)) {
+						$shipment->newShipmentProcess(ShipmentProcess::MSG_NEW, ShipmentProcess::TYPE_OTHER);
+					}
+					$shipment->cbwf=$shipment->cbwf|128;
+					$shipment->bwf=$shipment->bwf| ImParcel::BWF_HELD_OTHER;
+					$shipment->update(['cbwf','bwf']);
+				}
+			}
+
+			$sql = 'SELECT id FROM `shipment` WHERE type = 10 AND status = 55 AND cbwf & 128 = 0';
+			foreach ($rs as $r)
+			{
+				$shipment = ImParcel::model()->findByPk($r['id']);
+				$flag = $shipment->exceedScreenPeriod();
+				if ($flag) {
+					$process = ShipmentProcess::model()->find('pid = :pid', [':pid' => $r['id']]);
+					if (empty($process)) {
+						$shipment->newShipmentProcess(ShipmentProcess::MSG_NEW, ShipmentProcess::TYPE_OTHER);
+					}
+					$shipment->cbwf = $shipment->cbwf | 128;
+					$shipment->bwf = $shipment->bwf | ImParcel::BWF_HELD_OTHER;
+					$shipment->mdata['screen_period_exceed'] = true;
+					$shipment->update(['cbwf', 'bwf', 'meta']);
+				}
+			}
+		}
+		//funcPushHeldShipmentsToCustomProcess();
+		$this->funcDoMQ('funcPushHeldShipmentsToCustomProcess','funcPushHeldShipmentsToCustomProcess',7200);
+	}
+
+	public function pushHeldShipmentsToCustomProcessNew()
+	{
+		function funcPushHeldShipmentsToCustomProcessNew()
+		{
+			$shipmentUpdateArr = ShipmentUpdateService::getAllUpdatedBwfRecord();
+			foreach($shipmentUpdateArr as $key => $shipmentUpdate)
+			{
+				$process = ShipmentProcess::model()->find("pid = :pid",[":pid"=>$shipmentUpdate->shipment_id]);
+				$type = 0;
+				$shipment = $shipmentUpdate->imparcel;
+				if(!empty($process))
+				{
+					$type = $process->type;
+				}
+				$type = ($type|ShipmentProcess::TYPE_EMPP);
+				$type = $type^ShipmentProcess::TYPE_EMPP;
+				$type = ($type|ShipmentProcess::TYPE_HV);
+				$type = $type^ShipmentProcess::TYPE_HV;
+				$type = ($type|ShipmentProcess::TYPE_AQIS);
+				$type = $type^ShipmentProcess::TYPE_AQIS;
+				$type = ($type|ShipmentProcess::TYPE_SAC);
+				$type = $type^ShipmentProcess::TYPE_SAC;
+				$type = ($type|ShipmentProcess::TYPE_OTHER);
+				$type = $type^ShipmentProcess::TYPE_OTHER;
+
+				if(($shipment->bwf&ImParcel::HVCODE)>0)
+				{
+					$type = $type|ShipmentProcess::TYPE_HV;
+				}
+
+				if(($shipment->bwf&ImParcel::EMPPCODE)>0)
+				{
+					$type = $type|ShipmentProcess::TYPE_EMPP;
+				}
+
+				if(($shipment->bwf&ImParcel::AQISCODE)>0)
+				{
+					$type = $type|ShipmentProcess::TYPE_AQIS;
+				}
+
+				if(($shipment->bwf&ImParcel::SACCODE)>0)
+				{
+					$type = $type|ShipmentProcess::TYPE_SAC;
+				}
+
+				if((($shipment->status=ImParcel::STATE_HELD OR ($shipment->status>=ImParcel::STATE_REPORTED AND ($shipment->bwf&ImParcel::BWF_HELD_OTHER)>0)) AND (($shipment->bwf&ImParcel::HVCODE)==0 AND ($shipment->bwf&ImParcel::AQISCODE)==0 AND ($shipment->bwf&ImParcel::EMPPCODE)==0 AND ($shipment->bwf&ImParcel::SACCODE)==0)))
+				{
+					$time=$shipment->getHeldTrackingTime();
+					if ((!empty($time)&&(time()- strtotime($time))>86400*7)||($shipment->bwf&ImParcel::BWF_HELD_OTHER)>0) {
+						$type = $type|ShipmentProcess::TYPE_OTHER;
+
+						if(($shipment->bwf&ImParcel::BWF_HELD_OTHER)==0)
+						{
+							$shipment->bwf=$shipment->bwf| ImParcel::BWF_HELD_OTHER;
+							$shipment->cbwf = $shipment->cbwf | 128;
+							$shipment->update(['cbwf','bwf']);
+						}
+					}
+				}
+
+				if($shipment->status==ImParcel::STATE_HELD)
+				{
+					$flag = $shipment->exceedScreenPeriod();
+					if ($flag) {
+						$type = $type|ShipmentProcess::TYPE_OTHER;
+						if(!empty($shipment->mdata['screen_period_exceed'])&&($shipment->bwf&ImParcel::BWF_HELD_OTHER)>0)
+						{
+
+						}else
+						{
+							$shipment->cbwf = $shipment->cbwf | 128;
+							$shipment->bwf = $shipment->bwf | ImParcel::BWF_HELD_OTHER;
+							$shipment->mdata['screen_period_exceed'] = true;
+							$shipment->update(['cbwf', 'bwf', 'meta']);
+						}
+					}
+				}
+
+				if($shipment->status<=ImParcel::STATE_HELD)
+				{
+					if(($shipment->bwf&ImParcel::BWF_HELD_OTHER)>0)
+					{
+						$type = $type|ShipmentProcess::TYPE_OTHER;
+					}
+				}
+
+				if(empty($process))
+				{
+					if(!empty($type))
+					{
+						$shipment->newShipmentProcessAllStatus(ShipmentProcess::MSG_NEW, $type);
+					}
+				}else if(!empty($process))
+				{
+					if($process->type!=$type)
+					{
+						$shipment->newShipmentProcessAllStatus(ShipmentProcess::MSG_NEW, $type);
+					}
+				}
+
+				$shipmentUpdate->status = shipmentUpdate::DONE;
+				$shipmentUpdate->update(["status"]);
+			}
+		}
+
+		$this->funcDoMQ('funcPushHeldShipmentsToCustomProcessNew','funcPushHeldShipmentsToCustomProcessNew',7200);
+	}
+
+
+	public function deleteDuplicateCustomProcess()
+	{
+		$model = new ImParcel('search');
+		$model->unsetAttributes();
+		if (isset($_GET['ImParcel'])) {
+			$model->setAttributes($_GET['ImParcel']);
+		}
+		$model->process_status = 4;
+		$allImParcels = $model->search(false, 30,false,true,false,true)->data;
+		foreach ($allImParcels as $key => $model)
+		{
+			$processesNotWaitingConfirm = ShipmentProcess::model()->count("pid = :pid and status!=4",[":pid"=>$model->id]);
+			if($processesNotWaitingConfirm>0)
+			{
+				$duplicatedWaitingConfirmProcess = ShipmentProcess::model()->find("pid = :pid and status=4",[":pid"=>$model->id]);
+				$duplicatedWaitingConfirmProcess->delete();
+			}
+		}
+
+		$model = new ImParcel('search');
+		$model->unsetAttributes();
+		if (isset($_GET['ImParcel'])) {
+			$model->setAttributes($_GET['ImParcel']);
+		}
+		$model->process_status = 1;
+		$allImParcels = $model->search(false, 30,false,true,false,true)->data;
+		foreach ($allImParcels as $key => $model)
+		{
+			$processesNotWaitingConfirm = ShipmentProcess::model()->count("pid = :pid and status!=1",[":pid"=>$model->id]);
+			if($processesNotWaitingConfirm>0)
+			{
+				$duplicatedWaitingConfirmProcess = ShipmentProcess::model()->find("pid = :pid and status=1",[":pid"=>$model->id]);
+				$duplicatedWaitingConfirmProcess->delete();
+			}
+		}
+
+		$model = new ImParcel('search');
+		$model->unsetAttributes();
+		if (isset($_GET['ImParcel'])) {
+			$model->setAttributes($_GET['ImParcel']);
+		}
+		$model->process_status = 2;
+		$allImParcels = $model->search(false, 30,false,true,false,true)->data;
+		foreach ($allImParcels as $key => $model)
+		{
+			$processesNotWaitingConfirm = ShipmentProcess::model()->count("pid = :pid and status=24",[":pid"=>$model->id]);
+			if($processesNotWaitingConfirm>0)
+			{
+				$duplicatedWaitingConfirmProcess = ShipmentProcess::model()->find("pid = :pid and status=2",[":pid"=>$model->id]);
+				$duplicatedWaitingConfirmProcess->delete();
+			}
+		}
+
+
+		// custom done all self customs shipments after the date of customs
+		$orgs = Org::model()->findAll("json_value(meta,'$.self_customs')=1 and status=1");
+		foreach ($orgs as $key => $org)
+		{
+			$shipmentProcesses = ShipmentProcess::model()->findAll("status <=4 and s_agent_id = :sid and started < :date",[":sid"=>$org->id,":date"=>date("Y-m-d 00:00:00")]);
+			foreach ($shipmentProcesses as $key => $shipmentProcess)
+			{
+				$shipmentProcess->status = ShipmentProcess::CUSTOM_DONE;
+				$shipmentProcess->update(["status"]);
+			}
+		}
+		
+
+	}
+
+	public function processingMqProcess()
+	{
+
+		function funcProcessingMqProcess()
+		{
+			$mqProcess = MqProcess::model()->with(['task'])->find("task.status != :taskStatus and process_status = :status",[":taskStatus"=>TlaTask::CLOSE,":status"=>MqProcess::NO_READY]);
+			$service = new Service();
+			$processingMqCount = $service->getCacheData("processingMq");
+			if(empty($processingMqCount))
+			{
+				$processingMqCount['count'] = 1;
+			}else
+			{
+				$processingMqCount['count'] += 1;
+			}
+			$processingMqCount = $service->setCacheData("processingMq",$processingMqCount,3600);
+			switch ($mqProcess->process_type) {
+				case  MqProcess::PLGROUP_REPORT:
+					$_GET['mqProcessId'] = $mqProcess->id;
+					Yii::import('application.controllers.ReportController');
+					$report = new ReportController('default');
+					$report->actionAjaxExportPlGroupReport();
+					break;
+				
+				default:
+					# code...
+					break;
+			}
+
+
+
+			$processingMqCount = $service->getCacheData("processingMq");
+			if(empty($processingMqCount))
+			{
+				$processingMqCount['count'] = 0;
+			}else
+			{
+				$processingMqCount['count'] = $processingMqCount['count']-1;
+			}
+			$processingMqCount = $service->setCacheData("processingMq",$processingMqCount,3600);
+		}
+
+
+		$service = new Service();
+		$processingMqCount = $service->getCacheData("processingMq");
+		if(empty($processingMqCount)||$processingMqCount['count']<2)
+		{
+			funcProcessingMqProcess();
+		}
+
+	}
+
+
+	public function processingShipmentScanMqProcess()
+	{
+
+		$mqProcess = ShipmentScanMqProcess::model()->with(['task'])->find("task.status != :taskStatus and process_status = :status",[":taskStatus"=>TlaTask::CLOSE,":status"=>MqProcess::NO_READY]);
+		switch ($mqProcess->process_type) {
+			case  MqProcess::PLGROUP_REPORT:
+				$_GET['mqProcessId'] = $mqProcess->id;
+				Yii::import('application.controllers.ReportController');
+				$report = new ReportController('default');
+				$report->actionAjaxExportPlGroupReport();
+				break;
+			
+			default:
+				# code...
+				break;
+		}
+
+	}
+
+	public function generateConsolProcessWaitingInvoiceInvoiceToday()
+	{
+		function funcGenerateConsolProcessWaitingInvoiceInvoiceToday()
+		{
+			// check outturn today
+			$edimsgs = Edimsg::model()->findAll("(type = :type or type = :type1 ) and dt > :today and fid!=0 ",[":type"=>"AIROUT",":type1"=>"SEAOUT",":today"=>date("Y-m-d")]);
+			$checkConsols = [];
+			foreach ($edimsgs as $key => $edimsg)
+			{
+				if(in_array($edimsg->fid,$checkConsols))
+				{
+					$consol = Consol::model()->findByPk($edimsg->fid);
+					Yii::app()->name = "TLA";
+					$msgs = $consol->genSpecialInvoice(false,false,[],false);
+					$checkMsg = join(',',$msgs);
+					if(preg_match('/create/i',$checkMsg))
+					{
+
+					}else
+					{
+						if($checkMsg!='Total Amount is 0')
+						{
+							Emailog::sendEmailTo('gero@toplogistics.com.au', json_encode($consol->no.":".$checkMsg),$consol->no." auto generate consol invoice error");
+						}
+					}
+				}
+				$checkConsols[] = $edimsg->fid;
+			}
+			
+		}
+		$this->funcDoMQ('funcGenerateConsolProcessWaitingInvoiceInvoiceToday','funcGenerateConsolProcessWaitingInvoiceInvoiceToday',7200);
+	}
+
+
+	public function generateConsolProcessWaitingInvoiceInvoice()
+	{
+		function funcGenerateConsolProcessWaitingInvoiceInvoice()
+		{
+			
+			$model=new Consol('search');
+			$model->unsetAttributes();
+			$model->isBackend = true;
+			$model->process_statuses=[ConsolProcess::STATE_WAITING_CREATE_INVOICE];
+			$model->eta = ">2023-02-01";
+			$allConsols = $model->search(false)->data;
+			foreach ($allConsols as $key => $consol)
+			{
+				echo $consol->no."|";
+				//$consol = $consol->getReal();
+				$consol->refresh();
+				$ids = [];
+				if(!empty($consol->type==Consol::IMCOCONSOLTYPE))
+				{
+					$ids = array_column($consol->getOrgsInfo(),'id');
+				}
+
+				$invoices = Invoice::model()->count("consol_id = :consolId and status not in (8,10,99) ",[":consolId"=>$consol->id]);
+				if($invoices>0&&in_array(4018,$ids))
+				{
+					$consol->process->status = ConsolProcess::STATE_CONSOL_PROCESS_DONE;
+					$consol->process->update(['status']);
+					continue;
+				}
+
+				if(empty($consol->mdata['isAutoGen']))
+				{
+					if($consol->type==Consol::IMCOCONSOLTYPE)
+					{
+						Yii::app()->name = "TLA";
+						$msgs = $consol->genSpecialInvoice(false,false,[],false);
+						$checkMsg = join(',',$msgs);
+						if(preg_match('/create/i',$checkMsg))
+						{
+							$consol->mdata['isAutoGen'] = 1;
+							$consol->save();
+						}else
+						{
+							if($checkMsg=="Total Amount does not changed")
+							{
+								$consol->mdata['isAutoGen'] = 1;
+								$consol->save();
+							}elseif($checkMsg!='Total Amount is 0')
+							{
+								Emailog::sendEmailTo('gero@toplogistics.com.au', json_encode($consol->no.":".$checkMsg),$consol->no." auto generate consol invoice error");
+							}
+						}
+					}
+
+				}else
+				{
+					if(empty($consol->process->mdata['process_note'])&&empty($consol->mdata['cfs_address']))
+					{
+						$consol->process->status = ConsolProcess::STATE_CONSOL_PROCESS_DONE;
+						$consol->process->update(['status']);
+					}
+				}
+			}
+		}
+		$this->funcDoMQ('funcGenerateConsolProcessWaitingInvoiceInvoice','funcGenerateConsolProcessWaitingInvoiceInvoice',7200);
+	}
+
+	public function fixPTCInvoice()
+	{
+		$sql = 'SELECT json_extract(meta,"$.port_charge.invoice_no") FROM `consol_process` WHERE meta like "%port_charge%"';
+		$rs = Yii::app()->db_tla->createCommand($sql)->queryAll();
+		foreach ($rs as $r)
+		{
+			
+		}
+	}
+
+
+	public function funcDoMQ($key,$func,$time = 3600)
+	{
+		sleep(rand(1,20));
+		$status = $this->checkMQProcessing($key);
+		if(!empty($status))
+		{
+			echo "processing";
+			return;
+		}
+
+		$this->setMQProcessing($key,$time);
+
+		$func();
+
+		$this->deleteMQProcessing($key);
+	}
+
+	private function checkMQProcessing($key)
+	{
+		$mqRecord = Yii::app()->cache->get('MQRecord:'.$key);
+		if(!empty($mqRecord))
+		{
+			echo "xxxxxx";
+			return 1;
+		}
+		return 0;
+	}
+
+	private function setMQProcessing($key,$expired=null)
+	{
+		if(!empty($expired))
+		{
+			$mqRecord = Yii::app()->cache->set('MQRecord:'.$key,'MQRecord:'.$key,$expired);
+		}else
+		{
+			$mqRecord = Yii::app()->cache->set('MQRecord'.$key,'MQRecord:'.$key);
+		}
+		return 1;
+	}
+
+	private function deleteMQProcessing($key)
+	{
+		$this->setMQProcessing($key,1);
+		return 1;
+	}
+
+	public function deleteMQProcessingGo()
+	{
+		$key = $this->prompt("MQKey");
+		$this->setMQProcessing($key,1);
+		return 1;
+	}
+
+	public function log($m)
+	{
+		$lf = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR.'MQ_cmd.log';
+		@file_put_contents($lf, date('Y-m-d H:i:s').' '.$m." " . Yii::app()->name . "\n", FILE_APPEND);
+	}
+
+	public function sendCheckConnoteRangeDaily()
+	{
+		function funSendCheckConnoteRangeDaily()
+		{
+			$emailService = new EmailService();
+			$emailService->sendConnoteRangeNotice();
+		}
+		funSendCheckConnoteRangeDaily();
+	}
+}

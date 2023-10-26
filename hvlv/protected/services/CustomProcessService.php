@@ -1,0 +1,506 @@
+<?php
+class CustomProcessService extends Service
+{
+    public static function getCustomProcessKPIReport($startdate, $enddate)
+    {
+        $start_date = $startdate;
+        $end_date = $enddate;
+        $provide = [];
+        $orgShipmentProcesses = [];
+
+        $sql = 'select lid , min(l.time) as time , JSON_EXTRACT(meta, "$.status") as recordtype 
+        from log l 
+        where l.model = "ShipmentProcess" 
+        and (JSON_EXTRACT(l.meta, "$.status") = "Customs Done" 
+        or JSON_EXTRACT(l.meta, "$.status") = "Documents Received") 
+        and l.time > "' . $start_date . ' 00:00:00" and l.time < "' . $end_date . ' 23:59:59" 
+        group by l.lid,l.meta order by time';
+
+        $rs = Yii::app()->db->createCommand($sql)->queryAll();
+        $i = 0;
+        foreach ($rs as $r) {
+            $orgShipmentProcesses[$i] = $r;
+            $i++;
+        }
+
+        while (strtotime($start_date) <= strtotime($end_date)) {
+
+            $hv_close_total = $aqis_close_total = $empp_close_total = 0;
+            $hv_open_total = $aqis_open_total = $empp_open_total = 0;
+
+            foreach ($orgShipmentProcesses as $key => $r) {
+                $daysdiff = ceil((time() - strtotime(date("y-m-d", strtotime($r['time'])))) / 86400);
+                $startdaysdiff = ceil((time() - strtotime($start_date)) / 86400);
+
+                if ($daysdiff == $startdaysdiff) {
+                    //$sql = 'SELECT p.* FROM `shipment_process` p where p.id =' . $r['lid'];
+                    //$sql = 'SELECT p.type,s.hbn,s.ref FROM `shipment_process` p left join shipment s on p.pid = s.id where s.status!=100 and p.id =' . $r['lid'];
+                    $sql = 'SELECT p.type,s.hbn,s.ref,min(l.time) as time 
+                    FROM `shipment_process` p 
+                    left join shipment s on p.pid = s.id 
+                    left join log l on p.id = l.lid 
+                    where l.model="ShipmentProcess" 
+                    and JSON_EXTRACT(l.meta, "$.status") = "Documents Received" 
+                    and p.id =' . $r['lid'] . '
+                    group by l.lid,l.meta';
+
+                    $rshipmentprocess = Yii::app()->db->createCommand($sql)->queryAll()[0];
+
+                    if (!empty($rshipmentprocess)) {
+                        if (($rshipmentprocess['type'] & ShipmentProcess::TYPE_HV) > 0) {
+                            if ($r['recordtype'] == '"Customs Done"') {
+                                $hv_close_total++;
+                            } else if ($r['recordtype'] == '"Documents Received"') {
+                                $hv_open_total++;
+                            }
+                        }
+                        if (($rshipmentprocess['type'] & ShipmentProcess::TYPE_EMPP) > 0) {
+                            if ($r['recordtype'] == '"Customs Done"') {
+                                $empp_close_total++;
+                            } else if ($r['recordtype'] == '"Documents Received"') {
+                                $empp_open_total++;
+                            }
+                        }
+                        if (($rshipmentprocess['type'] & ShipmentProcess::TYPE_AQIS) > 0) {
+                            if ($r['recordtype'] == '"Customs Done"') {
+                                $aqis_close_total++;
+                            } else if ($r['recordtype'] == '"Documents Received"') {
+                                $aqis_open_total++;
+                            }
+                        }
+                    }
+                    unset($orgShipmentProcesses[$key]);
+                }
+            }
+            $provide[$start_date] = [$start_date, $hv_open_total, $hv_close_total, $empp_open_total, $empp_close_total, $aqis_open_total, $aqis_close_total];
+            $start_date = date("Y-m-d", strtotime("+1 days", strtotime($start_date)));
+        }
+        return $provide;
+    }
+
+    public static function getCustomProcessOpenRecordsDetail($startdate, $enddate)
+    {
+        $start_date = $startdate;
+        $end_date = $enddate;
+        $provide = [];
+        $orgShipmentProcesses = [];
+
+        $sql = 'select lid , min(l.time) as time , JSON_EXTRACT(meta, "$.status") as recordtype 
+        from log l 
+        where l.model = "ShipmentProcess" 
+        and (JSON_EXTRACT(l.meta, "$.status") = "Customs Done" 
+        or JSON_EXTRACT(l.meta, "$.status") = "Documents Received") 
+        and l.time > "' . $start_date . ' 00:00:00" and l.time < "' . $end_date . ' 23:59:59" 
+        group by l.lid,l.meta order by time';
+
+        $rs = Yii::app()->db->createCommand($sql)->queryAll();
+        $i = 0;
+        foreach ($rs as $r) {
+            $orgShipmentProcesses[$i] = $r;
+            $i++;
+        }
+
+        while (strtotime($start_date) <= strtotime($end_date)) {
+
+            foreach ($orgShipmentProcesses as $key => $r) {
+                $hv_close_total = $aqis_close_total = $empp_close_total = 'False';
+                $hv_open_total = $aqis_open_total = $empp_open_total = 'False';
+
+                $daysdiff = ceil((time() - strtotime(date("y-m-d", strtotime($r['time'])))) / 86400);
+                $startdaysdiff = ceil((time() - strtotime($start_date)) / 86400);
+
+                if ($daysdiff == $startdaysdiff) {
+                    $sql = 'SELECT p.type,s.hbn,s.ref,min(l.time) as time 
+                    FROM `shipment_process` p 
+                    left join shipment s on p.pid = s.id 
+                    left join log l on p.id = l.lid 
+                    where l.model="ShipmentProcess" 
+                    and JSON_EXTRACT(l.meta, "$.status") = "Documents Received" 
+                    and p.id =' . $r['lid'] . '
+                    group by l.lid,l.meta';
+
+                    $rshipmentprocess = Yii::app()->db->createCommand($sql)->queryAll()[0];
+
+                    if (!empty($rshipmentprocess)) {
+                        if (($rshipmentprocess['type'] & ShipmentProcess::TYPE_HV) > 0) {
+                            if ($r['recordtype'] == '"Customs Done"') {
+                                $hv_close_total = 'True';
+                            } else if ($r['recordtype'] == '"Documents Received"') {
+                                $hv_open_total = 'True';
+                            }
+                        }
+                        if (($rshipmentprocess['type'] & ShipmentProcess::TYPE_EMPP) > 0) {
+                            if ($r['recordtype'] == '"Customs Done"') {
+                                $empp_close_total = 'True';
+                            } else if ($r['recordtype'] == '"Documents Received"') {
+                                $empp_open_total = 'True';
+                            }
+                        }
+                        if (($rshipmentprocess['type'] & ShipmentProcess::TYPE_AQIS) > 0) {
+                            if ($r['recordtype'] == '"Customs Done"') {
+                                $aqis_close_total = 'True';
+                            } else if ($r['recordtype'] == '"Documents Received"') {
+                                $aqis_open_total = 'True';
+                            }
+                        }
+                        $provide[] = [$start_date, $rshipmentprocess['hbn'], $rshipmentprocess['ref'], $hv_open_total, $hv_close_total, $empp_open_total, $empp_close_total, $aqis_open_total, $aqis_close_total];
+                    }
+                    unset($orgShipmentProcesses[$key]);
+                }
+            }
+            //$provide[$start_date] = [$start_date, $hv_open_total,$hv_close_total,$empp_open_total, $empp_close_total,$aqis_open_total, $aqis_close_total];
+            $start_date = date("Y-m-d", strtotime("+1 days", strtotime($start_date)));
+        }
+        return $provide;
+    }
+
+    public static function getCustomProcessKPIPeriodZeroRecord()
+    {
+        $provide = [];
+        $empp_Total = 0;
+        $aqis_Total = 0;
+        $hv_Total = 0;
+
+        $sql = 'SELECT p.type,p.status,s.hbn,s.ref,c.eta,min(l.time) as time,JSON_EXTRACT(l.meta, "$.status") as recordtype 
+        FROM `shipment_process` p 
+        left join shipment s on p.pid = s.id 
+        left join consol c on s.consol_id = c.id
+        left join log l on p.id = l.lid 
+        where l.model="ShipmentProcess" 
+        and p.status not in (1,2,3,24)
+        and JSON_EXTRACT(l.meta, "$.status") = "Documents Received"
+        group by l.lid,l.meta
+        having to_days(c.eta)<to_days(min(l.time)) and min(to_days(l.time)) = to_days(DATE_SUB(curdate(),INTERVAL 0 DAY))';
+
+        $rs = Yii::app()->db->createCommand($sql)->queryAll();
+
+        if (!empty($rs)) {
+            foreach ($rs as $r) {
+                if (($r['type'] & ShipmentProcess::TYPE_HV) > 0) {
+                    $hv_Total++;
+                }
+                if (($r['type'] & ShipmentProcess::TYPE_EMPP) > 0) {
+                    $empp_Total++;
+                }
+                if (($r['type'] & ShipmentProcess::TYPE_AQIS) > 0) {
+                    $aqis_Total++;
+                }
+            }
+            $provide[] = ['DAY' => '0', 'EMPP' => $empp_Total, 'AQIS' => $aqis_Total, 'HV' => $hv_Total, 'TOTAL' => $empp_Total + $aqis_Total + $hv_Total];
+        }
+        return $provide;
+    }
+
+    public static function getCustomProcessKPIPeriodOneRecord()
+    {
+        $provide = [];
+        $empp_Total = 0;
+        $aqis_Total = 0;
+        $hv_Total = 0;
+
+        $sql = 'SELECT p.type,p.status,s.hbn,s.ref,c.eta,min(l.time) as time,JSON_EXTRACT(l.meta, "$.status") as recordtype 
+        FROM `shipment_process` p 
+        left join shipment s on p.pid = s.id 
+        left join consol c on s.consol_id = c.id
+        left join log l on p.id = l.lid 
+        where l.model="ShipmentProcess" 
+        and p.status not in (1,2,3,24)
+        and JSON_EXTRACT(l.meta, "$.status") = "Documents Received"
+        group by l.lid,l.meta
+        having to_days(c.eta)<to_days(min(l.time)) and min(to_days(l.time)) < to_days(DATE_SUB(curdate(),INTERVAL 0 DAY)) and min(to_days(l.time)) > to_days(DATE_SUB(curdate(),INTERVAL 5 DAY))';
+
+        $rs = Yii::app()->db->createCommand($sql)->queryAll();
+
+        if (!empty($rs)) {
+            foreach ($rs as $r) {
+                if (($r['type'] & ShipmentProcess::TYPE_HV) > 0) {
+                    $hv_Total++;
+                }
+                if (($r['type'] & ShipmentProcess::TYPE_EMPP) > 0) {
+                    $empp_Total++;
+                }
+                if (($r['type'] & ShipmentProcess::TYPE_AQIS) > 0) {
+                    $aqis_Total++;
+                }
+            }
+            $provide[] = ['DAY' => '0-3', 'EMPP' => $empp_Total, 'AQIS' => $aqis_Total, 'HV' => $hv_Total, 'TOTAL' => $empp_Total + $aqis_Total + $hv_Total];
+        }
+        return $provide;
+    }
+
+    public static function getCustomProcessKPIPeriodTwoRecord()
+    {
+        $provide = [];
+        $empp_Total = 0;
+        $aqis_Total = 0;
+        $hv_Total = 0;
+
+        $sql = 'SELECT p.type,p.status,s.hbn,s.ref,c.eta,min(l.time) as time,JSON_EXTRACT(l.meta, "$.status") as recordtype 
+        FROM `shipment_process` p 
+        left join shipment s on p.pid = s.id 
+        left join consol c on s.consol_id = c.id
+        left join log l on p.id = l.lid 
+        where l.model="ShipmentProcess" 
+        and p.status not in (1,2,3,24)
+        and JSON_EXTRACT(l.meta, "$.status") = "Documents Received"
+        group by l.lid,l.meta
+        having to_days(c.eta)<to_days(min(l.time)) and min(to_days(l.time)) < to_days(DATE_SUB(curdate(),INTERVAL 5 DAY)) and min(to_days(l.time)) > to_days(DATE_SUB(curdate(),INTERVAL 10 DAY))';
+
+        $rs = Yii::app()->db->createCommand($sql)->queryAll();
+
+        if (!empty($rs)) {
+            foreach ($rs as $r) {
+                if (($r['type'] & ShipmentProcess::TYPE_HV) > 0) {
+                    $hv_Total++;
+                }
+                if (($r['type'] & ShipmentProcess::TYPE_EMPP) > 0) {
+                    $empp_Total++;
+                }
+                if (($r['type'] & ShipmentProcess::TYPE_AQIS) > 0) {
+                    $aqis_Total++;
+                }
+            }
+            $provide[] = ['DAY' => '3-5', 'EMPP' => $empp_Total, 'AQIS' => $aqis_Total, 'HV' => $hv_Total, 'TOTAL' => $empp_Total + $aqis_Total + $hv_Total];
+        }
+        return $provide;
+    }
+
+    public static function getCustomProcessKPIPeriodThreeRecord()
+    {
+        $provide = [];
+        $empp_Total = 0;
+        $aqis_Total = 0;
+        $hv_Total = 0;
+
+        $sql = 'SELECT p.type,p.status,s.hbn,s.ref,c.eta,min(l.time) as time,JSON_EXTRACT(l.meta, "$.status") as recordtype 
+        FROM `shipment_process` p 
+        left join shipment s on p.pid = s.id 
+        left join consol c on s.consol_id = c.id
+        left join log l on p.id = l.lid 
+        where l.model="ShipmentProcess" 
+        and p.status not in (1,2,3,24)
+        and JSON_EXTRACT(l.meta, "$.status") = "Documents Received"
+        group by l.lid,l.meta
+        having to_days(c.eta)<to_days(min(l.time)) and min(to_days(l.time)) < to_days(DATE_SUB(curdate(),INTERVAL 10 DAY)) and min(to_days(l.time)) > to_days(DATE_SUB(curdate(),INTERVAL 15 DAY))';
+
+        $rs = Yii::app()->db->createCommand($sql)->queryAll();
+
+        if (!empty($rs)) {
+            foreach ($rs as $r) {
+                if (($r['type'] & ShipmentProcess::TYPE_HV) > 0) {
+                    $hv_Total++;
+                }
+                if (($r['type'] & ShipmentProcess::TYPE_EMPP) > 0) {
+                    $empp_Total++;
+                }
+                if (($r['type'] & ShipmentProcess::TYPE_AQIS) > 0) {
+                    $aqis_Total++;
+                }
+            }
+            $provide[] = ['DAY' => '5-7', 'EMPP' => $empp_Total, 'AQIS' => $aqis_Total, 'HV' => $hv_Total, 'TOTAL' => $empp_Total + $aqis_Total + $hv_Total];
+        }
+        return $provide;
+    }
+
+    public static function getCustomProcessKPIPeriodFourRecord()
+    {
+        $provide = [];
+        $empp_Total = 0;
+        $aqis_Total = 0;
+        $hv_Total = 0;
+
+        $sql = 'SELECT p.type,p.status,s.hbn,s.ref,c.eta,min(l.time) as time,JSON_EXTRACT(l.meta, "$.status") as recordtype 
+        FROM `shipment_process` p 
+        left join shipment s on p.pid = s.id 
+        left join consol c on s.consol_id = c.id
+        left join log l on p.id = l.lid 
+        where l.model="ShipmentProcess" 
+        and p.status not in (1,2,3,24)
+        and JSON_EXTRACT(l.meta, "$.status") = "Documents Received"
+        group by l.lid,l.meta
+        having to_days(c.eta)<to_days(min(l.time)) and min(to_days(l.time)) < to_days(DATE_SUB(curdate(),INTERVAL 15 DAY))';
+
+        $rs = Yii::app()->db->createCommand($sql)->queryAll();
+
+        if (!empty($rs)) {
+            foreach ($rs as $r) {
+                if (($r['type'] & ShipmentProcess::TYPE_HV) > 0) {
+                    $hv_Total++;
+                }
+                if (($r['type'] & ShipmentProcess::TYPE_EMPP) > 0) {
+                    $empp_Total++;
+                }
+                if (($r['type'] & ShipmentProcess::TYPE_AQIS) > 0) {
+                    $aqis_Total++;
+                }
+            }
+            $provide[] = ['DAY' => '>7', 'EMPP' => $empp_Total, 'AQIS' => $aqis_Total, 'HV' => $hv_Total, 'TOTAL' => $empp_Total + $aqis_Total + $hv_Total];
+        }
+        return $provide;
+    }
+
+    public static function convertCustomKPIArr($eta)
+    {
+        $empp = ['EMPP'];
+        $aqis = ['AQIS'];
+        $hv = ['HV'];
+        $total = ['SUB TOTAL'];
+        $provide = [];
+        foreach ($eta as $r) {
+            
+            $empp[] = isset($r[0]['EMPP'])?$r[0]['EMPP']:null;
+            $aqis[] = isset($r[0]['AQIS'])?$r[0]['AQIS']:null;
+            $hv[] = isset($r[0]['HV'])?$r[0]['HV']:null;
+            $total[] = isset($r[0]['TOTAL'])?$r[0]['TOTAL']:null;
+        }
+
+        $provide[] = $empp;
+        $provide[] = $aqis;
+        $provide[] = $hv;
+        $provide[] = $total;
+
+        return $provide;
+    }
+
+    public static function getCountTotalCustomProcessDoneCurrentDay()
+    {
+
+        $proivde = ['EMPPClose' => 0, "AQISClose" => 0, 'HVClose' => 0,'EMPPOpen'=>0,'AQISOpen'=>0,'HVOpen'=>0];
+        $provide['EMPPClose'] = self::getEMPPTotalCurrentDay();
+        $provide['HVClose'] = self::getHVTotalCurrentDay();
+        $provide['AQISClose'] = self::getAQISTotalCurrentDay();
+        $provide['EMPPOpen']=self::getEMPPOpenTotalCurrentDay();
+        $provide['HVOpen']=self::getHVOpenTotalCurrentDay();
+        $provide['AQISOpen']=self::getAQISOpenTotalCurrentDay();
+
+        return $provide;
+    }
+
+    public static function getEMPPTotalCurrentDay()
+    {
+        $provide = 0;
+        $sql = "select count(*) as EMPP from shipment s 
+        left join shipment_process p on s.id = p.pid 
+        where s.status !=100 
+        and (s.bwf & 512) >0 
+        and p.status = 24 
+        and p.date like CONCAT('%',DATE_SUB(curdate(),INTERVAL 0 DAY),'%')";
+
+        $rs = Yii::app()->db->createCommand($sql)->queryAll();
+
+        if (!empty($rs)) {
+            $provide = $rs[0]['EMPP'];
+        }
+        return $provide;
+    }
+
+    public static function getHVTotalCurrentDay()
+    {
+        $provide = 0;
+        $sql = "select count(*) as HV from shipment s 
+        left join shipment_process p on s.id = p.pid 
+        where s.status !=100 
+        and (s.bwf & 4) >0 
+        and p.status = 24 
+        and p.date like CONCAT('%',DATE_SUB(curdate(),INTERVAL 0 DAY),'%')";
+
+        $rs = Yii::app()->db->createCommand($sql)->queryAll();
+
+        if (!empty($rs)) {
+            $provide = $rs[0]['HV'];
+        }
+        return $provide;
+    }
+
+    public static function getAQISTotalCurrentDay()
+    {
+        $provide = 0;
+        $sql = "select count(*) as AQIS from shipment s 
+        left join shipment_process p on s.id = p.pid 
+        where s.status !=100 
+        and (s.bwf & 32) >0 
+        and p.status = 24 
+        and p.date like CONCAT('%',DATE_SUB(curdate(),INTERVAL 0 DAY),'%')";
+
+        $rs = Yii::app()->db->createCommand($sql)->queryAll();
+
+        if (!empty($rs)) {
+            $provide = $rs[0]['AQIS'];
+        }
+        return $provide;
+    }
+
+    public static function getHVOpenTotalCurrentDay()
+    {
+        $provide = 0;
+        $sql = 'SELECT s.bwf,p.type,p.status,s.hbn,s.ref,min(l.time) as time,JSON_EXTRACT(l.meta, "$.status") as recordtype 
+        FROM `shipment_process` p 
+        left join shipment s on p.pid = s.id 
+        left join log l on p.id = l.lid 
+        where l.model="ShipmentProcess" 
+        and p.status not in (24)
+        and JSON_EXTRACT(l.meta, "$.status") = "Documents Received"
+        and (s.bwf & 4)>0
+        group by l.lid,l.meta
+        having min(l.time) >= DATE_SUB(concat(CURDATE(), " ", "17:00:00"),INTERVAL 1 DAY) and min(l.time)<DATE_SUB(concat(CURDATE(), " ", "17:00:00"),INTERVAL 0 DAY)';
+
+        $rs = Yii::app()->db->createCommand($sql)->queryAll();
+
+        if (!empty($rs)) {
+            $provide = count($rs);
+        }
+        return $provide;
+    }
+
+    public static function getEMPPOpenTotalCurrentDay()
+    {
+        $provide = 0;
+        $sql = 'SELECT s.bwf,p.type,p.status,s.hbn,s.ref,min(l.time) as time,JSON_EXTRACT(l.meta, "$.status") as recordtype 
+        FROM `shipment_process` p 
+        left join shipment s on p.pid = s.id 
+        left join log l on p.id = l.lid 
+        where l.model="ShipmentProcess" 
+        and p.status not in (24)
+        and JSON_EXTRACT(l.meta, "$.status") = "Documents Received"
+        and (s.bwf & 512)>0
+        group by l.lid,l.meta
+        having min(l.time) >= DATE_SUB(concat(CURDATE(), " ", "17:00:00"),INTERVAL 1 DAY) and min(l.time)<DATE_SUB(concat(CURDATE(), " ", "17:00:00"),INTERVAL 0 DAY)';
+
+        $rs = Yii::app()->db->createCommand($sql)->queryAll();
+
+        if (!empty($rs)) {
+            $provide = count($rs);
+        }
+        return $provide;
+    }
+
+    public static function getAQISOpenTotalCurrentDay()
+    {
+        $provide = 0;
+        $sql = 'SELECT s.bwf,p.type,p.status,s.hbn,s.ref,min(l.time) as time,JSON_EXTRACT(l.meta, "$.status") as recordtype 
+        FROM `shipment_process` p 
+        left join shipment s on p.pid = s.id 
+        left join log l on p.id = l.lid 
+        where l.model="ShipmentProcess" 
+        and p.status not in (24)
+        and JSON_EXTRACT(l.meta, "$.status") = "Documents Received"
+        and (s.bwf & 32)>0
+        group by l.lid,l.meta
+        having min(l.time) >= DATE_SUB(concat(CURDATE(), " ", "17:00:00"),INTERVAL 1 DAY) and min(l.time)<DATE_SUB(concat(CURDATE(), " ", "17:00:00"),INTERVAL 0 DAY)';
+
+        $rs = Yii::app()->db->createCommand($sql)->queryAll();
+
+        if (!empty($rs)) {
+            $provide = count($rs);
+        }
+        return $provide;
+    }
+
+    public static function getPercentage($divisor,$dividend){
+        if($divisor==0 || $dividend==0){
+            return 0;
+        }else {
+            return round($divisor / $dividend * 100, 2);
+        }
+    }
+}

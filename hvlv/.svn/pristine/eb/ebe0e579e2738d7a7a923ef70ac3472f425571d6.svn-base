@@ -1,0 +1,679 @@
+<?php
+include_once('ImcoConsolController.php');
+class EdiAwbConsolController extends ImcoConsolController
+{
+	protected $nonAjax=['export','emps', 'eparcel', 'sac', 'msac','email', 'ap_manifest', 'cp_manifest','exportAddressReport','exportAddressManifestReport', 'exportAout','exportStartrackApLodge' ,'exportApLodge','exportTollApLodge','download','printAllLabels','exportHeldShipments','seaManifest','exportShipmentDetail','exportStartrackMelApLodge','seaOutturnShipments', 'storageLabel', 'd2zAutomation', 'blueAutomation', 'gvAutomation', 'webMation','seaDeliveryOrderTogether','exportCargoReceipt','dgDocument','printBagTags','SeaDO', 'arrivalNotice'];
+
+	public function beforeAction($action){
+		if(isset($_POST['EdiAwbConsol'])){
+			$_POST['ImcoConsol'] = $_POST['EdiAwbConsol'];
+		}
+		return parent::beforeAction($action);
+	}
+
+	public function actionSeaDO($id)
+	{
+		$model= $this->loadModel($id);
+		oPDF::renderPDF('sea_order_fcl', ['model' => $model], 1, $model->awb.'_DO.pdf');
+	}
+
+		//air cargo
+	public function actionAcr($id)
+	{
+		$cn = $this->loadModel($id);
+		if (empty($cn->mdata['cnee'])) {
+			$cn->addError('meta', 'Consignee Name required');
+		}
+		if (empty($cn->mdata['cnee_addr'])) {
+			$cn->addError('meta', 'Consignee Address required');
+		}
+		if (empty($cn->mdata['cnor'])) {
+			$cn->addError('meta', 'Shipper Name required');
+		}
+		if (empty($cn->mdata['cnor_addr'])) {
+			$cn->addError('meta', 'Shipper Address required');
+		}
+		if ($cn->hasErrors()) {
+			$this->ajaxResult($cn);
+		}
+		if ($cn->service == 20) {
+			/*
+			 * Sea Cargo Report
+			if (empty($cn->mdata['acr_stat'])) {
+				if (empty($cn->mdata['cbm'])) {
+					$cn->addError('meta', 'cbm required');
+				}
+				if (empty($cn->awb)) {
+					$cn->addError('meta', 'Ocean Bill required');
+				}
+				if (empty($cn->mdata['container_no'])) {
+					$cn->addError('meta', 'Container No. required');
+				}
+				
+				if (empty($cn->mdata['house_bill'])) {
+					$cn->addError('meta', 'House Bill Required');
+				}
+				if (empty($cn->mdata['item'])) {
+					$cn->addError('meta', 'Good Description Required');
+				}
+				if (empty($cn->flight)) {
+					$cn->addError('meta', 'voyage number Required');
+				}
+				if (empty($cn->airline)) {
+					$cn->addError('meta', 'vessel IMO number Required');
+				}
+				if ($cn->hasErrors()) {
+					$this->ajaxResult($cn);
+				}
+				$cnee_name = $cn->mdata['cnee'];
+				$cnee_addr = $cn->mdata['cnee_addr'];
+				$cnor_name = $cn->mdata['cnor'];
+				$cnor_addr = $cn->mdata['cnor_addr'];
+				$em = new Edimsg;
+				$em->dt = date('Y-m-d H:i:s');
+				$em->type = 'SEACR-C';
+				$em->sender = Yii::app()->params['ics']['testing']? Yii::app()->params['ics']['test_site'] : Yii::app()->params['ics']['prod_site'];
+				$em->receiver = Yii::app()->params['ics']['customs_id'];
+				$em->status = 19;
+				$em->fid = $cn->id;
+				$em->save();
+				$em->mid = sprintf('%06s', substr($em->id, -6));
+				$vn = Edimsg::model()->count('type = :t AND fid = :fid', [':t' => 'SEACR-C', ':fid' => $cn->id]);
+				$obl=$cn->awb;// /required ocean bill landing
+			   $hbl=$cn->mdata['house_bill'];//house bill landing
+			   //A document signed and delivered by the Master of a Ship to the consignor. A document of title and a receipt for goods.
+			   $voyage_number=$cn->flight ;// like 023s
+			   $vessel=$cn->airline; //IMO  like 9235103
+			   $container_number=trim($cn->mdata['container_no']);//container no  like OOLU9551594
+			   $container_size= DmawbConsol::getContainerCode($cn->mdata['sea_type']);
+				$cargo_type=$cn->mdata['cargo_type'];           //	Import Cargo Type   FCL=>Full Container load           LCL=>Less than Container load   B/B=>Break bulk
+						   $volume=$cn->mdata['cbm']; //  3.190 .....
+						   $msg = "UNH+".$em->mid."+CUSCAR:D:99B:UN'
+BGM+933:::SEACR+" .$cn->no.($vn>1? '-'.$vn : '').":".$vn."+9'
+RFF+BH:".$hbl."'
+RFF+MB:".$obl."'
+RFF+PQ:CC'
+NAD+CN++".Edimsg::strSegment($cnee_name, 35, 2).":".Edimsg::strSegment($cnee_addr, 35, 3)."'
+NAD+CZ++".Edimsg::strSegment($cnor_name, 35, 2).":".Edimsg::strSegment($cnor_addr, 35, 3)."'
+NAD+AH+".Yii::app()->params['ics']['abn']."::95'
+NAD+VW+".Yii::app()->params['ics']['abn']."::95'
+TDT+20+".$voyage_number."++11++++".$vessel."::11'
+LOC+8+".$cn->pod."::6'
+LOC+12+".$cn->pod."::6'
+LOC+27+".substr($cn->pol, 0, 2)."::5'
+LOC+76+".$cn->pol."::6'
+LOC+73+".$cn->pol."::6'
+GIS+FFO:109:95'
+CNI++:::I'
+RFF+AAQ:".$container_number."'
+GID+1'
+RFF+ACC:".$container_size."'
+GID+1'
+RFF+ZZZ:1'
+GID+1'
+PAC+".$cn->totPacks()."'
+PAC+++".$cargo_type.":67:95'
+PAC+++GENN:121:95'
+PAC+++PK:185:95'
+FTX+AAA+++PARCELS'
+MEA+AAE+AAL+KG:".sprintf("%.2f", $cn->totWeight())."'
+MEA+AAE+ABJ+CU:".sprintf("%.2f", $volume)."'
+MEA+AAE+G+KG:".sprintf("%.2f", $cn->totWeight())."'
+";
+				$mc = substr_count($msg, "\n")+1;
+				$msg .= "UNT+".$mc."+".$em->mid."'";
+				$em->msg = $msg;
+				if (Yii::app()->params['ics']['testing']) {
+					$em->mdata['test'] = 1;
+				}
+				//echo $msg;
+				$em->status = 20;
+				$em->save();
+				$cn->mdata['acr_stat'] = 1;
+				$cn->status = 30;
+				$cn->save();
+			} else {
+			 */
+			//scr
+				if(empty($cn->shipments)){ //fcl only
+					$valid = true;
+					if (empty($cn->mdata['awb_wt'])) {
+						$cn->addError('meta', 'Consol '.$cn->awb.' has no weight.');
+						$valid = false;
+					}
+					if (empty($cn->mdata['cbm'])) {
+						$cn->addError('meta', 'Consol '.$cn->awb.' has no CBM.');
+						$valid = false;
+					}
+					if (empty($cn->mdata['b&l_pcs'])) {
+						$cn->addError('meta', 'Consol '.$cn->awb.' missing number of packs.');
+						$valid = false;
+					}
+					if (empty($cn->mdata['item'])){
+						$cn->addError('meta', 'Consol '.$cn->awb.' has no goods detail.');
+						$valid = false;
+					}
+					if($valid){
+					$obl=$cn->awb;// /required ocean bill landing
+					$hbl=$cn->mdata['house_bill'];//house bill landing;// parent house bill landing
+				//A document signed and delivered by the Master of a Ship to the consignor. A document of title and a receipt for goods.
+					$voyage_number=$cn->flight ;// like 023s
+					$vessel=$cn->airline; //IMO  like 9235103
+					$container_number=trim($cn->mdata['container_no']);//container no  like OOLU9551594
+					$container_size= DmawbConsol::getContainerCode($cn->mdata['sea_type']);
+					$cargo_type=$cn->mdata['cargo_type'];
+					if (empty($cargo_type)) {
+						$cargo_type="LCL";
+					}
+					$volume = $cn->mdata['cbm'];
+
+					$em = new Edimsg;
+					$em->dt = date('Y-m-d H:i:s');
+					$em->type = 'SEACR-C';
+					$em->sender = Yii::app()->params['ics']['testing']? Yii::app()->params['ics']['test_site'] : Yii::app()->params['ics']['prod_site'];
+					$em->receiver = Yii::app()->params['ics']['customs_id'];
+					$em->status = 19;
+					$em->fid = $cn->id;
+					$em->save();
+					$em->mid = sprintf('%06s', substr($em->id, -6));
+					$vn = Edimsg::model()->count('type = :t AND fid = :fid', [':t' => 'SEACR-C', ':fid' => $cn->id]) + 1;
+					$msg = "UNH+".$em->mid."+CUSCAR:D:99B:UN'
+BGM+933:::SEACR+".$cn->no.($vn>1? '-'.$vn : '').":".$vn."+9'
+RFF+PQ:PO'\n";
+					if (!empty($cn->mdata['house_bill'])) {
+						$msg.="RFF+BH:".$cn->mdata['house_bill']."'\n";
+					}
+					if (!empty($cn->mdata['parent_bill'])) {
+						$msg.="RFF+BM:".$cn->mdata['parent_bill']."'\n";
+					}
+					$cnor_name = $cn->mdata['cnor'];
+					$cnor_addr = $cn->mdata['cnor_addr'];
+					$cnor_addr = trim($cnor_addr, " .,");
+
+					$cnee_name = $cn->mdata['cnee'];
+					$cnee_addr = $cn->mdata['cnee_addr'];
+
+					//use word replace service; RFF+BH:".$p->hbn."'
+					//FFI ".(($p->bwf & 4096) > 0? "\nGIS+FFO:109:95'": "")."
+					$msg .= "RFF+MB:".$obl."'
+NAD+AH+".Yii::app()->params['ics']['abn']."::95'
+NAD+VW+".Yii::app()->params['ics']['abn']."::95'
+NAD+CN++".Edimsg::strSegment($cnee_name, 35, 2).":".Edimsg::strSegment($cnee_addr, 35, 3)."'
+NAD+CZ++".Edimsg::strSegment($cnor_name, 35, 2).":".Edimsg::strSegment($cnor_addr, 35, 3)."'
+TDT+20+".$voyage_number."++11++++".$vessel."::11'
+LOC+8+".$cn->pod."::6'
+LOC+12+".$cn->pod."::6'
+LOC+27+".substr($cn->pol, 0, 2)."::5'
+LOC+76+".$cn->pol."::6'
+LOC+73+".$cn->pol."::6'
+CNI++:::I'
+RFF+AAQ:".$container_number."'
+GID+1'
+RFF+ACC:".$container_size."'
+GID+1'
+RFF+ZZZ:1'
+GID+1'
+PAC+".$cn->mdata['b&l_pcs']."'
+PAC+++".$cargo_type.":67:95'
+PAC+++GENN:121:95'
+PAC+++PK:185:95'
+FTX+AAA+++".Edimsg::strSegment(str_replace('/', ',', trim($cn->mdata['item'], '/')), 512, 5)."'
+MEA+AAE+AAL+KG:".sprintf("%.2f", $cn->mdata['awb_wt'])."'
+MEA+AAE+ABJ+CU:".sprintf("%.2f", $volume)."'
+MEA+AAE+G+KG:".sprintf("%.2f", $cn->mdata['awb_wt'])."'
+";
+						$mc = substr_count($msg, "\n")+1;
+						$msg .= "UNT+".$mc."+".$em->mid."'";
+						$em->msg = $msg;
+						if (Yii::app()->params['ics']['testing']) {
+							$em->mdata['test'] = 1;
+						}
+						$em->status = 20;
+						$em->save();
+					}
+				}
+
+				$dhr = round((strtotime($cn->eta) - time() - (86400 * 3)) / 3600);
+				$msghrate = max(round(count($cn->shipments) / max($dhr, 4)), 600);
+
+				$transaction=Yii::app()->db->beginTransaction();
+				try {
+					$mc = 0;
+					foreach ($cn->shipments as $i=>$p) {
+						if (!$p->canSendACR() || $p->status > 50 || $p->status == 42) {
+							continue;
+						}
+						
+						if (($p->cbwf&ImParcel::CBWF_DIRECT_CONSOL_BASE)>0) {
+							continue;
+						}
+
+						$goods = WordReplace::replace($p->getGoods())[0];
+
+						if (empty($p->weight)) {
+							$cn->addError('meta', 'Shipment '.$p->hbn.' has no weight.');
+							continue;
+						} elseif (empty($p->dvalue)) {
+							$cn->addError('meta', 'Shipment '.$p->hbn.' has no value.');
+							continue;
+						} elseif (empty($p->pkg)) {
+							$cn->addError('meta', 'Shipment '.$p->hbn.' missing number of packs.');
+							continue;
+						} elseif (empty($goods)){
+							$cn->addError('meta', 'Shipment '.$p->hbn.' has no goods detail.');
+							continue;
+						}
+						$canSac = $p->canSAC();
+						$obl=$cn->awb;// /required ocean bill landing
+						$hbl=$cn->mdata['house_bill'];//house bill landing;// parent house bill landing
+					//A document signed and delivered by the Master of a Ship to the consignor. A document of title and a receipt for goods.
+						$voyage_number=$cn->flight ;// like 023s
+						$vessel=$cn->airline; //IMO  like 9235103
+						$container_number=trim($cn->mdata['container_no']);//container no  like OOLU9551594
+						$container_size= DmawbConsol::getContainerCode($cn->mdata['sea_type']);
+						$cargo_type=$cn->mdata['cargo_type'];
+						if (empty($cargo_type)) {
+							$cargo_type="LCL";
+						}
+						$volume=$p->cbm>0?$p->cbm*$p->pkg:$p->weight/250;
+						if ($volume<0.01) $volume=0.01;
+						$em = new Edimsg;
+						$em->dt = date('Y-m-d H:i:s');
+						$em->type = 'SEACR-S';
+						$em->sender = Yii::app()->params['ics']['testing']? Yii::app()->params['ics']['test_site'] : Yii::app()->params['ics']['prod_site'];
+						$em->receiver = Yii::app()->params['ics']['customs_id'];
+						$em->status = 19;
+						$em->fid = $p->id;
+						$em->save();
+						$em->mid = sprintf('%06s', substr($em->id, -6));
+						$vn = Edimsg::model()->count('type = :t AND fid = :fid', [':t' => 'SEACR-S', ':fid' => $p->id]) + 1;
+						$msg = "UNH+".$em->mid."+CUSCAR:D:99B:UN'
+BGM+933:::SEACR+".$p->hbn.($vn>1? '-'.$vn : '').":".$vn."+9'
+RFF+PQ:PO'\n";
+						if (!empty($hbl)) {
+							$msg.="RFF+BM:".$hbl."'\n";
+						}
+						$cnor_name = $p->cnor->name;
+						if (!preg_match('/\w/', $cnor_name)) $cnor_name = $p->agent->name;
+						$cnor_name = $cnor_name;
+						$cnor_addr = $p->cnor->fullAddress(['suburb', 'city', 'state', 'postcode']);
+						if (!preg_match('/\w/', $cnor_addr)) {
+							$cnor_addr = $p->agent->getAddress(true, false, false);
+						}
+						$cnor_addr = trim($cnor_addr, " .,");
+						// $cnor_addr = $cnor_addr;
+
+						if (!empty($p->receiver)&&!empty($p->receiver->address)&&!empty($p->receiver->name)&&!empty($p->receiver->postcode)) {
+							$cnee_name=$p->receiver->name;
+							$cnee_addr=$p->receiver->fullAddress(['suburb', 'state', 'postcode']);
+						} else {
+							$cnee_name=$p->cnee->name;
+							$cnee_addr=$p->cnee->fullAddress(['suburb', 'state', 'postcode']);
+						}
+						//use word replace service;
+						$msg .= "RFF+BH:".$p->hbn."'
+RFF+MB:".$obl."'
+NAD+AH+".Yii::app()->params['ics']['abn']."::95'
+NAD+VW+".Yii::app()->params['ics']['abn']."::95'
+NAD+CN++".Edimsg::strSegment($cnee_name, 35, 2).":".Edimsg::strSegment($cnee_addr, 35, 3)."'
+NAD+CZ++".Edimsg::strSegment($cnor_name, 35, 2).":".Edimsg::strSegment($cnor_addr, 35, 3)."'
+TDT+20+".$voyage_number."++11++++".$vessel."::11'
+LOC+8+".$cn->pod."::6'
+LOC+12+".$cn->pod."::6'
+LOC+27+".substr($cn->pol, 0, 2)."::5'
+LOC+76+".$cn->pol."::6'
+LOC+73+".$cn->pol."::6'".(($p->bwf & 4096) > 0? "\nGIS+FFO:109:95'": "")."
+CNI++:::I'
+RFF+AAQ:".$container_number."'
+GID+1'
+RFF+ACC:".$container_size."'
+GID+1'
+RFF+ZZZ:1'
+".($canSac && ($p->bwf & 4096) == 0 ? "GIS+SAC:109:95'\n" : "")."GID+1'
+PAC+".$p->pkg."'
+PAC+++".$cargo_type.":67:95'
+PAC+++GENN:121:95'
+PAC+++PK:185:95'
+FTX+AAA+++".Edimsg::strSegment(str_replace('/', ',', trim($goods, '/')), 512, 5)."'
+MEA+AAE+AAL+KG:".sprintf("%.2f", $p->weight)."'
+MEA+AAE+ABJ+CU:".sprintf("%.2f", $volume)."'
+MEA+AAE+G+KG:".sprintf("%.2f", $p->weight)."'
+";
+						$mc = substr_count($msg, "\n")+1;
+						$msg .= "UNT+".$mc."+".$em->mid."'";
+						$em->msg = $msg;
+						if (Yii::app()->params['ics']['testing']) {
+							$em->mdata['test'] = 1;
+						}
+						//echo $msg;
+						if($dhr <= 0 && $mc < 1000){
+							$em->status = 20;
+						}else{ //schedule to delay send SCR
+							$em->status = 18;
+							$em->dt = date('Y-m-d H:i:s', strtotime('+'.floor($mc/$msghrate).' hour'.' +'.($mc % 60).' minute'));
+						}
+						$em->save();
+						$p->status = 50;
+						$p->save();
+						$mc++;
+					}
+					$transaction->commit();
+				} catch (Exception $ex) {
+					$transaction->rollback();
+					Log::log2file("Sea sub Acr".$cn->no."=>".$ex->getMessage(), "transaction_err_log", "transaction");
+					throw $ex;
+				}
+			//}
+		} else {
+			/*
+			 * Air ACR
+			 */
+			$hwb = empty($cn->mdata['house_bill'])? $cn->no : $cn->mdata['house_bill'];
+			//$airline = preg_replace('/\d+/', '', trim($cn->airline));
+			$airline = substr(trim($cn->airline), 0, 2);
+			//if(empty($airline)) $airline = preg_replace('/\d+/', '',trim($cn->airline));
+			//$flight = preg_match('/^\d+$/', $cn->flight)? $cn->flight : substr($cn->flight, 2);
+
+			// in case 5j , 5j039  for example : C17043001HKG
+			$flight = substr(trim($cn->flight), 2);
+
+			$hasError = false;
+			$awba = AwbTracking::prepAwb($cn->awb);
+			if (!$awba[3]) {
+				$cn->addError('meta', 'Please check the AWB number');
+				$hasError = true;
+			}
+			if(empty($flight) || empty($airline)){
+				$cn->addError('meta', 'Please check the Airline/Flight number');
+				$hasError = true;
+			}
+			if(abs(strtotime($cn->eta) - time()) > 864000 && yii::app()->user->grp != 0){
+				$cn->addError('meta', 'ETA needs to be within 10 days');
+				$hasError = true;
+			}
+			$awb = $awba[0];
+
+			if($hasError) $this->ajaxResult($cn);
+
+			if (empty($cn->mdata['acr_stat'])) {
+				$em = new Edimsg;
+				$em->dt = date('Y-m-d H:i:s');
+				$em->type = 'AIRCR-C';
+				$em->sender = Yii::app()->params['ics']['testing']? Yii::app()->params['ics']['test_site'] : Yii::app()->params['ics']['prod_site'];
+				$em->receiver = Yii::app()->params['ics']['customs_id'];
+				$em->status = 19;
+				$em->fid = $id;
+				$em->save();
+				$em->mid = sprintf('%06s', substr($em->id, -6));
+				$vn = Edimsg::model()->count('type = :t AND fid = :fid', [':t' => 'AIRCR-C', ':fid' => $cn->id]);
+
+				$cnee_name = $cn->mdata['cnee'];
+				$cnee_addr = $cn->mdata['cnee_addr'];
+				$cnor_name = $cn->mdata['cnor'];
+				$cnor_addr = $cn->mdata['cnor_addr'];
+				$err = false;
+				if (empty($cnor_name) || !preg_match('/[A-z]+/', $cnor_name)) {
+					$cn->addError('meta', 'Consignor name required');
+					$err = true;
+				}
+
+				if (empty($cnee_name) || !preg_match('/[A-z]+/', $cnee_name)) {
+					$cn->addError('meta', 'Consignee name required');
+					$err = true;
+				}
+
+				if (empty($cnor_addr) || !preg_match('/[A-z]+/', $cnor_addr)) {
+					$cn->addError('meta', 'Consignor address required');
+					$err = true;
+				}
+
+				if (empty($cnee_addr) || !preg_match('/[A-z]+/', $cnee_addr)) {
+					$cn->addError('meta', 'Consignee address required');
+					$err = true;
+				}
+
+				if(!$err){
+					$msg = "UNH+".$em->mid."+CUSCAR:D:99B:UN'
+BGM+933:::AIRCR+".$cn->no.($vn>1? '-'.$vn : '').":".$vn."+9'
+RFF+PQ:CC'
+RFF+HWB:".$hwb."'
+RFF+MWB:".$awb."'
+NAD+CN++".Edimsg::strSegment($cnee_name, 35, 2).":".Edimsg::strSegment($cnee_addr, 35, 3)."'
+NAD+CZ++".Edimsg::strSegment($cnor_name, 35, 2).":".Edimsg::strSegment($cnor_addr, 35, 3)."'
+NAD+VW+".Yii::app()->params['ics']['abn']."::95'
+TDT+20+".$flight."++6+".$airline."::3'
+LOC+8+".$cn->pod."::6'
+LOC+76+".$cn->pol."::6'
+LOC+12+".$cn->pod."::6'
+LOC+91+".$cn->pol."::6'
+DTM+178:".date("Ymd", strtotime($cn->eta)).":102'".(($p->bwf & 4096) > 0? "\nGIS+FFO:109:95'": "")."
+CNI+1'
+RFF+UCN:".$cn->no."'
+MOA+44:".sprintf("%.2f", $cn->totDValue()).":AUD'
+GID+1'
+PAC+".$cn->totPacks()."'
+FTX+AAA+++PARCELS'
+MEA+AAE+G+KG:".sprintf("%.2f", $cn->totWeight())."'
+";
+					$mc = substr_count($msg, "\n")+1;
+					$msg .= "UNT+".$mc."+".$em->mid."'";
+					$em->msg = $msg;
+					if (Yii::app()->params['ics']['testing']) {
+						$em->mdata['test'] = 1;
+					}
+					//echo $msg;
+					$em->status = 20;
+					$em->save();
+					$cn->mdata['acr_stat'] = 1;
+					$cn->status = 60;
+					$cn->save();
+					if (!empty($cn->process)&&($cn->process->status<= ConsolProcess::STATE_WAITING_MAIN_ACR)) {
+						$cn->process->updateStatus(ConsolProcess::STATE_MAIN_ACR_SENT);
+					}
+				}
+			} elseif ($cn->mdata['acr_stat'] == 5) {
+				//check the prohibted words at first
+				$errs=[];
+				foreach ($cn->shipments as $i=>$p) {
+					$temp=WordReplace::replace($p->getGoods())[1];
+					if (!empty($temp)) {
+						$errs[]="shipment ".$p->ref." ".implode("|", $temp);
+					};//use word replace service;
+				}
+				  
+				if (empty($errs)) {
+					$transaction = Yii::app()->db->beginTransaction();
+					try {
+						foreach ($cn->shipments as $i=>$p) {
+							if (!$p->canSendACR()) continue;
+
+							$err = false;
+
+							if (empty($p->weight)) {
+								$cn->addError('meta', 'Shipment '.$p->hbn.' has no weight.');
+								$err = true;
+							}
+							if (empty($p->dvalue)) {
+								$cn->addError('meta', 'Shipment '.$p->hbn.' has no value.');
+								$err = true;
+							}
+							if (empty($p->pkg)) {
+								$cn->addError('meta', 'Shipment '.$p->hbn.' has number of packs.');
+								$err = true;
+							}
+
+							// only value < 750USD can SAC
+							// or 1000 AUD can be SAC (Self Assessed Clearance) only
+							$canSac = $p->canSAC();
+							// special one
+							// for Michelle don't send sac for this shipment
+							// if ( $p->hbn == '8202853606' ) {
+							//     $canSac = false;
+							//}
+
+							$cnor_name = $p->cnor->name;
+							if (!preg_match('/\w/', $cnor_name)) {
+								$cnor_name = $p->agent->name;
+							}
+							$cnor_name = Edimsg::strEscape($cnor_name);
+							if(empty($cnor_name)){
+								$cn->addError('meta', 'Shipment '.$p->hbn.' cnor name problem');
+								$err = true;
+							}
+
+							$cnor_addr = $p->cnor->fullAddress(['suburb', 'city', 'state', 'postcode']);
+							if (!preg_match('/\w/', $cnor_addr)) {
+								$cnor_addr = $p->agent->getAddress(true, false, false);
+							}
+							$cnor_addr = trim($cnor_addr, " .,");
+							$cnor_addr = Edimsg::strEscape($cnor_addr);
+							
+							if(empty($cnor_addr)){
+								$cn->addError('meta', 'Shipment '.$p->hbn.' cnor address problem');
+								$err = true;
+							}
+							
+							if (!empty($p->receiver)&&!empty($p->receiver->address)&&!empty($p->receiver->name)&&!empty($p->receiver->postcode)) {
+								$cnee_name=$p->receiver->name;
+								$cnee_addr = $p->receiver->fullAddress(['suburb', 'city', 'state', 'postcode']);
+							} else {
+								$cnee_name = $p->cnee->name;
+								$cnee_addr = $p->cnee->fullAddress(['suburb', 'city', 'state', 'postcode']);
+							}
+
+							$cnee_name = Edimsg::strEscape($cnee_name);
+							$cnee_addr = Edimsg::strEscape($cnee_addr);
+
+							if(empty($cnee_name) || !preg_match('/[A-z]+/', $cnee_name)){
+								$cn->addError('meta', 'Shipment '.$p->hbn.' cnee name problem');
+								$err = true;
+							}
+							if(empty($cnee_addr) || !preg_match('/[A-z]+/', $cnee_addr)){
+								$cn->addError('meta', 'Shipment '.$p->hbn.' cnee address problem');
+								$err = true;
+							}
+
+							// $goods = $p->getGoods());
+							$goods = WordReplace::replace($p->getGoods())[0];//use word replace service;
+							if (empty($goods)) {
+								$cn->addError('meta', 'Shipment '.$p->hbn.' missing goods detail');
+								$err = true;
+							}
+
+							if($err) continue;
+
+							$os = Edimsg::model()->findAll(['condition' => "status = 50 AND type = 'AIRCR-S' AND fid = :id", 'params' => [':id' => $p->id], 'order' => 't.id DESC']);
+
+							$omid = null;
+							if (!empty($os)) {
+								foreach ($os as $o) {
+									if (preg_match('/MWB:'.$awb.'/', $o->msg) && preg_match('/BGM\+933:::AIRCR\+([^\+:]+):\d+\+9\'/', $o->msg, $m)) {
+										$omid = $m[1];
+										break;
+									}
+								}
+							}
+
+							$em = new Edimsg;
+							$em->dt = date('Y-m-d H:i:s');
+							$em->type = 'AIRCR-S';
+							$em->sender = Yii::app()->params['ics']['testing']? Yii::app()->params['ics']['test_site'] : Yii::app()->params['ics']['prod_site'];
+							$em->receiver = Yii::app()->params['ics']['customs_id'];
+							$em->status = 19;
+							$em->fid = $p->id;
+							$em->save();
+							$em->mid = sprintf('%06s', substr($em->id, -6));
+							$vn = Edimsg::model()->count('type = :t AND fid = :fid', [':t' => 'AIRCR-S', ':fid' => $p->id]) + 1;
+							$msg = "UNH+".$em->mid."+CUSCAR:D:99B:UN'
+BGM+933:::AIRCR+" . (empty($omid)?  $p->hbn.'-'.$vn : $omid). ":" . $vn . "+".(empty($omid)? 9 : 4)."'
+RFF+PQ:PO'
+RFF+AWB:".$hwb."'\n";
+							$msg .= "RFF+HWB:".$p->hbn."'
+RFF+MWB:".$awb."'\n";
+							if (!empty($p->mdata['importer_abn'])) {
+								$importer_abn=preg_replace("/[^\d]/i", "", $p->mdata['importer_abn']);
+								if (preg_match("/^\d{11}$/i", $importer_abn)) { //ABN need to 11 digits;
+									$msg.="NAD+AT+".$importer_abn."::95'\n";
+								}
+							}
+							if (!empty($p->mdata['vendor_id'])) { //vendor_id need to be 11 digits;
+								$vendor_id=preg_replace("/[^\d]/i", "", $p->mdata['vendor_id']);
+								if (preg_match("/^\d{11}$/i", $vendor_id)) {
+									$msg.="NAD+VN+".$vendor_id."::95'\n";
+								}
+							}
+							$msg.="NAD+CN++".Edimsg::strSegment($cnee_name, 35, 2).":".Edimsg::strSegment($cnee_addr, 35, 3)."'
+NAD+CZ++".Edimsg::strSegment($cnor_name, 35, 2).":".Edimsg::strSegment($cnor_addr, 35, 3)."'
+NAD+VW+".Yii::app()->params['ics']['abn']."::95'
+TDT+20+".$flight."++6+".$airline."::3'
+LOC+8+".$cn->pod."::6'
+LOC+76+".$cn->pol."::6'
+LOC+12+".$cn->pod."::6'
+LOC+91+".$cn->pol."::6'
+DTM+178:".date("Ymd", strtotime($cn->eta)).":102'
+CNI+1'
+RFF+UCN:".$p->hbn."'
+MOA+44:".sprintf("%.2f", $p->dvalue).":".($p->currency == 1? 'AUD' : 'USD')."'
+".($canSac ? "GIS+SAC:109:95'\n" : "")."GID+1'
+PAC+".$p->pkg."'
+FTX+AAA+++".Edimsg::strSegment(str_replace('/', ',', trim($goods, '/')), 512, 5)."'
+MEA+AAE+G+KG:".sprintf("%.2f", $p->weight)."'
+";
+							$mc = substr_count($msg, "\n")+1;
+							$msg .= "UNT+".$mc."+".$em->mid."'";
+							$em->msg = $msg;
+							if (Yii::app()->params['ics']['testing']) {
+								$em->mdata['test'] = 1;
+							}
+							//echo $msg;
+							$em->status = 20;
+							$em->save();
+							if($p->status < 50){
+								$p->status = 50;
+								$p->save();
+							}
+						}
+						$transaction->commit();
+					} catch (Exception $ex) {
+						$transaction->rollback();
+						Log::log2file("Air sub Acr".$cn->no."=>".$ex->getMessage(), "transaction_err_log", "transaction");
+						throw  $ex;
+					}
+					if (!empty($cn->process)&&$cn->process->status<=ConsolProcess::STATE_WAITING_SUB_ACR) {
+						$cn->process->updateStatus(ConsolProcess::STATE_WAITING_SEND_UBM);
+					}
+				} else {
+					$cn->addError('prohibited', implode(';', $errs));
+				}
+			}
+		}
+		$this->ajaxResult($cn);
+	}
+
+	public function actionArrivalNotice($id)
+	{
+		$model = $this->loadModel($id);
+
+		oPDF::renderPDF('arrival_notice_fcl', ['model' => $model], 1, $model->awb.'.pdf');
+	}
+		
+	public function actionSeaManifest($id)
+	{
+		$model= $this->loadModel($id);
+		oPDF::renderPDF('sea_consol_manifest_fcl', ['model' => $model], 1, $model->awb.'.pdf');
+	}
+	
+	/**
+	 * Returns the data model based on the primary key given in the GET variable.
+	 * If the data model is not found, an HTTP exception will be raised.
+	 * @param integer the ID of the model to be loaded
+	 */
+	public function loadModel($id)
+	{
+		$model= EdiAwbConsol::model()->findByPk($id);
+		if ($model===null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		return $model;
+	}
+}

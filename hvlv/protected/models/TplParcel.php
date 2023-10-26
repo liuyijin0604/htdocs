@@ -1,0 +1,9 @@
+<?php
+
+// for WMS delivery tasks
+class TplParcel extends ImParcel
+{
+	public static $my_ot_id = 10;
+	public static $modelType = 10;
+	
+}

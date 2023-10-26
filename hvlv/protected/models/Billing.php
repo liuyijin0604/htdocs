@@ -1,0 +1,1512 @@
+<?php
+
+/**
+ * This is the model class for table "billing".
+ *
+ * The followings are the available columns in table 'billing':
+ * @property string $id
+ * @property string $org_id
+ * @property string $created
+ * @property string $date
+ * @property string $due
+ * @property string $type
+ * @property integer $status
+ * @property string $billing_ref
+ * @property string $dpt_id
+ * @property integer $currency
+ * @property string $no
+ * @property string $meta
+ * @property integer $sync_xero
+ */
+class Billing extends oActiveRecord
+{
+	public $client, $total, $gst, $nolog, $custom_log_note, $mdata, $balance,$isForArrange,$siReconcileId,$siReconcileType;
+	public $siReconcileDiff = null;
+
+	public static $states = array(
+		self::BILLING_STATUS_PENDING => 'Pending',
+		self::BILLING_STATUS_CONFIRM => 'Confirm',
+		self::BILLING_STATUS_POSTED => 'Posted',
+		// self::BILLING_STATUS_NEED_CHECK => 'Invoice Check',
+		// self::BILLING_STATUS_OVERDUE => 'Overdue',
+		self::BILLING_STATUS_ARRANGED_PAYMENT => 'Arranged Payment',
+		self::BILLING_STATUS_PAID_PARTLY_CREDIT => 'Paid with Partly Credit',
+		self:: BILLING_STATUS_PARTIALLY_PAID=> 'Partially Paid',
+		self::BILLING_STATUS_FULLY_CREDITED => 'Fully Credited',
+		self::BILLING_STATUS_PAID => 'Paid',
+		// self::BILLING_STATUS_ACCRUAL_CHECK => 'Accrual Check',
+		self::BILLING_STATUS_CANCELLED => 'Cancelled',
+		self::BILLING_STATUS_DELETED => 'Deleted',
+	);
+
+	const BILLING_STATUS_PENDING = 1;
+	const BILLING_STATUS_CONFIRM = 2;
+	const BILLING_STATUS_POSTED = 3;
+	const BILLING_STATUS_NEED_CHECK = 4;
+	const BILLING_STATUS_OVERDUE = 5;
+	const BILLING_STATUS_PAID_PARTLY_CREDIT = 6;
+	const BILLING_STATUS_PARTIALLY_PAID = 7;
+	const BILLING_STATUS_FULLY_CREDITED = 8;
+	const BILLING_STATUS_PAID = 9;
+	const BILLING_STATUS_ACCRUAL_CHECK = 10;
+	const BILLING_STATUS_CANCELLED = 11;
+	const BILLING_STATUS_ARRANGED_PAYMENT = 12;
+	const BILLING_STATUS_DELETED = 99;
+	
+	public function getDbConnection(){
+		return self::getTlaConnection();
+	}
+
+	public static $currencies = array(
+		1 => 'AUD',
+		2 => 'USD',
+		3 => 'CNY',
+		4 => 'HKD',
+		5 => 'EUR',
+		6 => 'GBP',
+		7 => 'NZD',
+	);
+
+	public static $gstPercents = array(
+		1 => '10',
+		7 => '15',
+	);
+
+	public function getStatus()
+	{
+		if (isset(self::$states[$this->status])) {
+			return Yii::t(strtolower(__CLASS__), self::$states[$this->status]);
+		}
+		return '';
+	}
+
+	private function shouldAddGst($gst)
+	{
+		if (!empty($gst)) {
+			if (in_array($gst, ['OUTPUT', 'INPUT', 'CAPEXINPUT', 'GSTONCAPIMPORTS', 'GSTONIMPORTS'])) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public function afterFind()
+	{
+		if (!empty($this->meta)) {
+			$this->mdata = json_decode($this->meta, true);
+		}
+		$this->getTotal();
+	}
+
+	public function getTotal()
+	{
+		$this->total = 0;
+		$this->gst = 0;
+		foreach ($this->lines as $line) {
+			$this->total += $line->actual_amount + $line->gst_amount;
+			$this->gst += $line->gst_amount;
+		}
+	}
+
+	// public function getTotal()
+	// {
+	// 	$this->total = 0;
+	// 	$this->gst = 0;
+
+	// 	$non_gst_amount = 0;
+	// 	$has_gst_amount = 0;
+	// 	foreach ($this->lines as $line) {
+	// 		if ($line->gst_amount > 0) {
+	// 			$has_gst_amount += $line->actual_amount;
+	// 		} else {
+	// 			$non_gst_amount += $line->actual_amount;
+	// 		}
+	// 	}
+
+	// 	$this->total = number_format($has_gst_amount * 1.1 + $non_gst_amount, 2, '.', '');
+	// 	$this->gst = number_format($has_gst_amount * 0.1, 2, '.', '');
+	// }
+
+	public function calTotal()
+	{
+		// get all total
+		$total = 0;
+		$gst = 0;
+		foreach ($this->lines as $line) {
+			// if ($this->type == 6 && $this->org_id != 1133) {
+			// 	$total += $line->actual_amount;
+			// } else {
+			// 	$total += $line->actual_amount + $line->gst_amount;
+			// }
+			// fix general cost that actual_amount includes gst_amount
+			$total += $line->actual_amount + $line->gst_amount;
+			$gst += $line->gst_amount;
+		}
+		if ($this->total != $total) {
+			$this->total = $total;
+			$this->nolog = true;
+			$this->update('total');
+		}
+		if ($this->gst != $gst) {
+			$this->gst = $gst;
+			$this->nolog = true;
+			$this->update('gst');
+		}
+	}
+
+	// public function calTotal()
+	// {
+	// 	$total = 0;
+	// 	$gst = 0;
+
+	// 	$non_gst_amount = 0;
+	// 	$has_gst_amount = 0;
+	// 	foreach ($this->lines as $line) {
+	// 		if ($line->gst_amount > 0) {
+	// 			$has_gst_amount += $line->actual_amount;
+	// 		} else {
+	// 			$non_gst_amount += $line->actual_amount;
+	// 		}
+	// 	}
+
+	// 	$total = number_format($has_gst_amount * 1.1 + $non_gst_amount, 2, '.', '');
+	// 	$gst = number_format($has_gst_amount * 0.1, 2, '.', '');
+
+	// 	if ($this->total != $total) {
+	// 		$this->total = $total;
+	// 		$this->nolog = true;
+	// 		$this->update('total');
+	// 	}
+	// 	if ($this->gst != $gst) {
+	// 		$this->gst = $gst;
+	// 		$this->nolog = true;
+	// 		$this->update('gst');
+	// 	}
+	// }
+
+	public function afterSave()
+	{
+		if (!$this->nolog && !empty($this)) {
+			$extra = empty($this->custom_log_note) ? array() : array('note' => $this->custom_log_note);
+			$opname = 'Cron Or API';
+			if (isset(Yii::app()->user)) {
+				$opname = Yii::app()->user->name;
+			}
+			if ($this->isNewRecord) {
+				Log::add($this, Log::LOG_TYPE_CREATE, array_merge(['note' => $opname . ' create'], $extra));
+			} else {
+				$arrangeStr="";
+				if($this->getStatus()=="Arranged Payment")
+				{
+					$pab = PaymentArrangeBilling::model()->find(["condition"=>"billing_id = :bid","params"=>[":bid"=>$this->id],"order"=>"id desc"]);
+					if(!empty($pab))
+					{
+						$arrangeStr=" Arrange No:".$pab->payment_arrange->no;
+					}
+				}
+				Log::add($this, Log::LOG_TYPE_UPDATE, array_merge(['note' => $opname . ' update status is :' . $this->getStatus().$arrangeStr], $extra));
+			}
+		}
+
+		if (!empty($this->xero_id) && $this->status == self::BILLING_STATUS_CANCELLED) {
+			$this->delete2xero();
+			foreach ($this->lines as $line) {
+				$line->status = self::BILLING_STATUS_CANCELLED;
+				$line->update('status');
+			}
+		}
+	}
+
+	public function delete2xero()
+	{
+		if (yii::app()->name != 'TLA') {
+			$xero = new XeroAPI('xero_token_pcaex');
+		} else {
+			$xero = new XeroAPI('xero_token_toplog');
+		}
+		$results = $xero->get('Accounting\Invoice', ['Type' => 'ACCPAY', 'InvoiceID' => $this->xero_id]);
+		try {
+			if (!empty($results) && count($results) == 1) {
+				$xero->delete('Accounting\Invoice', $results[0]['InvoiceID']);
+			} else {
+				// log error message
+				Yii::app()->xero->log('failed to delete billing to xero for : ' . $this->billing_cref, Xero::LOG_LEVEL_ERR);
+			}
+		} catch (Exception $mye) {
+			$msg = 'failed to delete billing - ' . $mye->getMessage();
+			$msg .= PHP_EOL;
+			Yii::app()->xero->log($msg, Xero::LOG_LEVEL_ERR);
+		}
+	}
+
+	public function getType()
+	{
+		return Yii::t(strtolower(__CLASS__), self::$types[$this->type]);
+	}
+
+	public function getDptName()
+	{
+		$dptList = Org::dptList();
+		if (isset($dptList[$this->dpt_id])) {
+			return Yii::t(strtolower(__CLASS__), $dptList[$this->dpt_id]);
+		} else {
+			return '';
+		}
+	}
+
+	public function getDpmt()
+	{
+		if (empty($this->mdata['dpmts'])) {
+			$dpmts = [];
+			foreach ($this->lines as $line) {
+				$dpmts[] = $line->dpmt;
+			}
+
+			$dpmts = array_unique($dpmts);
+
+			$this->mdata['dpmts'] = $dpmts;
+			$this->update('meta');
+		}
+		$dpmts = [];
+		foreach ($this->mdata['dpmts'] as $dpmt) {
+			if (isset(Invoice::$dpmts[$dpmt])) {
+				$dpmts[] = Yii::t(strtolower(__CLASS__), Invoice::$dpmts[$dpmt]);
+			}
+		}
+
+		return implode(', ', $dpmts);
+	}
+
+	public function getCurrency()
+	{
+		return Yii::t(strtolower(__CLASS__), Invoice::$currencies[$this->currency]);
+	}
+
+	public function paid($pending = false)
+	{
+		$amt = 0;
+		foreach ($this->payments as $p) {
+			if (!empty($p->payment) && $p->payment->status == 6) {
+				$amt += $p->amount;
+			}
+		}
+		return round($amt * 1000) / 1000;
+	}
+
+	public function getCredit()
+	{
+		$amt = 0;
+		foreach ($this->payments as $p) {
+			if (isset($p->payment) && ($p->payment->type == 5) && ($p->payment->status == 6)) {
+				$amt += $p->amount;
+			}
+		}
+		return round($amt * 1000) / 1000;
+	}
+
+	public function realPaid()
+	{
+		$amt = 0;
+		foreach ($this->payments as $p) {
+			if (isset($p->payment) && ($p->payment->type == 5)) {
+				continue;
+			}
+			if (isset($p->payment) && ($p->payment->status == 6)) {
+				$amt += $p->amount;
+			}
+		}
+		return round($amt * 1000) / 1000;
+	}
+
+	public function checkPaid()
+	{
+		$paid = $this->paid();
+		$credit = $this->getCredit();
+		$realPaid = $this->realPaid();
+		if ($this->status == self::BILLING_STATUS_ARRANGED_PAYMENT) {
+			$last_arrange = PaymentArrangeBilling::model()->with('payment_arrange')->find(['condition' => 'payment_arrange.status = 6 AND billing_id = :billing_id', 'params' => [':billing_id' => $this->id], 'order' => 't.id DESC']);
+			$last_pay = PayBill::model()->with('payment')->find(['condition' => 'payment.status = 6 AND bill_id = :bill_id', 'params' => [':bill_id' => $this->id], 'order' => 't.pay_id DESC']);
+			if (!empty($last_arrange) && empty($last_pay)) {
+				return;
+			// } else if (!empty($last_arrange) && !empty($last_pay) && $last_arrange->amount != $last_pay->amount) {
+			// 	return;
+			} else {
+				$this->status = self::BILLING_STATUS_POSTED;
+			}
+		}
+		if($this->total < 0&&($this->status==self::BILLING_STATUS_PAID||$this->status==self::BILLING_STATUS_PARTIALLY_PAID))
+		{
+			return;
+		}
+
+		if ($this->total < 0) {
+			$this->status = self::BILLING_STATUS_POSTED;
+		} else if ($paid >= round($this->total, 2)) {
+			if ($credit <= 0) {
+				$this->status = self::BILLING_STATUS_PAID;
+			} else if ($realPaid > 0) {
+				$this->status = self::BILLING_STATUS_PAID_PARTLY_CREDIT;
+			} else {
+				$this->status = self::BILLING_STATUS_FULLY_CREDITED;
+			}
+		} else if ($paid > 0) {
+			$this->status = self::BILLING_STATUS_PARTIALLY_PAID;
+		} else if ($this->status != self::BILLING_STATUS_ARRANGED_PAYMENT) {
+			$this->status = self::BILLING_STATUS_POSTED;
+		}
+	}
+
+	public function getBalance($currency = null)
+	{
+		if($this->getCredit()>$this->getDisputeAmount())
+		{
+			$total = $this->total - $this->getCredit();
+		}else
+		{
+			$total = $this->total - $this->getDisputeAmount();
+		}
+
+		if ($this->currency != 1) {
+			$currency = Currency::model()->find('valid = 1 AND type=0 AND date >= :date', array(':date' => $this->date));
+			if (!empty($currency)) {
+				$currency = $currency->currency;
+			} else {
+				$currency = 1;
+			}
+			return sprintf('%.02f', ($total - $this->realPaid()) / $currency);
+		} else {
+			return sprintf('%.02f', $total - $this->realPaid());
+		}
+	}
+
+	public function getDisputeAmount($url = false, $gst = true)
+	{
+		$amount = 0;
+		// [$app_name, Yii::app()->name] = [Yii::app()->name, 'HVLV APP'];
+		// $si = SupplierInvoice::model()->find('inv_no = :inv_no AND status < 100', [':inv_no' => $this->billing_cref]);
+		// if (!empty($si)) {
+		// 	$siR = SiReconcile::model()->find('supplier_invoice_id = :supplier_invoice_id AND t.status < 100', [':supplier_invoice_id' => $si->id]);
+		// 	$dls = DisputeLine::model()->with('parent')->findAll('parent.rec_id = :rec_id AND t.status != 99', [':rec_id' => $siR->id]);
+		// 	foreach ($dls as $dl) {
+		// 		if ($dl->status == 0) $amount += $dl->dispute_amount_ex_gst * ($gst ? 1.1 : 1);
+		// 		else if ($dl->status == 10) $amount += $dl->credit_amount_ex_gst * ($gst ? 1.1 : 1);
+		// 	}
+		// }
+		// Yii::app()->name = $app_name;
+
+		[$app_name, Yii::app()->name] = [Yii::app()->name, 'TLA'];
+		$si = SupplierInvoice::model()->find('inv_no = :inv_no AND status < 100', [':inv_no' => $this->billing_cref]);
+		if (!empty($si)) {
+			$siR = SiReconcile::model()->find('supplier_invoice_id = :supplier_invoice_id AND t.status < 100', [':supplier_invoice_id' => $si->id]);
+			$dls = DisputeLine::model()->with('parent')->findAll('parent.rec_id = :rec_id AND t.status != 99', [':rec_id' => $siR->id]);
+			foreach ($dls as $dl) {
+				if ($dl->status == 0) $amount += $dl->dispute_amount_ex_gst * ($gst ? 1.1 : 1);
+				else if ($dl->status == 10) $amount += $dl->credit_amount_ex_gst * ($gst ? 1.1 : 1);
+			}
+		}
+		Yii::app()->name = $app_name;
+
+		if (!$url || $amount == 0) {
+			return number_format($amount, 2, '.', '');
+		} else {
+			return '<a href="' . Yii::app()->createUrl('billing/displayDispute', ['id' => $this->id]) . '" class="jqm_link">' . number_format($amount, 2, '.', '') . '</a>';
+		}
+	}
+
+	public function getImAccrualAmount($gst = true)
+	{
+		$amount = 0;
+		// [$app_name, Yii::app()->name] = [Yii::app()->name, 'HVLV APP'];
+		// $si = SupplierInvoice::model()->find(['condition' => 'inv_no = :inv_no AND status < 100', 'params' => [':inv_no' => $this->billing_cref], 'order' => 'id DESC']);
+		// if (!empty($si)) {
+		// 	$siR = SiReconcile::model()->find(['condition' => 't.supplier_invoice_id = :supplier_invoice_id AND t.status < 100', 'params' => [':supplier_invoice_id' => $si->id], 'order' => 'id DESC']);
+		// 	if (!empty($siR)) {
+		// 		foreach ($siR->lines as $srl) {
+		// 			if (($srl->type & SiReconcileLine::TYPE_3PL) > 0) continue;
+		// 			$amount += ($srl->my_value > 0 ? $srl->my_value : $srl->value) * ($gst ? 1.1 : 1);
+		// 		}
+		// 	}
+		// }
+		// Yii::app()->name = $app_name;
+
+		[$app_name, Yii::app()->name] = [Yii::app()->name, 'TLA'];
+		$si = SupplierInvoice::model()->find(['condition' => 'inv_no = :inv_no AND status < 100', 'params' => [':inv_no' => $this->billing_cref], 'order' => 'id DESC']);
+		if (!empty($si)) {
+			$siR = SiReconcile::model()->find(['condition' => 't.supplier_invoice_id = :supplier_invoice_id AND t.status < 100', 'params' => [':supplier_invoice_id' => $si->id], 'order' => 'id DESC']);
+			if (!empty($siR)) {
+				foreach ($siR->lines as $srl) {
+					if (($srl->type & SiReconcileLine::TYPE_3PL) > 0) continue;
+					$amount += ($srl->my_value > 0 ? $srl->my_value : $srl->value) * ($gst ? 1.1 : 1);
+				}
+			}
+		}
+		Yii::app()->name = $app_name;
+
+		return number_format($amount, 2, '.', '');
+	}
+
+	public function getPayAmount()
+	{
+		$selected = Yii::app()->cache->get('billing_streamline_selected_' . session_id()) ? Yii::app()->cache->get('billing_streamline_selected_' . session_id()) : [];
+		if (!empty($selected[$this->id])) {
+			return $selected[$this->id];
+		} else {
+			return $this->getBalance();
+		}
+	}
+
+	public function canSyncXero()
+	{
+		return in_array($this->status, [2]);
+	}
+
+	public function beforeSave()
+	{
+		$this->meta = empty($this->mdata) ? '' : json_encode($this->mdata);
+
+		if (empty($this->created) || $this->created === '0000-00-00') {
+			$this->created = date('Y-m-d');
+		}
+
+		if (empty($this->transaction_date) || $this->transaction_date === '0000-00-00') {
+			$this->transaction_date = $this->created;
+		}
+
+		if (empty($this->date) || $this->date === '0000-00-00') {
+			$this->date = date('Y-m-d');
+		}
+
+		if (empty($this->due) || $this->due === '0000-00-00') {
+			$this->due = $this->date;
+		}
+
+		if (empty($this->status)) {
+			$this->status = 1;
+		}
+
+		if (empty($this->no)) {
+			$this->no = $this->genNo();
+		}
+
+		$this->total = 0;
+		$this->gst = 0;
+		foreach ($this->lines as $line) {
+			$this->total += $line->actual_amount + $line->gst_amount;
+			$this->gst += $line->gst_amount;
+		}
+
+		if (!$this->isNewRecord) {
+			$o = self::model()->findByPk($this->id);
+			if ($o->status == $this->status) {
+				$this->nolog = true;
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * generate billing number
+	 * @return string
+	 */
+	public function genNo()
+	{
+		$n = 'BL' . date('ymd', strtotime($this->created));
+		$s = self::model()->count('no LIKE :n', [':n' => $n . '%']) + 1;
+		return $n . sprintf('%02d', $s) . 'SYD';
+	}
+
+	public static function getChargeCodeAll($term)
+	{
+		$chargecodes = array();
+
+		// edi
+		$chargeTypes = EdiJob::getChargeItemTypes();
+		foreach ($chargeTypes as $k => $v) {
+			$chargecodes[] = array(
+				'value' => $k,
+				'label' => $v,
+			);
+		}
+
+		// import
+		$chargecodes = array_merge($chargecodes, array(
+			['value' => '91034', 'label' => '91034:COS import warehouse service/material cost'],
+			['value' => '91030', 'label' => '91030:COS import terminal handling'],
+			['value' => '91031', 'label' => '91031:COS import local courier'],
+			['value' => '91032', 'label' => '91032:COS import customs clearance'],
+			['value' => '91033', 'label' => '91033:COS import air freight/Ocean'],
+		));
+
+		// 3pl
+		$chargecodes = array_merge($chargecodes, array(
+			['value' => '91022', 'label' => '3PL - warehouse service cost'],
+		));
+
+		foreach ($chargecodes as $k => $code) {
+			if (stripos($code['label'], $term) === false) {
+				unset($chargecodes[$k]);
+			}
+		}
+
+		return $chargecodes;
+	}
+
+	public function check()
+	{
+		return;
+		$this->status = 2;
+		$this->update('status');
+		foreach ($this->lines as $line) {
+			$consol = BillingLine::getModel($line->billing_ref)['consol'];
+			$line->status = 2;
+			$line->update('status');
+			// edijob billing line
+			if (preg_match('/JB\d{8}/', $this->billing_ref)) {
+				$invline = InvLine::model()->find('job_id = :id and qty * rate > :amount', array(':id' => $consol->id, ':amount' => $this->actual_amount));
+				if (empty($invline)) {
+					$this->setInvoiceCheck($line);
+					continue;
+				}
+			}
+
+			// consol billing line
+			switch ($line->charge_code) {
+				case 91032:{
+						if (($line->actual_amount == 50 || $line->actual_amount == 65 || $line->actual_amount == 60) && preg_match('/(ECN(| )\d{10})/', $line->desc, $m)) {
+							// processing fee => 85 + 8.5
+							$shipment = Shipment::model()->find('hbn = :hbn', array(':hbn' => str_replace(' ', '', $m[1])));
+							if (empty($shipment)) {
+								$this->setInvoiceCheck($line);
+							}
+
+							$invline = InvLine::model()->with('invoice')->find('invoice.consol_id = :cid AND invoice.status NOT IN (8,10) AND invoice.pid = :pid AND t.det like :desc AND t.amount = 93.5 AND t.ccode = "PROCESSING FEE"', array(':cid' => $consol->id, ':desc' => '%' . $shipment->hbn . '%', ':pid' => $shipment->id));
+							if (empty($invline)) {
+								$this->setInvoiceCheck($line);
+							}
+						} else if (preg_match('/(ECN(| )\d{10})/', $line->desc, $m)) {
+							// customs entry attached => x
+							$shipment = Shipment::model()->find('hbn = :hbn', array(':hbn' => str_replace(' ', '', $m[1])));
+							if (empty($shipment)) {
+								$this->setInvoiceCheck($line);
+							}
+
+							$invline = InvLine::model()->with('invoice')->find('invoice.consol_id = :cid AND invoice.status NOT IN (8,10) AND invoice.pid = :pid AND t.det = "CUSTOMS ENTRY ATTACHED" AND t.amount = :amount AND t.ccode = "CUSTOMS DUTY/GST"', array(':cid' => $consol->id, ':amount' => $line->actual_amount, ':pid' => $shipment->id));
+							if (empty($invline)) {
+								$this->setInvoiceCheck($line);
+							}
+						} else {
+							$this->setInvoiceCheck($line);
+						}
+					}
+					break;
+				case 91030:{
+						// terminal handling only => x + 82.5 + 0.2 * parcels
+						$total = number_format(($line->actual_amount + 82.5 + 0.2 * count($consol->shipments)) * 1.1, 2, '.', '');
+						$invoice = Invoice::model()->find('consol_id = :cid AND status NOT IN (8,10) AND total = :total', array(':cid' => $consol->id, ':total' => $total));
+						if (empty($invoice)) {
+							$this->setInvoiceCheck($line);
+						}
+					}
+					break;
+				case 91033:{
+						// air freight
+						$invline = InvLine::model()->with('invoice')->find('invoice.consol_id = :cid AND invoice.status NOT IN (8,10) AND t.amount > :amount AND ccode like "%transhipment%"', array(':cid' => $consol->id, ':amount' => $line->actual_amount));
+						if (empty($invline)) {
+							$this->setInvoiceCheck($line);
+						}
+					}
+					break;
+				case 91034:{
+						// warehouse service
+						$invlines = InvLine::model()->with('invoice')->findAll('invoice.consol_id = :cid AND invoice.status NOT IN (8,10) AND t.amount in (5.5, 27.5)', array(':cid' => $consol->id));
+						foreach ($invlines as $invline) {
+							if (round($line->actual_amount * 1.1) != round($invline->qty * $invline->amount)) {
+								continue;
+							}
+
+							break 2;
+						}
+						$this->setInvoiceCheck($line);
+					}
+					break;
+				case 91031:{
+						// local courier
+						$totalInvoice = 0;
+						$invoices = Invoice::model()->findAll('consol_id = :cid AND type = 10', array(':cid' => $consol->id));
+						foreach ($invoices as $invoice) {
+							$totalInvoice += $invoice->total;
+						}
+						$totalBilling = 0;
+						$billinglines = BillingLine::model()->findAll('billing_ref = :ref AND charge_code = 91031', array(':ref' => $consol->no));
+						foreach ($billinglines as $billingline) {
+							$totalBilling += $billingline->actual_amount ? $billingline->actual_amount : $billingline->accrual_amount;
+						}
+						if ($totalBilling > $totalInvoice) {
+							$this->setInvoiceCheck($line);
+						}
+					}
+					break;
+			}
+
+			if ($line->actual_amount > 1.2 * $line->accrual_amount || $line->accrual_amount > 1.2 * $line->actual_amount) {
+				$this->setAccrualCheck($line);
+			}
+		}
+	}
+
+	public function setInvoiceCheck($line)
+	{
+		// if ($this->status != 4) {
+		// 	$this->status = 4;
+		// 	$this->update('status');
+		// }
+		// $line->status = 4;
+		// $line->update('status');
+		$line->mdata['check'] = 4;
+		$line->update('meta');
+	}
+
+	public function setAccrualCheck($line)
+	{
+		// if ($this->status != 10) {
+		// 	$this->status = 10;
+		// 	$this->update('status');
+		// }
+		// $line->status = 10;
+		// $line->update('status');
+		$line->mdata['check'] = 4;
+		$line->update('meta');
+	}
+
+	public function getNo($fix = null)
+	{
+		if ($fix == null || $fix == 10) {
+			if ($this->dpmt != 40) {
+				$terms = array('no' => $this->billing_ref);
+			} else {
+				$terms = array('id' => substr($this->billing_ref, 1));
+			}
+
+			if ($fix == 10) {
+				$terms['fix'] = true;
+
+				if ($this->dpmt == 10) {
+					return Yii::app()->createURL("imcoConsol/updateByNo", $terms);
+				} else if ($this->dpmt == 20) {
+					return Yii::app()->createURL("excoConsol/updateByNo", $terms);
+				} else if ($this->dpmt == 30) {
+					return Yii::app()->createURL("ediJob/updateByNo", $terms);
+				} else if ($this->dpmt == 40) {
+					return Yii::app()->createURL("wmsTask/update", $terms);
+				}
+			} else {
+				if ($this->dpmt == 10) {
+					return "<a href=\"".Yii::app()->createURL("imcoConsol/updateByNo", $terms)."\" class=\"tab_link\" title=\"".$this->billing_ref."\">".$this->billing_ref."</a>";
+				} else if ($this->dpmt == 20) {
+					return "<a href=\"".Yii::app()->createURL("excoConsol/updateByNo", $terms)."\" class=\"tab_link\" title=\"".$this->billing_ref."\">".$this->billing_ref."</a>";
+				} else if ($this->dpmt == 30) {
+					return "<a href=\"".Yii::app()->createURL("ediJob/updateByNo", $terms)."\" class=\"tab_link\" title=\"".$this->billing_ref."\">".$this->billing_ref."</a>";
+				} else if ($this->dpmt == 40) {
+					return "<a href=\"".Yii::app()->createURL("wmsTask/update", $terms)."\" class=\"tab_link\" title=\"".$this->billing_ref."\">".$this->billing_ref."</a>";
+				}
+			}
+		}
+	}
+
+	public static function linkLine($line, $check = false, $status = Billing::BILLING_STATUS_CONFIRM)
+	{
+		if ($line->billing_cref == '') return;
+		$billing = Billing::model()->find('billing_cref = :cref AND org_id = :oid', array(':cref' => $line->billing_cref, ':oid' => $line->org_id));
+		if (empty($billing)) {
+			$billing = new Billing;
+			$billing->org_id = $line->org_id;
+			$billing->created = date('Y-m-d');
+			$billing->billing_cref = $line->billing_cref;
+			$billing->dpmt = $line->dpmt;
+			$billing->type = $line->type;
+			$billing->dpt_id = $line->dpt_id;
+			$billing->currency = $line->currency;
+		}
+		$billing->status = $status;
+		$billing->date = $line->date;
+		$billing->due = $line->due;
+		$billing->transaction_date = $line->transaction_date;
+		$billing->save();
+		$line->billing_id = $billing->id;
+		$line->status = $status;
+		if (!$line->isNewRecord) {
+			$line->update('billing_id', 'status');
+		}
+		if ($check) {
+			$billing->check();
+		}
+	}
+
+	public static function getPayList()
+	{
+		$billings = self::getPayListByLine();
+
+		$selected = Yii::app()->cache->get('billing_streamline_selected_' . session_id()) ? Yii::app()->cache->get('billing_streamline_selected_' . session_id()) : [];
+
+		$data = [];
+		foreach ($billings as $billing) {
+			if (empty($data[$billing->org_id . $billing->currency])) $data[$billing->org_id . $billing->currency] = ['id' => $billing->org_id, 'name' => $billing->cust->name, 'currency' => $billing->getCurrency(), 'total' => 0, 'gst' => 0, 'subtotal' => 0, 'balance' => 0, 'amount' => 0];
+			$data[$billing->org_id . $billing->currency]['total'] += $billing->total;
+			$data[$billing->org_id . $billing->currency]['gst'] += $billing->gst;
+			$data[$billing->org_id . $billing->currency]['subtotal'] += $billing->total - $billing->gst;
+			$data[$billing->org_id . $billing->currency]['bank'] = $billing->cust->getBankAccount(true, $billing->currency);
+			$data[$billing->org_id . $billing->currency]['balance'] += $billing->getBalance();
+			$data[$billing->org_id . $billing->currency]['bankaccount'] = $billing->cust->getBankAccount(false, $billing->currency);
+			$data[$billing->org_id . $billing->currency]['amount'] += floatval(!empty($selected[$billing->id]) ? $selected[$billing->id] : $billing->getBalance());
+		}
+
+		return $data;
+	}
+
+	public static function getPayListByLine()
+	{
+		$model = new Billing;
+		$model->unsetAttributes();
+		$selected = Yii::app()->cache->get('billing_streamline_selected_' . session_id()) ? Yii::app()->cache->get('billing_streamline_selected_' . session_id()) : [];
+		$ec = new CDbCriteria;
+		if (!empty($selected)) {
+			$ec->addCondition('id IN (' . implode(',', array_keys($selected)) . ')');
+		} else {
+			$ec->addCondition('1 = 0');
+		}
+		$ec->addCondition('t.status IN (' . implode(',', [Billing::BILLING_STATUS_POSTED, Billing::BILLING_STATUS_PARTIALLY_PAID]) . ')');
+		$billings = $model->search(false, 0, 't.date ASC', $ec)->getData();
+
+		return $billings;
+	}
+
+	public static function saveBill2Xero(&$data, $split = false)
+	{
+		sleep(1);
+		if (yii::app()->name != 'TLA') {
+			$xero = new XeroAPI('xero_token_pcaex');
+		} else {
+			$xero = new XeroAPI('xero_token_toplog');
+		}
+
+		$rs = $xero->get('Accounting\Invoice', ['Type' => 'ACCPAY', 'InvoiceNumber' => $data->no]);
+		foreach ($rs as $r) {
+			if ($r['Status'] == 'VOIDED') continue;
+			$org = Org::model()->findByPk($data->orgId);
+			if (preg_match('/' . $r['Contact']['Name'] . '/i', $org->name)) {
+				$billing = Billing::model()->find('billing_cref = :no AND org_id = :org_id', [':no' => $data->no, ':org_id' => $data->orgId]);
+				$billing->xero_id = $r['InvoiceID'];
+				$billing->update('xero_id');
+				break;
+			}
+		}
+		return self::_saveBill2Xero($xero, $data, $split);
+	}
+
+	private static function _saveBill2Xero($xero, &$data, $split = false)
+	{
+		$billing = $xero->new('Accounting\Invoice');
+		$billing->setType('ACCPAY');
+
+		$billing->setStatus('AUTHORISED'); // approved , waiting for pay
+		$billing->setInvoiceNumber($data->no);
+
+		$curIndex = $data->currency;
+		$curCode = 'AUD';
+		if (isset(Billing::$currencies[$curIndex])) {
+			$curCode = Billing::$currencies[$curIndex];
+		}
+		$billing->setCurrencyCode($curCode);
+
+		$contact = $xero->new('Accounting\Contact');
+		$org = Org::model()->findByPk($data->orgId);
+		if (!empty($org->extra[$xero->key])) {
+			$contact->setGUID($org->extra[$xero->key]);
+		} else {
+			$contact->setName($org->name);
+			$contact->setAccountNumber('PORG-' . $org->id);
+		}
+		$billing->setContact($contact);
+		$billing->setDate(new DateTime($data->date));
+		$billing->setDueDate(new DateTime($data->due));
+
+		// Exclusive - exclude GST
+		// Inclusive - include GST
+		// NoTax
+		switch ($data->gstType) {
+			case 1:
+				$billing->setLineAmountType('Exclusive');
+				break;
+			case 2:
+				$billing->setLineAmountType('Inclusive');
+				break;
+			default:
+				$billing->setLineAmountType('NoTax');
+				break;
+		}
+		// get all items
+		if (!$split) {
+			$itemDatas = [];
+			foreach ($data->lines as $line) {
+				$seg_acc_gst = (isset($line['dept']) ? $line['dept'] : '') . ' - ' . $line['code'] . ' - ' . $line['region']. ' - ' . $line['taxType'];
+				if (empty($itemDatas[$seg_acc_gst])) {
+					$itemData = $xero->new('Accounting\LineItem');
+					$itemData->setQuantity(1);
+					$itemData->setAccountCode($line['code']);
+					$itemData->setDescription($line['description']);
+					$itemData->setUnitAmount(number_format($line['qty'] * $line['amount'], 2, '.', ''));
+
+					// fix tax type issue
+					// in case GST free in come we set set GST free expenses
+					if (empty($line['taxType'])) {
+						$itemData->setTaxType('EXEMPTEXPENSES');
+					} else {
+						$itemData->setTaxType($line['taxType']);
+					}
+
+					$t = Invoice::getTrackingInfo($line, isset($line['dept']) ? $line['dept'] : '');
+					foreach ($t['name'] as $k => $name) {
+						$tracking = $xero->new('Accounting\TrackingCategory');
+						$tracking->setName($t['name'][$k]);
+						$tracking->setOption($t['value'][$k]);
+						$itemData->addTracking($tracking);
+					}
+
+					$itemDatas[$seg_acc_gst] = $itemData;
+				} else {
+					$itemDatas[$seg_acc_gst]->setUnitAmount(number_format($itemDatas[$seg_acc_gst]->getUnitAmount() + $line['qty'] * $line['amount'], 2, '.', ''));
+				}
+			}
+			foreach ($itemDatas as $itemData) {
+				$billing->addLineItem($itemData);
+			}
+		} else {
+			foreach ($data->lines as $line) {
+				$itemData = $xero->new('Accounting\LineItem');
+				$itemData->setQuantity($line['qty']);
+				$itemData->setAccountCode($line['code']);
+				$itemData->setDescription($line['description']);
+				$itemData->setUnitAmount($line['amount']);
+
+				// fix tax type issue
+				// in case GST free in come we set set GST free expenses
+				if (empty($line['taxType'])) {
+					$itemData->setTaxType('EXEMPTEXPENSES');
+				} else {
+					$itemData->setTaxType($line['taxType']);
+				}
+
+				$t = Invoice::getTrackingInfo($data, isset($line['dept']) ? $line['dept'] : '');
+				foreach ($t['name'] as $k => $name) {
+					$tracking = $xero->new('Accounting\TrackingCategory');
+					$tracking->setName($t['name'][$k]);
+					$tracking->setOption($t['value'][$k]);
+					$itemData->addTracking($tracking);
+				}
+				$billing->addLineItem($itemData);
+			}
+		}
+
+		try {
+			$guid = Billing::model()->find('billing_cref = :no AND org_id = :org_id AND status != 11', [':no' => $data->no, ':org_id' => $data->orgId]);
+			if (!empty($guid->xero_id)) {
+				$billing->setGUID($guid->xero_id);
+			}
+
+			$rt = $billing->save();
+			Yii::app()->xero->log(json_encode($rt->getElements()), Xero::LOG_LEVEL_TRACE);
+			if ($billing->hasGUID()) {
+				return $billing->getGUID();
+			} else {
+				// log error message
+				Yii::app()->xero->log('failed to save bill to xero for : ' . $data->no, Xero::LOG_LEVEL_ERR);
+			}
+		} catch (Exception $mye) {
+			$msg = 'failed to save bill - ' . $mye->getMessage();
+			$msg .= PHP_EOL;
+			$msg .= 'Bill Data : ' . json_encode($billing, JSON_PRETTY_PRINT);
+			Yii::app()->xero->log($msg, Xero::LOG_LEVEL_ERR);
+			throw $mye;
+		}
+
+		return false;
+	}
+
+	public static function saveBillCreditNote2Xero(&$data, $split = false)
+	{
+		if (yii::app()->name != 'TLA') {
+			$xero = new XeroAPI('xero_token_pcaex');
+		} else {
+			$xero = new XeroAPI('xero_token_toplog');
+		}
+
+		$rs = $xero->get('Accounting\CreditNote', ['Type' => 'ACCPAYCREDIT', 'CreditNoteNumber' => $data->no]);
+		foreach ($rs as $r) {
+			if ($r['Status'] == 'VOIDED') continue;
+			$org = Org::model()->findByPk($data->orgId);
+			if (preg_match('/' . $r['Contact']['Name'] . '/i', $org->name)) {
+				$billing = Billing::model()->find('billing_cref = :no AND org_id = :org_id', [':no' => $data->no, ':org_id' => $data->orgId]);
+				$billing->xero_id = $r['CreditNoteID'];
+				$billing->update('xero_id');
+				break;
+			}
+		}
+		return self::_saveBillCreditNote2Xero($xero, $data, $split);
+	}
+
+	private static function _saveBillCreditNote2Xero($xero, &$data, $split = false)
+	{
+		$creditNote = $xero->new('Accounting\CreditNote');
+
+		$creditNote->setType('ACCPAYCREDIT');
+		$creditNote->setStatus('AUTHORISED');
+		$creditNote->setCreditNoteNumber($data->no);
+
+		$curIndex = $data->currency;
+		$curCode = 'AUD';
+		if (isset(self::$currencies[$curIndex])) {
+			$curCode = self::$currencies[$curIndex];
+		}
+		$creditNote->setCurrencyCode($curCode);
+
+		$contact = $xero->new('Accounting\Contact');
+		$org = Org::model()->findByPk($data->orgId);
+		if (!empty($org->extra[$xero->key])) {
+			$contact->setGUID($org->extra[$xero->key]);
+		} else {
+			$contact->setName($org->name);
+			$contact->setAccountNumber('PORG-' . $org->id);
+		}
+		$creditNote->setContact($contact);
+		$creditNote->setDate(new DateTime($data->date));
+
+		// Exclusive - exclude GST
+		// Inclusive - include GST
+		// NoTax
+		switch ($data->gstType) {
+			case 1:
+				$creditNote->setLineAmountType('Exclusive');
+				break;
+			case 2:
+				$creditNote->setLineAmountType('Inclusive');
+				break;
+			default:
+				$creditNote->setLineAmountType('NoTax');
+				break;
+		}
+
+		if (!$split) {
+			$itemDatas = [];
+			foreach ($data->lines as $line) {
+				$seg_acc_gst = (isset($line['dept']) ? $line['dept'] : '') . ' - ' . $line['code'] . ' - ' . $line['region']. ' - ' . $line['taxType'];
+				if (empty($itemDatas[$seg_acc_gst])) {
+					$itemData = $xero->new('Accounting\LineItem');
+					$itemData->setQuantity(1);
+					$itemData->setAccountCode($line['code']);
+					$itemData->setDescription($line['description']);
+					$itemData->setUnitAmount(- $line['qty'] * $line['amount']);
+
+					// fix tax type issue
+					// in case GST free in come we set set GST free expenses
+					if (empty($line['taxType'])) {
+						$itemData->setTaxType('EXEMPTEXPENSES');
+					} else {
+						$itemData->setTaxType($line['taxType']);
+					}
+
+					$t = Invoice::getTrackingInfo($line, isset($line['dept']) ? $line['dept'] : '');
+					foreach ($t['name'] as $k => $name) {
+						$tracking = $xero->new('Accounting\TrackingCategory');
+						$tracking->setName($t['name'][$k]);
+						$tracking->setOption($t['value'][$k]);
+						$itemData->addTracking($tracking);
+					}
+
+					$itemDatas[$seg_acc_gst] = $itemData;
+				} else {
+					$itemDatas[$seg_acc_gst]->setUnitAmount($itemDatas[$seg_acc_gst]->getUnitAmount() - $line['qty'] * $line['amount']);
+				}
+			}
+
+			foreach ($itemDatas as $itemData) {
+				$creditNote->addLineItem($itemData);
+			}
+		} else {
+			foreach ($data->lines as $line) {
+				$itemData = $xero->new('Accounting\LineItem');
+				$itemData->setQuantity($line['qty']);
+				$itemData->setAccountCode($line['code']);
+				$itemData->setDescription($line['description']);
+				$itemData->setUnitAmount(- $line['amount']);
+
+				// fix tax type issue
+				// in case GST free in come we set set GST free expenses
+				if (empty($line['taxType'])) {
+					$itemData->setTaxType('EXEMPTEXPENSES');
+				} else {
+					$itemData->setTaxType($line['taxType']);
+				}
+
+				$t = Invoice::getTrackingInfo($data, isset($line['dept']) ? $line['dept'] : '');
+				foreach ($t['name'] as $k => $name) {
+					$tracking = $xero->new('Accounting\TrackingCategory');
+					$tracking->setName($t['name'][$k]);
+					$tracking->setOption($t['value'][$k]);
+					$itemData->addTracking($tracking);
+				}
+				$creditNote->addLineItem($itemData);
+
+				$creditNote->addLineItem($itemData);
+			}
+		}
+
+		try {
+			$guid = Billing::model()->find('billing_cref = :no AND org_id = :org_id AND status != 11', [':no' => $data->no, ':org_id' => $data->orgId]);
+			if (!empty($guid->xero_id)) {
+				$creditNote->setGUID($guid->xero_id);
+			}
+
+			$rt = $creditNote->save();
+			Yii::app()->xero->log(json_encode($rt->getElements()), Xero::LOG_LEVEL_TRACE);
+			if ($creditNote->hasGUID()) {
+				return $creditNote->getGUID();
+			} else {
+				// log error message
+				Yii::app()->xero->log('failed to save bill to xero for : ' . $data->no, Xero::LOG_LEVEL_ERR);
+			}
+		} catch (Exception $mye) {
+			$msg = 'failed to save bill - ' . $mye->getMessage();
+			$msg .= PHP_EOL;
+			$msg .= 'Bill Data : ' . json_encode($creditNote, JSON_PRETTY_PRINT);
+			Yii::app()->xero->log($msg, Xero::LOG_LEVEL_ERR);
+		}
+
+		return false;
+	}
+
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName()
+	{
+		return 'billing';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('org_id, created,type, status , currency', 'required'),
+			array('billing_cref, billing_ref, date, dpt_id, dpmt', 'required', 'on' => 'add'),
+			array('status, currency', 'numerical', 'integerOnly' => true),
+			array('org_id, type,dpmt, dpt_id,sync_xero', 'length', 'max' => 10),
+			array('billing_ref', 'length', 'max' => 45),
+			array('no', 'length', 'max' => 15),
+			array('date, due, transaction_date,type, status, billing_ref, billing_cref, no, client, total, gst, balance, xero_id', 'safe'),
+
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, org_id, dpmt,created,sync_xero, date, due, transaction_date,type, status, billing_ref, billing_cref,dpt_id, currency, no, meta, total, gst, balance, xero_id', 'safe', 'on' => 'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+			'cust' => array(self::BELONGS_TO, 'Org', 'org_id'),
+			'lines' => array(self::HAS_MANY, 'BillingLine', 'billing_id', 'on' => 'lines.status != 11'),
+			'payments' => array(self::HAS_MANY, 'PayBill', 'bill_id', 'on' => 'payments.sync_xero = 0'),
+			'invoice' => array(self::HAS_ONE, 'BillingInvoice', ['billing_cref' => 'billing_cref', 'org_id' => 'org_id']),
+			'arranges' => array(self::HAS_MANY, 'PaymentArrangeBilling', 'billing_id'),
+		);
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return array(
+			'id' => 'ID',
+			'org_id' => 'Supplier',
+			'dpmt' => 'Department',
+			'created' => 'Created',
+			'client' => 'Supplier',
+			'date' => 'Date',
+			'due' => 'Due Date',
+			'transaction_date' => 'Transaction Date',
+			'type' => 'Type',
+			'status' => 'Status',
+			'billing_ref' => 'Billing Ref',
+			'billing_cref' => 'Invoice #',
+			'dpt_id' => 'Branch',
+			'currency' => 'Currency',
+			'no' => 'No',
+			'meta' => 'Meta',
+			'total' => 'Total',
+			'sync_xero' => 'Xero',
+		);
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search($pgn = true, $ps = 30, $odr = 't.id DESC', $ec = false)
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria = new CDbCriteria;
+
+		$criteria->compare('t.id', $this->id);
+		$criteria->compare('t.org_id', $this->org_id);
+		// $criteria->compare('t.dpmt', $this->dpmt);
+		$criteria->compare('t.created', $this->created, true);
+		$criteria->compare('t.date', $this->date, true);
+		$criteria->compare('transaction_date', $this->transaction_date, true);
+		$criteria->compare('t.due', $this->due, true);
+		$criteria->compare('t.type', $this->type, true);
+		$criteria->compare('t.status', $this->status);
+		$criteria->compare('billing_ref', $this->billing_ref, true);
+		$criteria->compare('billing_cref', $this->billing_cref, true);
+		$criteria->compare('dpt_id', $this->dpt_id, true);
+		$criteria->compare('t.total', $this->total, true);
+		$criteria->compare('currency', $this->currency);
+		$criteria->compare('no', $this->no, true);
+		$criteria->compare('meta', $this->meta, true);
+		$criteria->compare('sync_xero', $this->sync_xero);
+
+		if(!empty($this->isForArrange))
+		{
+			$criteria->addCondition('t.status != 9');
+		}
+
+		if (!empty($this->dpmt)) {
+			$criteria->addCondition('(t.dpmt = ' . $this->dpmt . ' OR JSON_CONTAINS(t.meta, ' . $this->dpmt . ', "$.dpmts"))');
+		}
+
+		$with = array();
+		if (!empty($this->client)) {
+			$with[] = 'cust';
+			$criteria->addCondition('cust.name LIKE "%' . $this->client . '%" OR cust.id = "' . $this->client . '"');
+			// $criteria->compare('cust.name', $this->client, true);
+		}
+		if (!empty($with)) {
+			$criteria->with = array_unique($with);
+			$criteria->together = true;
+		}
+		if ($ec) {
+			$criteria->mergeWith($ec);
+		}
+		return new CActiveDataProvider($this, array(
+			'criteria' => $criteria,
+			'sort' => array(
+				'defaultOrder' => $odr,
+			),
+			'pagination' => $pgn ? array(
+				'pageSize' => $ps,
+			) : false,
+		));
+	}
+
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return Billing the static model class
+	 */
+	public static function model($className = __CLASS__)
+	{
+		return parent::model($className);
+	}
+
+	public static function getPayableFromSiReconcile($org_ids, $consol_ids, $array = false, $inv_nos = null, $letter = null)
+	{
+		$cond = '';
+		if (!empty($org_ids)) {
+			if (is_array($org_ids)) {
+				$cond .= ' AND sr.org_id IN (' . implode(',', $org_ids) . ')';
+			} else {
+				$cond .= ' AND sr.org_id = "' . $org_ids . '"';
+			}
+		}
+
+		if (!empty($consol_ids)) {
+			if (is_array($consol_ids)) {
+				$cond .= ' AND consol.id IN (' . implode(',', $consol_ids) . ')';
+			} else {
+				$cond .= ' AND consol.id = "' . $consol_ids . '"';
+			}
+		}
+
+		if (!empty($inv_nos)) {
+			if (is_array($inv_nos)) {
+				$cond .= ' AND si.inv_no IN (' . implode(',', $inv_nos) . ')';
+			} else {
+				$cond .= ' AND si.inv_no = "' . $inv_nos . '"';
+			}
+		}
+
+		$cond .= ' AND (sr.confirm_status & 16)>0';
+
+		if (empty($letter)) {
+		$sql = 'SELECT SUM(v6) AS payable, SUM(v7) AS accrual, v3 AS consol_no, v5 AS invoice_no, v8 AS org_id FROM (
+			SELECT srl.id AS v0, srl.ref AS v1, srl.item_code AS v2, consol.no AS v3, consol.eta AS v4, si.inv_no AS v5, srl.value AS v6, srl.my_value AS v7, si.org_id AS v8 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.shipment ON shipment.id = srl.fid JOIN hvlv_db.consol ON consol.id = shipment.consol_id WHERE si.type = 1 AND srl.model = "ImParcel" AND srl.item_code = "item" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v0, srl.ref AS v1, srl.item_code AS v2, consol.no AS v3, consol.eta AS v4, si.inv_no AS v5, srl.value AS v6, srl.my_value AS v7, si.org_id AS v8 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.awb = srl.ref WHERE si.type = 1 AND srl.item_code = "letter" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v0, srl.ref AS v1, srl.item_code AS v2, consol.no AS v3, consol.eta AS v4, si.inv_no AS v5, srl.value AS v6, srl.my_value AS v7, si.org_id AS v8 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON json_query(consol.meta, "$.elms") LIKE concat("%", srl.ref, "%") WHERE si.type = 1 AND srl.item_code = "letter" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v0, srl.ref AS v1, srl.item_code AS v2, consol.no AS v3, consol.eta AS v4, si.inv_no AS v5, srl.value AS v6, srl.my_value AS v7, si.org_id AS v8 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.shipment ON shipment.id = srl.fid JOIN hvlv_db.consol ON consol.id = shipment.consol_id WHERE si.type = 2 AND srl.model = "ImParcel" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v0, srl.ref AS v1, srl.item_code AS v2, consol.no AS v3, consol.eta AS v4, si.inv_no AS v5, srl.value AS v6, srl.my_value AS v7, si.org_id AS v8 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.id = srl.fid WHERE si.type = 3 AND srl.model IN ("ImcoConsol", "DmawbConsol") AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v0, srl.ref AS v1, srl.item_code AS v2, consol.no AS v3, consol.eta AS v4, si.inv_no AS v5, srl.value AS v6, srl.my_value AS v7, si.org_id AS v8 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.id = srl.fid WHERE si.type = 4 AND srl.model IN ("ImcoConsol", "DmawbConsol") AND sr.status < 100 ' . $cond . '
+
+			union
+
+			SELECT srl.id AS v0, srl.ref AS v1, srl.item_code AS v2, consol.no AS v3, consol.eta AS v4, si.inv_no AS v5, srl.value AS v6, srl.my_value AS v7, si.org_id AS v8 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.shipment ON shipment.id = srl.fid JOIN hvlv_db.consol ON consol.id = shipment.consol_id WHERE si.type = 1 AND srl.model = "ImParcel" AND srl.item_code = "item" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v0, srl.ref AS v1, srl.item_code AS v2, consol.no AS v3, consol.eta AS v4, si.inv_no AS v5, srl.value AS v6, srl.my_value AS v7, si.org_id AS v8 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.awb = srl.ref WHERE si.type = 1 AND srl.item_code = "letter" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v0, srl.ref AS v1, srl.item_code AS v2, consol.no AS v3, consol.eta AS v4, si.inv_no AS v5, srl.value AS v6, srl.my_value AS v7, si.org_id AS v8 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON json_query(consol.meta, "$.elms") LIKE concat("%", srl.ref, "%") WHERE si.type = 1 AND srl.item_code = "letter" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v0, srl.ref AS v1, srl.item_code AS v2, consol.no AS v3, consol.eta AS v4, si.inv_no AS v5, srl.value AS v6, srl.my_value AS v7, si.org_id AS v8 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.shipment ON shipment.id = srl.fid JOIN hvlv_db.consol ON consol.id = shipment.consol_id WHERE si.type = 2 AND srl.model = "ImParcel" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v0, srl.ref AS v1, srl.item_code AS v2, consol.no AS v3, consol.eta AS v4, si.inv_no AS v5, srl.value AS v6, srl.my_value AS v7, si.org_id AS v8 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.id = srl.fid WHERE si.type = 3 AND srl.model IN ("ImcoConsol", "DmawbConsol") AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v0, srl.ref AS v1, srl.item_code AS v2, consol.no AS v3, consol.eta AS v4, si.inv_no AS v5, srl.value AS v6, srl.my_value AS v7, si.org_id AS v8 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.id = srl.fid WHERE si.type = 4 AND srl.model IN ("ImcoConsol", "DmawbConsol") AND sr.status < 100 ' . $cond . '
+		) temp GROUP BY v3, v5, v8';
+		} else if ($letter == 'exclude') {
+		$sql = 'SELECT SUM(v6) AS payable, SUM(v7) AS accrual, v3 AS consol_no, v5 AS invoice_no, v8 AS org_id FROM (
+			SELECT srl.id AS v0, srl.ref AS v1, srl.item_code AS v2, consol.no AS v3, consol.eta AS v4, si.inv_no AS v5, srl.value AS v6, srl.my_value AS v7, si.org_id AS v8 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.shipment ON shipment.id = srl.fid JOIN hvlv_db.consol ON consol.id = shipment.consol_id WHERE si.type = 1 AND srl.model = "ImParcel" AND srl.item_code = "item" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v0, srl.ref AS v1, srl.item_code AS v2, consol.no AS v3, consol.eta AS v4, si.inv_no AS v5, srl.value AS v6, srl.my_value AS v7, si.org_id AS v8 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.shipment ON shipment.id = srl.fid JOIN hvlv_db.consol ON consol.id = shipment.consol_id WHERE si.type = 2 AND srl.model = "ImParcel" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v0, srl.ref AS v1, srl.item_code AS v2, consol.no AS v3, consol.eta AS v4, si.inv_no AS v5, srl.value AS v6, srl.my_value AS v7, si.org_id AS v8 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.id = srl.fid WHERE si.type = 3 AND srl.model IN ("ImcoConsol", "DmawbConsol") AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v0, srl.ref AS v1, srl.item_code AS v2, consol.no AS v3, consol.eta AS v4, si.inv_no AS v5, srl.value AS v6, srl.my_value AS v7, si.org_id AS v8 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.id = srl.fid WHERE si.type = 4 AND srl.model IN ("ImcoConsol", "DmawbConsol") AND sr.status < 100 ' . $cond . '
+
+			union
+
+			SELECT srl.id AS v0, srl.ref AS v1, srl.item_code AS v2, consol.no AS v3, consol.eta AS v4, si.inv_no AS v5, srl.value AS v6, srl.my_value AS v7, si.org_id AS v8 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.shipment ON shipment.id = srl.fid JOIN hvlv_db.consol ON consol.id = shipment.consol_id WHERE si.type = 1 AND srl.model = "ImParcel" AND srl.item_code = "item" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v0, srl.ref AS v1, srl.item_code AS v2, consol.no AS v3, consol.eta AS v4, si.inv_no AS v5, srl.value AS v6, srl.my_value AS v7, si.org_id AS v8 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.shipment ON shipment.id = srl.fid JOIN hvlv_db.consol ON consol.id = shipment.consol_id WHERE si.type = 2 AND srl.model = "ImParcel" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v0, srl.ref AS v1, srl.item_code AS v2, consol.no AS v3, consol.eta AS v4, si.inv_no AS v5, srl.value AS v6, srl.my_value AS v7, si.org_id AS v8 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.id = srl.fid WHERE si.type = 3 AND srl.model IN ("ImcoConsol", "DmawbConsol") AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v0, srl.ref AS v1, srl.item_code AS v2, consol.no AS v3, consol.eta AS v4, si.inv_no AS v5, srl.value AS v6, srl.my_value AS v7, si.org_id AS v8 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.id = srl.fid WHERE si.type = 4 AND srl.model IN ("ImcoConsol", "DmawbConsol") AND sr.status < 100 ' . $cond . '
+		) temp GROUP BY v3, v5, v8';
+		} else if ($letter == 'only') {
+		$sql = 'SELECT SUM(v6) AS payable, SUM(v7) AS accrual, v3 AS consol_no, v5 AS invoice_no, v8 AS org_id FROM (
+			SELECT srl.id AS v0, srl.ref AS v1, srl.item_code AS v2, consol.no AS v3, consol.eta AS v4, si.inv_no AS v5, srl.value AS v6, srl.my_value AS v7, si.org_id AS v8 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.awb = srl.ref WHERE si.type = 1 AND srl.item_code = "letter" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v0, srl.ref AS v1, srl.item_code AS v2, consol.no AS v3, consol.eta AS v4, si.inv_no AS v5, srl.value AS v6, srl.my_value AS v7, si.org_id AS v8 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON json_query(consol.meta, "$.elms") LIKE concat("%", srl.ref, "%") WHERE si.type = 1 AND srl.item_code = "letter" AND sr.status < 100 ' . $cond . '
+
+			union
+
+			SELECT srl.id AS v0, srl.ref AS v1, srl.item_code AS v2, consol.no AS v3, consol.eta AS v4, si.inv_no AS v5, srl.value AS v6, srl.my_value AS v7, si.org_id AS v8 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.awb = srl.ref WHERE si.type = 1 AND srl.item_code = "letter" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v0, srl.ref AS v1, srl.item_code AS v2, consol.no AS v3, consol.eta AS v4, si.inv_no AS v5, srl.value AS v6, srl.my_value AS v7, si.org_id AS v8 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON json_query(consol.meta, "$.elms") LIKE concat("%", srl.ref, "%") WHERE si.type = 1 AND srl.item_code = "letter" AND sr.status < 100 ' . $cond . '
+		) temp GROUP BY v3, v5, v8';
+		}
+
+		$rs = Yii::app()->db->createCommand($sql)->queryAll();
+
+		if ($array) {
+			return $rs;
+		} else {
+			$total = 0;
+			foreach ($rs as $r) {
+				$total += $r['payable'];
+			}
+			return $total;
+		}
+	}
+
+	public static function getDisputeFromSiReconcile($org_ids, $consol_ids, $inv_no = null, $letter = null)
+	{
+		$cond = '';
+		if (is_array($org_ids)) {
+			$cond .= ' AND sr.org_id IN (' . implode(',', $org_ids) . ')';
+		} else {
+			$cond .= ' AND sr.org_id = "' . $org_ids . '"';
+		}
+
+		if (is_array($consol_ids)) {
+			$cond .= ' AND consol.id IN (' . implode(',', $consol_ids) . ')';
+		} else {
+			$cond .= ' AND consol.id = "' . $consol_ids . '"';
+		}
+
+		if (!empty($inv_no)) {
+			$cond .= ' AND si.inv_no = "' . $inv_no . '"';
+		}
+
+		if (empty($letter)) {
+		$sql = 'SELECT SUM(dispute_amount_ex_gst) AS actual FROM dispute_line WHERE si_reconcile_line_id IN (
+			SELECT srl.id AS v1 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.shipment ON shipment.id = srl.fid JOIN hvlv_db.consol ON consol.id = shipment.consol_id WHERE si.type = 1 AND srl.model = "ImParcel" AND srl.item_code = "item" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v1 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.awb = srl.ref WHERE si.type = 1 AND srl.item_code = "letter" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v1 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON json_query(consol.meta, "$.elms") LIKE concat("%", srl.ref, "%") WHERE si.type = 1 AND srl.item_code = "letter" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v1 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.shipment ON shipment.id = srl.fid JOIN hvlv_db.consol ON consol.id = shipment.consol_id WHERE si.type = 2 AND srl.model = "ImParcel" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v1 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.id = srl.fid WHERE si.type = 3 AND srl.model IN ("ImcoConsol", "DmawbConsol") AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v1 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.id = srl.fid WHERE si.type = 4 AND srl.model IN ("ImcoConsol", "DmawbConsol") AND sr.status < 100 ' . $cond . '
+
+			union
+
+			SELECT srl.id AS v1 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.shipment ON shipment.id = srl.fid JOIN hvlv_db.consol ON consol.id = shipment.consol_id WHERE si.type = 1 AND srl.model = "ImParcel" AND srl.item_code = "item" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v1 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.awb = srl.ref WHERE si.type = 1 AND srl.item_code = "letter" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v1 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON json_query(consol.meta, "$.elms") LIKE concat("%", srl.ref, "%") WHERE si.type = 1 AND srl.item_code = "letter" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v1 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.shipment ON shipment.id = srl.fid JOIN hvlv_db.consol ON consol.id = shipment.consol_id WHERE si.type = 2 AND srl.model = "ImParcel" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v1 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.id = srl.fid WHERE si.type = 3 AND srl.model IN ("ImcoConsol", "DmawbConsol") AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v1 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.id = srl.fid WHERE si.type = 4 AND srl.model IN ("ImcoConsol", "DmawbConsol") AND sr.status < 100 ' . $cond . '
+		)';
+		} else if ($letter == 'exclude') {
+		$sql = 'SELECT SUM(dispute_amount_ex_gst) AS actual FROM dispute_line WHERE si_reconcile_line_id IN (
+			SELECT srl.id AS v1 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.shipment ON shipment.id = srl.fid JOIN hvlv_db.consol ON consol.id = shipment.consol_id WHERE si.type = 1 AND srl.model = "ImParcel" AND srl.item_code = "item" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v1 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.shipment ON shipment.id = srl.fid JOIN hvlv_db.consol ON consol.id = shipment.consol_id WHERE si.type = 2 AND srl.model = "ImParcel" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v1 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.id = srl.fid WHERE si.type = 3 AND srl.model IN ("ImcoConsol", "DmawbConsol") AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v1 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.id = srl.fid WHERE si.type = 4 AND srl.model IN ("ImcoConsol", "DmawbConsol") AND sr.status < 100 ' . $cond . '
+
+			union
+
+			SELECT srl.id AS v1 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.shipment ON shipment.id = srl.fid JOIN hvlv_db.consol ON consol.id = shipment.consol_id WHERE si.type = 1 AND srl.model = "ImParcel" AND srl.item_code = "item" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v1 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.shipment ON shipment.id = srl.fid JOIN hvlv_db.consol ON consol.id = shipment.consol_id WHERE si.type = 2 AND srl.model = "ImParcel" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v1 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.id = srl.fid WHERE si.type = 3 AND srl.model IN ("ImcoConsol", "DmawbConsol") AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v1 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.id = srl.fid WHERE si.type = 4 AND srl.model IN ("ImcoConsol", "DmawbConsol") AND sr.status < 100 ' . $cond . '
+		)';
+		} else if ($letter == 'only') {
+		$sql = 'SELECT SUM(dispute_amount_ex_gst) AS actual FROM dispute_line WHERE si_reconcile_line_id IN (
+			SELECT srl.id AS v1 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.awb = srl.ref WHERE si.type = 1 AND srl.item_code = "letter" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v1 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON json_query(consol.meta, "$.elms") LIKE concat("%", srl.ref, "%") WHERE si.type = 1 AND srl.item_code = "letter" AND sr.status < 100 ' . $cond . '
+
+			union
+
+			SELECT srl.id AS v1 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.awb = srl.ref WHERE si.type = 1 AND srl.item_code = "letter" AND sr.status < 100 ' . $cond . '
+			union
+			SELECT srl.id AS v1 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON json_query(consol.meta, "$.elms") LIKE concat("%", srl.ref, "%") WHERE si.type = 1 AND srl.item_code = "letter" AND sr.status < 100 ' . $cond . '
+		)';
+		}
+
+		$rs = Yii::app()->db->createCommand($sql)->queryAll();
+
+		return floatval(@$rs[0]['actual']);
+	}
+
+	public static function getDescFromSiReconcile($org_ids, $consol_ids, $inv_no)
+	{
+		$cond = '';
+		if (is_array($org_ids)) {
+			$cond .= ' AND sr.org_id IN (' . implode(',', $org_ids) . ')';
+		} else {
+			$cond .= ' AND sr.org_id = "' . $org_ids . '"';
+		}
+
+		if (is_array($consol_ids)) {
+			$cond .= ' AND consol.id IN (' . implode(',', $consol_ids) . ')';
+		} else {
+			$cond .= ' AND consol.id = "' . $consol_ids . '"';
+		}
+
+		if (!empty($inv_no)) {
+			$cond .= ' AND si.inv_no = "' . $inv_no . '"';
+		}
+
+		$sql = 'SELECT DISTINCT v0 FROM (
+			SELECT srl.det AS v0 FROM hvlv_db.`si_reconcile_line` srl JOIN hvlv_db.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_db.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.id = srl.fid WHERE si.type = 4 AND srl.model IN ("ImcoConsol", "DmawbConsol") AND sr.status < 100 ' . $cond . '
+
+			union
+
+			SELECT srl.det AS v0 FROM hvlv_top.`si_reconcile_line` srl JOIN hvlv_top.`si_reconcile` sr ON srl.rec_id = sr.id JOIN hvlv_top.`supplier_invoice` si ON si.id = sr.supplier_invoice_id JOIN hvlv_db.consol ON consol.id = srl.fid WHERE si.type = 4 AND srl.model IN ("ImcoConsol", "DmawbConsol") AND sr.status < 100 ' . $cond . '
+		) temp';
+
+		$rs = [];
+		$data = Yii::app()->db->createCommand($sql)->queryAll();
+		foreach ($data as $r) {
+			$rs[] = $r['v0'];
+		}
+
+		return implode('*** ', $rs);
+	}
+
+
+	public function getSiReconcileId()
+	{
+		if(!empty($this->siReconcileId)) return $this->siReconcileId;
+
+		$supplierInvoice = SupplierInvoice::model()->find('inv_no=:no and status !=100 and org_id = :orgId',[":no"=>$this->billing_cref,":orgId"=>$this->org_id]);
+		if(!empty($supplierInvoice))
+		{
+			$siReconcile = SiReconcile::model()->find('supplier_invoice_id=:sid',[':sid'=>$supplierInvoice->id]);
+			$this->siReconcileId = $siReconcile->id;
+			return $siReconcile->id;
+		}else
+		{
+			return 0;
+		}
+	}
+
+	public function getSiReconcileDiff()
+	{
+		if(!empty($this->siReconcileId))
+		{
+			$sql="SELECT sum(value-my_value) from `si_reconcile_line` WHERE rec_id={$this->siReconcileId} AND item_code !='eparcel' AND item_code!='eparcel-fuel'";
+			$r=Yii::app()->db_tla->createCommand($sql)->queryScalar();
+			if (!empty($r)) {
+				$this->siReconcileDiff= $r;
+				return $r;
+			}
+			return 0;
+		}
+	}
+
+	public function getSiReconcileType()
+	{
+		if(!empty($siReconcileType)) return $siReconcileType;
+
+		$supplierInvoice = SupplierInvoice::model()->find('inv_no=:no and status !=100',[":no"=>$this->billing_cref]);
+		if(!empty($supplierInvoice))
+		{
+			return $supplierInvoice->type;
+		}else
+		{
+			return 0;
+		}
+	}
+
+}

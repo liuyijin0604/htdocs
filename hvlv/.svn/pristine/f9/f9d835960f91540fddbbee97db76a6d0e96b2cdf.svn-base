@@ -1,0 +1,854 @@
+<?php
+class ConsolProcessService extends Service
+{
+    public function getSumConsolProcessCreateToday($dptId)
+    {
+        $result = [];
+        $totalCountNew = $airCountNew = $seaCountNew = 0;
+        $totalCbmNew = $airCbmNew = $seaCbmNew = 0;
+        $totalWeightNew = $airWeightNew = $seaWeightNew = 0;
+        
+        $today = date("Y-m-d");
+        $yesterday = date("Y-m-d", strtotime("-1 day"));
+        // models = all new created consol process at the given dptId from yesterday 17:00 to today 16:59
+        $models = ConsolProcess::model()->findAllBySql('SELECT * FROM consol_process WHERE fid IN (SELECT id FROM consol WHERE dpt_id = ' .$dptId. ') AND started >= "' . $yesterday . ' 17:00:00" AND started <= "' . $today . ' 16:59:59"');
+
+        if(!empty($models))
+        {
+            /**
+             * Calculate air and sea consol's count, CBM, and weight.
+             * Total = air + sea
+             */
+            foreach($models as $model) 
+            {
+                if($model->main_type == 1)
+                {
+                    $airCountNew++;
+                    $airCbmNew += number_format($model->consol->totCBM(), 3, '.', '');
+                    $airWeightNew += number_format($model->consol->totWeight(), 3, '.', '');
+                }
+                if($model->main_type == 2)
+                {
+                    $seaCountNew++;
+                    $seaCbmNew += number_format($model->consol->totCBM(), 3, '.', '');
+                    $seaWeightNew += number_format($model->consol->totWeight(), 3, '.', '');
+                }
+            }
+            $totalCountNew = $airCountNew + $seaCountNew;
+            $totalCbmNew = $airCbmNew + $seaCbmNew;
+            $totalWeightNew = $airWeightNew + $seaWeightNew;
+        }
+
+        $result['totalCount'] = $totalCountNew;
+        $result['totalCBM'] = $totalCbmNew;
+        $result['totalWeight'] = number_format($totalWeightNew, 3, '.', '');
+
+        $result['airCount'] = $airCountNew;
+        $result['airCBM'] = $airCbmNew;
+        $result['airWeight'] = number_format($airWeightNew, 3, '.', '');
+
+        $result['seaCount'] = $seaCountNew;
+        $result['seaCBM'] = $seaCbmNew;
+        $result['seaWeight'] = number_format($seaWeightNew, 3, '.', '');
+
+        return $result;
+    }
+
+    /**
+     * Find all consol processes which have been done (status becomes 80).
+     * Use date instead of started.
+     * All the rest is the same as new
+     */
+    public function getSumConsolProcessDoneToday($dptId)
+    {
+        $result = [];
+        $totalCountDone = $airCountDone = $seaCountDone = 0;
+        $totalCbmDone = $airCbmDone = $seaCbmDone = 0;
+        $totalWeightDone = $airWeightDone = $seaWeightDone = 0;
+        $today = date("Y-m-d");
+        $yesterday = date("Y-m-d", strtotime("-1 day"));
+        $models = ConsolProcess::model()->findAllBySql('SELECT * FROM consol_process WHERE fid IN (SELECT id FROM consol WHERE dpt_id = '.$dptId.') AND date >="'.$yesterday.' 17:00:00" AND date <= "' . $today . ' 16:59:59" AND status = 80');
+
+        if(!empty($models))
+        {
+            foreach($models as $model)
+            {
+                if($model->main_type == 1)
+                {
+                    $airCountDone++;
+                    $airCbmDone += $model->consol->totCBM();
+                    $airWeightDone += $model->consol->totWeight();
+                }
+                if($model->main_type == 2)
+                {
+                    $seaCountDone++;
+                    $seaCbmDone += $model->consol->totCBM();
+                    $seaWeightDone += $model->consol->totWeight();
+                }
+            }
+            $totalCountDone = $airCountDone + $seaCountDone;
+            $totalCbmDone = $airCbmDone + $seaCbmDone;
+            $totalWeightDone = $airWeightDone + $seaWeightDone;
+        }
+        $result['totalCount'] = $totalCountDone;
+        $result['totalCBM'] = number_format($totalCbmDone, 3, '.', '');
+        $result['totalWeight'] = number_format($totalWeightDone, 3, '.', '');
+
+        $result['airCount'] = $airCountDone;
+        $result['airCBM'] = number_format($airCbmDone, 3, '.', '');
+        $result['airWeight'] = number_format($airWeightDone, 3, '.', '');
+
+        $result['seaCount'] = $seaCountDone;
+        $result['seaCBM'] = number_format($seaCbmDone, 3, '.', '');
+        $result['seaWeight'] = number_format($seaWeightDone, 3, '.', '');
+
+        return $result;
+    }
+
+    /**
+     * Find all consol processes which havn't been done (status != 80)
+     */
+    public function getSumConsolProcessLeftToday($dptId)
+    {
+        $result = [];
+        $totalCountLeft = $airCountLeft = $seaCountLeft = 0;
+        $totalCbmLeft = $airCbmLeft = $seaCbmLeft = 0;
+        $totalWeightLeft = $airWeightLeft = $seaWeightLeft = 0;
+        $today = date("Y-m-d");
+        $yesterday = date("Y-m-d", strtotime("-1 day"));
+        $models = ConsolProcess::model()->findAllBySql('SELECT cp.* FROM consol_process cp left outer join consol c on cp.fid = c.id WHERE c.dpt_id = '.$dptId.' AND cp.status != 80 AND c.status !=100');
+        if(!empty($models))
+        {
+            foreach($models as $model)
+            {
+                if($model->main_type == 1)
+                {
+                    $airCountLeft++;
+                    $airCbmLeft += $model->consol->totCBM();
+                    $airWeightLeft += $model->consol->totWeight();
+                }
+                if($model->main_type == 2)
+                {
+                    $seaCountLeft++;
+                    $seaCbmLeft += $model->consol->totCBM();
+                    $seaWeightLeft += $model->consol->totWeight();
+                }
+            }
+            $totalCountLeft = $airCountLeft + $seaCountLeft;
+            $totalCbmLeft = $airCbmLeft + $seaCbmLeft;
+            $totalWeightLeft = $airWeightLeft + $seaWeightLeft;
+        }
+        $result['totalCount'] = $totalCountLeft;
+        $result['totalCBM'] = number_format($totalCbmLeft, 3, '.', '');
+        $result['totalWeight'] = number_format($totalWeightLeft, 3, '.', '');
+
+        $result['airCount'] = $airCountLeft;
+        $result['airCBM'] = number_format($airCbmLeft, 3, '.', '');
+        $result['airWeight'] = number_format($airWeightLeft, 3, '.', '');
+
+        $result['seaCount'] = $seaCountLeft;
+        $result['seaCBM'] = number_format($seaCbmLeft, 3, '.', '');
+        $result['seaWeight'] = number_format($seaWeightLeft, 3, '.', '');
+
+        return $result;
+    }
+
+    public function getConsolProcessDailyReport($dptId)
+    {
+        $result = [];
+        $todayNew = $this->getSumConsolProcessCreateToday($dptId);
+        $todayDone = $this->getSumConsolProcessDoneToday($dptId);
+        $todayLeft = $this->getSumConsolProcessLeftToday($dptId);
+        $result['todayNew'] = $todayNew;
+        $result['todayDone'] = $todayDone;
+        $result['todayLeft'] = $todayLeft;
+
+        return $result;
+    }
+
+    public static function getConsolProcessRecord($dptId, $reportCacheType)
+	{
+		$consolProcessService = new ConsolProcessService;
+		$arrSydReport = $consolProcessService->getConsolProcessDailyReport($dptId);
+		$temp = json_encode($arrSydReport);
+		$modelReportCacheSYD = new ReportCache();
+		$modelReportCacheSYD->type = $reportCacheType;
+		$modelReportCacheSYD->status = ReportCache::Active;
+		$modelReportCacheSYD->meta = $temp;
+		$modelReportCacheSYD->create_time = date('Y-m-d');
+		$modelReportCacheSYD->creater = 1;
+		$modelReportCacheSYD->modify_time = date('Y-m-d');
+		$modelReportCacheSYD->modifyer = 1;
+		$modelReportCacheSYD->save();
+	}
+
+
+    public function checkNOAEmail($email)
+    {
+        $awb = "";
+        $flight = "";
+        $airline = "";
+        $content = "";
+        $terminal = "";
+        $emailType = "";
+        if(preg_match('/menzie/i',$email->from_email)&&preg_match('/notification\sof\sarrival/i',$email->subject))
+        {
+            $emailType = "MENZIE";
+            if(preg_match('/Airwaybill\snumber:\s(\d{3})\s(\d{4})\s(\d{4})/i',$email->plain_body,$m))
+            {
+                $content = $email->plain_body;
+            }else
+            {
+                if(!empty($email->attachments))
+                {
+                    foreach ($email->attachments as $key => $attachment) {
+                        if(preg_match('/NOA_/i',$attachment->name))
+                        {
+                            $content = file_get_contents($attachment->getFile());
+                        }
+                    }
+                }
+            }
+
+            if(!empty($content))
+            {
+                preg_match('/Airwaybill\snumber:\s(\d{3})\s(\d{4})\s(\d{4})/i',$content,$m);
+                $awb = $m[1]."-".$m[2].$m[3];
+                if(preg_match('/Arriving\sFlight:\s(.*)\sDate/i',$content,$m))
+                {
+                    $flight = $m[1];
+                    $airline = explode(" ",$flight)[0];
+                    $flight = explode(" ",$flight)[1];
+                }
+                if(preg_match('/Terminal\s(Two)\sWarehouse/i',$content,$m))
+                {
+                    $terminal = $m[1];
+                }
+
+
+            }else
+            {
+                Emailog::sendEmailTo('dev@toplogistics.com.au', $email->id," NOA Loading Error");
+            }
+
+        }elseif(preg_match('/dnata/i',$email->from_email)&&(preg_match('/notification\sof\sarrival/i',$email->subject) ||preg_match('/noae/i',$email->subject) ))
+        {
+            $emailType = "DNATA";
+            if(preg_match('/Airwaybill\snumber:\s(\d{3})\s(\d{4})\s(\d{4})/i',$email->plain_body,$m))
+            {
+                $content = $email->plain_body;
+            }else
+            {
+                if(!empty($email->attachments))
+                {
+                    foreach ($email->attachments as $key => $attachment) {
+                        if(preg_match('/NOA_/i',$attachment->name))
+                        {
+                            $content = file_get_contents($attachment->getFile());
+                        }
+                    }
+                }
+            }
+
+            if(!empty($content))
+            {
+                preg_match('/Airwaybill\snumber:\s(\d{3})\s(\d{4})\s(\d{4})/i',$content,$m);
+                $awb = $m[1]."-".$m[2].$m[3];
+                if(preg_match('/Arriving\sFlight:\s(.*)\sDate/i',$content,$m))
+                {
+                    $flight = $m[1];
+                    $airline = explode(" ",$flight)[0];
+                    $flight = explode(" ",$flight)[1];
+                }
+                if(preg_match('/Terminal\s(Two)\sWarehouse/i',$content,$m))
+                {
+                    $terminal = $m[1];
+                }
+            }else
+            {
+                Emailog::sendEmailTo('dev@toplogistics.com.au', $email->id," NOA Loading Error");
+            }
+        }elseif(preg_match('/qantas/i',$email->from_email)&&preg_match('/\d{3}-\d{8}\sNotified/i',$email->subject))
+        {
+            $emailType = "QANTAS";
+           if(preg_match('/AWB\sNumber:\s(\d{3}-\d{8})/i',$email->plain_body,$m)&&preg_match('/Status:Notified/i',$email->plain_body,$m))
+            {
+                $awb = $m[1];
+                $flight = "";
+                $airline = "";
+                $content = $email->plain_body;
+            }else
+            {
+                Emailog::sendEmailTo('dev@toplogistics.com.au', $email->id," NOA Loading Error");
+            }
+        }
+
+        if(empty($awb)) return false;
+
+        $countConsol = Consol::model()->count("json_value(meta,'$.noa_email_identify') = :noa",[":noa"=>$awb.$flight.$airline.$terminal]);
+        if($countConsol>0)
+        {
+            return false;
+        }
+
+        $consol = Consol::model()->find("awb = :awb and status != :status and airline = :airline and (flight=:flight or flight=:flight2 or flight=:flight3)",[":awb"=>$awb,":status"=>ImcoConsol::Status_Cancelled,":airline"=>$airline,":flight"=>$airline.$flight,":flight2"=>$airline." ".$flight,":flight3"=>$flight]);
+
+        if(empty($consol))
+        {
+            $consol = Consol::model()->find(["condition"=>"awb = :awb and status != :status and (bwf&:bwf)=0","params"=>[":awb"=>$awb,":status"=>ImcoConsol::Status_Cancelled,":bwf"=>Consol::NOA_BWF],"order"=>"id asc"]);
+        }
+
+        if(empty($consol))
+        {
+            $eta = "";
+            $depot = "";
+            $dptId = 0;
+            $shipments = 0;
+            if(preg_match("/Date:\s(\d{2})\/(\d{2})\/(\d{4})/i",$content,$m))
+            {
+                $eta = $m[3]."-".$m[2]."-".$m[1];
+            }
+
+            if(preg_match("/syd/i",$content,$m))
+            {
+                $depot = "AUSYD";
+                $dptId = Org::TLA_DEPARTMENT_SYDNEY;
+            }
+
+            if(preg_match("/mel/i",$content,$m))
+            {
+                $depot = "AUMEL";
+                $dptId = Org::TLA_DEPARTMENT_MELBOURNE;
+            }
+
+
+            if(preg_match("/bne/i",$content,$m))
+            {
+                $depot = "AUBNE";
+                $dptId = Org::TLA_DEPARTMENT_BRISBANE;
+            }
+
+            if(preg_match("/Manifested\spieces\:(.*)(\d{1,4})/i",$content,$m))
+            {
+                $shipments = $m[2];
+            }
+
+            if(empty($depot))
+            {
+                Emailog::sendEmailTo('dev@toplogistics.com.au', $email->id," NOA Loading Error");
+                return false;
+            }
+
+            $consol = new DmawbConsol('create');
+            $consol->owner_id = Org::ORGID_IMPORT_CASUAL_CUSTOMER;
+            $consol->service = Consol::AIRCONSOL;
+            $consol->eta = $eta;
+            $consol->awb = $awb;
+            $consol->dpt_id = $dptId;
+            $consol->pod = $depot;
+            $consol->flight = $airline.$flight;
+            $consol->airline = $airline;
+            $consol->mdata['shipments'] = $shipments;
+            $consol->mdata['NOA_DMAWBCONSOL'] = 1;
+            $consol->save();
+
+        }
+        sleep(5);
+
+        $depotArr = ["DNATA106"=>"FC48P","DNATA106TWO"=>"GD06H","DNATA218"=>"FC60D","DNATA530"=>"FC54B","MENZIE106"=>"GF70E","MENZIE218"=>"DJ72A","MENZIE530"=>"FZ49A","QANTAS106"=>"8553P","QANTAS218"=>"9532M","QANTAS530"=>"3450K"];
+        $originUbm = $depotArr[$emailType.$consol->dpt_id.strtoupper($terminal)];
+        $process = $consol->process;
+        $consol->bwf = $consol->bwf|Consol::NOA_BWF;
+        $consol->mdata['ubm_origin'] = $originUbm;
+        if (empty($consol->mdata['ubm_dest'])) {
+            $consol->mdata['ubm_dest'] = $consol->getEstID();
+        }
+        $consol->mdata['noa_email_identify']=$awb.$flight.$airline.$terminal;
+        $consol->save();
+        sleep(5);
+        if(!empty($process))// process NOA log
+        {
+            $extra = [];
+            $extra["NOA_Email"] = $email->no;
+            Log::add($process, $process->isNewRecord ? 3 : 4, array_merge(array('status' => $process->getStatus()), $extra));
+        }
+
+
+        if($process->status<ConsolProcess::STATE_WAITING_AIRPORT_CKIN)
+        {
+            $edimsg = Edimsg::model()->find("type=:type and fid=:fid and status in (10,18,19,20,30,40,50)",[":type"=>"UBMREQ",":fid"=>$consol->id]);
+            if(empty($edimsg))
+            {
+                $icsService = new IcsService();
+                $consol->mdata['NOA_SENT_UB'] = 1;
+                $consol->updateMeta();
+                if($consol->type==ImcoConsol::$my_type)
+                {
+                    $icsService->preUbm($consol,true);
+                }else
+                {
+                    $icsService->preDmawbUbm($consol,true);
+                }
+                $consol->mdata['NOA_SENT_UB'] = 1;
+                $consol->updateMeta();
+                sleep(5);
+            }
+        }elseif($process->status==ConsolProcess::STATE_WAITING_AIRPORT_CKIN)
+        {
+            $process->status = ConsolProcess::STATE_WAITING_NOTIFY_DRIVER_PICKUP;
+            $process->update(['status']);
+            sleep(5);
+        }
+
+        if(!empty($consol))
+        {
+            $extra = [];
+            $extra["NOA_Email"] = $email->no;
+            Log::add($consol, $consol->isNewRecord ? 3 : 4, array_merge(array('status' => $consol->getStatus()), $extra));
+        }
+
+    }
+
+
+    public function getUserPermission()
+    {
+        $userOccupation = User::getCurrentUser()->occupation;
+        $service = [];
+        $status = [];
+        $statusStr = "";
+        $major = [];
+        $majorStr = "";
+        foreach(User::$consolOpOccupation as $key => $value)
+        {
+            if(($userOccupation&$key)>0)
+            {
+                if(empty($value[0])) break;
+                $service[$value[0]] = $value[0];
+                $status[$value[1]] = $value[1];
+                $major[$value[2]] = $value[2];
+            }
+
+        }
+
+        $sumStatus = array_sum($status);
+        $sumMajor = array_sum($major);
+
+        if($sumStatus==1)
+        {
+            $statusStr = "<".ConsolProcess::STATE_WAITING_WH_SCAN;
+        }
+
+        return [$service,$statusStr,$sumMajor,$sumStatus];
+
+    }
+
+    public function getUbSummeryList($saveDetail = false)
+    {
+        $total = 0;
+        $done = 0;
+        $left = 0;
+        $donePercent = 0;
+        $detailData = [];
+        $tomorrow = HolidayHelper::getNextDay(date("Y-m-d"));
+        $allConsols = Consol::model()->findAll("service = :service and eta = :tomorrow and no not like 'WDT%' and status !=:status and type = :type ",[':tomorrow'=>$tomorrow,':service'=>Consol::AIRCONSOL,':status'=>ImcoConsol::Status_Cancelled,":type"=>ImcoConsol::$my_type]);
+        $myUserId = User::model()->find("(occupation &:occupation)>0 and active =1",[":occupation"=>User::CONSOL_UB])->id;
+        $consolIds = array_column($allConsols, 'id');
+        foreach ($allConsols as $key => $consol)
+        {
+            $myClass = "";
+            switch ($consol->type) {
+                case ImcoConsol::$my_type:
+                    $myClass = "ImcoConsol";
+                    break;
+
+                case DmawbConsol::$my_type:
+                    $myClass = "DmawbConsol";
+                    break;
+
+            }
+            if(empty($myClass)) continue;
+            $log = Log::model()->find(["condition"=>"model = :model and lid = :lid and type = :type","params"=>[":model"=>$myClass,":lid"=>$consol->id,":type"=>Log::LOG_TYPE_CREATE],"order"=>"id asc"]);
+            if(empty($log)) continue;
+            if($log->user_id == $myUserId)
+            {
+                if($consol->service==Consol::AIRCONSOL)
+                {
+                    if($consol->process->status==ConsolProcess::STATE_UB_ON_SCHEDULE)
+                    {
+                        $done+=1;
+                    }else
+                    {
+                        $detailData[] = [$consol->no];
+                        $left+=1;
+                    }
+                    continue;
+                }
+
+                if($consol->service==Consol::SEACONSOL)
+                {
+                    if(($consol->process->sub_status&ConsolProcess::DU_UB)>0||$consol->mdata['ubmsent']==1)
+                    {
+                        $done+=1;
+                    }else
+                    {
+                        $detailData[] = [$consol->no];
+                        $left+=1;
+                    }
+                    continue;
+                }
+
+            }
+        }
+        if($saveDetail)
+        {
+            $result= [];
+            $result['header'] = ["no"];
+            $result['totalData'] = [];
+            foreach($detailData as $key => $d)
+            {
+                $result['totalData'][] = [$d[0]];
+            }
+
+            $this->saveDailyReportDetail(ReportCache::TODAY_UB_DAILY,$result,0);
+            return;
+        }
+
+        $total = $done+$left;
+
+        $donePercent = empty($total)?"0%":((number_format($done/$total,2,'.','')*100)."%");
+        return ["total"=>$total,"done"=>$done,"left"=>$left,'donePercent'=>$donePercent,'consolNos'=>$detailData];
+    }
+
+    public function getScrAcrSummeryList($saveDetail = false)
+    {
+        $total = 0;
+        $done = 0;
+        $left = 0;
+        $donePercent = 0;
+        $detailData = [];
+        $tommorow = HolidayHelper::getNextDay(date("Y-m-d"));
+        $afterTomorrow = HolidayHelper::getNextDay($tommorow);
+        $allConsols = Consol::model()->findAll("eta = :afterTomorrow and no not like 'WDT%' and status !=:status and json_value(meta,'$.blockacr') is null and type = :type ",[':afterTomorrow'=>$afterTomorrow,':status'=>ImcoConsol::Status_Cancelled,":type"=>ImcoConsol::$my_type]);
+        $myUserId = User::model()->find("(occupation &:occupation)>0 and active =1",[":occupation"=>User::CONSOL_SCR_ACR])->id;
+        $consolIds = array_column($allConsols, 'id');
+        foreach ($allConsols as $key => $consol)
+        {
+            /** no 4252,3390,4336,4432 org**/
+            $orgIds = $consol->totOrg();
+            if(!empty($orgIds))
+            {
+               $orgIds= array_column($orgIds, 'org_id');
+            }
+            if(in_array($orgIds[0],[4252,3390,4336,4432]))
+            {
+                continue;
+            }
+            /****************************************************/
+
+
+            $myClass = "";
+            switch ($consol->type) {
+                case ImcoConsol::$my_type:
+                    $myClass = "ImcoConsol";
+                    break;
+
+                case DmawbConsol::$my_type:
+                    $myClass = "DmawbConsol";
+                    break;
+
+            }
+            if(empty($myClass)) continue;
+            $log = Log::model()->find(["condition"=>"model = :model and lid = :lid and type = :type","params"=>[":model"=>$myClass,":lid"=>$consol->id,":type"=>Log::LOG_TYPE_CREATE],"order"=>"id asc"]);
+            if(empty($log)) continue;
+            if($log->user_id == $myUserId)
+            {
+                if($consol->service==Consol::AIRCONSOL)
+                {
+                    continue;
+                    if(!empty($cn->mdata['acr_stat_sub']))
+                    {
+                        $done+=1;
+                    }else
+                    {
+                        $detailData[] = [$consol->no];
+                        $left+=1;
+                    }
+                    continue;
+                }
+
+                if($consol->service==Consol::SEACONSOL)
+                {
+                    if(($consol->process->sub_status&ConsolProcess::DU_SCR)>0)
+                    {
+                        $done+=1;
+                    }else
+                    {
+                        $detailData[] = [$consol->no];
+                        $left+=1;
+                    }
+                    continue;
+                }
+
+            }
+        }
+        if($saveDetail)
+        {
+            $result= [];
+            $result['header'] = ["no"];
+            $result['totalData'] = [];
+            foreach($detailData as $key => $d)
+            {
+                $result['totalData'][] = [$d[0]];
+            }
+
+            $this->saveDailyReportDetail(ReportCache::TODAY_SCR_ACR_DAILY,$result,0);
+            return;
+        }
+
+        $total = $done+$left;
+
+        $donePercent = empty($total)?"0%":((number_format($done/$total,2,'.','')*100)."%");
+        return ["total"=>$total,"done"=>$done,"left"=>$left,'donePercent'=>$donePercent,'consolNos'=>$detailData];
+    }
+
+    public function saveDailyReportDetail($type,$result,$dptId)
+    {
+        $rc = ReportCache::model()->find("create_time = :createTime and type =:type and dpt_id = :dptId",[":createTime"=>date('Y-m-d 00:00:00'),":type"=>$type,":dptId"=>$dptId]);
+        if(empty($rc))
+        {
+            $rc = new ReportCache();
+            $rc->type = $type;
+            $rc->status = 1;
+            $rc->mdata=$result;
+            $rc->create_time = date("Y-m-d 00:00:00");
+            $rc->creater = 1;
+            $rc->modify_time = date('Y-m-d H:i:s');
+            $rc->dpt_id = $dptId;
+            $rc->save();
+        }else
+        {
+            $rc->mdata  = $result;
+            $rc->update(['meta']);
+        }
+    }
+
+    public function exportPreAlert($model,$hideCusotmer=false,$depotId=-1) {
+        $genTotalWeight =0;
+        $title = [];
+        $airLineArray = [];
+        $qantasAirline = [];
+        $menziesAirline = [];
+        $dnataAirline = [];
+        $otherAirline = [];
+        // array_push($title, 'Air');
+        foreach ($model as $key => $consolModel) {
+            if($consolModel->getDeportOriginAgent()=='MENZIES'){
+                 $menziesAirline[] = $model[$key];
+            }
+            elseif ($consolModel->getDeportOriginAgent()=='DNATA') {
+                $dnataAirline[] = $model[$key];
+            }
+            elseif ($consolModel->getDeportOriginAgent()=='QANTAS') {
+                $qantasAirline[] = $model[$key];
+            }
+            else{
+                $otherAirline[] = $model[$key];
+            }
+        }
+        if (!empty($qantasAirline)) {
+            $airLineArray[] = $qantasAirline;
+        }
+        if (!empty($menziesAirline)) {
+            $airLineArray[] = $menziesAirline;
+        }
+        if (!empty($dnataAirline)) {
+            $airLineArray[] = $dnataAirline;
+        }
+        if (!empty($otherAirline)) {
+            $airLineArray[] = $otherAirline;
+        }
+        
+        if($depotId==106){ // Air
+            array_push($title, "TLA Imports Cargo Picking List SYD");
+        }
+        elseif($depotId==218){ // Air
+            array_push($title, "TLA Imports Cargo Picking List MEL");
+        }
+        elseif($depotId==811){ // Air
+            array_push($title, "TLA Imports Cargo Picking List PER");
+        }
+        elseif($depotId==-1){ // Air
+            array_push($title, "TLA Imports Cargo Picking List ALL");
+        }
+
+        $xls = new oExcel;
+        $i = 1;
+        $xls->setColWidth(array_fill(0, 30, 15));
+        $xls->getActiveSheet()->mergeCells('A1:I1');               
+        $xls->setFont('A1:F1', array('bold' => true));
+        $xls->getActiveSheet()->getStyle('A1:I1')->getAlignment()->setHorizontal(\PHPExcel_Style_Alignment::HORIZONTAL_CENTER);
+        $xls->getActiveSheet()->getStyle('A1:I1')->getAlignment()->setVertical(\PHPExcel_Style_Alignment::VERTICAL_CENTER);
+        $xls->getActiveSheet()->getStyle('A1:I1')->getFont()->setSize(16)->setBold(true);
+        $xls->getActiveSheet()->mergeCells('A2:I2');
+        $xls->getActiveSheet()->getStyle('A2:I2')->getFill()->setFillType(\PHPExcel_Style_Fill::FILL_SOLID); 
+        $xls->getActiveSheet()->getStyle('A2:I2')->getFill()->getStartColor()->setRGB('33B8FF'); 
+        $xls->getActiveSheet()->mergeCells('H3:I3');
+        $xls->addRow($i++, $title);
+        $i++;
+        $xls->addRow($i++, ['','','','','','','', date('m/d/Y h:i:s a', time())]);        
+
+        foreach ($airLineArray as $key => $airLine) {
+            $xls->addRow($i++, ['', 'Customer','MAWB', 'ETA', 'STATUS', 'PCS', 'WEIGHT', 'TYPE', 'NOTE']);
+            $totalWeight = 0;
+            foreach ($airLine as $key => $value) { 
+                if($this->checkIfUrgentConsol($value)){
+                    $xls->getActiveSheet()->getStyle('B' . $i . ':C' . $i)->getFill()->setFillType(\PHPExcel_Style_Fill::FILL_SOLID);
+                    $xls->getActiveSheet()->getStyle('B' . $i . ':C' . $i)->getFill()->getStartColor()->setRGB('FFC133'); 
+                }           
+                $xls->addRow($i++, [$value->getDeportOriginAgent(), $value->getReal()->getOwnerName(), $value->awb, $value->eta, '', $value->getBLpcs(), round($value->totWeight()), empty($value->getReal()->mdata["air_type"])?ImcoConsol::$air_types[$value->mdata["air_type"]]:ImcoConsol::$air_types[$value->getReal()->mdata["air_type"]], '']);
+                $totalWeight += round($value->getReal()->totWeight());
+            }
+            $xls->addRow($i++, ['', '','TOTAL', '', '', '', $totalWeight, '', '']);
+            $genTotalWeight += $totalWeight;
+            $xls->getActiveSheet()->getStyle('A' . $i . ':I' . $i)->getFill()->setFillType(\PHPExcel_Style_Fill::FILL_SOLID);
+            $xls->getActiveSheet()->getStyle('A' . $i . ':I' . $i)->getFill()->getStartColor()->setRGB('33B8FF'); 
+            $i++;
+        }
+        $xls->addRow($i++, ['', '','GRAND TOTAL', '', '', '', $genTotalWeight, '', '']);
+
+        // Add borders to all cells with data
+        $lastRowIndex = $xls->getActiveSheet()->getHighestRow();
+        $lastColumnIndex = $xls->getActiveSheet()->getHighestColumn();
+        $range = 'A1:I'.$lastRowIndex;
+        $BStyle = array(
+          'borders' => array(
+            'allborders' => array(
+              'style' => PHPExcel_Style_Border::BORDER_THIN
+            )
+          )
+        );
+        $xls->getActiveSheet()->getStyle($range)->applyFromArray($BStyle);
+
+        if($hideCusotmer){
+            $columnIndex = 1; // 列索引从0开始，1表示第二列
+            $columnDimension = $xls->getActiveSheet()->getColumnDimensionByColumn($columnIndex);
+            $columnDimension->setVisible(false);
+        }
+
+        $xls->output('pre_alert_report_'.time().'.xlsx');
+    }
+
+    public function checkIfUrgentConsol($consol){
+        $ownerIds = array(4660,4618,4657,4669);
+        if(array_intersect($ownerIds,$consol->getOwnerName(true))){
+            return true;
+        }
+        else{
+            return false;
+        }
+    }
+
+    public function exportPreAlertSea($model,$hideCusotmer=false,$depotId=-1) {
+        $genTotalWeight =0;
+        $title = "";
+        // array_push($title, 'Air');
+
+        switch ($depotId) {
+            case 106:
+                $title="TLA SYD SEA SCHEDULE";
+                break;
+            case 218:
+                $title="TLA MEL SEA SCHEDULE";
+                break;
+            case 529:
+                $title="TLA ADE SEA SCHEDULE";
+                break;           
+            case 530:
+                $title="TLA BNE SEA SCHEDULE";
+                break;
+             case 811:
+                $title="TLA PER SEA SCHEDULE";
+                break;
+            case 2936:
+                $title="TLA FRE SEA SCHEDULE";
+                break;
+            case -1:
+                $title="TLA ALL SEA SCHEDULE";
+                break;            
+            default:
+                // code...
+                break;
+        }
+
+        $xls = new oExcel;
+        $i = 1;
+        $xls->setColWidth(array_fill(0, 30, 15));
+        $xls->getActiveSheet()->mergeCells('A1:I1');               
+        $xls->setFont('A1:I1', array('bold' => true));
+        $xls->getActiveSheet()->getStyle('A1:I1')->getAlignment()->setHorizontal(\PHPExcel_Style_Alignment::HORIZONTAL_CENTER);
+        $xls->getActiveSheet()->getStyle('A1:I1')->getAlignment()->setVertical(\PHPExcel_Style_Alignment::VERTICAL_CENTER);
+        $xls->getActiveSheet()->getStyle('A1:I1')->getFont()->setSize(16)->setBold(true);
+        // $xls->getActiveSheet()->mergeCells('A2:I2');
+        // $xls->getActiveSheet()->getStyle('A2:I2')->getFill()->setFillType(\PHPExcel_Style_Fill::FILL_SOLID); 
+        // $xls->getActiveSheet()->getStyle('A2:I2')->getFill()->getStartColor()->setRGB('33B8FF'); 
+        // $xls->getActiveSheet()->mergeCells('J1:K1');
+        $xls->addRow($i++, [$title]);
+        $xls->addRow($i++, ['', 'Type','CTRN NO.', 'Voyage No', 'ETA', 'Customer', 'Delivery Date', 'Unpack Date', 'Weekday', 'Unpacking Team', 'Time']); 
+        $xls->getActiveSheet()->getStyle('A2:K2')->getFont()->setSize(12)->setBold(true);
+
+        foreach ($model as $key => $value) {
+
+            // if(!empty($value->process->mdata['unpacking_team'])){
+            //     $xls->getActiveSheet()->getStyle('A' . $i . ':K' . $i)->getFill()->setFillType(\PHPExcel_Style_Fill::FILL_SOLID);
+            //     $xls->getActiveSheet()->getStyle('A' . $i . ':K' . $i)->getFill()->getStartColor()->setRGB('FFC133'); 
+            // }
+            $unpackingDate=@$value->mdata['ContainerUnloadDate'];  
+            $unpackingTeams=SeaConsolService::getUnpackingTeam($value);
+            $unpackStaff=empty($value->process->mdata['unpacking_team'])?"":$unpackingTeams[@$value->process->mdata['unpacking_team']];
+            $weekday=empty($unpackingDate)?"":date('l', strtotime($unpackingDate));            
+            $ownerNames="";
+            if (!empty($value->mdata['owner_id'])) {
+                $owner=Org::model()->findBypk($value->mdata['owner_id']);
+                $ownerNames=$owner->code;
+            }
+            else{
+                $ownerIds=array_column(@$value->totOrg(),'org_id');
+                if(!empty($ownerIds)){
+                    $criteria = new CDbCriteria();
+                    $ownerIdsStr=implode(",", $ownerIds);
+                    $criteria->addCondition(" id in ({$ownerIdsStr}) ");
+                    $owners=Org::model()->findAll($criteria);
+                    $ownerCodes=array_column($owners,'code'); 
+                    $ownerNames=implode(",", $ownerCodes);
+                }
+
+            }           
+            
+            $xls->addRow($i++, [ORG::$warehouse_list[$value->dpt_id], DmawbConsol::$containerTypes[$value->getReal()->mdata['sea_type']], @$value->mdata['container_no'], $value->flight, $value->eta, $ownerNames, @$value->mdata['pickup'], $unpackingDate, $weekday, $unpackStaff]);
+        }
+
+        // Add borders to all cells with data
+        $lastRowIndex = $xls->getActiveSheet()->getHighestRow();
+        $lastColumnIndex = $xls->getActiveSheet()->getHighestColumn();
+        $range = 'A1:K'.$lastRowIndex;
+        $BStyle = array(
+          'borders' => array(
+            'allborders' => array(
+              'style' => PHPExcel_Style_Border::BORDER_THIN
+            )
+          )
+        );
+        $xls->getActiveSheet()->getStyle($range)->applyFromArray($BStyle);
+
+        if($hideCusotmer){
+            $columnIndex = 5; // 列索引从0开始，1表示第二列
+            $columnDimension = $xls->getActiveSheet()->getColumnDimensionByColumn($columnIndex);
+            $columnDimension->setVisible(false);
+        }
+
+        $xls->output('pre_alert_report_sea'.time().'.xlsx');
+    }
+
+
+}
+

@@ -1,0 +1,2007 @@
+<?php
+class ExParcel extends Shipment{
+
+	public static $my_type = 20;
+
+	public static $states = array(
+		8 => 'Pending',
+		9 => 'Printed',
+		10 => 'New',
+		12 => 'Picked Up',
+		14 => 'Rcvd. No Info',
+		15 => 'Received',
+		16 => 'Check',
+		18 => 'Info Ready',
+		20 => 'Consolidated',
+		25 => 'Confirmed',
+		30 => 'Reported',
+		35 => 'Held',
+		40 => 'Cleared',
+		60 => 'Dispatched',
+		70 => 'Arrived',
+		80 => 'Clearance',
+		90 => 'Courier',
+		99 => 'Delivered',
+		100 => 'Cancelled',
+		101 => 'Problem',
+		102 => 'Returning',
+		103 => 'Missing',
+		104 => 'Returned',
+		105 => 'Refunded', //已理赔
+		106 => 'Discarded', //已销毁
+	);
+
+	public static $bwfs = array(
+		1 => 'Value Alert',
+		2 => 'Similar Address',
+		4 => 'Check Address',
+		8 => 'Goods Detail',
+		16 => 'Check Weight',
+		32 => 'Multiple ID',
+		64 => 'Missing Tel',
+		128 => 'Name Changed',
+		256 => 'Interstate Transit',
+	);
+
+	public static $styps = array(
+		0 => 'Standard',
+		10 => 'VIP',
+		20 => '玄武',
+		30 => '奶粉',
+		40 => '经济杂货',
+		50 => '普通杂货',
+	);
+
+	public static $exms = array(
+		'EXLV' => 'EXLV - Goods under the value of $2000 (AUD)',
+		'EXPE' => 'EXPE - Unaccompanied Personal Effects',
+		'EXCC' => 'EXCC - Contingency Customs Authority Number (CAN)',
+	);
+
+	public static $errTypes=array(
+		1=>'名字输错了',
+		2=>'电话号码输错了',
+		4=>'地址输错了',
+		8=>'品名输错了',
+		16=>'数量输错了',
+		32=>'重量输错了',
+	);
+		
+	public static $tax_free_th = 70;
+
+	public $edc, $gtyp, $ocpd, $prod;
+
+	public $goods_altered = false;
+
+	public function rules(){
+		$rules = array(
+			array('hbn', 'required'),
+			array('ocpd, prod', 'safe', 'on'=>'search'),
+		);
+		return array_merge(parent::rules(), $rules);
+	}
+
+	public function relations(){
+		return parent::relations() + [
+			'location' => array(self::HAS_ONE, 'StorageLog', 'fid', 'on' => 'location.out_dt IS NULL'),
+		];
+	}
+	
+	public static function shortExms(){
+		$r = array();
+		foreach(self::$exms as $k => $v){
+			$r[$k] = $k;
+		}
+		return $r;
+	}
+	
+	public function getGoods($uniq=false){
+		$tn = false;
+		$gs = [];
+		if(empty($this->eitems['g'])) return '';
+		foreach(($uniq?  array_unique($this->eitems['g']) : $this->eitems['g']) as $i=>$g){
+			if(empty($this->eitems['pid'][$i])) continue;
+			$p = ExProdb::model()->findByPk($this->eitems['pid'][$i]);
+			if($p) $gs[] = $p->name;
+		}
+		
+		return implode(', ', $gs);
+	}
+
+	public function isReceived(){
+		if($this->status > 18) return true;
+		if($this->status < 14) return false;
+		$sl = StorageLog::findItem($this);
+		return !empty($sl);
+	}
+	
+	public function cost_dc($poc, $exrate, $debug=false){
+		$spwt = $this->shipWeight();
+		$typ = $this->goodsType();
+		$orate = OrgRate::model()->find('type = 10 AND code = :c AND vfrom <= CURRENT_DATE() AND (vto IS NULL OR vto >= CURRENT_DATE())', [':c' => $poc]);
+		if(empty($orate)) return 999;
+		if(empty($orate->mdata['ppk'])) $orate->mdata['ppk'] = 0;
+		if(empty($orate->mdata['pkg'])) $orate->mdata['pkg'] = 0;
+		return $orate->mdata['ppk'] + $orate->mdata['pkg'] * $spwt;
+		/*if($poc == 'CNCAN'){
+			$dc = $spwt * 3;
+			$dc += preg_match('/^J/', $r[1]->zone)? 8 : 7;
+		}elseif($poc == 'CNPEK'){
+			$dc = $spwt * 3;
+			$dc += 8;
+		}elseif(in_array($poc, ['CNCSX', 'CNCS2'])){
+			//if($typ == 'O'){
+			//	$dc = $spwt * 4.6;
+			//}else{
+			//	$dc = $spwt * 5.6;
+			//}
+			//$dc += 1.6 + 8;
+			$dc += 7; //after 1/5/17 7
+			$dc = 7;
+			$dc += $spwt * 4.1;
+		}elseif(in_array($poc, ['CNTAO', 'CNTA2'])){
+			$dc = $spwt * 2.2;
+			$dc += 3.5;
+		}elseif(in_array($poc, ['CNCA2', 'CNCA3'])){
+			$dc = $spwt * 3.5;
+			$dc += 7;
+		}elseif($poc == 'CNCHQ'){
+			$dc = 5;
+			$dc += 3.5 * $spwt;
+		}elseif($poc == 'CNCTU'){
+			$dc = 4.3 * $spwt;
+		}elseif($poc == 'CNXMN' || $poc == 'CNXM2'){
+			$dc = 4.5 + (2.5 * $spwt);
+		}elseif($poc == 'CNKMG'){
+			//$dc = 5.5 * $spwt; //before 2016-10-01
+			//$dc += 1; //id check fee
+			$dc = 3.5 * $spwt;
+		}elseif($poc == 'CNTSN'){
+			$dc = 0.3;
+			$dc += 5.5 * $spwt;
+		}elseif($poc == 'CNSJA'){
+			$dc += 0.7 * $spwt;
+		}elseif($poc == 'CNXIA'){
+			$dc += 4 * $spwt;
+		}
+
+		return $dc;
+		*/
+	}
+
+	public function cost_courier($poc, $exrate, $debug=false){
+		$typ = $this->goodsType();
+		$spwt = $this->shipWeight();
+
+		if($poc == 'CNCA2') $poc = 'CNCA3';
+		if($poc == 'CNTA2') $poc = 'CNTAO';
+		if(in_array($poc, ['CNXM2', 'CNXM3'])) $poc = 'CNXMN';
+		$r = $this->rating($poc, $exrate, true);
+		if(empty($r)){
+			$this->addError('hbn', 'Unable to rate '.$this->hbn.' @ '.$poc);
+			return 999;
+		}else{
+			return $r[0];
+		}
+	}
+
+	public function cost_af($pol, $pod, $exrate, $debug=false){
+		$c2p = ['CNXM2' => 'CNXMN', 'CNXM3' => 'CNXMN', 'CNCA3' => 'CNCAN', 'CNCA2' => 'CNCAN', 'CNJMN' => 'CNCAN', 'CNJM2' => 'CNCAN', 'CNCS2' => 'CNCSX', 'CNXIA' => 'CNSIA', 'CNXI2' => 'CNSIA'];
+		return $this->weight * $exrate * Yii::app()->params['settings']['af_'.$pol.'_'.(isset($c2p[$pod])? $c2p[$pod] : $pod)]['value'];
+	}
+
+	public function serviceGrade(){
+		//if(preg_match('/^(PV|EPV)\d+AU/i', $this->hbn)) return 1;
+		//if(preg_match('/^DAU\d+/i', $this->hbn)) return 1;
+		$pl = PickupList::model()->with('lines')->find('lines.fid = :id', [':id' => $this->id]);
+		if(empty($pl) || !isset($pl->mdata['sergra'])) return empty($this->agent->extra['sergra'])? 0 : 1;
+		return empty($pl->mdata['sergra'])? 0 : 1;
+	}
+
+	public function pickupDate(){
+		$pl = PickupList::model()->with('lines')->find('lines.fid = :id', [':id' => $this->id]);
+		if(empty($pl)){
+			$l = Log::model()->find('model = "ExParcel" AND lid = :lid AND user_id = 0 AND meta REGEXP :t', [':lid' => $this->id, ':t' => 'Received|Rcvd|Info Ready']);
+			return empty($l)? substr($pl->created, 0, 10) : substr($l->time, 0, 10);
+		}else{
+			return substr($pl->created, 0, 10);
+		}
+	}
+
+	public function hasOriginTrace(){
+		return OriginTrace::model()->count('pid = :pid', [':pid' => $this->id]) > 0;
+	}
+
+	public function bcOnly(){
+		if($this->goodsType() == 'M') return false; //M not allowed in BC
+		// || in_array($this->agent_id, [1010,1214])
+		return ($this->cnee->cnid_id > 0 || !empty($this->cnee->cnid_no)) && (Meta::getVal($this, 'clearanceMode') == 'BC');
+	}
+
+	public function bestRates($debug = false, $useCache = true){
+		$c = Yii::app()->cache->get('EPBR_'.$this->id);
+		if(!empty($c) && !$debug  && $useCache) return $c;
+		if(empty($this->agent_id) || $this->agent->creditBlock()) return [];
+		if(($this->bwf & 256) == 256) return [];
+
+		if(empty($this->eitems['g'])) $this->eitems['g'] = [];
+		$typ = $this->goodsType();
+		$tq = empty($this->eitems['q'])? 0 : array_sum($this->eitems['q']);
+		$spwt = $this->shipWeight();
+
+		if(!empty($_GET['exrate'])){
+			$exrate = $_GET['exrate'];
+		}else{
+			$ec = ExcoConsol::model()->find(['order' => 'id DESC']);
+			$exrate = $ec->exrate;
+		}
+
+		if(!empty($_GET['dpt'])){
+			$odpt = ExcoConsol::$pols[$_GET['dpt']];
+		}elseif(!empty($this->consol_id)){
+			$odpt = $this->consol->pol;
+		}else{
+			$odpt = ExcoConsol::$pols[$this->odpt_id];
+		}
+
+		if($debug){
+			echo 'Origin: '.$odpt, PHP_EOL,
+			'ExRate: '.$exrate, PHP_EOL,
+			'Weight: '.$spwt.' / '.$this->weight, PHP_EOL;
+		}
+
+		if($typ == 'O' && preg_match('/^(\w{0,2}\d{3,6})$/', trim($this->eitems['g'][0]))){
+			$this->eitems['g'][0] = 'UGG '.$this->eitems['g'][0];
+		}
+
+		$gm = implode('', $this->eitems['g']);
+
+		$dc = new ExChannel('search');
+		$dc->id = -1;
+		Meta::getAll($dc);
+
+		if(!empty($dc->_mkv['bcs'])){
+			$v = eval($dc->_mkv['bcs']);
+			if(!$v) return [];
+		}
+
+		$cs = ExChannel::model()->findAll('status = 50');
+		$rs = [];
+		foreach($cs as $c){
+			//service
+			if(empty($c->mdata['actService_'.$this->styp])){
+				if($debug) echo 'Service '.$this->styp.' not allowed, pass ', $c->name, PHP_EOL;
+				continue;
+			}
+
+			//type
+			if(empty($c->mdata['allowType_'.$typ])){
+				if($debug) echo 'Goods Type '.$typ.' not allowed, pass ', $c->name, PHP_EOL;
+				continue;
+			}
+
+			//min qty
+			if(!empty($c->mdata['minQty_'.$typ]) && $c->mdata['minQty_'.$typ] > $tq){
+				if($debug) echo 'Min Qty '.$c->mdata['minQty_'.$typ].' > '.$tq.', pass ', $c->name, PHP_EOL;
+				continue;
+			}
+
+			//max qty
+			if(!empty($c->mdata['maxQty_'.$typ]) && $c->mdata['maxQty_'.$typ] < $tq){
+				if($debug) echo 'Max Qty '.$c->mdata['maxQty_'.$typ].' < '.$tq.', pass ', $c->name, PHP_EOL;
+				continue;
+			}
+
+			//id no
+			if(empty($this->cnee->cnid_id) && empty($this->cnee->cnid_no) && (empty($c->mdata['altCnee']) || strtotime($this->pickupDate()) > strtotime('-1 day'))){
+				if($debug) echo 'No ID not allowed, pass ', $c->name, PHP_EOL;
+				continue;
+			}
+
+			//keyword
+			if(!empty($c->mdata['excl_'.$typ]) && preg_match('/'.implode('|', preg_split('/[\s,;\|]+/', $c->mdata['excl_'.$typ])).'/i', $gm)){
+				if($debug) echo 'Bad keyword match, pass ', $c->name, PHP_EOL;
+				continue;
+			}
+
+			//BC only
+			if($c->mdata['dtype'] != 'bc' && $this->bcOnly()){
+				if($debug) echo 'BC only, pass ', $c->name, PHP_EOL;
+				continue;
+			}
+			if(!$c->customCheck($typ, $tq, $gm, $spwt, $this)){
+				if($debug) echo 'Custom check false, pass ', $c->name, PHP_EOL;
+				continue;
+			}
+			$rs[$c->code] = [0, 1];
+		}
+
+		if(!empty($dc->_mkv['acs'])) eval($dc->_mkv['acs']);
+
+		foreach($rs as $k=>$v){
+			if($v[1] == 0) continue;
+			/*value > 1k
+			if(in_array($k, ['CNCAN', 'CNTA2', 'CNCSX', 'CNTSN'])){
+				$tdv = $this->getDvalue($k);
+				if($debug) echo 'TDV: '.$tdv."\n";
+				if($tdv > 900 && !in_array($typ, ['B', 'M'])){
+					$rs[$k][0] = 0;
+					continue;
+				}
+			}*/
+			if($debug) echo 'POC == '.$k, PHP_EOL;
+		
+			//freight
+			$frt = $this->cost_af($odpt, $k, $exrate, $debug);
+			$rs[$k][0] += $frt;
+
+			if($debug) echo 'Freight: '.$frt, PHP_EOL;
+
+			//dc
+			$dca = $this->cost_dc($k, $exrate, $debug);
+			$rs[$k][0] += $dca;
+			if($debug) echo 'DC: '.$dca, PHP_EOL;
+			
+			//courier
+			$crr = $this->cost_courier($k, $exrate, $debug);
+			$rs[$k][0] += $crr;
+			if($debug) echo 'Courier: '.$crr, PHP_EOL;
+
+			/*if($k == 'CNCA3' && $rs[$k][1] != 0 && $rs[$k][0] > 0){
+				$rs[$k][0] *= 0.8;
+			}*/
+
+			//tariff
+			$tar = $this->calTariff($k, !empty($this->consol_id) && $this->consol->poc == $k);
+			//if($k == 'CNCA3' && $typ == 'O' && $tq < 7) $tar = 0;
+			//if($k == 'CNKMG' && $tar > 0) $tar = $spwt * 2;
+			//if($k == 'CNCSX' && $typ == 'O' && $tq < 7) $tar = 0;
+			//if($k == 'CNCSX' && $tar > 0) $tar = $spwt * 5;
+			$rs[$k][0] += $tar;
+			if($debug) echo 'VAL: '.$this->getDvalue($k), PHP_EOL;
+			if($debug) echo 'TAR: '.$tar, PHP_EOL, PHP_EOL;
+		}
+
+		//691 premium
+		/*if(in_array($this->agent_id, [691, 446])){
+			if($rs['CNCA3'][1] == 1 && $rs['CNCA3'][0] > 0 && $rs['CNCA3'][0] < 150){
+				foreach($rs as $k=>$v){
+					if(!in_array($k, ['CNCA3'])){
+						$rs[$k][0] = 0;
+						$rs[$k][1] = 0;
+					}
+				}
+			}
+		}*/
+
+		//premium service only
+		/*if($this->serviceGrade() && (($rs['CNCAN'][1] == 1 && $rs['CNCAN'][0] > 0 && $rs['CNCAN'][0] < 999) || $rs['CNCA3'][1] == 1 && $rs['CNCA3'][0] > 0 && $rs['CNCA3'][0] < 999)){
+			if($debug) echo "Premium Service\n";
+			foreach($rs as $k=>$v){
+				if(!in_array($k, ['CNCAN', 'CNCA3']) && !empty($rs[$k][0])) $rs[$k][0] = 0;
+			}
+		}*/
+
+		foreach($rs as $k=>$v){
+			$rs[$k] = empty($v[0])? 999 : round($v[0], 1);
+		}
+
+		asort($rs);
+
+		if(!$debug) Yii::app()->cache->set('EPBR_'.$this->id, $rs, 600);
+	
+		return $rs;
+	}
+
+	public function getCost(){
+		if(empty($this->consol_id)) return -1;
+		$c = 0;
+		$poc = $this->consol->poc;
+
+		//freight
+		$c += $this->cost_af($this->consol->pol, $this->consol->pod, $this->consol->exrate);
+
+		//dc
+		$c += $this->cost_dc($poc, $this->consol->exrate);
+		
+		//courier
+		$c += $this->cost_courier($poc, $this->consol->exrate);
+
+		//tariff
+		$c += $this->calTariff($poc);
+
+		return $c;
+	}
+
+	public function rfcProblem($c = 5){
+		if($this->created > time() - 604800) return 0;
+		$rfcCount = 0;
+		foreach($this->logs as $l){
+			if(preg_match('/^Removed from consol/', $l->extra['note'])) $rfcCount++;
+		}
+		if($rfcCount >= ($c-1)) $this->status = 101;
+		return $rfcCount;
+	}
+
+	public function chargeWeight(){
+		if(!empty($this->agent->extra['wt_own']) && !empty($this->weight) && $this->weight > 0.2){
+			return round(max($this->weight, 1)*100)/100;
+		}
+		if($this->wtck > $this->weight){
+			if(empty($this->agent->extra['wt_check']) && ($this->wtck <= $this->weight * 1.05)){// || $this->wtck > $this->weight * 1.5
+				$this->wtck = $this->weight;
+			}
+		}
+		
+		$gt = $this->goodsType();
+		$tq = empty($this->eitems['q'])? 1 : array_sum($this->eitems['q']);
+		$nw = $this->weight;
+
+		$ck2mw = true;
+		if($gt == 'B'){
+			$b450 = empty($this->eitems['pid'][0])? preg_match('/450G/i', $this->eitems['g'][0]) : in_array($this->eitems['pid'][0], [1498]);
+			switch($tq){
+				case 1:
+					$minw = $b450? 0.8 : 1.2;
+					if($this->wtck <= 1.4) $this->wtck = 1.2;
+				break;
+				case 2:
+					$minw = $b450? 1.4 : 2.4;
+					if($this->wtck <= 2.6) $this->wtck = 2.4;
+				break;
+				case 3:
+					$minw = $b450? 2 : 3.6;
+					if($this->wtck <= 3.8) $this->wtck = 3.6;
+				break;
+				case 4:
+					$minw = 4.8;
+				break;
+				case 6:
+					$minw = 7.5;
+					if($this->wtck <= 7.8) $this->wtck = 7.5;
+				break;
+				default:
+					$minw = $tq * 1.2;
+				break;
+			}
+			$this->weight = $minw;
+		}elseif($gt == 'M'){
+			if($tq == 6){
+				$minw = preg_match('/Maxigenes|蓝胖子/', implode($this->eitems['g']))? 7.8 : 6.8;
+			}else{
+				$minw = $tq * 1.1 + 0.2;
+			}
+		}else{
+			$ck2mw = false;
+			if($this->wtck > $this->weight * 1.5){
+				$this->wtck = $this->weight;
+			}
+		}
+
+		if($ck2mw){
+			$mmw = max($this->weight, $minw);
+			// || $this->wtck > $mmw * 1.5
+			if($this->wtck <= $mmw * 1.1) $this->wtck = $mmw;
+		}
+
+		$weight = max($this->weight, $this->wtck, $minw, 1);
+
+		return round($weight*100)/100;
+	}
+
+	public function billDate(){
+		$r = PickupList::model()->with('lines')->find('lines.fid = :id', [':id' => $this->id]);
+		if(!empty($r)) return substr($r->created, 0 , 10);
+		foreach($this->tracks as $t){
+			if(in_array($t->type, [14,15,18])) return substr($t->dt, 0 , 10);
+		}
+		return $this->created;
+	}
+
+	public function getAgentRate($debug = false, $use_cache = true){
+		if(!$debug && $use_cache && !empty($this->mdata['agent_rate'])) return $this->mdata['agent_rate'];
+		$billDate = $this->billDate();
+		$bdts = strtotime($this->billDate());
+
+		$typ = $this->goodsType();
+		$tq =  empty($this->eitems['q'])? 0 : array_sum($this->eitems['q']);
+		if(empty($this->eitems['g']) || !is_array($this->eitems['g'])) $this->eitems['g'] = [];
+		$weight = $this->chargeWeight();
+		$gm = implode('', $this->eitems['g']);
+		foreach($this->eitems['g'] as $g){
+			if(preg_match('/^(\w{0,2}\d{3,6})\s*/', trim($g))){
+				$gm = 'UGG '.$gm;
+				break;
+			}
+		}
+		if($debug) echo "Bill Date: ", $billDate, PHP_EOL;
+		
+		if($this->agent->type == 65){
+			$this->agent_id = $this->agent->by;
+			$this->agent = $this->agent->owner;
+		}
+
+		if($bdts > strtotime('2018-03-31')){//unified price
+			
+			switch(trim($this->agent->state)){
+				case 'QLD':
+					$rid = 530;
+				break;
+				default:
+					$rid = 106;
+				break;
+			}
+			$rates = SellRate::getRates($rid, 20, $billDate);
+			$ar = [];
+			foreach($rates as $k=>$r){
+				$ar[] = $k;
+			}
+
+			$r = ['R0', $rates['R0'], -9999];
+			if(!empty($this->agent->extra['use_sr1'])){
+				$orates = SellRate::getRates($this->agent_id, 20, $billDate);
+			}
+
+			if($typ == 'B'){
+				if($tq <= 3){
+					if(!empty($this->agent->extra['use_sr1'])){
+						$r[0] = 'SR1';
+						$r[1] = empty($orates['SR1'])? $rates['SR1'] :$orates['SR1'];
+					}else{
+						if(preg_match('/三段|四段|3段|4段/', $gm) && !preg_match('/一段|二段|1段|2段/', $gm)){
+							$r[0] = 'R2';
+							$r[1] = empty($orates['R2'])? $rates['R2'] :$orates['R2'];
+						}else{
+							$r[0] = 'R1';
+							$r[1] = empty($orates['R1'])? $rates['R1'] :$orates['R1'];
+						}
+					}
+				}elseif($tq == 6){
+					$r[0] = 'SR2';
+					$r[1] = empty($orates['SR2'])? $rates['SR2'] :$orates['SR2'];
+					if($this->agent_id == 999 && $bdts < strtotime('2018-05-01')) $r[1]->item = 28;
+				}
+			}elseif($typ == 'M'){
+				if(!empty($this->agent->extra['use_sr1'])){
+					$r[0] = 'SR1';
+					$r[1] = empty($orates['SR1'])? $rates['SR1'] :$orates['SR1'];
+				}elseif(!empty($rates['R3'])){
+					$r[0] = 'R3';
+					$r[1] = empty($orates['R3'])? $rates['R3'] :$orates['R3'];
+				}
+			}elseif(preg_match('/UGG|鞋|靴|围巾|Scarf|Boots|Sneaker|披肩|\d+码/i', $gm)){
+				$r[0] = 'SR3';
+				$r[1] = empty($orates['SR3'])? $rates['SR3'] :$orates['SR3'];
+				if(in_array($this->agent_id, [1375, 1459, 626, 434, 861]) && $bdts < strtotime('2018-05-21')){
+					$r[1]->perkg = '6.5';
+				}elseif($this->agent_id == 1274 && $bdts <= strtotime('2018-05-31')){
+					$r[1]->perkg = '6.5';
+				}
+			}elseif(!empty($rates['SR6']) && preg_match('/Wine|红酒|葡萄酒/i', $gm)){
+				$r[0] = 'SR6';
+				$r[1] = empty($orates['SR6'])? $rates['SR6'] :$orates['SR6'];
+			}
+			
+			if(empty($r[1])) $r[1] = false;
+
+			$dis = SellRate::getRates($this->agent_id, 25, $billDate);
+
+			if(!empty($dis['D']) && !empty($this->agent->extra['rebate_apply']) && !empty($this)){
+				$applyDiscount = function($r, $dis){
+					return round($r * (100 - $dis['D']->item)) / 100;
+				};
+				if($debug) echo "Discount: ".$dis['D']->item."%\n";
+				$r[1]->perkg = $applyDiscount($r[1]->perkg, $dis);
+				$r[1]->item = $applyDiscount($r[1]->item, $dis);
+			}
+			
+			if(!empty($r[1]) && $r[2] < 0){
+				if(empty($r[1]->item)) $r[1]->item = 0;
+				$r[2] = round(($weight * $r[1]->perkg + $r[1]->item) * 100) / 100;
+			}
+
+			//rural surcharge
+			if(!empty($this->agent->extra['rural_surcharge'])){
+				if(preg_match('/新疆|西藏|内蒙古/', $this->state)){
+					$r[2] += 2;
+				}
+			}
+
+			if($debug) echo "Rate/Charge: ".$r[0]."/".$r[2]."\n";
+
+			if(!empty($r[1])){
+				$o = new StdClass;
+				$o->perkg = $r[1]->perkg;
+				$o->item = $r[1]->item;
+				$r[1] = $o;
+			}
+
+			//record
+			if(in_array($this->status, [90,99]) && $r[2] >= 0){
+				$this->mdata['agent_rate'] = $r;
+				$this->updateMeta();
+			}
+
+			return $r;
+		}
+
+		$rates = SellRate::getRates($this->agent_id, 20, $billDate);
+		if(empty($this->agent) || (empty($rates['V0']) && empty($rates['R0']) && empty($rates['EC']))) return ['NA', false, -9999];
+
+		$ar = [];
+		foreach($rates as $k=>$r){
+			$ar[] = $k;
+		}
+		$v0 = $this->serviceGrade();
+		$r = ['R0', $rates['R0'], -9999];
+		
+		if($debug){
+			echo "Agent: ".$this->agent_id."\n";
+			echo 'Avalilable Rates: ';
+			echo implode(',', $ar)."\n";
+			echo 'Type: '.$typ."\n";
+			echo 'Goods: '.$gm."\n";
+		}
+
+		if(!empty($rates['EC'])){
+			$r[0] = 'EC';
+			$r[1] = $rates['EC'];
+		}elseif($this->odpt_id == 218){//mel
+			if($debug) echo "Branch: MEL\n";
+			if($v0){
+				if(!empty($rates['V0'])){
+					$r[0] = 'V0';
+					$r[1] = $rates['V0'];
+				}else{
+					$r[0] = 'V0';
+					$defv0 = new SellRate;
+					$defv0->perkg = 8.5;
+					$r[1] = $defv0;
+				}
+			}elseif(in_array($typ, ['B', 'M'])){
+				if(!empty($rates['R1'])){
+					$r[0] = 'R1';
+					$r[1] = $rates['R1'];
+				}
+				if($tq > 5 && (($typ == 'B' && $tq == 6) || ($typ == 'M' && $tq < 10)) && !empty($rates['M2'])){
+					$r[0] = 'M2';
+					$r[1] = $rates['M2'];
+					$r[2] = $r[1]->perkg;
+				}
+			}elseif($typ == 'X'){
+				if(!empty($rates['M1'])){
+					$r[0] = 'M1';
+					$r[1] = $rates['M1'];
+				}
+			}
+
+			if(in_array($typ, ['O', 'X']) && !empty($rates['M4'])){ //quilt?
+				if(preg_match('/驼羊被|羊毛被|被子/', $gm)){
+					$r[0] = 'M4';
+					$r[1] = $rates['M4'];
+					$qq = 0;
+					foreach($this->eitems['g'] as $gi => $g){
+						if(preg_match('/驼羊被|羊毛被|被子/', $g)){
+							$qq += $this->eitems['q'][$gi];
+						}
+					}
+					$r[2] = round(($weight * $r[1]->perkg + $qq * $r[1]->item) * 100) / 100;
+				}
+			}
+		}elseif($this->odpt_id == 530){//bne
+			if($debug) echo "Branch: BNE\n";
+			if($v0){
+				if(!empty($rates['V0'])){
+					$r[0] = 'V0';
+					$r[1] = $rates['V0'];
+				}else{
+					$r[0] = 'V0';
+					$defv0 = new SellRate;
+					$defv0->perkg = 8.5;
+					$r[1] = $defv0;
+				}
+			}elseif(in_array($typ, ['M'])){
+				if(!empty($rates['B1'])){
+					$r[0] = 'B1';
+					$r[1] = $rates['B1'];
+					$r[2] = round($tq * $r[1]->item * 100) / 100;
+				}
+			}elseif(strtotime($this->billDate()) < strtotime('2016-04-05') && (($typ == 'B' && $tq <= 4) || ($typ == 'M' && $tq <= 8))){
+				if(!empty($rates['SR1'])){
+					$r[0] = 'SR1';
+					$r[1] = $rates['SR1'];
+				}elseif(!empty($rates['R1'])){
+					$r[0] = 'R1';
+					$r[1] = $rates['R1'];
+				}
+			}elseif(strtotime($this->billDate()) >= strtotime('2016-04-05') && (($typ == 'B' && $tq <= 3) || ($typ == 'M' && $tq <= 6))){
+				if(!empty($rates['SR1'])){
+					$r[0] = 'SR1';
+					$r[1] = $rates['SR1'];
+				}elseif(!empty($rates['R1'])){
+					$r[0] = 'R1';
+					$r[1] = $rates['R1'];
+				}
+			}elseif(sizeof($this->eitems['g']) == 1 && $typ == 'B' && $tq == 6 && preg_match('/3|4|三|四/', $this->eitems['g'][0])){
+				if(!empty($rates['SR2'])){
+					$r[0] = 'SR2';
+					$r[1] = $rates['SR2'];
+				}elseif(!empty($rates['R1'])){
+					$r[0] = 'R1';
+					$r[1] = $rates['R1'];
+				}
+			}elseif(in_array($typ, ['B', 'M'])){
+				if(!empty($rates['R1'])){
+					$r[0] = 'R1';
+					$r[1] = $rates['R1'];
+				}
+			}
+		}else{ //syd
+			if($debug) echo "Branch: SYD\n";
+
+			if($bdts < strtotime('2018-01-01')){ // pre 2018
+				if($v0){
+					if(!empty($rates['V0'])){
+						$r[0] = 'V0';
+						$r[1] = $rates['V0'];
+					}else{
+						$r[0] = 'V0';
+						$defv0 = new SellRate;
+						$defv0->perkg = 8.5;
+						$r[1] = $defv0;
+					}
+				}elseif($bdts < strtotime('2016-04-05') && (($typ == 'B' && $tq <= 4) || ($typ == 'M' && $tq <= 8))){
+					if(!empty($rates['SR1'])){
+						$r[0] = 'SR1';
+						$r[1] = $rates['SR1'];
+					}elseif(!empty($rates['R1'])){
+						$r[0] = 'R1';
+						$r[1] = $rates['R1'];
+					}
+				}elseif($bdts < strtotime('2017-03-01') && $bdts >= strtotime('2016-09-01') && (($typ == 'B' && $tq == 3) || ($typ == 'M' && ($tq > 2 && $tq <= 6)))){
+					if(!empty($rates['SR1'])){
+						$r[0] = 'SR1';
+						$r[1] = $rates['SR1'];
+					}elseif(!empty($rates['R1'])){
+						$r[0] = 'R1';
+						$r[1] = $rates['R1'];
+					}
+				}elseif($bdts < strtotime('2017-03-01') && $bdts >= strtotime('2016-04-05') && (($typ == 'B' && $tq <= 3) || ($typ == 'M' && $tq <= 6))){
+					if(!empty($rates['SR1'])){
+						$r[0] = 'SR1';
+						$r[1] = $rates['SR1'];
+					}elseif(!empty($rates['R1'])){
+						$r[0] = 'R1';
+						$r[1] = $rates['R1'];
+					}
+				}elseif($typ == 'B' && $tq > 3 && !empty($rates['R2'])){
+					$r[0] = 'R2';
+					$r[1] = $rates['R2'];
+				}elseif($typ == 'B' && $tq == 6){
+					if(!empty($rates['SR2'])){
+						$r[0] = 'SR2';
+						$r[1] = $rates['SR2'];
+					}elseif(!empty($rates['R1'])){
+						$r[0] = 'R1';
+						$r[1] = $rates['R1'];
+					}
+				}elseif($typ == 'B' && $tq == 3){
+					if(preg_match('/三段|四段|3段|4段/', $gm) && !preg_match('/一段|二段|1段|2段/', $gm)){
+						if(!empty($rates['SR4'])){
+							$r[0] = 'SR4';
+							$r[1] = $rates['SR4'];
+						}elseif(!empty($rates['R1'])){
+							$r[0] = 'R1';
+							$r[1] = $rates['R1'];
+						}
+					}else{
+						if(!empty($rates['SR5'])){
+							$r[0] = 'SR5';
+							$r[1] = $rates['SR5'];
+						}elseif(!empty($rates['R1'])){
+							$r[0] = 'R1';
+							$r[1] = $rates['R1'];
+						}
+					}
+				}elseif(in_array($typ, ['B', 'M'])){
+					if(!empty($rates['R1'])){
+						$r[0] = 'R1';
+						$r[1] = $rates['R1'];
+					}
+				}elseif(!empty($rates['SR3']) && in_array($typ, ['O', 'X'])){
+					if(preg_match('/UGG|鞋|靴|围巾|Scarf/i', $gm)){
+						$r[0] = 'SR3';
+						$r[1] = $rates['SR3'];
+					}
+				}
+
+				if(in_array($typ, ['O', 'X'])){ //quilt?
+					if(preg_match('/驼羊被|羊毛被|被子/', $gm) && !empty($rates['T1'])){
+						$r[0] = 'T1';
+						$r[1] = $rates['T1'];
+						$qq = 0;
+						foreach($this->eitems['g'] as $gi => $g){
+							if(preg_match('/驼羊被|羊毛被|被子/', $g)){
+								$qq += $this->eitems['q'][$gi];
+							}
+						}
+						$r[2] = round(($weight * $r[1]->perkg + $qq * $r[1]->item) * 100) / 100;
+					}elseif(preg_match('/UGG|鞋|靴|围巾|披肩/i', $gm) && !empty($rates['T2'])){
+						$r[0] = 'T2';
+						$r[1] = $rates['T2'];
+						$qq = 0;
+						foreach($this->eitems['g'] as $gi => $g){
+							if(preg_match('/UGG|鞋|靴|围巾|披肩/i', $g)){
+								$qq += $this->eitems['q'][$gi];
+							}
+						}
+						$r[2] = round(($weight * $r[1]->perkg + $qq * $r[1]->item) * 100) / 100;
+					}elseif(preg_match('/潘多拉|首饰|项链|手镯|手链|饰品|耳环|耳钉|戒指|手珠|玻璃珠|裸石|吊坠/', $gm) && !empty($rates['T3'])){
+						$r[0] = 'T3';
+						$r[1] = $rates['T3'];
+						$qq = 0;
+						foreach($this->eitems['g'] as $gi => $g){
+							if(preg_match('/潘多拉|首饰|项链|手镯|手链|饰品|耳环|耳钉|戒指|手珠|玻璃珠|裸石|吊坠/', $g)){
+								$qq = 1;
+								break;
+							}
+						}
+						$r[2] = round(($weight * $r[1]->perkg + $qq * $r[1]->item) * 100) / 100;
+					}elseif(preg_match('/洗脸(器|仪)/', $gm) && !empty($rates['T4'])){
+						$r[0] = 'T4';
+						$r[1] = $rates['T4'];
+						$qq = 0;
+						foreach($this->eitems['g'] as $gi => $g){
+							if(preg_match('/洗脸(器|仪)/', $g)){
+								$qq += $this->eitems['q'][$gi];
+							}
+						}
+						$r[2] = round(($weight * $r[1]->perkg + $qq * $r[1]->item) * 100) / 100;
+					}
+				}
+			}else{
+				if(($typ == 'B' && $tq <= 3 && preg_match('/三段|四段|3段|4段/', $gm) && !preg_match('/一段|二段|1段|2段/', $gm) && !preg_match('/羊/', $gm)) || ($typ == 'M' && $tq <= 4)){
+					if(!empty($rates['R2'])){
+						$r[0] = 'R2';
+						$r[1] = $rates['R2'];
+					}elseif(!empty($rates['R1'])){
+						$r[0] = 'R1';
+						$r[1] = $rates['R1'];
+					}
+				}elseif($typ == 'B' && $tq == 6){
+					if(!empty($rates['SR2'])){
+						$r[0] = 'SR2';
+						$r[1] = $rates['SR2'];
+					}elseif(!empty($rates['R1'])){
+						$r[0] = 'R1';
+						$r[1] = $rates['R1'];
+					}
+				}elseif(in_array($typ, ['B', 'M'])){
+					if(!empty($rates['R1'])){
+						$r[0] = 'R1';
+						$r[1] = $rates['R1'];
+					}
+				}elseif(!empty($rates['SR3']) && preg_match('/UGG|鞋|靴|围巾|Scarf|Boots|Sneaker|披肩|\d+码/i', $gm)){
+					$r[0] = 'SR3';
+					$r[1] = $rates['SR3'];
+				}elseif(!empty($rates['SR6']) && preg_match('/Wine|红酒|葡萄酒/i', $gm)){
+					$r[0] = 'SR6';
+					$r[1] = $rates['SR6'];
+				}
+			}
+		}
+		if(empty($r[1])) $r[1] = false;
+		
+		if(!empty($r[1]) && $r[2] < 0){
+			if(empty($r[1]->item)) $r[1]->item = 0;
+			$r[2] = round(($weight * $r[1]->perkg + $r[1]->item) * 100) / 100;
+		}
+
+		//rural surcharge
+		if(!in_array($this->agent_id, [1125, 839, 368, 1246, 730, 471, 824])){
+			if(preg_match('/黑龙江|吉林|辽宁|新疆|西藏|内蒙古/', $this->state) || (preg_match('/北京/', $this->state) && $bdts < strtotime('2018-03-01'))){
+				$r[2] += 2;
+			}
+		}
+
+		if($debug) echo "Rate/Charge: ".$r[0]."/".$r[2]."\n";
+
+		if(!empty($r[1])){
+			$o = new StdClass;
+			$o->perkg = $r[1]->perkg;
+			$o->item = $r[1]->item;
+			$r[1] = $o;
+		}
+
+		//record
+		if(in_array($this->status, [90,99]) && $r[2] >= 0){
+			$this->mdata['agent_rate'] = $r;
+			$this->updateMeta();
+		}
+
+		return $r;
+	}
+
+	public function rating($poc, $exrate = 1, $rzr = false, $date = false){
+		//if(!empty($this->mdata['accr_dcdc']) && !$rzr) return $this->mdata['accr_dcdc'];
+		if(!$date) $date = date('Y-m-d');
+		$spwt = $this->shipWeight();
+		if($spwt == 0 && !empty($this->agent->extra['wt_check'])) $spwt = 2;
+		$zr = ZoneRate::model()->with('orgrate')->find("(zone = 'ALL' OR zone_name LIKE :s) AND (weight_lo < :w AND weight_hi >= :w) AND base+item+perkg > 0 AND orgrate.code = :rc AND orgrate.vfrom <= :today AND (orgrate.vto >= :today OR orgrate.vto IS NULL)", [':s' => '%'.mb_substr($this->state, 0, 2).'%', ':w' => $spwt, ':rc' => $poc, ':today' => $date]);
+		if(empty($zr)) return false;
+		$r = $zr->base + $zr->item;
+		$wl = $this->weight - ($zr->base > 0? $zr->nkg : 0);
+		if($wl > 0 && $zr->nkg > 0){
+			$r += ceil($wl / $zr->nkg) * $zr->perkg;
+		}
+		if($r < $zr->minimum) $r = $zr->minimum;
+		if($zr->orgrate->currency == 1) $r = $r * $exrate;
+		$r = round($r*100)/100;
+
+		//record
+		if(in_array($this->status, [90,99]) && !$rzr && $r > 0){
+			$this->mdata['accr_dcdc'] = (string) $r;
+			$this->updateMeta();
+		}
+		return $rzr? [$r, $zr] : $r;
+	}
+
+	public function afterSave(){
+		if($this->status < 30){
+			$ht = Tracking::model()->count('pid = :pid AND type = :t', array(':pid' => $this->id, ':t' => $this->status));
+			if(empty($ht)){
+				$dpt = empty($this->odepot)? '' : $this->odepot->suburb;
+				switch($this->status){
+					case 10:
+						$this->addTracking(10, '收到运单信息', $dpt);
+					break;
+					case 14:
+						$this->addTracking(14, '货物入库，等待运单信息', $dpt);
+					break;
+					case 15:
+						if(!empty($this->cnee->cnid_no) || $this->agent_id == 794 || ($this->agent_id == 824 && $this->cnor->name == '海淘城')){
+							$this->addTracking(15, '货物入库，等待发运', $dpt);
+						}else{
+							$this->addTracking(15, '运单信息已输入，身份证信息未上传，留库待发', $dpt);
+						}
+					break;
+					case 18:
+						$this->addTracking(18, '身份证信息已匹配成功，等待发运', $dpt);
+					break;
+					case 20:
+						$this->addTracking(20, '批次确认，准备预申报', $dpt);
+					break;
+					case 25:
+						$this->addTracking(25, '口岸进口预申报完成', $dpt);
+					break;
+					default:
+					break;
+				}
+			}/*elseif($this->status == 18 && Tracking::model()->count('pid = :pid AND type > 20', array(':pid' => $this->id)) == 0 && $this->odpt_id != 218){ //not Melbourne
+				$ht = Tracking::model()->find('pid = :pid AND type = :t', array(':pid' => $this->id, ':t' => $this->status));
+				$ht->dt = date('Y-m-d H:i:s');
+				$ht->save();
+			}*/
+		}
+
+		return parent::afterSave();
+	}
+
+	public function altCnee(){
+		if(!empty($this->mdata['AltCnee'])){
+			$alcn = Addr::model()->findByPk($this->mdata['AltCnee']);
+			if(empty($alcn)) $alcn = AddrArchive::model()->findByPk($this->mdata['AltCnee']);
+			
+			if(!empty($alcn)){
+				$this->cnee->name = $alcn->name;
+				$this->cnee->cnid_id = $alcn->cnid_id;
+			}
+		}
+		if(!empty($this->mdata['altTel'])){
+			$this->cnee->tel = $this->mdata['altTel'];
+		}
+		if(!empty($this->mdata['altAddr'])){
+			$this->cnee->address = $this->mdata['altAddr'];
+		}
+	}
+
+	public function randCnee($id){
+		if(empty($this->mdata['AltCnee'])){
+			$sql = "SELECT cnee_id FROM shipment WHERE type = 20 AND status = 99 AND cnee_id NOT IN (SELECT cnee_id FROM shipment WHERE consol_id = ".$id.") ORDER BY RAND() LIMIT 1";
+			$cid = Yii::app()->db->createCommand($sql)->queryScalar();
+			$this->mdata['AltCnee'] = $cid;
+			$this->nolog = true;
+			$this->save();
+		}
+
+		return Addr::model()->findByPk($this->mdata['AltCnee']);
+	}
+
+	public function getSubConsol($f = false){
+		if(empty($this->consol_id)) return false;
+		if(empty($this->consol->mdata['subc'])){
+			return $f? $this->consol->{$f} : false;
+		}else{
+			$sql = 'SELECT f.id FROM mani_map m INNER JOIN manifest f ON m.mani_id = f.id WHERE m.fid = :id AND f.consol_id = :cid AND f.type = 60';
+			$mid = Yii::app()->db->createCommand($sql)->bindValues([':id' => $this->id, ':cid' => $this->consol_id])->queryScalar();
+			if(empty($mid)) return false;
+
+			foreach($this->consol->mdata['subc'] as $k=>$sc){
+				if(in_array($mid, explode(',', $sc['pids']))){
+					return $f? $sc[$f] : $sc;
+				}
+			}
+			return false;
+		}
+	}
+
+	public function getFlight(){
+		return $this->getSubConsol('flight');
+	}
+
+	public function getAwb(){
+		return $this->getSubConsol('awb');
+	}
+
+	public function receiptData($n = false, $s = true){
+		if(empty($this->mdata['receipt']) || $n){
+			$ts = ['coles', 'woolworth', 'cw', 'misc', 'costco'];
+			$d = [];
+			$d['tpl'] = $ts[rand(0,4)];
+			$d['bg'] = rand(1,5);
+			$d['sid'] = rand(0,4);
+			$d['date'] = date('Y-m-d', strtotime($this->created.' -'.rand(30,5).' day')).' '.rand(7,22).':'.rand(10,60);
+			$d['no'] = rand(1000000,9999999);
+			$d['mn'] = rand(1000000,9999999);
+			$d['ro'] = sprintf('%0.2f', rand()/getrandmax()*2-1);
+			$this->mdata['receipt'] = $d;
+			if($s){
+				$this->nolog = true;
+				$this->save();
+			}
+		}
+		return $this->mdata['receipt'];
+	}
+
+	public function receiptItemName($i){
+		if(isset($this->eitems['gen'][$i])) return $this->eitems['gen'][$i];
+		if(isset($this->eitems['pid'][$i])){
+			$p = ExProdb::model()->findByPk($this->eitems['pid'][$i]);
+			if($p){
+				return $p->brandEn().' '.$p->name;
+			}
+		}
+		return ExProdb::$types[ExProdb::$rtypes[$this->eitems['type'][$i]]];
+	}
+
+	public function statusList(){
+		$r = ExParcel::$states;
+		if(!Acl::hasAccess('B:Export/UpdateParcelAfterConsolidation')){
+			$r = array_slice($r, 0, 7, true);
+		}
+		return $r;
+	}
+
+	public function checkInfoReady($se=false){
+		$err = array();
+		if(empty($this->weight)) $err[] = 'Weight required';
+		if($this->cnor_id > 0)	$err = array_merge($err, $this->cnor->ExportValidate(1));
+		if($this->cnee_id > 0){
+			if(empty($this->cnee->cnid_id)) $this->cnee->save();
+			$err = array_merge($err, $this->cnee->ExportValidate(2));
+		}
+		if(empty($this->eitems['g']) || empty($this->eitems['q']) || array_sum($this->eitems['q']) == 0 || empty(trim(implode('', $this->eitems['g'])))) $err[] = 'Missing goods detail';
+		
+		/* goods details are not critical
+		$gdc = true;
+		foreach($this->eitems['g'] as $k => $g){
+			if(empty($this->eitems['pid'])){
+				$gdc = false;
+				break;
+			}
+		}
+		if(!$gdc) $err[] = 'Goods Details incomplete';
+		*/
+
+		//if($this->bwf & 4) $err[] = 'Please confirm address';
+
+		if(empty($err)){
+			$this->status = 18;
+			return true;
+		}else{
+			//$this->status = 15;
+			if($se){
+				foreach($err as $e){
+					$this->addError('cnee', $e);
+				}
+			}
+			return false;
+		}
+	}
+
+	public function arrayComb($arrays, $i = 0) {
+		if (!isset($arrays[$i])) return array();
+		if ($i > 0 && $i == count($arrays) - 1) return $arrays[$i];
+
+		$result = array();
+
+		if(count($arrays) == 1){
+			foreach($arrays[0] as $v){
+				$result[] = array($v);
+			}
+			return $result;
+		}
+
+		// get combinations from subsequent arrays
+		$tmp = $this->arrayComb($arrays, $i + 1);
+
+		// concat each array from tmp with each element from $arrays[$i]
+		foreach ($arrays[$i] as $v) {
+			foreach ($tmp as $t) {
+				$result[] = is_array($t) ? 
+					array_merge(array($v), $t) :
+					array($v, $t);
+			}
+		}
+
+		return $result;
+	}
+	
+	public function newShipmentErrRecord($err=0){
+		$resp=array('status'=>1,'msg'=>' ');
+		$errOpInfo=$this->getErrOp();
+		if(empty($errOpInfo)){
+			$resp['status']=0;
+			$resp['msg']='Not found data entry user';
+			return $resp;
+		}
+		if(empty($this->err_record)){
+			$errRecord=new ShipmentErrRecord();
+			$errRecord->fid= $this->id;
+			$errOpInfo=$this->getErrOp();
+			$errRecord->create_time=date('Y-m-d H:i:s');
+			$errRecord->err_op=$errOpInfo[0];
+			$errRecord->err_time=$errOpInfo[1];
+		}else{
+			$errRecord= $this->err_record;
+		}
+		$errRecord->record=$err;
+		$errRecord->save();
+		return $resp;
+	}
+	
+    public function getErrOp(){
+		$info=null;
+		$dataEntryUser=User::getDataEntryUser();
+		$dataUserId=0;
+		foreach ($this->logs as $log){
+			if(in_array($log->user_id,$dataEntryUser)){
+			   return [$log->user_id,$log->time];
+			}
+		}
+	   return $info;
+	}
+
+	public function labelGoods(){
+		foreach($this->eitems['pid'] as $gi => $pid){
+			$pd = ExProdb::model()->findByPk($pid);
+			if(!empty($pd) && !empty($pd->mdata['labelname'])){
+				$this->eitems['g'][$gi] = $pd->mdata['labelname'];
+				$this->goods_altered = true;
+			}
+		}
+	}
+
+	public function altGoods($poc=false){
+		if($poc === false && !empty($this->consol)) $poc = $this->consol->poc;
+		if(empty($poc)) return;
+		if(method_exists($this, 'altGoods_'.$poc)){
+			$this->{'altGoods_'.$poc}();
+			$this->addError('items', 'Goods detail altered');
+		}else{
+			if(empty($this->eitems['pid'])) $this->eitems['pid'] = [];
+			foreach($this->eitems['pid'] as $gi => $pid){
+				if($this->_altItem($gi, null, null, $poc)) continue;
+			}
+		}
+	}
+
+	private function _altItem($gi, $pd, $pid=null, $poc){
+		$alt = false;
+		if(!empty($this->mdata['altItems']['pid'][$gi])) $pid = $this->mdata['altItems']['pid'][$gi];
+		if(empty($pd) && !empty($pid)) $pd = ExProdb::model()->findByPk($pid);
+		if(!empty($pd)){
+			$this->eitems['pid'][$gi] = $pid;
+			$this->eitems['g'][$gi] = $pd->name_zh;
+			$this->eitems['b'][$gi] = $pd->brand;
+			$this->eitems['m'][$gi] = $pd->model;
+			$this->eitems['u'][$gi] = $pd->unit;
+			$this->eitems['hs'][$gi] = $pd->hs;
+			$this->eitems['w'][$gi] = $pd->weight * intval($this->eitems['q'][$gi]);
+			$this->eitems['v'][$gi] = empty($pd->mdata['price_'.$poc])? $pd->price : $pd->mdata['price_'.$poc];
+			$alt = true;
+		}
+
+		if(!empty($this->mdata['altItems']['q'][$gi])){
+			$this->eitems['q'][$gi] = $this->mdata['altItems']['q'][$gi];
+			$alt = true;
+		}
+		if(!empty($this->mdata['altItems']['v'][$gi])){
+			$this->eitems['v'][$gi] = $this->mdata['altItems']['v'][$gi];
+			$alt = true;
+		}
+		$this->goods_altered = true;
+		return $alt;
+	}
+	
+	public function altGoods_CNKMG(){
+		return;
+		$rev = $this->calTariff('CNKMG') > 0;
+		if(empty($this->eitems['pid'])) $this->eitems['pid'] = [];
+		foreach($this->eitems['pid'] as $gi => $pid){
+			if($this->_altItem($gi, null, null, 'CNKMG')) continue;
+			$rep = true;
+			if(preg_match('/1段|一段|2段|二段/', $this->eitems['g'][$gi])){
+				$this->eitems['g'][$gi] = preg_replace(['/1段|2段/', '/一段|二段/'], ['3段', '三段'], $this->eitems['g'][$gi]);
+				$pd = ExProdb::model()->find('name_zh = :n', [':n' => $this->eitems['g'][$gi]]);
+				if(!empty($pd)) $pid = $pd->id;
+			}elseif(preg_match('/婴儿辅食|米糊|米粉|肉泥|饼干|果泥/', $this->eitems['g'][$gi])){
+				$pid = 959;
+			}elseif(preg_match('/黄油|奶酪|奶油|芝士|butter|cheese/i', $this->eitems['g'][$gi])){
+				$pid = 471;
+			}elseif(preg_match('/化妆盒/', $this->eitems['g'][$gi])){
+				$pid = 1244;
+			}elseif($pid == 1093){
+				$pid = 864;
+			}elseif($rev > 0){
+				if(!empty($pid)) $pd = ExProdb::model()->findByPk($pid);
+				$hs = $this->eitems['hs'][$gi];
+				$v = $this->eitems['v'][$gi];
+				if(!empty($pd)){
+					$hs = $pd->hs;
+					$v = empty($pd->mdata['price_CNKMG'])? $pd->price : $pd->mdata['price_CNKMG'];
+				}
+				if($v > 30){
+					$pd = ExProdb::model()->find([
+						'condition' => 'hs = :hs AND price < :v AND price > 10 AND name_zh NOT REGEXP :regfn',
+						'params' => [':hs' => $hs, ':v' => $v, ':regfn' => '/婴儿辅食|米糊|米粉|肉泥|饼干|黄油|奶酪|奶油|芝士|果泥|butter|cheese/i'],
+						'order' => 'rand()']);
+					$pid = $pd->id;
+				}
+			}else{
+				$rep = false;
+			}
+
+			if(empty($pid)) continue;
+			if($rep) $this->_altItem($gi, null, $pid, 'CNKMG');
+		}
+	}
+
+	public function mapGoods($debug=false){
+		if(!isset($this->eitems['g'])) return false;
+		$qc = "status = 1 AND type = :t AND (code = :n OR CONCAT(',',tag,',') LIKE :tn OR name_zh LIKE :fn)";
+		$twt = 0;
+		$tv = 0;
+		$tdv = 0;
+		$oon = true;
+		$wrl = array();
+		$map = array();
+		$wpl = array();
+		$this->bwf = $this->bwf & (~ 25);
+
+		foreach($this->eitems['g'] as $i => $g){
+			if(empty($this->eitems['type'][$i])){
+				$t = '';
+				$this->bwf = $this->bwf | 8;
+			}else{
+				$t = $this->eitems['type'][$i];
+			}
+			
+			$pm = ExProdb::model()->find('name_zh = :g AND status = 1', [':g' => $g]);
+			if(empty($pm)){
+				$pm = ExProdbMap::model()->find('name = :g AND agt_id = :aid', [':g' => $g, ':aid' => $this->agent_id]);
+			}else{
+				$map[$i] = $pm;
+				$wrl[$i] = array($pm->weight);
+				continue;
+			}
+
+			if(empty($pm)){
+				$pm = ExProdbMap::model()->find('name = :g AND agt_id = :aid', [':g' => preg_replace('/\s*\(.+\)\s*/', '', $g), ':aid' => $this->agent_id]);
+			}
+			if(!empty($pm)){
+				$map[$i] = $pm->prod;
+				$wrl[$i] = array($pm->prod->weight);
+				continue;
+			}
+			$qp = array(':t' => ExProdb::$rtypes[$t], ':fn' => '%'.$g.'%', ':n' => $g, ':tn' => '%,'.$g.',%');
+			if($t != 'O') $oon = false;
+			$prs = ExProdb::model()->findAll(array(
+				'condition' => $qc,
+				'params' => $qp,
+				'order' => 'price, weight',
+			));
+			$this->eitems['mp'][$i] = sizeof($prs);
+
+			if($t == 'M' && $g == '成人奶粉') $prs = false;
+			
+			if(empty($prs)){
+				$this->bwf = $this->bwf | 8;
+				if($debug) echo 'No product found for '.$g."\n";
+				continue;
+			}
+			if($this->eitems['mp'][$i] == 1){
+				$map[$i] = $prs[0];
+				$wrl[$i] = array($prs[0]->weight);
+			}else{
+				if(!isset($wpl[$i])) $wpl[$i] = array();
+				foreach($prs as $pr){
+					if(!isset($wpl[$i]['w'.$pr->weight])) $wpl[$i]['w'.$pr->weight] = $pr;
+				}
+				$rs = Yii::app()->db->createCommand()->select('DISTINCT(weight) AS wt')->from('ex_prodb t')->where($qc, $qp)->order('weight')->queryAll();
+				$wrl[$i] = array();
+				foreach($rs as $r){
+					$wrl[$i][] = $r['wt'];
+				}
+			}
+		}
+
+		//match weight
+		$wb = empty($this->mdata['dcwt'])? $this->weight : $this->mdata['dcwt'];
+		if(!isset($this->eitems['q'])) $this->eitems['q'] = [];
+		if(($this->bwf & 8) == 0 && sizeof($map) < sizeof($this->eitems['q'])){
+			$combs = $this->arrayComb($wrl);
+			$lvc = 0;
+			$wmax = 0;
+			$wmin = 0;
+
+			foreach($combs as $k => $wc){
+				$wct = 0;
+				$cvt = 0;
+				$cmap = array();
+				foreach($wc as $i=>$w){
+					$wct += $w * floatval($this->eitems['q'][$i]);
+					if(empty($map[$i])){
+						$cvt += $wpl[$i]['w'.$w]->price * floatval($this->eitems['q'][$i]);
+						$cmap[$i] = $wpl[$i]['w'.$w];
+					}else{
+						$cvt += $map[$i]->price * floatval($this->eitems['q'][$i]);
+						$cmap[$i] = $map[$i];
+					}
+				}
+				if(empty($wmax) || $wct > $wmax) $wmax = $wct;
+				if(empty($wmin) || $wct < $wmin) $wmin = $wct;
+				if($wct > $wb || ($wb > 1 && $wct < $wb * 0.6)) continue;
+				if(empty($lvc) || $cvt < $lvc){
+					$lvc = $cvt;
+					$map = $cmap;
+				}
+			}
+
+			if(sizeof($map) < sizeof($this->eitems['q'])){
+				$this->bwf = $this->bwf | 16;
+				$this->mdata['tw_min'] = sprintf('%0.2f', $wmin);
+				$this->mdata['tw_max'] = sprintf('%0.2f', $wmax);
+				if($debug) echo "Weight error\n";
+			}
+		}
+
+		//assign values
+		$pd_type = array_flip(ExProdb::$rtypes);
+		foreach($this->eitems['g'] as $i => $g){
+			if(empty($map[$i])) continue;
+			$r = $map[$i];
+			$this->eitems['pid'][$i] = $r->id;
+			$this->eitems['type'][$i] = empty($pd_type[$r->type])? 'O': $pd_type[$r->type];
+			$this->eitems['g'][$i] = $r->name_zh;
+			$this->eitems['u'][$i] = $r->unit;
+			$this->eitems['w'][$i] = $r->weight * floatval($this->eitems['q'][$i]);
+			$this->eitems['b'][$i] = $r->brand;
+			$this->eitems['m'][$i] = $r->model;
+			$this->eitems['hs'][$i] = $r->hs;
+			$this->eitems['t'][$i] = $r->tax;
+			$this->eitems['v'][$i] = $r->price;
+			$twt += $this->eitems['w'][$i];
+			$tv += $this->eitems['v'][$i] * floatval($this->eitems['q'][$i]);
+			$tdv += ($this->eitems['u'][$i] == '千克')?  $this->eitems['t'][$i] * $this->eitems['w'][$i] : $this->eitems['t'][$i] * floatval($this->eitems['q'][$i]);
+			if(empty($r->tax)){
+				$this->bwf = $this->bwf | 8; //if no tariff
+				if($debug) echo 'No tariff for '.$g."\n";
+			}
+		}
+		
+		$this->value = $tv;
+		$this->tariff = $tdv;
+		
+		if($tdv >= self::$tax_free_th && $oon){
+			$this->bwf = $this->bwf | 1;
+		}
+
+		if(($this->bwf & 24) == 0) $this->saveGoodsMap();
+		
+		return ($this->bwf & 24) == 0;
+	}
+
+	public function hasUnmappedGoods(){
+		if(empty($this->eitems['g'])) return false;
+		foreach($this->eitems['g'] as $i => $g){
+			if(empty($this->eitems['pid'][$i]) && empty($this->eitems['mp'][$i])){
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public function saveGoodsMap(){
+		if(empty($this->mdata['client_entry'])) return;
+		$ce = $this->mdata['client_entry'];
+		if(empty($ce['items']) || sizeof($ce['items']['g']) != sizeof($this->eitems['g'])) return;
+
+		foreach($ce['items']['g'] as $gi => $g){
+			if(empty($this->eitems['pid'][$gi])) continue;
+			$g = preg_replace('/\s*\(.+\)\s*/', '', $g);
+			$m = ExProdbMap::model()->find('agt_id = :aid AND name = :n', [':aid' => $this->agent_id, ':n' => $g]);
+			if(empty($m)){
+				$m = new ExProdbMap;
+				$m->agt_id = $this->agent_id;
+				$m->name = $g;
+			}elseif($m->pid == $this->eitems['pid'][$gi]) continue;
+
+			$m->pid = $this->eitems['pid'][$gi];
+			$m->save();
+		}
+	}
+
+	public function checkHeld(){
+		//suspected sender
+		/*if(in_array(preg_replace('/[\s\-]+/', '', $this->cnor->tel), ['0481154042'])){
+			$this->status = 35;
+		}*/
+	}
+
+	public function canSwap(){
+		return ExParcel::model()->with('cnee')->count('t.status = 18 AND t.id != :id AND cnee.name = :cn AND (cnee.cnid_id = :cid OR cnee.tel = :tel OR cnee.address = :addr) AND t.odpt_id = :od', array(':id' => $this->id, ':cn' => $this->cnee->name, ':cid' => $this->cnee->cnid_id, ':tel' => $this->cnee->tel, ':addr' => $this->cnee->address, ':od' => $this->odpt_id)) > 0;
+	}
+	
+	public function beforeSave(){
+		if($this->status == 100){
+			$this->bwf = 0;
+		}elseif($this->status < 25 || ($this->bwf & 24) > 0){
+			$this->cleanItems();
+			if(empty($this->hbn)) $this->hbn = $this->genHbn();
+			if(empty($this->pkg)) $this->pkg = 1;
+			if(empty($this->exm)) $this->exm = 'EXLV';
+			if(!empty($this->eitems) && $this->hasUnmappedGoods()) $this->mapGoods();
+			if(($this->bwf & 32) && $this->cnee->cnid_id > 0) $this->bwf = $this->bwf & (~ 32);
+			if($this->status < 18 && empty($this->eitems['g'])) $this->bwf = $this->bwf | 8;
+			if(($this->bwf & 8) == 0 && $this->value == 0) $this->sumValue();
+			if($this->status != 14){
+				$this->bwf = (!empty($this->cnee->name) && !empty($this->cnee->city) && !empty($this->cnee->postcode) && !empty($this->cnee->address))? $this->bwf & (~ 4) : $this->bwf | 4;
+				$this->bwf = empty($this->cnee->tel)? $this->bwf | 64 : $this->bwf & (~ 64);
+			}
+			if($this->status >= 12 && $this->status < 20) $this->checkInfoReady();
+			$this->checkHeld();
+		}elseif($this->status >= 25){
+			if($this->bwf & 128) $this->bwf = $this->bwf & (~ 128);
+		}
+
+		if($this->status == 20 && ($this->bwf & 32) > 0){
+			$d = CnID::model()->find('status = 20 AND bwf = 0 AND name = :n ORDER BY RAND()', [':n' => $this->cnee->name]);
+			$this->cnee->cnid_id = $d->id;
+			$this->cnee->save();
+			$this->bwf = $this->bwf & (~ 32);
+		}
+
+		if($this->id > 0){
+			$o = ExParcel::model()->findByPk($this->id);
+			$cln = [];
+			if($o->weight > 0 && $o->weight != $this->weight){
+				$cln[] = 'Weight changed from: '.$o->weight;
+			}
+			if($o->ref != $this->ref && !empty($o->ref)){
+				$cln[] = 'Ref changed from: '.$o->ref;
+			}
+			if(!empty($cln)) $this->custom_log_note = implode(', ', $cln);
+		}
+		return parent::beforeSave();
+	}
+
+	public function getStyp(){
+		return isset(self::$styps[$this->styp])? Yii::t(strtolower(__CLASS__), self::$styps[$this->styp]) : $this->styp;
+	}
+
+	public function getProds() {
+		$prods = '';
+		if (!empty($this->mdata['client_entry'])) {
+			$ce = $this->mdata['client_entry'];
+			if (!empty($ce['items']['g_zh'])) {
+				foreach ($ce['items']['g_zh'] as $item) {
+					$prods .= $item . ' ';
+				}
+			} else if (!empty($ce['items']['g'])) {
+				foreach ($ce['items']['g'] as $item) {
+					$prods .= $item . ' ';
+				}
+			}
+		} else if (!empty($this->eitems['g'])) {
+			foreach ($this->eitems['g'] as $item) {
+				$prods .= $item . ' ';
+			}
+		}
+		return (strlen($prods) > 15) ? (mb_substr($prods, 0, 15) . '..') : $prods;
+	}
+
+	public function genHbn(){
+		return (empty($this->mdata['pv'])? 'EAU' : 'EPV') . sprintf('%03s', $this->agent_id) . sprintf('%06s', $this->agent->getLabelNumber());
+	}
+
+	public function topTaiffItem(){
+		$itvs = [];
+		foreach($this->eitems['q'] as $i=>$q){
+				$itvs[$i] = $q * $this->eitems['t'][$i];
+		}
+		asort($itvs);
+		return array_pop(array_keys($itvs));
+	}
+
+	public function GzGoodsName($i, $s=false){
+		if(empty($this->eitems['type'][$i])) return false;
+		switch($this->eitems['type'][$i]){
+			case 'B':
+				$g = $this->eitems['b'][$i].'奶粉'.$this->eitems['m'][$i];
+			break;
+			case 'M':
+				$g = $s? '成人奶粉' : $this->eitems['b'][$i].'成人奶粉'.$this->eitems['m'][$i];
+			break;
+			default:
+				$g = $this->eitems['g'][$i];
+			break;
+		}
+
+		return $g;
+	}
+
+	public function GoodsNames($bgm = false, $j = ', ', $q = false){
+		if(empty($this->eitems['g'])) return 'EMPTY';
+		$gs = [];
+		foreach($this->eitems['g'] as $i => $g){
+			$gs[] = (($bgm)? $this->eitems['b'][$i].$g.$this->eitems['m'][$i] : $g).($q? '*'.$this->eitems['q'][$i]: '') ;
+		}
+
+		return implode($j, $gs);
+	}
+
+	public function goodsType(){
+		if(!empty($this->gtyp)) return $this->gtyp;
+		if(empty($this->eitems['type'])) return 'X';
+		$typs = array_unique($this->eitems['type']);
+		$typ = 'X';
+		switch(sizeof($typs)){
+			case 1:
+				$typ = array_pop($typs);
+			break;
+			case 2:
+				$typ = in_array('O', $typs)? 'X' : 'B';
+			break;
+		}
+		$this->gtyp = $typ;
+		return $typ;
+	}
+
+	public function getDvalue($poc = false){
+		if(!$poc){
+			if(empty($this->consol_id)) return $this->value;
+			$poc = $this->consol->poc;
+		}
+
+		if($poc == 'CNCS2') $poc = 'CNCSX';
+
+		$tv = 0;
+		if(empty($this->eitems['v'])) return false;
+
+		foreach($this->eitems['v'] as $gi=>$v){
+			if(!empty($this->eitems['pid'][$gi])){
+				$ep = ExProdb::model()->findByPk($this->eitems['pid'][$gi]);
+				$hs = trim(empty($ep->mdata['hs_'.$poc])? $this->eitems['hs'][$gi] : $ep->mdata['hs_'.$poc]);
+				if(!HsPoc::isActive($hs, $poc)){
+					$tv = 9999;
+					break;
+				}
+				/*if($poc == 'CNCAN'){
+					$v = 6.4 * $this->eitems['t'][$gi];
+				}elseif(in_array($poc, ['CNCA3', 'CNJMN'])){
+					$v = empty($ep->mdata['price_'.$poc])? $this->eitems['t'][$gi] : $ep->mdata['price_'.$poc];
+				}elseif(in_array($poc, ['CNKMG'])){
+					if($this->eitems['type'][$gi] != 'B'){
+						$v = 5 * floatval($this->eitems['t'][$gi]);
+					}else{
+						$v = 80;
+					}
+				}else
+				*/if(!empty($ep->mdata['price_'.$poc])){
+					$v = $ep->mdata['price_'.$poc];
+				}
+
+				if($poc == 'CNPEK' && $this->eitems['type'][$gi] == 'B'){ //PEK All B @180
+					$v = 180;
+				}
+
+				$exc = ExChannel::model()->find('code = :c', [':c' => $poc]);
+				$vr = HsPoc::getTariff($hs, $exc, $v, $ep->weight);
+				$v = $vr[0];
+			}else{
+				$hs = empty($this->eitems['hs'][$gi])?  '01010700' : $this->eitems['hs'][$gi];
+				switch($this->eitems['type'][$gi]){
+					case 'B':
+						$v = in_array($poc, ['CNCAN', 'CNPEK'])? 180 : 90;
+					break;
+					case 'M':
+						$v = 60;
+					break;
+					default:
+						$v = 40;
+						$hs = empty($this->eitems['hs'][$gi])?  '27000000' : $this->eitems['hs'][$gi];
+					break;
+				}
+			}
+
+			$tv += $v * floatval($this->eitems['q'][$gi]);
+		}
+		return $tv;
+	}
+
+	public function calTariff($poc = false, $cache = true){
+		if(!empty($this->mdata['accr_tariff']) && $cache) return $this->mdata['accr_tariff'];
+		if(!$poc){
+			if(empty($this->consol_id)) return $this->value * 0.1;
+			$poc = $this->consol->poc;
+		}
+
+
+		$exc = ExChannel::model()->find('code = :c', [':c' => $poc]);
+
+		$tv = 0;
+		if(empty($this->eitems['v'])) return $tv;
+		foreach($this->eitems['v'] as $gi=>$v){
+			if(!empty($this->eitems['pid'][$gi])){
+				$ep = ExProdb::model()->findByPk($this->eitems['pid'][$gi]);
+				$hs = trim(empty($ep->mdata['hs_'.$poc])? $ep->hs : $ep->mdata['hs_'.$poc]);
+				$v = empty($ep->mdata['price_'.$poc])? $ep->price : $ep->mdata['price_'.$poc];
+				$vr = HsPoc::getTariff($hs, $exc, $v, $ep->weight);
+				$tr = $vr[1];
+				$v = $vr[0];
+			}else{
+				$hs = empty($this->eitems['hs'][$gi])?  '01010700' : $this->eitems['hs'][$gi];
+				switch($this->eitems['type'][$gi]){
+					case 'B':
+						$v = $v < 90? $v : 180;
+					break;
+					case 'M':
+						$v = 50;
+					break;
+					default:
+						$v = 50;
+						$hs = empty($this->eitems['hs'][$gi])?  '27000000' : $this->eitems['hs'][$gi];
+					break;
+				}
+				$upr = HS::getUpr($hs);
+				$tr = !$upr? 0.15 : $upr['rate'];
+			}
+			
+			if($exc->mdata['dtype'] == 'bc') $tr = 0.12;
+			$tv += $tr * floatval($v) * floatval($this->eitems['q'][$gi]);
+		}
+
+		if($exc->mdata['dtype'] == 'cc') $tv = $tv > 50? $tv : 0;
+		$tv = round($tv * 100)/100;
+
+		//record
+		if(in_array($this->status, [90,99]) && $cache){
+			$this->mdata['accr_tariff'] = (string) $tv;
+			$this->updateMeta();
+		}
+
+		return $tv;
+	}
+
+	public function shipWeight($forcebm = false){
+		if($this->weight < 1) return $this->weight;
+		$gt = $this->goodsType();
+		$tq = empty($this->eitems['q'])? 1 : array_sum($this->eitems['q']);
+		if(floatval($this->wtck) > 0){
+			 if($this->wtck < $this->weight || !empty($this->agent->extra['wt_check'])) $this->weight = $this->wtck;
+		}
+
+		if(!empty($this->agent->extra['wt_check']) && $this->wtck > 0.01) $this->weight = $this->wtck;
+
+		$nw = $this->weight;
+		if($gt == 'B'){
+			if($tq < 3){
+				$nw = 1.2 * $tq;
+			}elseif($tq == 3){
+				$nw = 3.6;
+			}elseif($tq == 4){
+				$nw = 4.8;
+			}elseif($tq == 6){
+				$nw = 7.2;
+			}
+			if($forcebm && ($nw * 0.9) > $this->weight) $this->weight = $nw;
+		}elseif($gt == 'M'){
+			$nw = $tq * 1.1 + 0.2;
+			if($forcebm && ($nw * 0.9) > $this->weight) $this->weight = $nw;
+		}else{
+			$dt = round(($this->weight - floor($this->weight)) * 100);
+			if(($dt > 0 && $dt < 16) || ($dt > 50 && $dt < 66)){
+				return sprintf('%01.2f', round($this->weight * 100 - ($dt > 50? $dt - 50 : $dt)) / 100);
+			}
+		}
+		if(!empty($this->agent->extra['wt_check']) && $this->weight < $nw * 0.8) $this->weight = $nw;
+
+		return min($this->weight, $nw);
+	}
+
+	public function sumValue(){
+		$c = true;
+		$tv = 0;
+		$tdv = 0;
+		if(empty($this->eitems['v'])){
+			$c = false;
+		}else{
+			foreach($this->eitems['v'] as $i=>$v){
+				if(empty($v)){
+					$c = false;
+					break;
+				}
+				$tv += floatval($v);
+				$tdv += ($this->eitems['u'][$i] == '千克')?  floatval($this->eitems['t'][$i]) * floatval($this->eitems['w'][$i]) : floatval($this->eitems['t'][$i]) * floatval($this->eitems['q'][$i]);
+			}
+		}
+		if($c){
+			$this->value = $tv;
+			$this->tariff = $tdv;
+		}
+	}
+	
+	public function getColorCls(){
+		return $this->bwf > 0? 'red' : '';
+	}
+	
+	public function audVal(){
+		return empty($this->consol->exrate)? $this->value : round($this->value / $this->consol->exrate);
+	}
+
+	public function genWHD(){
+		if($this->weight < 2){
+			return array(15,15,20);
+		}elseif($this->weight < 3){
+			return array(30,15,20);
+		}elseif($this->weight < 4){
+			return array(45,15,20);
+		}elseif($this->weight < 5){
+			return array(30,30,20);
+		}else{
+			return array(45,30,20);
+		}
+	}
+
+	public function hasConnote($mid){
+		$r = ManiMap::model()->find("model = 'ExParcel' AND mani_id = :mid AND fid = :id", [':id' => $this->id, ':mid' => $mid]);
+		if(empty($r)) return false;
+		return $r->bwf & 1 > 0? 'Y' : '';
+	}
+
+	public function swapParcelSearch(){
+		$criteria=new CDbCriteria;
+		$criteria->with = 'cnee';
+		$criteria->compare('consol_id', 0);
+		$criteria->compare('t.status', 18);
+		$criteria->compare('t.odpt_id', $this->odpt_id);
+		$ctr2 = new CDbCriteria;
+		$ctr2->compare('cnee.cnid_id', $this->cnee->cnid_id);
+		$ctr2->compare('cnee.tel', $this->cnee->tel,'OR');
+		$ctr2->compare('cnee.address', $this->cnee->address,'OR');
+		$criteria->mergeWith($ctr2);
+		return new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+			'sort'=>array(
+				'defaultOrder'=>'t.bwf DESC, t.id DESC',
+			),
+			'pagination'=> false,
+		));
+	}
+
+	public function dupCount(){
+		$sql = 'SELECT count(s.id) AS c FROM addr a INNER JOIN shipment s on a.id = s.cnee_id WHERE s.type = 20 AND s.created < DATE_ADD(:c, INTERVAL 5 DAY) AND s.created > DATE_SUB(:c, INTERVAL 15 DAY) AND s.id != :id AND (a.cnid_no = :cno OR a.cnid_id = :cnid OR a.tel  = :t OR a.address = :a)';
+		return Yii::app()->db->createCommand($sql)->bindValues([':c' => $this->created, ':id' => $this->id, ':cno' => empty($this->cnee->cnid_no)? '-1' : $this->cnee->cnid_no, ':cnid' => empty($this->cnee->cnid_id)? '-1' : $this->cnee->cnid_id, ':t' => empty($this->cnee->tel)? '-1' : $this->cnee->tel, ':a' => empty($this->cnee->address)? '-1' : $this->cnee->address])->queryScalar();
+	}
+
+	public function cacheDupStat(){
+		$c = [];
+		$sql = 'SELECT a.cnid_id, count(s.id) AS c FROM addr a INNER JOIN shipment s on a.id = s.cnee_id WHERE s.status = 18 AND s.type = 20 GROUP BY a.cnid_id HAVING c > 1 ORDER BY c DESC';
+		$rs = Yii::app()->db->createCommand($sql)->queryAll();
+		foreach($rs as $r){
+			$c[0][$r['cnid_id']] = $r['c'] - 1;
+		}
+		
+		$sql = 'SELECT a.tel, count(s.id) AS c FROM addr a INNER JOIN shipment s on a.id = s.cnee_id WHERE s.status = 18 AND s.type = 20 GROUP BY a.tel HAVING c > 1 ORDER BY c DESC';
+		$rs = Yii::app()->db->createCommand($sql)->queryAll();
+		foreach($rs as $r){
+			$c[1][$r['tel']] = $r['c'] - 1;
+		}
+
+		$sql = 'SELECT a.address, count(s.id) AS c FROM addr a INNER JOIN shipment s on a.id = s.cnee_id WHERE s.status = 18 AND s.type = 20 GROUP BY a.address HAVING c > 1 ORDER BY c DESC';
+		$rs = Yii::app()->db->createCommand($sql)->queryAll();
+		foreach($rs as $r){
+			$c[2][$r['address']] = $r['c'] - 1;
+		}
+
+		Yii::app()->cache->set('ExParcelDupStat', $c, 300);
+
+		return $c;
+	}
+
+	public function getDupStat(){
+		$c = Yii::app()->cache->get('ExParcelDupStat');
+		if(empty($c)) $c = $this->cacheDupStat();
+		$t = [];
+		if(isset($c[0][$this->cnee->cnid_id])) $t[] = 'ID:<a href="#" class="flow_link" data-field="cnee_cnid" data-val="'.$this->cnee->cnid->no.'">'.$c[0][$this->cnee->cnid_id].'</a>';
+		if(isset($c[1][$this->cnee->tel])) $t[] = 'Tel:<a href="#" class="flow_link" data-field="cnee_tel" data-val="'.$this->cnee->tel.'">'.$c[1][$this->cnee->tel].'</a>';
+		if(isset($c[2][$this->cnee->address])) $t[] = 'Addr:<a href="#" class="flow_link" data-field="cnee_addr" data-val="'.$this->cnee->address.'">'.$c[2][$this->cnee->address].'</a>';
+
+		return implode(', ',$t);
+	}
+
+	public function createConsolSearch($consol = null, $exs=[]){
+		$criteria=new CDbCriteria;
+		$criteria->compare('consol_id', 0);
+		$criteria->compare('man_id',$this->man_id);
+		$criteria->compare('rec_id',$this->rec_id);
+		if(empty($consol)){
+			$criteria->compare('odpt_id',$this->odpt_id);
+		}else{
+			$criteria->compare('odpt_id',$consol->dpt_id);
+		}
+		$criteria->compare('t.status',$this->status);
+		$criteria->compare('t.type',$this->type);
+		$criteria->compare('hbn',$this->hbn,true);
+		$criteria->compare('ref',$this->ref,true);
+		$criteria->compare('t.state',$this->state,true);
+		$criteria->compare('t.postcode',$this->postcode,true);
+		if(!empty($exs)) $criteria->addNotInCondition("t.id", $exs);
+
+		$with = array('cnee');
+		if(!empty($this->agent_name)){
+			$with[] = 'agent';
+			$criteria->compare('agent.name',$this->agent_name,true);
+		}
+
+		if(!empty($this->cnee_name)){
+			$criteria->compare('cnee.name',$this->cnee_name,true);
+		}
+
+		if(!empty($this->cnor_name)){
+			$with[] = 'cnor';
+			$criteria->compare('cnor.name',$this->cnor_name,true);
+		}
+		$criteria->with = $with;
+		$criteria->group = 'cnee.cnid_id'; //filter by ID
+		$criteria->together = true;
+
+		$dp = new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+			'sort'=>array(
+				'defaultOrder'=>'t.id ASC',
+			),
+			'pagination'=>false,
+		));
+		$dd = $dp->data;
+		$ap = array();
+		$cpids = array();
+		$tels = array();
+		if(!empty($consol)){
+			foreach($consol->shipments as $p){
+				$ap[] = $p->cnee->FullAddress();
+				$cpids[] = $p->cnee->cnid_id;
+				$tels[] = $p->cnee->tel;
+			}
+		}
+
+		foreach($dd as $i=>$d){
+			//check same id
+			if(in_array($d->cnee->cnid_id, $cpids)){
+				unset($dd[$i]);
+				continue;
+			}
+
+			//check same tel
+			if(in_array($d->cnee->tel, $tels)){
+				unset($dd[$i]);
+				continue;
+			}
+
+			//check same address
+			$fa = $d->cnee->fullAddress();
+			if(in_array($fa, $ap)){
+				unset($dd[$i]);
+				continue;
+			}
+
+			/* similar_text too slow!
+			foreach($ap as $a){
+				$pct = 0;
+				similar_text($fa, $a, $pct);
+				if($pct == 100){
+					unset($dd[$i]);
+					break;
+				}
+			}
+			*/
+			$ap[] = $fa;
+			$tels[] = $d->cnee->tel;
+		}
+
+		sort($dd);
+		$dp->data = $dd;
+
+		return $dp;
+	}
+
+	public function search($pgn=true, $ps = 30, $ec = false, $defaultOrder = true,$isBackend = false){
+		if(!empty($this->ocpd)){
+			if(empty($ec)) $ec = new CDbCriteria;
+			if(is_array($ec->with)){
+				$ec->with[] = 'location';
+			}else{
+				$ec->with = empty($ec->with)? ['location'] : [$ec->with, 'location'];
+			}
+			if($this->ocpd == 'Y'){
+				$ec->addCondition('location.id > 0');
+			}elseif($this->ocpd == 'N'){
+				$ec->addCondition('location.id IS NULL');
+			}
+		}
+		if (!empty($this->prod)) {
+			if (empty($ec)) $ec = new CDbCriteria;
+			$ec->addCondition('meta like "%' . $this->prod . '%" or items like "%' . $this->prod . '%"');
+		}
+		return parent::search($pgn, $ps, $ec);
+	}
+		
+	public function get_icon(){
+		$r= ExImage::model()->find('hbn like :hbn',array(':hbn'=>"%".$this->hbn."%"));
+		if(!empty($r)){
+			return ($this->status > 18 || (!empty($this->cnee->address)&& !empty($this->cnee->name) && !empty($this->cnee->tel))	&& !empty($this->eitems['type']))? 1 : 2;
+		}else{
+			return ($this->status > 18 || (!empty($this->cnee->address)&& !empty($this->cnee->name) && !empty($this->cnee->tel) && !empty($this->eitems['type'])))? 3 : 4;
+		}
+	}
+
+	/**
+	 * JJ XY  declare value
+	 * XA XY2    broken: delivery fee*3
+	 *           lost: declare value;
+	 * XM BC     broken: declare value
+	 *            lost: declare value
+	 */
+	public function getPortClaimValue($type=Excrm::COMP_PORT_LOST){
+		$port= $this->consol->poc;
+		$value=0;
+		switch ($port){
+		   case  'CNJJI':     //晋江
+				 $value= $this->getDvalue(); 
+				break;
+		   case 'CNXI2': 
+		   case 'CNXIA'://西安；
+				 if($type= ExCrm::COMP_PORT_LOST){
+						$value= $this->getDvalue();
+				  }else if($type==Excrm::COMP_PORT_BROKEN){
+					  $value=$this->getAgentRate()[1]->perkg* $this->chargeWeight()*Currency::getExrate('',3)[0]*3;
+				  }
+				 break;
+		   case 'CNXMN':     //厦门
+				 $value= $this->getDvalue();
+				 break;
+		}
+		   return $value;
+	}
+}

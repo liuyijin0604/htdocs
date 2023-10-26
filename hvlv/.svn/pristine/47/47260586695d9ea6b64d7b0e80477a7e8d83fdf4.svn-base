@@ -1,0 +1,1324 @@
+<?php 
+class InvoiceService extends Service
+{
+	private $urlBase="https://os.toplogistics.com.au";
+	public function exportingInvoiceDiff()
+	{
+			$inv_file = empty($_FILES['inv_file']) ? [] : $_FILES['inv_file'];
+			$errors = [];
+			if (empty($inv_file['tmp_name'])) {
+				$errors[] = "Invalid Template";
+			} else {
+				if (preg_match('/csv/i', $inv_file['name'])) {
+					$xls = new oExcel('CSV');
+					$xls->load($inv_file['tmp_name']);
+					$data = $xls->getAll();
+				} else if (preg_match('/xlsx/i', $inv_file['name'])) {
+					$xls = new oExcel;
+					$xls->load($inv_file['tmp_name']);
+					$data = $xls->getAll();
+				} else if (preg_match('/xls/i', $inv_file['name'])) {
+					$xls = new oExcel('Excel5');
+					$xls->load($inv_file['tmp_name']);
+					$data = $xls->getAll();
+				}
+
+				if (empty($_POST['rate_option'])) {
+					$errors[] = "rate option is empty";
+				}
+				$head = $data[1];
+				// check format
+				$correct = false;
+				foreach ($data as $k => $line) {
+					yii::log(implode(',', $line), 'warning');
+					if (implode(',', $line) == 'Invoice No,Invoice Date,Customer,Created By,Label Number,RF,Con Id,Consignment Type,Charge Level,Charge Type,Weight,Parcel Weight (kg),Parcel Length (cm),Parcel Width (cm),Parcel Height (cm),Satchel Size,Date Issued,Pickup Date,Label Cost (Ex GST),Reference,Additional Notes,Pickup Street Address 1,Pickup Street Address 2,Pickup Town,Pickup Postcode,Destination Street Address 1,Destination Street Address 2,Destination Town,Destination  Postcode,Last Scan Desc,Last Scan Date') {
+						$correct = true;
+						$type = 1;
+						unset($data[$k]);
+						break;
+					}else if($line[3]=="Invoice No"&&$line[1]=="Customer")
+					{
+						$correct = true;
+						$type = 0;
+						unset($data[$k]);
+						break;
+					}else if($line[1]=="Country"&&$line[2]=="Label"&&$line[1]=="Country"&&$line[9]="Banked Courier"&&$line[27]=="New Price")
+					{
+						$correct = true;
+						$type = 2;
+						unset($data[$k]);
+						break;
+					}else if($line[2]=="Consignment No"&&$line[3]=="Receiver Postcode"&&$line[4]=="Billed Weight"&&$line[5]="Volume"&&$line[6]=="Fuel")
+					{
+						$correct = true;
+						$type = 3;
+						unset($data[$k]);
+						break;
+					}
+					unset($data[$k]);
+				}
+				if (!$correct) {
+					$errors[] = 'Invalid template file (Try "Save as .xlsx or .csv" in Excel)';
+				}
+
+				if(!empty($errors))
+				{
+					return $errors;
+				}
+
+				$errors = [];
+
+				$total = 0;
+				$ourTotal = 0;
+				$lines1 = [];
+				$lines2 = [];
+				$this->getFastwayInvoiceLines($data,$type,$lines1,$lines2,$errors);
+
+
+				return $this->exportDiffData($type,$lines1,$lines2,$errors,$head,$data);
+			}
+	}
+	private function exportDiffData($type,$lines1,$lines2,$errors,$head,$data)
+	{
+		if(in_array($type, [0,1,3]))
+		{
+			switch($type)
+			{
+				case 0:
+				case 1:
+					$name = 'Fastway';
+				case 3:
+					$name = 'TNT';
+			}
+			$xsl=new oExcel();
+			$i=1;
+			$xsl->addRow($i++, ['ref','invoice','postcode','weight',$name.' Cost','PCAE Cost','Diff']);
+			foreach ($lines1 as $key => $line) {
+				$xsl->addRow($i++, $line);
+			}
+
+			if(!empty($lines2))
+			{
+				$xsl->addRow($i++, []);
+				$xsl->addRow($i++, ["Empty In Consol"]);
+				$xsl->addRow($i++, []);
+				foreach ($lines2 as $key => $line) {
+					$xsl->addRow($i++, $line);
+				}
+			}
+			$tempfile = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.'invoice_diff_export.xlsx';
+			$xsl->output($tempfile, null, false);
+			return [1,$errors];
+		}else
+		{
+			$xsl=new oExcel();
+			$i=1;
+			$head[] = 'Customer Weight';
+			$head[] = 'Manifest Weight';
+			$head[] = 'Is Cubic Weight';
+			$head[] = 'Calculated Cubic Weight';
+			$head[] = 'Calculated Cubic Cost';
+			$head[] = 'Weight Cost';
+			$head[] = 'Diff-Weight Cost VS Sys Price';
+			$head[] = 'Manifest Weight Cost';
+			$head[] = 'Manifest Weight Cost VS Sys Price';
+			$xsl->addRow($i++, $head);
+			foreach ($data as $key => $line) {
+				if(empty($line[2])) continue;
+				$thisLine = $line;
+				$thisLine[12] = gmdate("Y/m/d H:i", intval(($line[12] - 25569) * 3600 * 24));
+				$thisLine[] = $lines1[$line[2]][1];
+				$thisLine[] = $lines1[$line[2]][2];
+				$thisLine[] = $lines1[$line[2]][4];
+				$thisLine[] = $lines1[$line[2]][3];
+				$thisLine[] = $lines1[$line[2]][5];
+				$thisLine[] = $lines1[$line[2]][6];
+				$thisLine[] = $lines1[$line[2]][7];
+				$thisLine[] = $lines1[$line[2]][8];
+				$thisLine[] = $lines1[$line[2]][9];
+				$xsl->addRow($i++, $thisLine);
+			}
+
+			$tempfile = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.'invoice_diff_export.xlsx';
+			$xsl->output($tempfile, null, false);
+			return [1,$errors];
+		}
+	}
+
+
+	private function getFastwayInvoiceLines($data,$type,&$lines1,&$lines2,&$errors)
+	{
+		if($type!=2)
+		{
+			foreach ($data as $k => $line) 
+			{
+				if($type==0)
+				{
+					$no = $line[2];
+					$invoice = $line[3];
+				}else if($type ==1)
+				{
+					$no = $line[5];
+					$invoice = $line[1];
+				}else if($type == 3)
+				{
+					$no = $line[2];
+					$invoice = $line[1];
+				}
+
+				if (empty($no)) {
+					continue;
+				}
+
+				if($type==0)
+				{
+					if (!empty($line[6])) {
+						$weight = $line[6];
+					} else {
+						$errors[] = $no.'line ' . $k . ' column 12, weight is empty';
+						continue;
+					}
+		
+				}else if($type==1)
+				{
+					if (!empty($line[12])) {
+						$weight = $line[12];
+					} else if (preg_match('/300GM/i', $line[16])) {
+						$weight = 0.3;
+					} else {
+						$errors[] = $no.'line ' . $k . ' column 12, weight is empty';
+						continue;
+					}
+					if (empty($line[19])) {
+						$errors[] = $no. 'line ' . $k . ' column 19, value is empty';
+						continue;
+						// $this->ajaxResult($model);
+					}
+				}else if($type==3)
+				{
+					if (!empty($line[4])) {
+						$weight = $line[4];
+					}else{
+						$errors[] = $no. 'line ' . $k . ' column 19, value is empty';
+						continue;
+						// $this->ajaxResult($model);
+					}
+				}
+
+				$shipment = ImParcel::model()->find('ref = :ref', [':ref' => $no]);
+				if($type==0)
+				{
+
+					$value = floatval($line[10]);
+					$postcode = $line[19];
+					$org_rate_id = $_POST['rate_option'];
+				}else if($type==1)
+				{
+					$value = floatval($line[19]);
+					$postcode = $line[29];
+					$org_rate_id = $_POST['rate_option'];
+				}else if($type==3)
+				{
+					$value = floatval($line[7]);
+					$postcode = @$shipment->cnee->postcode;
+					$org_rate_id = ImportChargeCode::TNT_SYDNEY_ID;
+					if (preg_match("/PCD\d{9}/", $no)) {
+						$org_rate_id = ImportChargeCode::TNT_MELBOURNE_ID;
+					}
+				}
+
+				$ourRated = Shipment::getCourierCostByShipment($no,$org_rate_id,$weight);
+				// add real cost to the shipment
+				$manifest_weight = $cust_check_weight = $chargevalue = $our_charge_weight = 0;
+				if (!empty($shipment)) {
+					$ourRate['consol_id'] = $shipment->consol_id;
+					$manifest_weight = isset($shipment->mdata['manifest_weight']) ? floatval($shipment->mdata['manifest_weight']) : 0;
+					$cust_check_weight = $shipment->weight;
+					$our_charge_weight = floatval(isset($shipment->mdata['charge_client_weight']) ? $shipment->mdata['charge_client_weight'] : $shipment->chargeWeight());
+					$chargevalue = number_format($shipment->getCouiercost(), 2, '.', '');
+				}
+				if(empty($shipment->consol_id))
+				{
+					$lines2[] = [$no, $invoice, $postcode, $weight, $value, $ourRated['price'], ($value-$ourRated['price'])];
+				}else
+				{
+					$lines1[] = [$no, $invoice, $postcode, $weight, $value, $ourRated['price'], ($value-$ourRated['price'])];
+				}
+			}
+		}
+		if($type==2)
+		{
+			//***********************************type = 2 declare *******************************//
+			foreach ($data as $k => $line) 
+			{
+				if($type==2)
+				{
+					$no = $line[2];
+				}
+				if (empty($no)) {
+					continue;
+				}
+
+				if($type==2)
+				{
+
+					$value = floatval($line[27]);
+					$postcode = $line[39];
+				}
+				$weight = $line[22];
+				$calculatedWeight = round(($line[23]*$line[24]*$line[25])*0.000001*250,2);
+				$ourRated = Shipment::getCourierCostByShipment($no, $_POST['rate_option'],$calculatedWeight);
+				$ourRatedWeight = Shipment::getCourierCostByShipment($no, $_POST['rate_option'],$weight);
+				$manifestWeightCost =  Shipment::getCourierCostByShipment($no, $_POST['rate_option'],@$shipment->mdata['manifest_weight']);
+				$isPao = (round($ourRated['price'],2)==$line[27])?"Yes":"No";
+				if (empty($ourRated['price'])) {
+					$errors[] =' calculated price is empty';
+					$isPao = '';
+				}
+
+
+				$shipment = ImParcel::model()->find('ref = :ref', [':ref' => $no]);
+				$lines1[$no] = [$no, @$shipment->weight,@$shipment->mdata['manifest_weight'],$calculatedWeight,$isPao,$ourRated['price'],$ourRatedWeight['price'],$ourRatedWeight['price']-$line[19],$manifestWeightCost['price'],$manifestWeightCost['price']-$line[19]];
+
+			}
+		}
+
+	}
+
+	public function createContainerPickupBookingInvoice($booking,$isPayWithAccountCode = false)
+	{
+		$invoice = Invoice::model()->findByAttributes(['no' => $booking->booking_number]);
+		if (empty($invoice)){
+			$invoice = new Invoice();
+			switch (substr($booking->booking_number, 0, 1)) {
+				case "S":
+				case "s":
+					$invoice->dpt_id = 106;	// TLA SYD
+					break;
+				case "M":
+				case "m":
+					$invoice->dpt_id = 218;	// TLA MEL
+					break;
+				case "B":
+				case "b":
+					$invoice->dpt_id = 530; // TLA BNE
+					break;
+			}
+			$shipment = ImParcel::model()->findByPk($booking->shipment_id);
+			$invoice->mdata['delivery_method'] = 2;
+			$invoice->mdata['container_info']=(!empty($shipment->consol->mdata['container_no'])?$shipment->consol->mdata['container_no']:'').'-'.(!empty($shipment->consol->mdata['sea_type'])?DmawbConsol::$containerTypes[$shipment->consol->mdata['sea_type']]:'').'-'.(!empty($shipment->consol->mdata['cargo_type'])?$shipment->consol->mdata['cargo_type']:'');
+			$name = $booking->company_name;
+			if($isPayWithAccountCode)
+			{
+				$sellRate = SellRate::findImCode($booking->mdata['account_code']);
+				$invoice->status = Invoice::INVOICE_STATUS_PENDING;
+				$invoice->to_id = $sellRate->org_id;
+				$name = $sellRate->org->name;
+			}else
+			{
+				$invoice->to_id = Org::ORGID_IMPORT_CASUAL_CUSTOMER;
+				$invoice->status = Invoice::INVOICE_STATUS_PENDING_PAID;
+				$invoice->bflag = Invoice::INVOICE_FLAG_PAYPAL;
+			}
+			$invoice->mdata['awb'] = $shipment->consol->awb;
+			$invoice->consol_id = $shipment->consol->id;
+			$invoice->pid = $shipment->id;
+			$invoice->dpmt = Invoice::DPMT_IMPORT;
+			$invoice->type = Invoice::INVOICE_TYPE_PICKUPBOOKING;
+			$invoice->currency = Invoice::CURRENCY_AUD;
+			$invoice->no = $booking->booking_number;
+			$invoice->date = date('Y-m-d');
+			$invoice->due = date('Y-m-d');
+			$invoice->posted = date('Y-m-d');
+			$invoice->gst =  number_format((float)$booking->fee * 0.1, 2, '.', '');
+			$invoice->total = $booking->fee+$invoice->gst;
+			if(!$isPayWithAccountCode)
+			{
+				$invoice->is_paypal = 2;
+			}
+			$invoice->sync_xero = 0;
+			$invoice->mdata['name'] = $name;
+			$invoice->mdata['address'] = " ";
+			$invoice->save();
+		}	
+	}
+
+	public function createContainerPickupBookingInvoiceMultiple($pb,$isPayWithAccountCode = false)
+	{
+		if($pb->total<0.0001) return false;
+
+		$invoice = Invoice::model()->findByAttributes(['no' => $pb->submit_no]);
+		if (empty($invoice)){
+			$invoice = new Invoice();
+			switch (substr($pb->submit_no, 0, 1)) {
+				case "S":
+				case "s":
+					$invoice->dpt_id = 106;	// TLA SYD
+					break;
+				case "M":
+				case "m":
+					$invoice->dpt_id = 218;	// TLA MEL
+					break;
+				case "B":
+				case "b":
+					$invoice->dpt_id = 530; // TLA BNE
+					break;
+			}
+			$booking = $pb->booking[0];
+			$shipment = ImParcel::model()->findByPk($booking->shipment_id);
+			$invoice->mdata['delivery_method'] = 2;
+			$invoice->mdata['container_info']=(!empty($shipment->consol->mdata['container_no'])?$shipment->consol->mdata['container_no']:'').'-'.(!empty($shipment->consol->mdata['sea_type'])?DmawbConsol::$containerTypes[$shipment->consol->mdata['sea_type']]:'').'-'.(!empty($shipment->consol->mdata['cargo_type'])?$shipment->consol->mdata['cargo_type']:'');
+			$name = $booking->company_name;
+			if($isPayWithAccountCode)
+			{
+				$sellRate = SellRate::findImCode($booking->mdata['account_code']);
+				$invoice->status = Invoice::INVOICE_STATUS_PENDING;
+				$invoice->to_id = $sellRate->org_id;
+				$name = $sellRate->org->name;
+			}else
+			{
+				$invoice->to_id = Org::ORGID_IMPORT_CASUAL_CUSTOMER;
+				$invoice->status = Invoice::INVOICE_STATUS_PENDING_PAID;
+				$invoice->bflag = Invoice::INVOICE_FLAG_PAYPAL;
+			}
+			$invoice->mdata['awb'] = $shipment->consol->awb;
+			$invoice->consol_id = $shipment->consol->id;
+			$invoice->pid = $shipment->id;
+			$invoice->dpmt = Invoice::DPMT_IMPORT;
+			$invoice->type = Invoice::INVOICE_TYPE_PICKUPBOOKING;
+			$invoice->currency = Invoice::CURRENCY_AUD;
+			$invoice->no = $pb->submit_no;
+			$invoice->date = date('Y-m-d');
+			$invoice->due = date('Y-m-d');
+			$invoice->posted = date('Y-m-d');
+			foreach ($pb->booking as $key => $booking) {
+				$invoice->gst +=  number_format((float)$booking->fee * 0.1, 2, '.', '');
+				$invoice->total +=  number_format((float)$booking->fee+((float)$booking->fee * 0.1), 2, '.', '');
+			}
+			if(!$isPayWithAccountCode)
+			{
+				$invoice->is_paypal = 2;
+			}
+			$invoice->sync_xero = 0;
+			$invoice->mdata['name'] = $name;
+			$invoice->mdata['address'] = " ";
+			$invoice->save();
+			return true;
+		}
+		return false;
+	}
+
+	public function createCargoBookingInvoice($booking)
+	{
+		$shipment = ImParcel::model()->findByPk($booking->shipment_id);
+		$invoice = Invoice::model()->findByPk(@$booking->mdata['invoiceId']);
+		if (empty($invoice)){
+			$invoice = new Invoice('create');
+			switch ($booking->depot) {
+				case 106:
+					$invoice->dpt_id = 106;	// TLA SYD
+					break;
+				case 218:
+					$invoice->dpt_id = 218;	// TLA MEL
+					break;
+				case 530:
+					$invoice->dpt_id = 530; // TLA BNE
+					break;
+				case 811:
+					$invoice->dpt_id = 811; // TLA PER
+					break;
+			}
+			$invoice->mdata['delivery_method'] = 2;
+			$invoice->mdata['container_info']=(!empty($shipment->consol->mdata['container_no'])?$shipment->consol->mdata['container_no']:'').'-'.(!empty($shipment->consol->mdata['sea_type'])?DmawbConsol::$containerTypes[$shipment->consol->mdata['sea_type']]:'').'-'.(!empty($shipment->consol->mdata['cargo_type'])?$shipment->consol->mdata['cargo_type']:'');
+			$org = Org::model()->findByPk($booking->org_id);
+			$name = !empty($org)?$org->name:'';
+			
+			$invoice->to_id = $booking->org_id;
+			$invoice->status = Invoice::INVOICE_STATUS_PENDING;
+			//$invoice->bflag = Invoice::INVOICE_FLAG_PAYPAL;
+			$invoice->mdata['awb'] = $shipment->consol->awb;
+			$invoice->consol_id = $shipment->consol->id;
+			$invoice->pid = $shipment->id;
+			$invoice->dpmt = Invoice::DPMT_COURIER_SERVICE;
+			$invoice->type = Invoice::INVOICE_TYPE_OTHERS;
+			$invoice->currency = Invoice::CURRENCY_AUD;
+			$invoice->sent = 0;
+			
+			$invoice->date = date('Y-m-d');
+			$invoice->due = date('Y-m-d');
+			$invoice->posted = date('Y-m-d');
+			$invoice->gst =  number_format((float)$booking->fee * 0.1, 2, '.', '');
+			$invoice->total = number_format((float)$booking->fee * 1.1, 2, '.','');
+			$invoice->sync_xero = 0;
+			$invoice->save();
+			$invoice->mdata['name'] = $name;
+			$invoice->mdata['awb'] = $shipment->consol->awb;
+			$invoice->mdata['address'] = $invoice->cust->getAddress();
+			$invoice->mdata['payterm'] = empty($invoice->cust->extra['payterm']) ? 'COD' : $invoice->cust->extra['payterm'] . ' days';
+			$invoice->save();
+			return $invoice->id;
+		}	
+	}
+
+	public function printInvoice($id)
+	{
+		if(!empty($_GET['xls']))
+		{
+			$model = Invoice::model()->findByPk($id);
+			$model->exportExcelInvoice();
+		}else if (!empty($_GET['inv_b']))
+		{
+			$model = Invoice::model()->findByPk($id);
+			$model->exportExcelInvoiceB();
+		}else
+		{
+			$model = Invoice::model()->findByPk($id);
+			if ($model->type != 60)
+			{
+				$d = ['inv' => $model];
+				if (!empty($_GET['obh']))
+				{
+					switch ($model->to_id) {
+						case 1084:
+							$d['behalf'] = 'priority';
+							break;
+					}
+				}
+				if (in_array($model->to_id, Org::$displayJobRef) && !empty($model->job->mdata['ref']))
+				{
+					$no = $model->job->mdata['ref'];
+				} else {
+					$no = $model->no;
+				}
+				oPDF::renderPDF('invoice', $d, 1, 'Invoice_' . $no . '.pdf');
+			}else
+			{
+				$ps = [];
+				$f1 = tempnam(Yii::app()->basePath . "/runtime", "ivp");
+				$f2 = tempnam(Yii::app()->basePath . "/runtime", "ivp");
+				oPDF::renderPDF('invoice', ['inv' => $model], 2, $f1);
+				oPDF::renderPDF('invoice_detail', ['inv' => $model], 2, $f2);
+				$ps = [$f1, $f2];
+				if ($model->to_id == 1457) {
+					$f3 = tempnam(Yii::app()->basePath . "/runtime", "ivp");
+					oPDF::renderPDF('stock_detail', ['inv' => $model], 2, $f3);
+					$ps[] = $f3;
+				}
+				oPDF::mergePDF($ps, 1, true, 'Invoice_' . $model->no . '.pdf');
+			}
+		}
+	}
+
+
+	public function createPaypallink($invoiceId){
+		$data = ["invoice_id"=>$invoiceId];
+		$paylink = $this->urlBase . '/payInvoice/paypal.app?token=';
+		$iv = str_repeat("\x00", openssl_cipher_iv_length('AES-256-CBC'));
+		$token = base64_encode(openssl_encrypt(json_encode($data), 'AES-128-CBC', md5(PoliPaymentApi::PAYLINK_KEY), 0, $iv));
+		$paylink .= trim($this->safe_b64encode($token));
+		return $paylink;
+	}
+
+	public function importExcelInv($file,$invoiceDate,$orgId)
+	{
+
+		$data = $this->getFileData($file);
+		if(empty($data))
+		{
+			return ["done"=>false,"msg"=>'Invalid Template'];
+		}
+		$data = $data[0];
+		$model = new Invoice('create');
+		$model->type = Invoice::INVOICE_TYPE_OTHERS;
+		$model->currency = 1;
+
+		unset($data[1]);
+		$dpmt = Invoice::INVOICE_TYPE_IMPORT;
+		$model->status = 1;
+		$model->dpmt = Invoice::INVOICE_TYPE_IMPORT;
+		$model->dpt_id = Org::TLA_DEPARTMENT_SYDNEY;
+		$model->to_id = $orgId;
+		$model->date = $invoiceDate;
+		$model->due = $invoiceDate;
+		$model->save();
+		$total = 0;
+		$tgst = 0;
+		foreach ($data as $i => $a) {
+			if(!empty($a[3])){
+				$il = new InvLine;
+				$il->inv_id = $model->id;
+				$il->ccode = "83000";
+				$il->det = $a[1];
+				$il->tax = (($a[6]>0)?"OUTPUT":"EXEMPTOUTPUT");
+				$il->rebate =0;
+				$il->amount = $a[4];
+				$gst = 0;
+				if ($il->tax == 'OUTPUT') {
+					$gst = floatval($il->amount) * 10 / 100;
+				}
+				$il->amount += $gst;
+				$il->gst = $gst;
+				$il->qty = $a[3];
+				$il->save();
+				$total += $il->amount * $il->qty;
+				$tgst += $il->gst * $il->qty;
+			}
+		}
+		$model->total = number_format($total, 2, '.', '');
+		$model->gst = number_format($tgst, 2, '.', '');
+		$model->mdata['name'] = $model->cust->name;
+		$model->mdata['address'] = $model->cust->getAddress();
+		$model->mdata['payterm'] = empty($model->cust->extra['payterm']) ? 'COD' : $model->cust->extra['payterm'] . ' days';
+		if($model->save())
+		{
+			$model->refresh();
+			return ["done"=>true,"msg"=>'Imported Invoice'.$model->no];
+		}
+		print_r($model->getErrors());
+		return ["done"=>false,"msg"=>''];
+	}
+
+	public function importInboundTransaction($file)
+	{
+		$data = $this->getFileData($file);
+		$res = new stdClass;
+		if (empty($data)) {
+			$res->success = false;
+			$res->msg = 'Invalid File';
+			return $res;
+		}
+		return $data;
+	}
+
+	public function processInboundTransaction($data, $dateFrom, $dateTo)
+	{
+		$res = new stdClass;
+		$res->data = [];
+		$res->errMsg = [];
+
+		if (!empty($data)) {
+			for ($i = 2; $i <= count($data[0]); $i++) {
+				$transaction = $data[0][$i];
+				$bookingNumber = $transaction['1'];
+				$bookingDate = $transaction['2'];
+				$bookingDate = str_replace('/', '-', $bookingDate);
+				$bookingDate = date('Y-m-d', strtotime($bookingDate));
+				$dateFrom = date('Y-m-d', strtotime($dateFrom));
+				$dateTo = date('Y-m-d', strtotime($dateTo));
+				$containerNum = $transaction['3'];
+				$isPaid = $transaction['5'];
+				$amount = floatval($transaction['9']) * 0.7;
+				$consolNo = !empty($transaction['10']) ? $transaction['10'] : '';
+				$bookingData = new stdClass;
+				if ($isPaid == 'FALSE'||$isPaid == 'false' || $amount == 0 || $bookingDate < $dateFrom || $bookingDate > $dateTo) {
+					continue;
+				}
+
+				if (!empty($bookingNumber)) {
+					$booking = PickupBooking::model()->findByAttributes(['booking_number' => $bookingNumber]);
+					// Error handling
+					if (empty($booking)) {
+						if (!empty($containerNum)) {
+							$consol = Consol::model()->findByAttributes(['container_no' => $containerNum]);
+							if (empty($consol)) {
+								if (empty($consolNo) || $consolNo == '') {
+									$res->errMsg[$bookingNumber] = "Booking " . $bookingNumber . " not found, please insert a consol number at row " . $i . " column J.";
+									continue;
+								} else {
+									$consol = Consol::model()->findByAttributes(['no' => $consolNo]);
+									if (empty($consol)) {
+										$res->errMsg[$bookingNumber] = "Consol number at row " . $i . " column J incorrect, please check your input.";
+										continue;
+									}
+								}
+							}
+							if (array_key_exists($consol->no, $res->data)) {
+								$bookingData->bookingNumber = $bookingNumber;
+								$bookingData->amount = $amount;
+								array_push($res->data[$consol->no], $bookingData);
+							} else {
+								$tempArr = [];
+								$bookingData->bookingNumber = $bookingNumber;
+								$bookingData->amount = $amount;
+								array_push($tempArr, $bookingData);
+								$res->data[$consol->no] = $tempArr;
+							}
+						}
+					} else {
+						if ($booking->status == PickupBooking::INBOUND_ERROR) {
+							if (empty($consolNo) && empty($containerNum)) {
+								$res->errMsg[$bookingNumber] = "Booking " . $bookingNumber . " has error, please insert a consol number at row " . $i . " column J.";
+								continue;
+							} else {
+								if (empty($consolNo)) {
+									$consol = Consol::model()->findByAttributes(['container_no' => $containerNum]);
+									if (empty($consol)) {
+										$res->errMsg[$bookingNumber] = "Booking " . $bookingNumber . " has error, please insert a consol number at row " . $i . " column J.";
+										continue;
+									}
+								} else {
+									$consol = Consol::model()->findByAttributes(['no' => $consolNo]);
+									if (empty($consol)) {
+										$res->errMsg[$bookingNumber] = "Booking " . $bookingNumber . " has error, please check input consol number at row " . $i . " column J.";
+										continue;
+									}
+								}
+								if (array_key_exists($consol->no, $res->data)) {
+									$bookingData->bookingNumber = $bookingNumber;
+									$bookingData->amount = $amount;
+									array_push($res->data[$consol->no], $bookingData);
+								} else {
+									$tempArr = [];
+									$bookingData->bookingNumber = $bookingNumber;
+									$bookingData->amount = $amount;
+									array_push($tempArr, $bookingData);
+									$res->data[$consol->no] = $tempArr;
+								}
+							}
+						} else {
+							if (!empty($booking->shipment_id)) {
+								$shipment = ImParcel::model()->findByPk($booking->shipment_id);
+								if (!empty($shipment)) {
+									$consol = Consol::model()->findByPk($shipment->consol_id);
+									if (!empty($consol)) {
+										if (array_key_exists($consol->no, $res->data)) {
+											$bookingData->bookingNumber = $bookingNumber;
+											$bookingData->amount = $amount;
+											array_push($res->data[$consol->no], $bookingData);
+										} else {
+											$tempArr = [];
+											$bookingData->bookingNumber = $bookingNumber;
+											$bookingData->amount = $amount;
+											array_push($tempArr, $bookingData);
+											$res->data[$consol->no] = $tempArr;
+										}
+									} else {
+										if (empty($consolNo) && empty($containerNum)) {
+											$res->errMsg[$bookingNumber] = "Booking " . $bookingNumber . " has error, please insert a consol number at row " . $i . " column J.";
+											continue;
+										} else {
+											if (!empty($containerNum)) {
+												$consol = Consol::model()->findByAttributes(['container_no' => $containerNum]);
+											}
+											if (empty($consol) && !empty($consolNo)) {
+												$consol = Consol::model()->findByAttributes(['no' => $consolNo]);
+											}
+
+											if (empty($consol)) {
+												$res->errMsg[$bookingNumber] = "Booking " . $bookingNumber . " has error, please insert a consol number at row " . $i . " column J.";
+												continue;
+											} else {
+												if (array_key_exists($consol->no, $res->data)) {
+													$bookingData->bookingNumber = $bookingNumber;
+													$bookingData->amount = $amount;
+													array_push($res->data[$consol->no], $bookingData);
+												} else {
+													$tempArr = [];
+													$bookingData->bookingNumber = $bookingNumber;
+													$bookingData->amount = $amount;
+													array_push($tempArr, $bookingData);
+													$res->data[$consol->no] = $tempArr;
+												}
+											}
+										}
+									}
+								} else {
+									if (empty($consolNo) && empty($containerNum)) {
+										$res->errMsg[$bookingNumber] = "Booking " . $bookingNumber . " has error, please insert a consol number at row " . $i . " column J.";
+										continue;
+									} else {
+										if (!empty($containerNum)) {
+											$consol = Consol::model()->findByAttributes(['container_no' => $containerNum]);
+										}
+										if (empty($consol) && !empty($consolNo)) {
+											$consol = Consol::model()->findByAttributes(['no' => $consolNo]);
+										}
+
+										if (empty($consol)) {
+											$res->errMsg[$bookingNumber] = "Booking " . $bookingNumber . " has error, please insert a consol number at row " . $i . " column J.";
+											continue;
+										} else {
+											if (array_key_exists($consol->no, $res->data)) {
+												$bookingData->bookingNumber = $bookingNumber;
+												$bookingData->amount = $amount;
+												array_push($res->data[$consol->no], $bookingData);
+											} else {
+												$tempArr = [];
+												$bookingData->bookingNumber = $bookingNumber;
+												$bookingData->amount = $amount;
+												array_push($tempArr, $bookingData);
+												$res->data[$consol->no] = $tempArr;
+											}
+										}
+									}
+								}
+							}
+						}
+						if (isset($booking->mdata['additionalCharges'])) {
+							$additionalCharges = $booking->mdata['additionalCharges'];
+							$j = 0;
+							foreach ($additionalCharges as $additionalCharge) {
+								$storageData = new stdClass;
+								if ($additionalCharge['storage_paid'] == 1 && $additionalCharge['storage_cancelled'] == 0 && empty($additionalCharge['storage_invoiced'])) {
+									if (array_key_exists($consol->no, $res->data)) {
+										$storageData->bookingNumber = $bookingNumber.'AC'.$j;
+										$storageData->amount = $additionalCharge['storage_total_including_tax'] - $additionalCharge['storage_commission'] * 1.1;
+										array_push($res->data[$consol->no], $storageData);
+									} else {
+										$tempArr = [];
+										$storageData->bookingNumber = $bookingNumber.'AC'.$j;
+										$storageData->amount = $additionalCharge['storage_total_including_tax'] - $additionalCharge['storage_commission'] * 1.1;
+										array_push($tempArr, $storageData);
+										$res->data[$consol->no] = $tempArr;
+									}
+									$j++;
+								}
+							}
+						}
+					}
+				}
+			}
+
+
+			/**
+			 * Handle bookings that have additional charges and booking time is on next month and create date is on this month,
+			 * only keep their additional charges in this month's invoices
+			 */
+			$prefix = '';
+			for ($i = 2; $i <= count($data[0]); $i++) {
+				$transaction = $data[0][$i];
+				$bookingNumber = $transaction['1'];
+				if (!empty($bookingNumber)) {
+					$prefix = substr($bookingNumber, 0, 3);
+					break;
+				}
+			}
+			$nextMonthStart = date('Y-m-d H:i:s', strtotime($dateTo . "+1 day"));
+			$sql = 'SELECT * FROM pickup_booking WHERE booking_time >= "' . $nextMonthStart .  '" AND create_date < "' . $nextMonthStart . '" AND create_date >= "' . $dateFrom . '" AND booking_number LIKE "' . $prefix . '%"';
+			$nextMonthBookings = PickupBooking::model()->findAllBySql($sql);
+			$j = 0;
+			foreach ($nextMonthBookings as $booking) {
+				$shipment = ImParcel::model()->findByPk($booking->shipment_id);
+				if (empty($shipment) || empty($booking->shipment_id)) {
+					continue;
+				}
+				if (!empty($booking->mdata['additionalCharges'])) {
+					foreach ($booking->mdata['additionalCharges'] as $key => $additionalCharge) {
+						if (empty($additionalCharge['storage_paid']) || strtotime($additionalCharge['storage_paid_time']) >= strtotime($nextMonthStart) || !empty($additionalCharge['storage_cancelled']) || !empty($additionalCharge['storage_invoiced'])) {
+							continue;
+						} else {
+							$storageData = new stdClass;
+							if (array_key_exists($shipment->consol->no, $res->data)) {
+								$storageData->bookingNumber = $booking->booking_number.'AC'.$j;
+								$storageData->amount = $additionalCharge['storage_total_including_tax'] - $additionalCharge['storage_commission'] * 1.1;
+								array_push($res->data[$shipment->consol->no], $storageData);
+							} else {
+								$tempArr = [];
+								$storageData->bookingNumber = $booking->booking_number.'AC'.$j;
+								$storageData->amount = $additionalCharge['storage_total_including_tax'] - $additionalCharge['storage_commission'] * 1.1;
+								array_push($tempArr, $storageData);
+								$res->data[$shipment->consol->no] = $tempArr;
+							}
+							$booking->mdata['additionalCharges'][$key]['storage_invoiced'] = 1;
+							$j++;
+						}
+					}
+					$booking->save();
+				}
+			}
+		}
+
+		// Calculate total amount in file
+		$totalAmount = 0;
+		foreach ($res->data as $transactionGroup) {
+			foreach($transactionGroup as $t) {
+				$totalAmount += $t->amount;
+			}
+		}
+		$totalAmount += (count($res->errMsg) * 15.4);
+		$res->totalInFile = $totalAmount;
+		return $res;
+	}
+
+	public function createInboundBookingInvoice($data, $invDate)
+	{
+		$statisticsData = new stdClass;
+		$totalImported = 0;
+		$alreadyImported = 0;
+		if (!empty($data) && count($data) > 0) {
+			foreach ($data as $key => $value) {
+				$consol = Consol::model()->findByAttributes(['no' => $key]);
+				switch ($consol->dpt_id) {
+					case 106:
+						$sql = "SELECT * FROM invoice WHERE consol_id = " . $consol->id . " AND `no` LIKE 'IBS_" . $consol->no . "%' AND `status` NOT IN (9, 10)";
+						break;
+					case 218:
+						$sql = "SELECT * FROM invoice WHERE consol_id = " . $consol->id . " AND `no` LIKE 'IBM_" . $consol->no . "%' AND `status` NOT IN (9, 10)";
+						break;
+					case 530:
+						$sql = "SELECT * FROM invoice WHERE consol_id = " . $consol->id . " AND `no` LIKE 'IBB_" . $consol->no . "%' AND `status` NOT IN (9, 10)";
+						break;
+				}
+				$invoices = Invoice::model()->findAllBySql($sql);
+				foreach ($invoices as $oldInvoice) {
+					$alreadyImported += $oldInvoice->total;
+				}
+				switch ($consol->dpt_id) {
+					case 106:
+						$sql = "SELECT * FROM invoice WHERE consol_id = " . $consol->id . " AND `no` LIKE 'IBS_" . $consol->no . "%'";
+						break;
+					case 218:
+						$sql = "SELECT * FROM invoice WHERE consol_id = " . $consol->id . " AND `no` LIKE 'IBM_" . $consol->no . "%'";
+						break;
+					case 530:
+						$sql = "SELECT * FROM invoice WHERE consol_id = " . $consol->id . " AND `no` LIKE 'IBB_" . $consol->no . "%'";
+						break;
+				}
+				$allInvoices = Invoice::model()->findAllBySql($sql);
+				$invoice = new Invoice();
+				$invoice->dpt_id = $consol->dpt_id;
+				$invoice->to_id = Org::ORGID_CLIENT_INBOUND;
+				$invoice->status = Invoice::INVOICE_STATUS_PENDING;
+				$invoice->consol_id = $consol->id;
+				$invoice->dpmt = Invoice::DPMT_IMPORT;
+				$invoice->type = Invoice::INVOICE_TYPE_INBOUNDBOOKING;
+				$invoice->currency = Invoice::CURRENCY_AUD;
+				switch ($consol->dpt_id) {
+					case 106:
+						$invoice->no = 'IBS_' . $consol->no . '_' . (count($allInvoices) + 1);
+						break;
+					case 218:
+						$invoice->no = 'IBM_' . $consol->no . '_' . (count($allInvoices) + 1);
+						break;
+					case 530:
+						$invoice->no = 'IBB_' . $consol->no . '_' . (count($allInvoices) + 1);
+						break;
+				}
+				$invoice->date = date('Y-m-d', strtotime($invDate));
+				$invoice->due = date('Y-m-d', strtotime($invDate));
+				$invoice->posted = date('Y-m-d', strtotime($invDate));
+				$invoice->mdata['name'] = 'Inbound Technologies Pty Ltd';
+				$invoice->mdata['address'] = '';
+				$total = 0;
+				foreach ($value as $transaction) {
+					$invLineCheck = InvLineCheck::model()->findByAttributes(['booking_number' => $transaction->bookingNumber]);
+					if (!empty($invLineCheck)) {
+						$invoiceLine = InvLine::model()->findByPk($invLineCheck->inv_line_id);
+						if (!empty($invoiceLine)) {
+							$oldInvoice = Invoice::model()->findByPk($invoiceLine->inv_id);
+							if (!empty($oldInvoice) && $oldInvoice->status != Invoice::INVOICE_STATUS_CACELLED) {
+								continue;
+							} else {
+								$total += $transaction->amount;
+							}
+						} else {
+							$total += $transaction->amount;
+						}
+					} else {
+						$total += $transaction->amount;
+					}
+					//$sql = "SELECT * FROM inv_line WHERE meta LIKE '%\"booking\":\"" . $transaction->bookingNumber . "\"%'";
+					/* $invoiceLine = InvLine::model()->findBySql($sql);
+					if (!empty($invoiceLine)) {
+						continue;
+					} else {
+						$total += $transaction->amount;
+					} */
+				}
+				if ($total == 0) {
+					continue;
+				}
+				$invoice->total = $total;
+				$invoice->gst = number_format((float)($total - ($total/1.1)), 2, '.', '');
+				$invoice->sync_xero = 0;
+				if ($invoice->save()) {
+					$totalImported += $invoice->total;
+					foreach ($value as $transaction) {
+						$invLineCheck = InvLineCheck::model()->findByAttributes(['booking_number' => $transaction->bookingNumber]);
+						if (empty($invLineCheck)) {
+							$invoiceLine = new InvLine();
+							$invoiceLine->inv_id = $invoice->id;
+							$invoiceLine->model = 'ImcoConsol';
+							$invoiceLine->fid = 0;
+							$invoiceLine->ccode = 'Inbound Booking';
+							$invoiceLine->amount = number_format((float)$transaction->amount, 2, '.', '');
+							$invoiceLine->gst = number_format((float)($transaction->amount - ($transaction->amount/1.1)), 2, '.', '');
+							if (preg_match("/AC[0-9]+/", $transaction->bookingNumber)) {
+								$invoiceLine->det = preg_replace("/AC[0-9]+/", '', $transaction->bookingNumber) . ' Storage Fee';
+								$invoiceLine->mdata["booking"] = preg_replace("/AC[0-9]+/", '', $transaction->bookingNumber);
+							} else {
+								$invoiceLine->det = $transaction->bookingNumber . ' Booking Base Fee';
+								$invoiceLine->mdata["booking"] = $transaction->bookingNumber;
+							}
+							$invoiceLine->qty = 1;
+							$invoiceLine->save();
+							$invLineCheck = new InvLineCheck();
+							$invLineCheck->booking_number = $transaction->bookingNumber;
+							$invLineCheck->inv_line_id = $invoiceLine->id;
+							$invLineCheck->save();
+						} else {
+							$invoiceLine = InvLine::model()->findByPk($invLineCheck->inv_line_id);
+							if (!empty($invoiceLine)) {
+								$oldInvoice = Invoice::model()->findByPk($invoiceLine->inv_id);
+								if (empty($oldInvoice) || $oldInvoice->status == Invoice::INVOICE_STATUS_CACELLED) {
+									$invoiceLine = new InvLine();
+									$invoiceLine->inv_id = $invoice->id;
+									$invoiceLine->model = 'ImcoConsol';
+									$invoiceLine->fid = 0;
+									$invoiceLine->ccode = 'Inbound Booking';
+									$invoiceLine->amount = number_format((float)$transaction->amount, 2, '.', '');
+									$invoiceLine->gst = number_format((float)($transaction->amount - $transaction->amount/1.1), 2, '.', '');
+									if (preg_match("/AC[0-9]+/", $transaction->bookingNumber)) {
+										$invoiceLine->det = preg_replace("/AC[0-9]+/", '', $transaction->bookingNumber) . ' Storage Fee';
+										$invoiceLine->mdata["booking"] = preg_replace("/AC[0-9]+/", '', $transaction->bookingNumber);
+									} else {
+										$invoiceLine->det = $transaction->bookingNumber . ' Booking Base Fee';
+										$invoiceLine->mdata["booking"] = $transaction->bookingNumber;
+									}
+									$invoiceLine->qty = 1;
+									$invoiceLine->save();
+									$invLineCheck->booking_number = $transaction->bookingNumber;
+									$invLineCheck->inv_line_id = $invoiceLine->id;
+									$invLineCheck->save();
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		$statisticsData->totalImported = $totalImported;
+		$statisticsData->alreadyImported = $alreadyImported;
+		return $statisticsData;
+	}
+
+	public function importEmailForPaypal($email,$invoiceNo,$amount,$trn)
+	{
+		$amount = floatval($amount);
+		if(empty($invoiceNo)) return;
+		$inv = Invoice::model()->find("no = :no",[":no"=>$invoiceNo]);
+
+		if(!empty($inv)&&!in_array($inv->status, [1, 9, 10]))
+		{
+			$inv_bal = $inv->getBalance();
+			$paid_amount = $amount;
+			// create a payment
+			$payment = new Payment();
+			$payment->org_id = $inv->to_id;
+			$payment->amount = $paid_amount;
+			$payment->ref = 'Paypal TRN: ' . $trn;
+			$payment->date = date('Y-m-d');
+			$payment->ata = max($paid_amount - $inv_bal, 0);
+			$payment->type = Payment::PAYMENT_TYPE_PAYPAL; // default by ETF
+			$payment->currency = $inv->currency; // AUD
+			$payment->status = Payment::PAYMENT_STATUS_POSTED; // posted status ? paid finish?
+			if(!$payment->save())
+			{
+				Emailog::sendEmailTo('dev@toplogistics.com.au', $email->no.":Paypay Email Save Error"," Paypal Invoice error");
+			}
+
+			// link payment with invoice table
+			$pi = new PayInv();
+			$pi->inv_id = $inv->id;
+			$pi->pay_id = $payment->id;
+			$pi->amount = min($inv_bal, $paid_amount);
+			$pi->save();
+
+			// update invoice status
+			// status as :
+			// 7 - partially paid
+			// 9 - paid
+			$left = $inv_bal - $paid_amount;
+			if ($left <= 0.001) {
+				$inv->status = Invoice::INVOICE_STATUS_PAID;
+				Invoice::funcChangeAddress($inv);
+			} else {
+				$inv->status = Invoice::INVOICE_STATUS_PARTIALLY_PAID;
+			}
+			$inv->save();
+		}
+	}
+
+	public function createCGStorageInvoice($shipment, $start, $to, $days, $amount)
+	{
+		$invoice = new Invoice();
+		$invoice->type = Invoice::INVOICE_TYPE_CG_STORAGE;
+		$invoice->to_id = !empty($shipment->agent_id) ? $shipment->agent_id : Yii::app()->user->org;
+		$invoice->man_id = 0;
+		$invoice->dpt_id = $shipment->ddpt_id;
+		$invoice->dpmt = Invoice::DPMT_COURIER_SERVICE;
+		$invoice->pid = $shipment->id;
+		$invoice->date = date('Y-m-d');
+		$invoice->consol_id = $shipment->consol_id;
+		$invoice->job_id = 0;
+		$invoice->cg_order_id = 0;
+
+		// if department not set , we set as sydney warehouse
+		if ( empty($invoice->dpt_id) ) {
+			$invoice->dpt_id = Org::PCAE_DEPARTMENT_SYDNEY;
+		}
+		$invoice->status = Invoice::INVOICE_STATUS_PENDING;
+		$invoice->currency = 1; // default as AUD
+		if (!empty($shipment->agent_id)) {
+			$owner = Org::model()->findByPk($shipment->agent_id);
+		} else {
+			$owner = Org::model()->findByPk(Yii::app()->user->org);
+		}
+		$invoice->mdata['name'] = $owner->name;
+		$invoice->mdata['address'] = $owner->getAddress();
+		$invoice->mdata['payterm'] = empty($owner->extra['payterm']) ? '2 days' : $owner->extra['payterm'] . ' days';
+		$invoice->due = Invoice::calcDue($invoice->date, $invoice->mdata['payterm']);
+		$invoice->total = $amount * 1.1;
+		$invoice->gst = $amount * 0.1;
+		$invoice->save();
+
+		$invoiceLine = new InvLine();
+		$invoiceLine->inv_id = $invoice->id;
+		$invoiceLine->amount = $amount * 1.1;
+		$invoiceLine->gst = $amount * 0.1;
+		$invoiceLine->qty = 1;
+		$invoiceLine->tax = 'OUTPUT';
+		$items = array();
+		$items[] = array($shipment->consol->awb, $shipment->hbn, $shipment->getDesc(), $shipment->pkg, $shipment->weight, $shipment->cbm, $amount, $shipment->ref, 0, 0, $days, $start, $to);
+		$invoiceLine->mdata['items'] = $items;
+		$invoiceLine->save();
+	}
+
+	/**
+	 * remove special string for URL paramters
+	 * @param $string
+	 * @return mixed|string
+	 */
+	private function safe_b64encode($string)
+	{
+		$data = base64_encode($string);
+		$data = str_replace(['+', '/', '='], ['-', '_', ''], $data);
+		return $data;
+	}
+
+	public function createPalletRequestInvoice($pallet_request, $shipment)
+	{
+		$result = new stdClass;
+		// Calculate amount
+		$totalAmount = 0.00;
+		$minimum = 0.00;
+		$unitPrice = 0.00;
+		$quantity = 0;
+		$base = 0.00;
+		if (!empty($shipment->mdata['chargecode'])) {
+			if ($shipment->mdata['chargecode'] == '5066') {
+				// 4PX SYD sea consol, use entire container price 500.00
+				$totalAmount = 500.00;
+				$unitPrice = 500.00;
+				$quantity = 1;
+			} else {	// Others need to calculate price by pallets or weight
+				$chargecodeModel = ImportChargeCode::model()->findByAttributes(['chargecode' => $shipment->mdata['chargecode']]);
+				if (empty($chargecodeModel)) {
+					$result->success = false;
+					$result->message = 'Charge code cannot be found.';
+					return $result;
+				} else {
+					$sql = 'SELECT * FROM zone_map WHERE chargecode_id = ' . $chargecodeModel->id . ' AND pc_lo <= ' . $shipment->cnee->postcode . ' AND pc_hi >= ' . $shipment->cnee->postcode;
+					$zoneMap = ZoneMap::model()->findBySql($sql);
+					if (empty($zoneMap)) {
+						$result->success = false;
+						$result->message = 'Cnee postcode not in chargecode zone.';
+						return $result;
+					} else {
+						if (!empty($chargecodeModel->mdata['calculate_plt'])) {
+							// Calculate price by pallet
+							$zoneRate = ZoneRate::model()->findByAttributes(array('chargecode_id' => $chargecodeModel->id, 'zone_name' => $zoneMap->zone_name));
+							if (empty($zoneRate)) {
+								$result->success = false;
+								$result->message = 'Zone rate not set.';
+								return $result;
+							}
+							if (empty($shipment->mdata['amzon_pallet'])) {
+								$result->success = false;
+								$result->message = 'Shipment pallet is 0.';
+								return $result;
+							} else {
+								$base = $zoneRate->base;
+								$minimum = $zoneRate->minimum;
+								$unitPrice = $zoneRate->item;
+								$quantity = $shipment->mdata['amzon_pallet'];
+							}
+						} else {
+							// Calculate price by weight
+							$chargeWeight = $shipment->chargeWeight();
+							$sql = 'SELECT * FROM zone_rate WHERE chargecode_id = ' . $chargecodeModel->id . ' AND zone_name = "' . $zoneMap->zone_name . '" AND weight_lo <=' . $chargeWeight . ' AND weight_hi >= ' . $chargeWeight;
+							$zoneRate = ZoneRate::model()->findBySql($sql);
+							if (empty($zoneRate)) {
+								$result->success = false;
+								$result->message = 'Zone rate not set.';
+								return $result;
+							} else {
+								$base = $zoneRate->base;
+								$minimum = $zoneRate->minimum;
+								$unitPrice = $zoneRate->perkg;
+								$quantity = $chargeWeight;
+							}
+						}
+					}
+				}
+				$totalAmount = $base + $unitPrice * $quantity;
+				if ($totalAmount == 0) {
+					$result->success = false;
+					$result->message = 'Total amount is 0';
+					return $result;
+				}
+				if ($totalAmount < $minimum && $totalAmount != 0) {
+					// Set minimum amount
+					$totalAmount = $minimum;
+				}
+			}
+			
+			/**
+			 * Create invoice
+			 */
+			$invoice = new Invoice();
+			$invoice->type = Invoice::INVOICE_TYPE_OTHERS;
+			$invoice->currency = Invoice::CURRENCY_AUD;
+			$invoice->dpmt = Invoice::DPMT_COURIER_SERVICE;
+			$invoice->to_id = $shipment->agent_id;
+			$invoice->consol_id = !empty($pallet_request->mdata['consol_id']) ? $pallet_request->mdata['consol_id'] : $shipment->consol_id;
+			$invoice->job_id = 0;
+			$invoice->cg_order_id = 0;
+			$invoice->pid = $shipment->id;
+			$invoice->man_id = 0;
+			$invoice->date = date('Y-m-d');
+			$invoice->dpt_id = $shipment->ddpt_id;
+			$invoice->status = Invoice::INVOICE_STATUS_PENDING;
+			$invoice->sent = 0;
+			if (!empty($shipment->agent_id)) {
+				$owner = Org::model()->findByPk($shipment->agent_id);
+			} else {
+				$owner = Org::model()->findByPk(Yii::app()->user->org);
+			}
+			$invoice->total = number_format(($totalAmount * 1.1), 2, '.', '');
+			$invoice->gst = number_format(($totalAmount * 0.1), 2, '.', '');
+			$invoice->mdata['name'] = $owner->name;
+			$invoice->mdata['address'] = $owner->getAddress();
+			$invoice->mdata['payterm'] = empty($owner->extra['payterm']) ? '2 days' : $owner->extra['payterm'] . ' days';
+			$invoice->due = Invoice::calcDue($invoice->date, $invoice->mdata['payterm']);
+			$invoice->save();
+
+			$pallet_request->invoice_id = $invoice->id;
+			$pallet_request->save();
+			/**
+			 * Set invoice line
+			 */
+			$invoiceLine = new InvLine();
+			$invoiceLine->inv_id = $invoice->id;
+			$invoiceLine->model = 'ImcoConsol';
+			$invoiceLine->fid = $invoice->consol_id;
+			$invoiceLine->ccode = '#Delivery Fee';
+			if ($shipment->mdata['chargecode'] == '5066') {
+				// 4PX SYD sea consol needs special invoice line
+				$invoiceLine->amount = number_format(($totalAmount * 1.1), 4, '.', '');
+				$invoiceLine->gst = number_format(($totalAmount * 0.1), 4, '.', '');
+			} else {
+				$invoiceLine->amount = number_format(($unitPrice * 1.1), 4, '.', '');
+				$invoiceLine->gst = number_format(($unitPrice * 0.1), 4, '.', '');
+			}
+			$invoiceLine->det = $shipment->ref;
+			$invoiceLine->qty = number_format($quantity, 4, '.', '');
+			$invoiceLine->tax = 'OUTPUT';
+			$invoiceLine->rebate = 0;
+			$invoiceLine->save();
+
+			// Set base fee invoice line for IEPOCH MELBOURNE
+			if ($shipment->mdata['chargecode'] == '3889' && $shipment->ddpt_id == 218) {
+				$invLine = new InvLine();
+				$invLine->inv_id = $invoice->id;
+				$invLine->model = 'ImcoConsol';
+				$invLine->fid = $invoice->consol_id;
+				$invLine->ccode = '#Base Fee';
+				$invLine->amount = number_format(($base * 1.1), 4, '.', '');
+				$invLine->gst = number_format(($base * 0.1), 4, '.', '');
+				$invLine->det = $shipment->ref;
+				$invLine->qty = number_format(1, 4, '.', '');
+				$invLine->tax = 'OUTPUT';
+				$invLine->rebate = 0;
+				$invLine->save();
+			}
+
+			$result->success = true;
+			return $result;
+		} else {
+			$result->success = false;
+			$result->message = 'Charge code not set.';
+			return $result;
+		}
+	}
+
+	public function createNameValidationInvoice()
+	{
+		$setting = SystemSetting::model()->findByAttributes(array('key' => 'word_replace_clients'));
+		$clients = $setting->mdata['org_ids'];
+		foreach ($clients as $client) {
+			$dateFrom = date("Y-m-d 00:00:00", mktime(0, 0, 0, date("m")-1, 1));
+			$dateTo = date("Y-m-d 23:59:59", mktime(0, 0, 0, date("m"), 0));
+			$sql = 'SELECT * FROM `hvlv_db`.word_replace_usage_log WHERE `org_id` = ' . $client . ' AND `process_time` >= "' . $dateFrom . '" AND `process_time` <= "' . $dateTo . '"';
+			$wordReplaceUsage = WordReplaceUsageLog::model()->findAllBySql($sql);
+			if (empty($wordReplaceUsage)) {
+				continue;	// No need to generate invoice when there was no usage
+			} else {
+				// Create Invoice
+				$orgRate = OrgRate::model()->findByAttributes(array('org_id' => $client));
+				$cus_services = $orgRate->getCustomerServicePlans($orgRate->org_id);
+				$rate = $cus_services['services']->AU->name_validation_rate;
+				$consolArr = [];
+				foreach ($wordReplaceUsage as $usage) {
+					if (!in_array($usage->consol_id, $consolArr)) {
+						array_push($consolArr, $usage->consol_id);
+					}
+				}
+				foreach($consolArr as $consolId) {
+					$sql = 'SELECT * FROM `hvlv_db`.word_replace_usage_log WHERE `org_id` = ' . $client . ' AND `process_time` >= "' . $dateFrom . '" AND `process_time` <= "' . $dateTo . '" AND consol_id = ' . $consolId;
+					$usageByConsol = WordReplaceUsageLog::model()->findAllBySql($sql);
+
+					$numberOfUsage = count($usageByConsol);
+					$amount = $numberOfUsage * $rate;
+					$invoice = new Invoice();
+					$invoice->to_id = $client;
+					$invoice->consol_id = $consolId;
+					$invoice->job_id = 0;
+					$invoice->pid = 0;
+					$invoice->cg_order_id = 0;
+					$invoice->man_id = 0;
+					$invoice->dpt_id = 106;
+					$invoice->dpmt = Invoice::DPMT_IMPORT;
+					$invoice->status = Invoice::INVOICE_STATUS_PENDING;
+					$invoice->type = Invoice::INVOICE_TYPE_NAME_VALIDATION;
+					$invoice->currency = Invoice::CURRENCY_AUD;
+					$invoice->sent = 0;
+					$invoice->date = date('Y-m-d');
+					$owner = Org::model()->findByPk($client);
+					$invoice->mdata['name'] = $owner->name;
+					$invoice->mdata['address'] = $owner->getAddress();
+					$invoice->mdata['payterm'] = empty($owner->extra['payterm']) ? '2 days' : $owner->extra['payterm'] . ' days';
+					$invoice->due = Invoice::calcDue($invoice->date, $invoice->mdata['payterm']);
+					$invoice->total = number_format(($amount * 1.1), 2, '.', '');
+					$invoice->gst = number_format(($amount * 0.1), 2, '.', '');
+					$invoice->save();
+
+					// Create Invoice Line
+					$invoiceLine = new InvLine();
+					$invoiceLine->inv_id = $invoice->id;
+					$invoiceLine->fid = 0;
+					$invoiceLine->ccode = '#Name Validation Fee';
+					$invoiceLine->amount = number_format((0.1 * 1.1), 4, '.', '');
+					$invoiceLine->gst = number_format((0.1 * 0.1), 4, '.', '');
+					$invoiceLine->det = "Name Validation Service";
+					$invoiceLine->qty = number_format($numberOfUsage, 4, '.', '');
+					$invoiceLine->tax = 'OUTPUT';
+					$invoiceLine->rebate = 0;
+					$invoiceLine->save();
+				}
+				
+			}
+		}
+	}
+}
+?>

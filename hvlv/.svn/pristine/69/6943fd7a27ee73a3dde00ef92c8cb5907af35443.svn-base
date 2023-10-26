@@ -1,0 +1,284 @@
+<?php
+
+class UserController extends Controller{
+
+	protected $skipAcl = ['profile'];
+
+	/**
+	 * Displays a particular model.
+	 * @param integer $id the ID of the model to be displayed
+	 */
+	public function actionView($id){
+		$this->render('view',array(
+			'model'=>$this->loadModel($id),
+		));
+	}
+
+	/**
+	 * Creates a new model.
+	 * If creation is successful, the browser will be redirected to the 'view' page.
+	 */
+	public function actionCreate(){
+		$model=new User();
+
+		// Uncomment the following line if AJAX validation is needed
+		// $this->performAjaxValidation($model);
+		if(isset($_POST['User'])){
+			$_POST['User']['password'] = md5($_POST['User']['password']);
+			$model->attributes=$_POST['User'];
+			if(empty($model->type)){
+				if(Yii::app()->user->grp == 40){
+					$model->type = 80;
+					$model->by_id = Yii::app()->user->org;
+				}
+			}else{
+				if($_POST['User']['type'] == 70){
+					$model->user = $model->getSubUserName();
+					$model->title = 'Mr';
+					$model->fname = 'Client';
+					$model->lname = 'Agent';
+					$model->email = $model->user.'@pcaexpress';
+				}
+			}
+                        $model->dpmt=0;
+                        if(!empty($_POST['theDpmts'])){
+                            foreach($_POST['theDpmts'] as $dpt) {
+                               $model->dpmt=$model->dpmt|$dpt;
+                            }
+                        }
+			if(!empty($_POST['occupation']))
+            {
+            	$occupation = 0;
+            	foreach ($_POST['occupation'] as $key => $value) {
+            		$occupation = $occupation|$value;
+            	}
+            	$model->occupation = $occupation;
+            }
+			$model->save();
+			if(!empty($_POST['User']['group']))
+ 			{
+ 				$groups = explode('(L)',$_POST['User']['group']);
+ 				if(empty($model->userWarehouseGroup))
+ 				{
+ 					$model->userWarehouseGroup = new UserWarehouseGroup();
+ 				}
+ 				$model->userWarehouseGroup->user_id = $model->id;
+ 				$model->userWarehouseGroup->group = $groups[0];
+ 				$model->userWarehouseGroup->leader = (count($groups)>1?1:0);
+ 				$model->userWarehouseGroup->save();
+ 			}else
+ 			{
+ 				if(!empty($model->userWarehouseGroup))
+ 				{
+ 					$model->userWarehouseGroup->delete();
+ 				}
+ 			}
+			$this->ajaxResult($model);
+		}
+
+		if(isset($_GET['type'])&&$_GET['type']=='driverUser')
+		{
+			$org = Org::model()->findByPk($_GET['id']);
+			$model->org_id = $org->id;
+			$model->type = User::DRIVER;
+			$this->render('create',array(
+				'model'=>$model,
+				'org'=>$org,
+				'type'=>'driverUser'
+			));
+			return;
+		}
+		
+		$this->render('create',array(
+				'model'=>$model,
+			));
+	}
+
+	/**
+	 * Updates a particular model.
+	 * If update is successful, the browser will be redirected to the 'view' page.
+	 * @param integer $id the ID of the model to be updated
+	 */
+	public function actionUpdate($id){
+
+		if(isset($_GET['type'])&&$_GET['type']=="driverUser")
+		{
+			$model=User::model()->find("org_id = :org_id",[":org_id"=>$id]);
+		}else
+		{
+			$model=$this->loadModel($id);
+		}
+
+		if(isset($_POST['User'])){
+			if(empty($_POST['User']['password'])){
+				unset($_POST['User']['password']);
+			}else{
+				$_POST['User']['password'] = md5($_POST['User']['password']);
+			}
+			$model->attributes=$_POST['User'];
+			$model->extra['rpc']=empty($_POST['extra']['rpc'])? 0 : 1;
+                        $model->extra['sound']=empty($_POST['extra']['sound'])?0:1;
+                        $model->dpmt=0;
+                        if(!empty($_POST['theDpmts'])){
+                            foreach($_POST['theDpmts'] as $dpt) {
+                               $model->dpmt=$model->dpmt|$dpt;
+                            }
+                        }
+            if(!empty($_POST['occupation']))
+            {
+            	$occupation = 0;
+            	foreach ($_POST['occupation'] as $key => $value) {
+            		$occupation = $occupation|$value;
+            	}
+            	$model->occupation = $occupation;
+            }
+ 			$model->save();
+ 			if(!empty($_POST['User']['group']))
+ 			{
+ 				$groups = explode('(L)',$_POST['User']['group']);
+ 				if(empty($model->userWarehouseGroup))
+ 				{
+ 					$model->userWarehouseGroup = new UserWarehouseGroup();
+ 				}
+ 				$model->userWarehouseGroup->user_id = $model->id;
+ 				$model->userWarehouseGroup->group = $groups[0];
+ 				$model->userWarehouseGroup->leader = (count($groups)>1?1:0);
+ 				$model->userWarehouseGroup->save();
+ 			}else
+ 			{
+ 				if(!empty($model->userWarehouseGroup))
+ 				{
+ 					$model->userWarehouseGroup->delete();
+ 				}
+ 			}
+			$this->ajaxResult($model);
+		}
+		
+		if(isset($_GET['type']))
+		{
+			$result['type'] = $_GET['type'];
+		}
+		$result = array('model'=>$model);
+
+		if(isset($_GET['tab'])){
+			Acl::hasAccess($this->CaName.'/'.$_GET['tab'], true);
+			$result = array('model'=>$model);
+
+			$this->render('tab_'.$_GET['tab'], $result);
+		}else{
+			$this->render('update',$result);
+		}
+	}
+	
+	public function actionProfile(){
+		$model=$this->loadModel(Yii::app()->user->id);
+
+		if(isset($_POST['User'])){
+			if(empty($_POST['User']['password'])){
+				unset($_POST['User']['password']);
+			}else{
+				$_POST['User']['password'] = md5($_POST['User']['password']);
+				if($model->extra['rpc'] == 1) $model->extra['rpc'] = 0;
+			}
+			$model->attributes=$_POST['User'];
+			$model->save();
+			$this->ajaxResult($model);
+		}
+		
+		if(isset($_GET['tab'])){
+			$this->render('tab_'.$_GET['tab'], array('model'=>$model));
+		}else{
+			$this->render('profile',array('model'=>$model));
+		}
+	}
+
+	/**
+	 * Deletes a particular model.
+	 * If deletion is successful, the browser will be redirected to the 'admin' page.
+	 * @param integer $id the ID of the model to be deleted
+	 */
+	public function actionDelete($id){
+		if(Yii::app()->request->isPostRequest){
+			// we only allow deletion via POST request
+			$this->loadModel($id)->delete();
+
+			// if AJAX request (triggered by deletion via admin grid view), we should not redirect the browser
+			if(!isset($_GET['ajax']))
+				$this->redirect(isset($_POST['returnUrl']) ? $_POST['returnUrl'] : array('admin'));
+		}
+		else
+			throw new CHttpException(400,'Invalid request. Please do not repeat this request again.');
+	}
+
+	public function actionSuggest(){
+		$rs = User::model()->findAll(array(
+			'condition' => 'active = 1 AND (fname LIKE :n OR lname LIKE :n OR user = :n)',
+			'params' => array(':n' => '%'.$_GET['term'].'%'),
+			'order' => 'fname',
+			'limit' => 20,
+			));
+		$a = array();
+		
+		foreach($rs as $r){
+			$a[] = array(
+				'value' => $r->id,
+				'label' => $r->getName(),
+			);
+		}
+		echo json_encode($a);
+	}
+
+	public function actionResetGoogleAuthernticator(){
+		if (!empty($_GET['id'])){
+			$user = User::model()->findByPk($_GET['id']);
+			$user->extra['googleAuthSecret'] = "";
+			$user->extra['googleAuthLogin'] = "";
+			if ($user->update('meta')) {
+				echo '{"done":true}';
+			}
+			else{
+				echo '{"done":false,"msg":"can not reset"}';
+			}
+		}
+		else{
+			echo '{"done":false,"msg":"can not find user"}';
+		}
+	}
+
+	/**
+	 * Lists all models.
+	 */
+	public function actionList(){
+        $model=new User('search');
+        $model->unsetAttributes();  // clear any default values
+		if(!Acl::hasAccess('C:user/ManageAll')) $model->by_id = Yii::app()->user->org;
+        if(isset($_GET['User']))
+            $model->attributes=$_GET['User'];
+        $this->render('list',array(
+            'model'=>$model,
+        ));
+	}
+
+	/**
+	 * Returns the data model based on the primary key given in the GET variable.
+	 * If the data model is not found, an HTTP exception will be raised.
+	 * @param integer the ID of the model to be loaded
+	 */
+	public function loadModel($id){
+		$model=User::model()->findByPk($id);
+		if($model===null)
+			throw new CHttpException(404,'The requested page does not exist.');
+		return $model;
+	}
+
+	/**
+	 * Performs the AJAX validation.
+	 * @param CModel the model to be validated
+	 */
+	protected function performAjaxValidation($model){
+		if(isset($_POST['ajax']) && $_POST['ajax']==='user-form'){
+			echo CActiveForm::validate($model);
+			Yii::app()->end();
+		}
+	}
+}

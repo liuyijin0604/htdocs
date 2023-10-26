@@ -1,0 +1,62 @@
+<?php 
+class BwtrunkService extends Service
+{
+    private $api;
+    private $model;
+
+    public function __construct()
+    {
+        $this->api = new BwtrunkAPI();
+        $this->model = new Bwtrunk();
+    }
+
+    public function updateData()
+    {
+        $data = $this->api->getData();
+        $transaction=Yii::app()->db->beginTransaction();
+        try{
+            if (!empty($data)) {
+            foreach ($data as $item) {
+            if(preg_match('/(\d{3})[\s\-]*(\d{4})[\s\-]*(\d{4})/',$item['MAWB_number'],$m)){
+                $mawb = $m[1]."-".$m[2].$m[3];
+                $model = $this->model->findByAttributes(array('MAWB_number' => $mawb));
+                if (empty($model)) {
+                        $model = new Bwtrunk();
+                        $model->MAWB_number = $mawb;
+                        $model->pieces_pick_up = $item['pieces_pick_up'];
+                        $model->CTO_start = $item['CTO_start'];
+                        $model->CTO_finish = $item['CTO_finish'];
+                        $model->Client_start = $item['Client_start'];
+                        $model->Client_finish = $item['Client_finish'];
+                        $model->save();
+                    }else if ($model->CTO_start != $item['CTO_start']) {
+                        $model = new Bwtrunk();
+                        $model->MAWB_number = $mawb;
+                        $model->pieces_pick_up = $item['pieces_pick_up'];
+                        $model->CTO_start = $item['CTO_start'];
+                        $model->CTO_finish = $item['CTO_finish'];
+                        $model->Client_start = $item['Client_start'];
+                        $model->Client_finish = $item['Client_finish'];
+                        $model->save();
+                    }else if (!empty($item['pieces_pick_up'])&&!empty($item['CTO_start'])&&!empty($item['CTO_finish'])&&!empty($item['Client_start'])&&!empty($item['Client_finish'])) {
+                        break;
+                    } else {
+                        $model->pieces_pick_up = $item['pieces_pick_up'];
+                        $model->CTO_start = $item['CTO_start'];
+                        $model->CTO_finish = $item['CTO_finish'];
+                        $model->Client_start = $item['Client_start'];
+                        $model->Client_finish = $item['Client_finish'];
+                        $model->save();
+                    }
+
+                 }
+              }
+            }
+        $transaction->commit();
+        }catch(Exception $ex){
+            $transaction->rollback();
+            throw $ex;
+        }
+
+    }
+}

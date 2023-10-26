@@ -1,0 +1,254 @@
+<?php 
+class OrgFlexibleRateService extends Service
+{
+	public function getRealSupplierCode($orgId,$template,$itemCode,$value)
+	{
+		$thisCode = null;
+		$isMulti = false;
+		$times = 1;
+		if($orgId==Org::ORGID_COURIER_UBI&&$template=="UBI-toll-surcharge")
+		{
+			$rates = SystemSetting::getSurchargeChargeRate(strtoupper('UBITOLLN'));
+		}elseif($orgId==Org::ORGID_COURIER_TOLL_IPEC)
+		{
+			$rates = SystemSetting::getSurchargeChargeRate(strtoupper('MYTOLLN'));
+		}elseif($orgId==Org::ORGID_COURIER_FL_HUNTER)
+		{
+			$rates = SystemSetting::getSurchargeChargeRate(strtoupper('FLHUNTER'));
+		}elseif($orgId==Org::ORGID_COURIER_ALLIED_TOP)
+		{
+			$rates = SystemSetting::getSurchargeChargeRate(strtoupper('ALLIED'));
+		}elseif($orgId==Org::ORGID_COURIER_TNT_TOP)
+		{
+			$rates = SystemSetting::getSurchargeChargeRate(strtoupper('TNTN'));
+		}elseif($orgId==Org::ORGID_COURIER_AUPOST)
+		{
+			$rates = SystemSetting::getSurchargeChargeRate(strtoupper('AUSPOST'));
+		}
+
+		if(!empty($rates[strtoupper($itemCode)]))
+		{
+			$thisCode = null;
+			if(!is_array($rates[strtoupper($itemCode)]))
+			{
+				$thisCode = $rates[strtoupper($itemCode)];
+			}else
+			{
+				if(isset($rates[strtoupper($itemCode)][number_format($value,0,'.','').""]))
+				{
+					$thisCode = $rates[strtoupper($itemCode)][number_format($value,0,'.','').""];
+				}elseif(isset($rates[strtoupper($itemCode)]["multi"]))// 对于像TOLL UBI_TOLL TNT他们收我们钱是多重的
+				{
+					$thisCode = $rates[strtoupper($itemCode)]["multi"][1];
+					$isMulti = true;
+					$times = number_format($value/floatval($rates[strtoupper($itemCode)]["multi"][0]),0,'.','');
+				}else
+				{
+					return  null;
+				}
+			}
+		}
+
+		return [$thisCode,$isMulti,$times];
+	}
+
+
+	public function getChargecodeSurchargeCode($p,$orgId,$flexibleSupplierCode)
+	{
+		$chargecodeSCode = [];
+		if(!empty($p->mdata['chargecode']))
+		{
+			if($p->mdata['chargecode']=="4723"&&$p->consol->eta<="2023-01-16")
+			{
+				$p->mdata['chargecode']="7442";
+			}
+
+			$chargecodeId = 0;
+			$importChargecode = ImportChargeCode::model()->find("chargecode=:chargecode",[":chargecode"=>$p->mdata['chargecode']]);
+			$surchargeList = ImportsFlexibleSurcharge::model()->findAll("chargecode_id=:chargecodeId and status = :status and courier_type = 'Courier Surcharge' and type!='fuel_surcharge' and (p_piece>0 or p_shipment>0)",[":chargecodeId"=>$importChargecode->id,":status"=>ImportsFlexibleSurcharge::ACTIVE]);
+			if(empty($surchargeList))
+			{
+				if($orgId==Org::ORGID_COURIER_UBI||$orgId==Org::ORGID_COURIER_TOLL_IPEC||$orgId==Org::ORGID_COURIER_TNT_TOP)
+				{
+					return 2;
+				}
+
+				if(empty($surchargeList)&&$re->imparcel->agent_id!=ORG::ORGID_CLIENT_AOCHEN)
+				{
+					$chargecodeId = 2329;
+				}
+
+				if(empty($surchargeList)&&$re->imparcel->agent_id==ORG::ORGID_CLIENT_AOCHEN)
+				{
+					$chargecodeId = 2239;
+				}
+
+
+				$surchargeList = ImportsFlexibleSurcharge::model()->findAll("chargecode_id=:chargecodeId and status = :status and courier_type = 'Courier Surcharge'",[":chargecodeId"=>$chargecodeId,":status"=>ImportsFlexibleSurcharge::ACTIVE]);
+			}
+			$cscodes = array_column($surchargeList, 'code');
+			$codes = SystemSetting::getSurchargeChargeRate(strtoupper('ALLSCODE'));
+			$posibleChargecodeSurchargeCodes = $codes[$orgId.$flexibleSupplierCode];
+			foreach ($posibleChargecodeSurchargeCodes as $key => $value) {
+				if(in_array($value,$cscodes)||$posibleChargecodeSurchargeCodes[0]=="FIXED")
+				{
+					$chargecodeSCode[] = $value;
+				}
+			}
+
+		}
+
+
+		return $chargecodeSCode;
+	}
+
+	public function checkShipmentSurchargeInvoice($p,$chargecodeSurchargeCodes,&$chargedList,$isMulti = flase,$times = 0,$re=null)
+	{
+		$p->getChargeByChargecode('',false,null,true,false,true,false,true);
+		$re = SiReconcileLine::model()->find('fid=:sid and item_code = "item"',[":sid"=>$re->fid]);
+		// 一个 supplier code 可能会引发多个chargecode surcharge code 收费， 如果是p_piece就可以对应收费，如果是p_shipment就收过一次就不要再收了
+		$charged = 0;
+		$isCharge = false;
+		$amount = 0;
+		$codes = [];
+		$skip = false;
+		$findCount = 0;
+		if($p->mdata['chargecode']=="4723"&&$p->consol->eta<="2023-01-16")
+		{
+			$p->mdata['chargecode']="7442";
+		}
+
+		$importChargecode = ImportChargeCode::model()->find("chargecode=:chargecode",[":chargecode"=>$p->mdata['chargecode']]);
+		$chargecodeId = $importChargecode->id;
+		$surchargeList = ImportsFlexibleSurcharge::model()->findAll("chargecode_id=:chargecodeId and status = :status and courier_type = 'Courier Surcharge' and type!='fuel_surcharge' and (p_piece>0 or p_shipment>0)",[":chargecodeId"=>$importChargecode->id,":status"=>ImportsFlexibleSurcharge::ACTIVE]);
+		if(empty($surchargeList)&&$re->imparcel->agent_id!=ORG::ORGID_CLIENT_AOCHEN)
+		{
+			$chargecodeId = 2329;
+		}
+
+		if(empty($surchargeList)&&$re->imparcel->agent_id==ORG::ORGID_CLIENT_AOCHEN)
+		{
+			$chargecodeId = 2239;
+		}
+
+		if($isMulti)// 如果是多重的收费
+		{
+			$chargedId = [1];
+			for ($i=0; $i < $times; $i++)
+			{
+				if($chargecodeSurchargeCodes[0]=="FIXED")
+				{
+					$codes[] = $chargecodeSurchargeCodes[2];
+					$amount += $chargecodeSurchargeCodes[1];
+				}else
+				{
+					foreach ($chargecodeSurchargeCodes as $key => $chargecodeSurchargeCode)
+					{
+
+
+						if(in_array($p->id.$chargecodeSurchargeCode,$chargedList))// 如果已经在之前的有check 过了，并且是per shipment 的，就不要重复收了
+						{
+							continue;
+						}
+
+						$tobj = ImportsFlexibleSurcharge::model()->find("chargecode_id=:chargecodeId and status = :status and code = :code",[":chargecodeId"=>$chargecodeId,":status"=>ImportsFlexibleSurcharge::ACTIVE,":code"=>$chargecodeSurchargeCode]);
+						if(!empty($tobj))
+						{
+							$findCount++;
+						}
+
+
+						if(!empty($re)&&$tobj->kgcwt>0)
+						{
+							if($re->weight<$tobj->kgcwf)
+							{
+								$skip = true;
+								continue;
+							}
+						}
+
+						$isCharge = false;
+						$amount += ($tobj->p_piece<0.0001?$tobj->p_shipment:$tobj->p_piece);
+						//$allCharged = ImportsShipmentCharge::model()->find("shipment_id = :shipmentId and code =:code",[":shipmentId"=>$p->id,":code"=>$chargecodeSurchargeCode]);
+
+						$allCharged = ImportsShipmentCharge::model()->find("shipment_id = :shipmentId and type =:type and id not in (".join(',',$chargedId).")",[":shipmentId"=>$p->id,":type"=>$tobj->type]);
+						if(!empty($allCharged))
+						{
+							$chargedId[] = $allCharged->id;
+							$isCharge = true;
+							$charged += $allCharged->value;
+						}
+						if($tobj->p_shipment>0)
+						{
+							$chargedList[] = [$p->id.$chargecodeSurchargeCode];
+						}
+						$codes[] = $chargecodeSurchargeCode;
+
+					}
+				}
+			}
+
+
+
+		}else
+		{
+			if($chargecodeSurchargeCodes[0]=="FIXED")
+			{
+				$codes[] = $chargecodeSurchargeCodes[2];
+				$amount += $chargecodeSurchargeCodes[1];
+			}else
+			{
+				foreach ($chargecodeSurchargeCodes as $key => $chargecodeSurchargeCode)
+				{
+					if(in_array($p->id.$chargecodeSurchargeCode,$chargedList))// 如果已经在之前的有check 过了，并且是per shipment 的，就不要重复收了
+					{
+						continue;
+					}
+
+					$tobj = ImportsFlexibleSurcharge::model()->find("chargecode_id=:chargecodeId and status = :status and code = :code",[":chargecodeId"=>$chargecodeId,":status"=>ImportsFlexibleSurcharge::ACTIVE,":code"=>$chargecodeSurchargeCode]);
+					if(!empty($tobj))
+					{
+						$findCount++;
+					}
+
+					if(!empty($re)&&$tobj->kgcwt>0)
+					{
+						if($re->weight<$tobj->kgcwf)
+						{
+							$skip = true;
+							continue;
+						}
+					}
+
+
+					$isCharge = false;
+					$amount += ($tobj->p_piece<0.0001?$tobj->p_shipment:$tobj->p_piece);
+					//$allCharged = ImportsShipmentCharge::model()->find("shipment_id = :shipmentId and code =:code",[":shipmentId"=>$p->id,":code"=>$chargecodeSurchargeCode]);
+
+					$allCharged = ImportsShipmentCharge::model()->find("shipment_id = :shipmentId and type =:type",[":shipmentId"=>$p->id,":type"=>$tobj->type]);
+					if(!empty($allCharged))
+					{
+						$isCharge = true;
+						$charged += $allCharged->value;
+					}
+					if($tobj->p_shipment>0)
+					{
+						$chargedList[] = [$p->id.$chargecodeSurchargeCode];
+					}
+					$codes[] = $chargecodeSurchargeCode;
+
+				}
+			}
+		}
+
+		if($findCount==0)
+		{
+			$skip = true;
+		}
+		
+
+		return [$isCharge,$amount,$charged,$codes,$skip];
+
+	}
+}
+?>

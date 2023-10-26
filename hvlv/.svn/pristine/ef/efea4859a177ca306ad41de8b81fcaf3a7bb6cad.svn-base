@@ -1,0 +1,393 @@
+<?php
+
+class SalesfunnelRequirementsController extends Controller
+{
+     /**
+     * Declares class-based actions.
+     */
+    protected $nonAjax = array('requirement','nextQuestion','preQustion','customerDetail','saveCustomerDetail','showOutcome','customerSubmit','nonAgentCustomerSave');
+    protected $skipAcl = array('requirement','nextQuestion','preQustion','customerDetail','saveCustomerDetail','showOutcome','customerSubmit','nonAgentCustomerSave');
+    protected $skipLogin = array('requirement','nextQuestion','preQustion','customerDetail','saveCustomerDetail','showOutcome','customerSubmit','nonAgentCustomerSave');
+
+
+    public function actionCustomerDetail()
+    {
+        if (empty($_GET['id'])){
+            $this->renderPartial('customer_detail_page');
+        }
+        else{
+            $submissionModel = SalesfunnelRequirementsSubmission::model()->findbypk($_GET['id']);
+            $this->renderPartial('customer_detail_page', ['submissionModel' => $submissionModel]);
+        }
+    }
+
+    public function actionShowOutcome()
+    {
+        $submit_id = $_GET['submit_id'];
+        $submissionModel = SalesfunnelRequirementsSubmission::model()->findbypk($submit_id);
+        $requirementRecordModels = SalesfunnelRequirementsRecords::model()->with('question','answer')->findAll(["condition"=>'submit_id =  '.($submit_id),"order"=>"t.question_id ASC"]);
+        $questionModels = new SalesfunnelRequirementsQuestions('search');
+        $answerModels = new SalesfunnelRequirementsAnswer('search');
+        if (!empty($_GET['SalesfunnelRequirementsQuestions'])) {
+            $questionModel->attributes = $_GET['SalesfunnelRequirementsQuestions'];
+        }
+        if (!empty($_GET['SalesfunnelRequirementsAnswer'])) {
+            $answerModel->attributes = $_GET['SalesfunnelRequirementsAnswer'];
+        }
+        // echo json_encode();
+
+
+        $this->renderPartial('requirement_outcome_page', [
+            'submissionModel' => $submissionModel,
+            'requirementRecordModels' =>$requirementRecordModels,
+            'questionModels' => $questionModels,
+            'answerModels' => $answerModels            
+        ]);
+
+    }
+
+    public function SaveCustomerDeatil($output=null){
+        if(!empty($_POST['email']))
+        {
+            $submission = SalesfunnelRequirementsSubmission::model()->find('email = "'.$_POST['email'].'" AND status !=1');
+            if(!empty($submission))
+            {                             
+                if(!empty($_POST['company_name'])){
+                    $submission->company_name = $_POST['company_name'];
+                }
+                if(!empty($_POST['first_name'])){
+                    $submission->first_name = $_POST['first_name'];
+                }
+                if(!empty($_POST['last_name'])){
+                    $submission->last_name = $_POST['last_name'];
+                }
+                if(!empty($_POST['contact_number'])){
+                     $submission->contact_number = $_POST['contact_number'];
+                }
+                if(!empty($_POST['category']) AND empty($submission->category)){
+                    $submission->category = implode(",", $_POST['category']);
+                }
+                if(isset($_POST['forwarder_shippingagent'])){
+                    $submission->forwarder_shippingagent = $_POST['forwarder_shippingagent'];                    
+                }
+                if (!empty($submission->auTel())){
+                    $submission->contact_number = $submission->auTel();
+                    $submission->save();
+                    $submission->refresh();
+
+                    if($output==1){
+                        return $submission;
+                    }
+                    else{
+                        echo '{"done":true,"submit_id":'.$submission->id.',"services_types":['.$submission->category.']}';
+                        return ;
+                    }
+                }
+                else{
+                    echo '{"done":false,"msg":"invalid mobile number"}';
+                    return ;
+                }                
+                
+            }else{                               
+                $submission = new SalesfunnelRequirementsSubmission();
+                $submission->email = $_POST['email'];
+                if(!empty($_POST['company_name'])){
+                    $submission->company_name = $_POST['company_name'];                    
+                }
+                if(!empty($_POST['first_name'])){
+                    $submission->first_name = $_POST['first_name'];                    
+                }
+                if(!empty($_POST['last_name'])){
+                    $submission->last_name = $_POST['last_name'];                    
+                }
+                if(!empty($_POST['contact_number'])){
+                     $submission->contact_number = $_POST['contact_number'];
+                }
+                if(!empty($_POST['category'])){
+                    $submission->category = implode(",", $_POST['category']);
+                }
+                if(isset($_POST['forwarder_shippingagent'])){
+                    $submission->forwarder_shippingagent = $_POST['forwarder_shippingagent'];
+                }
+                if (!empty($submission->auTel())){
+                    $submission->contact_number = $submission->auTel();
+                    $submission->save();
+                    $submission->refresh(); 
+
+                    if($output==1){
+                        return $submission;
+                    }
+                    else{
+                        echo '{"done":true,"submit_id":'.$submission->id.',"services_types":['.$submission->category.']}';
+                        return ;
+                    }
+                }
+                else{
+                     echo '{"done":false,"msg":"invalid mobile number"}';
+                    return ;
+                } 
+            }
+        }
+    }
+
+    public function actionSaveCustomerDetail()
+    {        
+        $this->SaveCustomerDeatil();
+
+    }
+
+    public function actionRequirement()
+    {
+        $salesService = new SalesfunnelRequirementsService();
+        $submit_id = $_GET['submit_id'];
+        // $services_types = $_GET['services_types'];
+        // echo ('question_category in ('.$services_types.')');
+        // Yii::app()->end();
+        $requirementRecordModels = SalesfunnelRequirementsRecords::model()->findAll(["condition"=>'submit_id =  '.($submit_id),"order"=>"question_id ASC"]);
+        $requirementSubmissionModel = SalesfunnelRequirementsSubmission::model()->find(["condition"=>'status=0 AND id =  '.($submit_id),"order"=>"id ASC"]);
+        if (!empty($requirementSubmissionModel->category) && isset($requirementSubmissionModel->category)){
+            $services_types = $requirementSubmissionModel->category;
+        }
+        else{
+            $services_types = $_GET['services_types'];            
+        }
+        $requirementQuesitonModels = SalesfunnelRequirementsQuestions::model()->findAll(["condition"=>'question_category in ('.$services_types.')',"order"=>"real_num ASC"]);
+        // print_r($requirementQuesitonModels);
+        // Yii::app()->end();
+        $categoryQuesitonIds = array_column($requirementQuesitonModels, 'id');
+        // $questionIds = array_column($requirementQuestionModels, 'id');
+        $questionIds = array_column($requirementRecordModels, 'question_id');
+        // $nextId = NULL;
+        if(!empty($questionIds)){
+            $result = SalesfunnelRequirementsQuestions::model()->findByPk(end($questionIds));
+            // $nextId = $salesService->checkNextQuestionExited($result->id);
+        }
+        else{
+            $result = SalesfunnelRequirementsQuestions::model()->find(["condition"=>'question_category in ('.$services_types.')',"order"=>"real_num ASC"]);
+            // $nextId = $salesService->checkNextQuestionExited(1);           
+        }
+        // echo join(',',$questionIds);
+        // Yii::app()->end();
+
+        array_pop($questionIds);
+
+
+        $this->renderPartial('requirement', [
+            'model' => $result,
+            'submit_id'=>$submit_id,
+            'questionIds'=>join(',',$questionIds),
+            'categoryQuesitonIds'=>join(',',$categoryQuesitonIds),
+            // 'nextId'=>$nextId
+        ]);
+    }
+
+    public function firstQuestion(){
+        $serviceTypes = join(',',$_POST['answerStr']);
+        $salesService = new SalesfunnelRequirementsService();
+        $questionCategories = $salesService->checkServiceType($serviceTypes);
+        $requirementQuestionModels = SalesfunnelRequirementsQuestions::model()->find(["condition"=>'question_category in '.implode(" , ", $questionCategories)]);
+        $obj = ['questionCategories'=>$questionCategories, 'requirementQuestionModels'=>$requirementQuestionModels];
+        return $obj;
+    }
+
+    public function saveQuestionAnswer(){
+        $salesService = new SalesfunnelRequirementsService();
+        $submit_id = $_GET['submit_id'];
+        // get
+        // echo json_encode($_GET);
+        // Yii::app()->end();
+        
+        if (isset($_GET['submit_id']) && !empty($_GET['submit_id']))  {
+            $submit_id = $_GET['submit_id'];            
+            $requirementRecordModel = SalesfunnelRequirementsRecords::model()->find('submit_id = :submit_id AND question_id = :question_id', [':submit_id' => $submit_id,':question_id' => $_GET['questionId']]);
+            $requirementSubmissionModel = SalesfunnelRequirementsSubmission::model()->findBypk($submit_id);
+            $services_types = $requirementSubmissionModel->category;
+            // echo  $submit_id."   ".$_GET['questionId'];
+            // Yii::app()->end();
+        }
+        if (empty($requirementRecordModel)){
+            $requirementRecordModel = new SalesfunnelRequirementsRecords();
+        }
+        if (isset($_GET['answerId']) && !empty($_GET['answerId']))  {
+            $ansId = $_GET['answerId'];                                              
+            if($ansId !=""){                
+                $objAnswer = SalesfunnelRequirementsAnswer::model()->findByPk($ansId);
+            }                
+            // echo json_encode(isset($_GET['answerId'])."  ".$_GET['answerId']);
+            // Yii::app()->end();
+            // $nextQuestionId = $objAnswer['next_question_id'];
+            // $requirementQu = SalesfunnelRequirementsQuestions::model()->findByPk($nextQuestionId); 
+            $requirementRecordModel->submit_id = $_GET['submit_id'];
+            $requirementRecordModel->question_id = $_GET['questionId'];
+            $requirementRecordModel->answer_id = $_GET['answerId'];
+            $requirementRecordModel->date = date('Y-m-d h:i:s', time());
+
+            // echo $requirementRecordModel->answer_id;
+            // Yii::app()->end();
+            $requirementRecordModel->save();
+            $requirementRecordModel->refresh();               
+        } 
+        elseif (isset($_GET['questionId']) && !empty($_GET['questionId'])) {
+            // print_r($_POST['answerStr']);
+            // Yii::app()->end();
+            if (!empty($_POST['answerStr'])){
+                $requirementRecordModel->answer_str = $_POST['answerStr'];
+            }
+            $requirementRecordModel->submit_id = $_GET['submit_id'];
+            $requirementRecordModel->question_id = $_GET['questionId'];
+            $requirementRecordModel->date = date('Y-m-d h:i:s', time());
+            $requirementRecordModel->save();
+            $requirementRecordModel->refresh();
+
+            // $qId = $_GET['questionId'];
+            // $currentQu = SalesfunnelRequirementsQuestions::model()->findByPk($qId);
+            // $nextQuestionNum = $currentQu['question_num'];
+            // $nextQuestionNum += 1;
+            // $requirementQu = SalesfunnelRequirementsQuestions::model()->find(["condition"=>'real_num > '.$currentQu->real_num.' and question_category in ('.$services_types.')',"order"=>"real_num ASC"]);                            
+        }
+        // echo json_encode($_GET);
+        // Yii::app()->end();
+
+        $qId = $_GET['questionId'];
+        $currentQu = SalesfunnelRequirementsQuestions::model()->findByPk($qId);
+        $requirementQu = SalesfunnelRequirementsQuestions::model()->find(["condition"=>'real_num > '.$currentQu->real_num.' and question_category in ('.$services_types.')',"order"=>"real_num ASC"]);
+        if (empty($requirementQu)){
+            $requirementQu = SalesfunnelRequirementsQuestions::model()->find(["condition"=>'question_num = 20']);
+        }
+
+        if(isset($_GET['submit_id'])){
+            $nextQuestionHtml = $salesService->printQuestion($requirementQu,$_GET['submit_id']);
+        }
+        else{
+            $nextQuestionHtml = $salesService->printQuestion($requirementQu);
+        }
+        $obj = ['submit_id'=>$submit_id, 'requirementQu'=>$requirementQu, 'requirementQu'=>$requirementQu];
+        return $obj;
+ 
+    }
+
+    public function actionCheckServiceType(){
+        $questionId = $_GET['questionId'];
+        // echo $questionId;
+        // Yii::app()->end();
+        $quesitonModel = SalesfunnelRequirementsQuestions::model()->findByPk($questionId);
+        $serviceType = "";
+        switch (@$quesitonModel->question_category) {
+                case SalesfunnelRequirementsQuestions::IMPORTSERVICE:
+                    $serviceType = "Service Type: Import Service";
+                    break;
+                case SalesfunnelRequirementsQuestions::SAMECITYDELIVERY:
+                    $serviceType = "Service Type: Same City";
+                    break;
+                case SalesfunnelRequirementsQuestions::_3PLFULFILMENT:
+                    $serviceType = "Service Type: 3PL";
+                    break;    
+                case SalesfunnelRequirementsQuestions::LASTQUESTIONCATEGORY:
+                    $serviceType = "Last Questiion";
+                    break;             
+                default:
+                    $serviceType = "The Last";
+                    break;
+                }
+
+        if (!empty($quesitonModel)){
+            // echo json_encode($_POST['forwarder_shippingagent'][0]);
+            // Yii::app()->end();
+            echo '{"done":true,"service_type":"'.$serviceType.'"}';
+            return ;
+        }
+        else{
+            echo '{"done":true,"service_type":"Last Question."}';
+            return ;
+        }
+
+    }
+
+    public function actionNextQuestion()
+    {
+        $salesService = new SalesfunnelRequirementsService();
+        $obj = $this->saveQuestionAnswer();
+        $lastQuestion = NULL;
+        // If (isset($obj['requirementQu'])){
+        //     $lastQuestion = 1;
+        // }
+        // $this->renderPartial('question', [
+        //     'model' => $obj['requirementQu'],
+        //     'submit_id'=>$obj['submit_id']
+        // ]);
+    }
+
+    public function actionPreQustion()
+    {
+        $requirementRecordModel = new SalesfunnelRequirementsRecords();
+        $submit_id = $_GET['submit_id'];
+        $salesService = new SalesfunnelRequirementsService();
+        // get
+        if (isset($_GET['preQustionId'])) {
+            $preQuestionId = $_GET['preQustionId'];
+            $objQuestion = SalesfunnelRequirementsQuestions::model()->findByPk($preQuestionId);
+        }         
+        // echo json_encode($_GET);
+        // Yii::app()->end();        
+        //$this->layout = 'pe';
+        if(isset($_GET['submit_id'])){
+            $previousQuestionHtml = $salesService->printQuestion($objQuestion,$_GET['submit_id']);
+        }
+        // $this->renderPartial('requirement', [
+        //     'model' => $objQuestion,
+        //     'submit_id'=>$submit_id
+        // ]);
+    }
+
+    public function actionCustomerSubmit(){
+        if (!empty($_GET['id'])){
+            // echo $_GET['id'];
+            // Yii::app()->end();            
+            $salesFunnelService = new SalesfunnelRequirementsService;                        
+            $requirementRecordModels = SalesfunnelRequirementsRecords::model()->with('question','answer')->findAll(["condition"=>'submit_id =  '.($_GET['id']),"order"=>"t.question_id ASC"]);
+            $submissionModel = SalesfunnelRequirementsSubmission::model()->findBypk($_GET['id']);                        
+            if ($submissionModel->status != 1){
+                $password = $salesFunnelService->randomPassword();
+                $submissionModel->password = md5($password);
+                $subjectStr = 'New Sales Funnel Requirement from '.$submissionModel->company_name; 
+                $salesFunnelService->sendRequirementEmail($submissionModel, $requirementRecordModels, "sales@toplogistics.com.au", $subjectStr, "imports@toplogistics.com.au");
+                // $salesFunnelService->sendRequirementEmail($submissionModel, $requirementRecordModels, "weijt133@gmail.com", $subjectStr, "ray.tang@toplogistics.com.au");
+                $submissionModel->status = 1;
+                $submissionModel->save();
+                $submissionModel->refresh();                       
+                $this->renderPartial('successfully_submit_page', ['submissionModel' => $submissionModel, 'password' => $password]);
+            }
+            else{
+                $this->renderPartial('customer_detail_page');
+            }
+        }
+        else{
+            print_r("Submitted unsuccessfully.");
+        }
+    }
+
+    public function actionNonAgentCustomerSave(){
+        $submission = $this->SaveCustomerDeatil(1);
+        $submit_id = $submission->id;
+        if (!empty($_POST['fsa_no_requirement'])){
+            $submission->business_requirement = $_POST['fsa_no_requirement'];
+            
+            if($submission->save()){
+                $submission->refresh();
+                echo '{"done":true,"submit_id":'.$submission->id.'}';
+                return ;
+            }
+            else{
+                // print_r($requirementRecordModel);`
+                echo '{"done":false,"msg":"Can not be saved."}';
+                return ;
+            }
+            
+        }
+        else{
+            echo '{"done":false,"msg":"Business Requirement is empty"}';
+            return ;
+        }
+    }
+
+}

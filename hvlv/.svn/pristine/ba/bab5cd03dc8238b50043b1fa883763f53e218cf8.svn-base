@@ -1,0 +1,32 @@
+<?php 
+class ChargecodeService extends Service
+{
+	public function checkChargecode($shipment)
+	{
+		$chargeCode = $shipment->mdata["chargecode"];
+		
+			$chargeCodeInfo = ImportChargeCode::model()->find('chargecode = :ccode', [':ccode' => $chargeCode]);
+			if(empty($chargeCodeInfo)){
+
+				return '[60005] - ' . 'Invalid charge code : ' . $chargeCode;
+			}
+
+			if($chargeCodeInfo->status != 1){
+				return '[40001] - Chargecode : ' . $chargeCode . ' has been disabled';
+			}
+			//adding dvalue check for eslink,chargecode 3600;
+			if (in_array($chargeCode, [3600])) {
+				if (($shipment->currency == 1 && $shipment->dvalue >= 1000)||($shipment->currency !=1 && $shipment->dvalue >= 1000 * Currency::getExrate()[0])) {
+					return '[90005] - Shipment '.$d->cust_ref.' value is Over AUS $1000';
+				}
+			}
+
+			$chargeCodeSetUp = $chargeCodeInfo->hasChargeSetUp($shipment);
+			if(!$chargeCodeSetUp['status']){
+				return '[90010] - Shipment '.$chargeCodeSetUp['msg'];
+			}
+		return "";
+
+	}
+}
+?>

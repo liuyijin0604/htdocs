@@ -1,0 +1,68 @@
+<h1>Word Replace Works!</h1>
+
+<div class="container">
+    <form id="word_replace_form">
+        <input type="text" id="shipment_id" name="shipment_id" style="display: none;" value="<?php echo intval($id); ?>" />
+        <table>
+            <tr>
+                <th>Original Word</th>
+                <th>Replace Word</th>
+                <th>Type</th>
+            </tr>
+            <tr>
+                <td><input type="text" id="original_word" name="original_word" required/></td>
+                <td><input type="text" id="replace_word" name="replace_word" required/></td>
+                <td><select id="word_type" name="word_type">
+                    <option value="1">Danger</option>
+                    <option value="2">Prohibited</option>
+                </select></td>
+                <td><input type="submit" value="submit"></td>
+            </tr>
+        </table>
+    </form>
+    <div class="row">
+        <h3>Replaced Records:</h3>
+        <table style="width: 100%;">
+            <tr>
+                <th style="text-align:left;">Original Word</th>
+                <th style="text-align:left;">Replaced Word</th>
+            </tr>
+            <?php
+            if (!empty($records)) {
+                foreach($records as $record) {
+                    echo '<tr>';
+                    echo '<td style="text-align:left;">' . $record->original_word . '</td>';
+                    echo '<td style="text-align:left;">' . @$record->replace_word . '</td>';
+                    echo '</tr>';
+                }
+            }
+            ?>
+        </table>
+    </div>
+</div>
+
+<script type="text/javascript">
+    $(function(){
+        $('#word_replace_form').on('submit', function(e) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+
+            var formData = new FormData(this);
+            $.ajax({
+                url: "<?= $this->createUrl('imParcel/wordReplace') ?>",
+                type: "POST",
+                data: formData,
+                enctype: 'multipart/form-data',
+                cache: false,
+                contentType: false,
+                processData: false,
+                success: function(res) {
+                    let response = jQuery.parseJSON(res);
+                    if (response.success == true) {
+                        myApp.notice(response.msg, 5000);
+                    }
+                }
+            })
+        })
+    })
+</script>

@@ -1,0 +1,142 @@
+<h3>The Amount for Invoice</h3>
+<div class="form" style="min-height: 300px;">
+<?php
+$form=$this->beginWidget('CActiveForm', [
+	'id'=>'custom_invoice_amount',
+	'enableAjaxValidation'=>false,
+
+]);?>
+<div class="row rowcol rowleft">
+	<?php echo $form->labelEx($model,'owner_id'); ?>
+	<?php echo $form->hiddenField($model,'owner_id');
+		$acname = empty($_GET["tabid"])? 'owner_ac' : $_GET["tabid"].'_owner_ac';
+		$this->widget('zii.widgets.jui.CJuiAutoComplete', array(
+			'name' => $acname,
+			'sourceUrl' => array('org/ownerSuggest'),
+			'value' => empty($model->owner_id)? '': $model->owner->name,
+			'options' => array(
+					'showAnim' => 'fold',
+					'minLength' => 2,
+					'delay' => 200,
+					'select' => 'js:function(event, ui){ $(this).val(ui.item["label"]); $(this).prevAll("input[type=hidden]").val(ui.item["value"]).data("ov",ui.item["value"]); return false; }',
+					'change' => 'js:function(event, ui){ if(ui.item == null) $(this).prevAll("input[type=hidden]").val(""); return false; }',
+			),
+			'htmlOptions' => array(
+				'size' => '50',
+			),
+	));
+	?> <small>Blank for Cash customer</small>
+	<?php echo $form->error($model,'owner_id'); ?>
+</div>
+<div class="row">
+<label>Items</label>
+<?php
+$il = new InvLine('search');
+$il->inv_id = -1;
+$this->widget('application.extensions.editablegrid.CEditableGridView', [
+	'id'=>'invline-grid',
+	'cssFile' => false,
+	'dataProvider'=>$il->search(),
+	'formUrl' => '#',
+	'summaryText' => '',
+	'afterSave' => "function(r){
+		if(r.done == true){
+			myApp.notice(r.msg, 5000);
+		}else{
+			myApp.alert(r.msg, false);
+		}
+		return r.done;
+	}",
+	'columns'=>[
+		['header' => 'GL Code','name' => 'ccode', 'class' => 'CEditableColumn', 'type' => 'list', 'filter'=> (!in_array($model->process->status,array_keys(ShipmentProcess::$aqisStates))?['CUSTOMS DUTY/GST' => 'CUSTOMS DUTY/GST', 'PROCESSING FEE' => 'PROCESSING FEE', 'OTHER' => 'OTHER']:['CUSTOMS DUTY/GST' => 'CUSTOMS DUTY/GST', 'PROCESSING FEE' => 'PROCESSING FEE', 'AQIS INSPECTION' => 'AQIS INSPECTION', 'AQIS DISPOSAL' => 'AQIS DISPOSAL', 'OTHER' => 'OTHER'])],
+		['header' => 'Detail','name' => 'det', 'class' => 'CEditableColumn','type'=>'input','value'=>'"'.(!in_array($model->process->status,array_keys(ShipmentProcess::$aqisStates))?'':$model->hbn).'"'],
+		['header' => 'Amount','name' => 'amount', 'class' => 'CEditableColumn', 'inputOptions' => ['size' => 5]],
+		['header' => 'Qty','name' => 'qty', 'class' => 'CEditableColumn', 'inputOptions' => ['size' => 5]],
+		['header' => 'Tax Rate', 'name' => 'tax','class' => 'CEditableColumn','type' => 'list',
+			'filter'=> Invoice::$InvoiceRevenueTaxRate ],
+
+		['class'=>'CEditableButtonColumn', 'template' => '{edit} {cancel} {save} {delete}'],
+	],
+]);
+?>
+</div>
+ <div class="row">
+        <?php echo CHtml::checkBox('custom_inv_created', (@$model->cbwf&512)>0?1:0);?> CA Invoice Created.
+ </div>
+<div class="button">
+    <?php echo CHtml::submitButton('submit')?>
+</div>
+
+<?php $this->endWidget();?>
+</div>
+
+<script type="text/javascript">
+$(function(){
+	var win = $('.jqmWindow.jqmID<?=$_GET['jqmid'];?>');
+	$('#invline-grid tfoot select', win).on('change', function(){
+		var v = $(this).val();
+		$('option', this).each(function(){
+			$(this).attr('selected', $(this).attr('value') == v);
+		});
+	});
+
+	$('#invline-grid .add_btn', win).on('click', function(){
+		$('#invline-grid .items tbody td.empty', win).parent().remove();
+		var r = $(this).parents('tr').clone();
+		$('.add_btn', r).attr('title', 'Del').text('Del').addClass('delete_btn').removeClass('add_btn save_btn');
+		$('input, select', r).each(function(){
+			var n = $(this).attr('name');
+			$(this).attr('name', n+'[]');
+		});
+		$('#invline-grid .items tbody').append(r);
+		$(this).parents('tr').find('select option').attr('selected', false);
+		$(this).parents('tr').find('input, select').val('');
+		return false;
+	});
+
+	win.off('click','#invline-grid a.delete_btn').on('click','#invline-grid a.delete_btn', function(){
+		if(window.confirm('Confirm to delete?')){
+			$(this).parents('tr').remove();
+		}
+		return false;
+	});
+
+	var ls = <?=empty($model->mdata['custom_inv'])? '{}' : json_encode($model->mdata['custom_inv']);?>;
+	if(ls.qty){
+		$('#invline-grid .items tbody td.empty', win).parent().remove();
+		for(var k in ls.qty){
+			if(ls.qty[k] < 1) continue;
+			var r = $('#invline-grid table tfoot tr', win).clone();
+			$('.add_btn', r).attr('title', 'Del').text('Del').addClass('delete_btn').removeClass('add_btn save_btn');
+			$('select, input', r).each(function(i){
+				var me = $(this);
+				var n = me.attr('name');
+				me.attr('name', n+'[]');
+				switch(i){
+					case 0:
+						me.val(ls.ccode[k]);
+					break;
+					case 1:
+						me.val(ls.det[k]);
+					break;
+					case 2:
+						me.val(ls.amount[k]);
+					break;
+					case 3:
+						me.val(ls.qty[k]);
+					break;
+					case 4:
+						me.val(ls.tax[k]);
+					break;
+				}
+				if(this.tagName.toLowerCase() == 'select'){
+					$('option', this).each(function(){
+						$(this).attr('select', $(this).attr('value') == me.val());
+					});
+				}
+			});
+			$('#invline-grid .items tbody').append(r);
+		}
+	}
+});
+</script>

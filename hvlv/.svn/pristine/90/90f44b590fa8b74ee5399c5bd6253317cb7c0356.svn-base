@@ -1,0 +1,159 @@
+<?php
+$displayErrorMsg = 'none';
+if (!empty($status) && $status == 'failed') {
+    $displayErrorMsg = 'block';
+} else {
+    $container_no = '';
+    $house_bl = '';
+}
+?>
+<!Doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-MrcW6ZMFYlzcLA8Nl+NtUVF0sA7MsXsP1UyJoMp4YLEuNSfAP+JcXn/tWtIaxVXM" crossorigin="anonymous"></script>
+    <!-- jQuery -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <!-- reCaptcha  -->
+    <!-- <script src="https://www.google.com/recaptcha/api.js"></script> -->
+    <!-- Custom CSS -->
+    <style>
+        body {
+            background: #ece7dc;
+        }
+    </style>
+    <title>TLA Container Pickup Booking</title>
+</head>
+
+<body>
+    <br />
+    <div class="container-sm">
+        <div class="card">
+            <div class="card-body">
+                <form method="POST" action="<?= $this->createUrl('customerService/containerBookingVertify'); ?>" id ="submitForm">
+                    <div class="mb-3">
+                        <select class="form-select" aria-label="Depot" id="depot" name="depot">
+                            <option value="Sydney">TLA Sydney</option>
+                            <option value="Melbourne">TLA Melbourne</option>
+                            <option value="Brisbane">TLA Brisbane</option>
+                        </select>
+                    </div>
+                    <input type="hidden" name="direct" id="direct" />
+                    <div id="multipleContainerDiv">
+                        <div class="containerDiv">
+                            <div class="mb-3">
+                                <label for="container_no" class="form-label">Container Number/AWB No.</label>
+                                <input type="text" class="form-control" id="container_no" name="container_no[]" value="<?php echo $container_no; ?>">
+                            </div>
+                            <div class="mb-3">
+                                <label for="house_bl" class="form-label">House BL</label>
+                                <input type="text" class="form-control" id="house_bl" name="house_bl[]" value="<?php echo $house_bl; ?>">
+                            </div>
+                            <div class="card" id = "card0" name = "card" style="display:none">
+                                <p style="color:red;" name ="card_p" >&nbsp;&nbsp;&nbsp;Error:&nbsp;</p>
+                            </div>
+                        </div>
+                    </div>
+                    </br>
+                    </br>
+                    </br>
+                    <button type="submit" class="btn btn-primary">Submit</button><a href = "" class="btn btn-primary" id="more" style="float: right;">+More</a>
+                </form>
+            </div>
+        </div>
+    </div>
+    <script type="text/javascript">
+        function deleteContainerDiv(id)
+        {
+            $('#'+id).remove();
+        }
+        $(function() {
+            let index = 2;
+            $("#depot").val("<?php if(!empty($depot)) {echo $depot;} else {echo "Sydney";} ?>");
+            $("#more").on("click",function(){
+                var divStr = '    <div class="containerDiv" id ="containerDiv'+index+'">'+
+                        '<div class="mb-3">'+
+                        '    <h5 for="container_no" class="form-label" name = "booking_slot">Booking '+index+'</h5>'+
+                        '</div>'+
+                        '<div class="mb-3">'+
+                        '    <label for="container_no" class="form-label">Container Number</label>'+
+                        '    <input type="text" class="form-control" id="container_no" name="container_no[]" value="<?php echo $container_no; ?>">'+
+                        '</div>'+
+                        '<div class="mb-3">'+
+                        '    <label for="house_bl" class="form-label">House BL</label>'+
+                        '    <input type="text" class="form-control" id="house_bl" name="house_bl[]" value="<?php echo $house_bl; ?>">'+
+                        '</div>'+
+                        '<div class="card" id="card'+(index-1)+'" name = "card" style="display:none;">'+
+                        '    <p name ="card_p" style="color:red;">&nbsp;&nbsp;&nbsp;Error:&nbsp;</p>'+
+                        '</div>'+
+                        '<a href = "" class="btn btn-primary" id="delete'+index+'" style="float: right;" onclick="deleteContainerDiv(\'containerDiv'+index+'\');return false;">-Del</a>'+
+                        '</div>';
+                $("#multipleContainerDiv").append(divStr);
+                index++;
+                return false;
+            });
+            $("form#submitForm").submit(function(event) {
+                direct = 0;
+                var formData = new FormData(this);
+                $.ajax({
+                    url: "https://ims.toplogistics.com.au/customerService/containerBookingVertify",
+                    //url: "http://localhost/hvlv/ims/customerService/containerBookingVertify",
+                    type: 'POST',
+                    async: false,
+                    data: formData,
+                    enctype: 'multipart/form-data',
+                    cache: false,
+                    contentType: false,
+                    processData: false,
+                    success: function(res) {
+                        //console.log(formData);
+                        console.log(res);
+                        var resultData = JSON.parse(res);
+                        console.log(resultData);
+                        var resultDataStatus = resultData.error;
+                        var resultDataArr = resultData.data;
+                        if(resultDataStatus==0)
+                        {
+                            direct = 1;
+                            $('#direct').val("1");
+                        }else
+                        {
+                            var cards = $("div[name='card']");
+                            var cardPs = $("p[name='card_p']");
+                            console.log(cards);
+                            for (var i = 0; i <resultDataArr.length; i++) {
+                                if(resultDataArr[i].status==0)
+                                {
+                                    $(cards[i]).show();
+                                    $(cardPs[i]).html("&nbsp;&nbsp;&nbsp;Error:&nbsp;"+resultDataArr[i].msg);
+                                }else
+                                {
+                                    $(cards[i]).hide();
+                                }
+                            }
+                           direct = 0;
+                        }
+
+                    },
+                });
+
+                if(direct==1)
+                {
+                    return true;
+                }else
+                {
+                    return false;
+                }
+            });
+
+
+        });
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,284 @@
+<?php
+
+/**
+ * This is the model class for table "log".
+ *
+ * The followings are the available columns in table 'log':
+ * @property integer $id
+ * @property string $time
+ * @property integer $type
+ * @property string $model
+ * @property integer $lid
+ * @property string $meta
+ * @property integer $user_id
+ *
+ * The followings are the available model relations:
+ * @property User $user
+ */
+class Log extends CActiveRecord
+{	
+	const LOG_TYPE_MISC = 0;
+    const LOG_TYPE_LOGIN = 1;
+    const LOG_TYPE_READ = 2;
+    const LOG_TYPE_CREATE = 3;
+    const LOG_TYPE_UPDATE = 4;
+    const LOG_TYPE_DELETE = 5;
+    const LOG_TYPE_NOTES = 6;
+    const LOG_TYPE_COMMIN = 7;
+    const LOG_TYPE_COMMOUT = 8;
+
+    public static $types = array(
+		'0' => 'Misc',
+		'1' => 'Login',
+		'2' => 'Read',
+		'3' => 'Create',
+		'4' => 'Update',
+		'5' => 'Delete',
+		'6' => 'Notes',
+		'7' => 'Comm-In',
+		'8' => 'Comm-Out',
+	);
+	
+	public $extra = array();
+	
+	/**
+	 * Returns the static model of the specified AR class.
+	 * @param string $className active record class name.
+	 * @return Log the static model class
+	 */
+	public static function model($className=__CLASS__){
+		return parent::model($className);
+	}
+
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName(){
+		return 'log';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules(){
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('model, lid', 'required'),
+			array('time, type, meta, user_id', 'safe'),
+			array('type, lid, user_id', 'numerical', 'integerOnly'=>true),
+			array('model', 'length', 'max'=>100),
+			// The following rule is used by search().
+			// Please remove those attributes that should not be searched.
+			array('id, time, type, model, lid, meta, user_id', 'safe', 'on'=>'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations(){
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+			'user' => array(self::BELONGS_TO, 'User', 'user_id'),
+		);
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels(){
+		$al = array(
+			'id' => 'ID',
+			'time' => 'Time',
+			'type' => 'Type',
+			'model' => 'Model',
+			'lid' => 'Lid',
+			'meta' => 'Detail',
+			'user_id' => 'User',
+		);
+		foreach($al as $k=>$l){
+			$al[$k] = Yii::t(strtolower(__CLASS__), $l);
+		}
+		return $al;
+	}
+	
+	protected function beforeSave(){
+		if(empty($this->time)) $this->time = date('Y-m-d H:i:s');
+		if(empty($this->user_id)) $this->user_id = User::currentUserID();
+		$this->meta = json_encode($this->extra);
+		return true;
+	}
+	
+	protected function afterFind(){
+		$this->extra = json_decode($this->meta, true);
+		return true;
+	}
+
+	public function mm(){
+		$r = new $this->model;
+		return $r::model()->findByPk($this->lid);
+	}
+
+    /**
+     * get export console create user name
+     * @param $consolId
+     * @return string
+     */
+    public static function getExconsolCreateUser($consolId){
+        $log = Log::model()->find('model = :m AND lid = :pid AND type = 3',[':m' => 'ExcoConsol',':pid' => $consolId] );
+        if ( empty($log) ) {
+            return 'System';
+        } else {
+            if(empty($log->user_id)){
+                return 'System';
+            }else{
+                return $log->user->getFullName();
+            }
+        }
+    }
+
+    /**
+     * @param $consolId
+     * @return int
+     */
+    public static function getExconsolCreateUserID($consolId){
+        $log = Log::model()->find('model = :m AND lid = :pid AND type = 3',[':m' => 'ExcoConsol',':pid' => $consolId] );
+        if ( empty($log) ) {
+            return 0;
+        } else {
+            if(empty($log->user_id)){
+                return 0;
+            }else{
+                return $log->user_id;
+            }
+        }
+    }
+
+    public static function getBillingCreateUserID($billingId) {
+    	$log = Log::model()->find('model = :m AND lid = :pid AND type = 3', [':m' => 'Billing', ':pid' => $billingId]);
+    	if (empty($log)) {
+    		return 0;
+    	} else {
+    		return $log->user_id;
+    	}
+    }
+
+	public static function getWmsTaskCreateUserID($wmstaskId)
+	{
+		$log = Log::model()->find('model = :m AND lid = :pid AND type = 3', [':m' => 'WmsTask', ':pid' => $wmstaskId]);
+		if (empty($log)) {
+			return 0;
+		} else {
+			return $log->user_id;
+		}
+	}
+
+	public function getUser(){
+		if(empty($this->user_id)){
+			return 'System';
+		}else{
+			if (empty($this->user)) return 'System';
+			return $this->user->getFullName();
+		}
+	}
+	
+	public function getType(){
+		return self::$types[$this->type];
+	}
+	
+	public function getExtra(){
+		$r ='';
+		if($this->type == 6){
+			return $this->extra['notes'];
+		}else{
+			foreach($this->extra as $k=>$v){
+				$r .= $k.': '.$v."\n";
+			}
+		}
+		return $r;
+	}
+	
+	public static function add($model, $type, $extra=array()){
+		$log = new Log;
+		$log->attributes = array(
+			'type' => $type,
+			'model' => get_class($model),
+			'lid' => $model->id,
+		);
+		if(!empty($extra)){
+			$log->extra = $extra;
+		}
+		$log->save();
+		return $log;
+	}
+	
+	public static function getLast($model){
+		$log = self::model()->find('model = :m AND lid = :id ORDER BY id DESC', array(':m' => get_class($model), ':id' => $model->id ));
+		return $log;
+	}
+
+	public static function getLast1($model, $type) {
+		$log = self::model()->find('model = :m AND lid = :id AND type = :type ORDER BY id DESC', array(':m' => get_class($model), ':id' => $model->id, ':type' => $type));
+		return $log;
+	}
+	
+	public static function getRevision($model, $array = false){
+		$logs = self::model()->findAll('model = :m AND lid = :id AND type = 4 ORDER BY id DESC', array(':m' => get_class($model), ':id' => $model->id ));
+		$rev = 0;
+		$rd = false;
+		foreach($logs as $l){
+			if($l->extra['status'] == 'Revise'){
+				if($rev == 0) $rd = $l->time;
+				$rev++;
+			}
+		}
+		if($array){
+			return array($rev, $rd);
+		}else{//'Rev #'.$rev.' - '.date('d/m/Y', strtotime($rd))
+			return $rev > 0? 'Revised' : 'Original';
+		}
+	}
+
+	public static function log2file($m,$file="direct_err",$direct=""){//for direct courier err
+		$dir = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR . $direct;
+		if(!is_dir($dir)) mkdir ($dir);
+		$lf = $dir.DIRECTORY_SEPARATOR;
+		$lf .= $file. date('Y-m-d') . '.log';
+		return file_put_contents($lf,date('Y-m-d H:i:s').' '.$m."\n", FILE_APPEND);
+	}
+  
+        /**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 * @return CActiveDataProvider the data provider that can return the models based on the search/filter conditions.
+	 */
+	public function search($page=50, $ec = null){
+		// Warning: Please modify the following code to remove attributes that
+		// should not be searched.
+
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('id',$this->id);
+		$criteria->compare('time',$this->time,true);
+		$criteria->compare('type',$this->type);
+		$criteria->compare('model',$this->model);
+		$criteria->compare('lid',$this->lid);
+		$criteria->compare('meta',$this->meta,true);
+		$criteria->compare('user_id',$this->user_id);
+
+		if (!empty($ec)) {
+			$criteria->mergeWith($ec);
+		}
+
+		return new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+			'sort'=>array(
+    			'defaultOrder'=>'id DESC',
+  			),
+			'pagination'=>array(
+				'pageSize'=>$page,
+            ),
+		));
+	}
+}

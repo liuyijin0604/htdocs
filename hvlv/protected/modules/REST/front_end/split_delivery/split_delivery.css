@@ -1,0 +1,33 @@
+.outside_margin{
+    margin-left: 10px;
+    margin-right: 10px;
+    margin-bottom: 10px;
+}
+
+.float_right{
+    float: right;
+}
+
+.margin_l_a{
+    margin-left: auto;
+}
+
+.inline{
+    display: inline;
+}
+
+.width_input_bottom{
+    width: 150px;
+}
+
+
+.ant-input-group-addon{
+    padding: 0px;
+}
+
+
+.card_tilte{
+    margin-left: 25px;
+}
+
+

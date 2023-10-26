@@ -1,0 +1,56 @@
+<?php
+class BwtrunkController extends Controller
+{
+    public function actionShowDialog()
+    {
+         $awb = isset($_GET['awb']) ? $_GET['awb'] : null;
+         $bwtrunks = Bwtrunk::model()->findAllByAttributes(array('MAWB_number' => $awb));
+         $this->render('_dialog', array(
+            'bwtrunks' => $bwtrunks,
+        ));
+    }
+
+    public function actionSave()
+    {
+        if (isset($_POST['id'])) {
+            $id = $_POST['id'];
+            $bwtrunk = Bwtrunk::model()->findByPk($id);
+
+            if ($bwtrunk === null) {
+                // Handle error - record not found
+            } else {
+                $bwtrunk->CTO_start = $_POST['CTO_start'];
+                $bwtrunk->CTO_finish = $_POST['CTO_finish'];
+                $bwtrunk->Client_start = $_POST['Client_start'];
+                $bwtrunk->Client_finish = $_POST['Client_finish'];
+
+                if ($bwtrunk->save()) {
+                    // Handle successful save
+                    echo 'success';
+                } else {
+                    // Handle save error
+                    echo 'error';
+                }
+            }
+        }
+    }
+    public function actionDelete()
+    {
+        if(Yii::app()->request->isAjaxRequest)
+        {
+            $id = $_POST['id'];
+            $bwtrunk = BwTrunk::model()->findByPk($id);
+            if($bwtrunk->delete())
+            {
+                echo 'success'; // 删除成功
+            }
+            else
+            {
+                echo 'error'; // 删除失败
+            }
+        }
+    }
+
+}
+
+?>

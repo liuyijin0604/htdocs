@@ -1,0 +1,231 @@
+<?php
+
+class WordReplaceUsageLogController extends Controller
+{
+	/**
+	 * @var string the default layout for the views. Defaults to '//layouts/column2', meaning
+	 * using two-column layout. See 'protected/views/layouts/column2.php'.
+	 */
+	public $layout='//layouts/column2';
+
+	/**
+	 * @return array action filters
+	 */
+	public function filters()
+	{
+		return array(
+			'accessControl', // perform access control for CRUD operations
+			'postOnly + delete', // we only allow deletion via POST request
+		);
+	}
+
+	/**
+	 * Specifies the access control rules.
+	 * This method is used by the 'accessControl' filter.
+	 * @return array access control rules
+	 */
+	public function accessRules()
+	{
+		return array(
+			array('allow',  // allow all users to perform 'index' and 'view' actions
+				'actions'=>array('index','view'),
+				'users'=>array('*'),
+			),
+			array('allow', // allow authenticated user to perform 'create' and 'update' actions
+				'actions'=>array('create','update'),
+				'users'=>array('@'),
+			),
+			array('allow', // allow admin user to perform 'admin' and 'delete' actions
+				'actions'=>array('admin','delete'),
+				'users'=>array('admin'),
+			),
+			array('deny',  // deny all users
+				'users'=>array('*'),
+			),
+		);
+	}
+
+	/**
+	 * Displays a particular model.
+	 * @param integer $id the ID of the model to be displayed
+	 */
+	public function actionView($id)
+	{
+		$this->render('view',array(
+			'model'=>$this->loadModel($id),
+		));
+	}
+
+	/**
+	 * Creates a new model.
+	 * If creation is successful, the browser will be redirected to the 'view' page.
+	 */
+	public function actionCreate()
+	{
+		$model=new WordReplaceUsageLog;
+
+		// Uncomment the following line if AJAX validation is needed
+		// $this->performAjaxValidation($model);
+
+		if(isset($_POST['WordReplaceUsageLog']))
+		{
+			$model->attributes=$_POST['WordReplaceUsageLog'];
+			if($model->save())
+				$this->redirect(array('view','id'=>$model->id));
+		}
+
+		$this->render('create',array(
+			'model'=>$model,
+		));
+	}
+
+	/**
+	 * Updates a particular model.
+	 * If update is successful, the browser will be redirected to the 'view' page.
+	 * @param integer $id the ID of the model to be updated
+	 */
+	public function actionUpdate($id)
+	{
+		$model=$this->loadModel($id);
+
+		// Uncomment the following line if AJAX validation is needed
+		// $this->performAjaxValidation($model);
+
+		if(isset($_POST['WordReplaceUsageLog']))
+		{
+			$model->attributes=$_POST['WordReplaceUsageLog'];
+			if($model->save())
+				$this->redirect(array('view','id'=>$model->id));
+		}
+
+		$this->render('update',array(
+			'model'=>$model,
+		));
+	}
+
+	/**
+	 * Deletes a particular model.
+	 * If deletion is successful, the browser will be redirected to the 'admin' page.
+	 * @param integer $id the ID of the model to be deleted
+	 */
+	public function actionDelete($id)
+	{
+		$this->loadModel($id)->delete();
+
+		// if AJAX request (triggered by deletion via admin grid view), we should not redirect the browser
+		if(!isset($_GET['ajax']))
+			$this->redirect(isset($_POST['returnUrl']) ? $_POST['returnUrl'] : array('admin'));
+	}
+
+	/**
+	 * Lists all models.
+	 */
+	public function actionIndex()
+	{
+		$dataProvider=new CActiveDataProvider('WordReplaceUsageLog');
+		$this->render('index',array(
+			'dataProvider'=>$dataProvider,
+		));
+	}
+
+	/**
+	 * Manages all models.
+	 */
+	public function actionAdmin()
+	{
+		$model=new WordReplaceUsageLog('search');
+		$model->unsetAttributes();  // clear any default values
+		if(isset($_GET['WordReplaceUsageLog']))
+			$model->attributes=$_GET['WordReplaceUsageLog'];
+
+		$this->render('admin',array(
+			'model'=>$model,
+		));
+	}
+
+	/**
+	 * Returns the data model based on the primary key given in the GET variable.
+	 * If the data model is not found, an HTTP exception will be raised.
+	 * @param integer $id the ID of the model to be loaded
+	 * @return WordReplaceUsageLog the loaded model
+	 * @throws CHttpException
+	 */
+	public function loadModel($id)
+	{
+		$model=WordReplaceUsageLog::model()->findByPk($id);
+		if($model===null)
+			throw new CHttpException(404,'The requested page does not exist.');
+		return $model;
+	}
+
+	/**
+	 * Performs the AJAX validation.
+	 * @param WordReplaceUsageLog $model the model to be validated
+	 */
+	protected function performAjaxValidation($model)
+	{
+		if(isset($_POST['ajax']) && $_POST['ajax']==='word-replace-usage-log-form')
+		{
+			echo CActiveForm::validate($model);
+			Yii::app()->end();
+		}
+	}
+
+	public function actionReports()
+	{
+		if(!empty($_POST)) {
+			$res = new stdClass;
+			$res->success = true;
+			$res->records = [];
+			$fromDate = !empty($_POST['from']) ? date('Y-m-d 00:00:00', strtotime($_POST['from'])) : '0000-00-00 00:00:00';
+			$toDate = !empty($_POST['to']) ? date('Y-m-d 23:59:59', strtotime($_POST['to'])) : date('Y-m-d H:i:s');
+			$orgId = $_POST['org_id'];
+			if (!empty($orgId)) {
+				$sql = 'SELECT * FROM word_replace_usage_log WHERE org_id = ' . $orgId . ' AND process_time >= "' . $fromDate . '" AND process_time <= "' . $toDate . '"';
+			} else {
+				$sql = 'SELECT * FROM word_replace_usage_log WHERE process_time >= "' . $fromDate . '" AND process_time <= "' . $toDate . '"';
+			}
+			$records = WordReplaceUsageLog::model()->findAllBySql($sql);
+			foreach ($records as $record) {
+				$temp = new stdClass;
+				$temp->org_id = $record->getOrgName();
+				$temp->shipment_id = $record->shipment_id;
+				$temp->consol_id = $record->consol_id;
+				$temp->ref = $record->getRef();
+				$temp->consol_no = $record->getConsolNo();
+				$temp->original = $record->original_word;
+				$temp->replace = @$record->replace_word;
+				$temp->process_time = $record->process_time;
+				array_push($res->records, $temp);
+			}
+			echo json_encode($res);
+			Yii::app()->end();
+		} else {
+			$this->render('reports');
+		}
+	}
+
+	public function actionExport()
+	{
+		if (!empty($_POST)) {
+			$fromDate = !empty($_POST['fromdate']) ? date('Y-m-d 00:00:00', strtotime($_POST['fromdate'])) : '0000-00-00 00:00:00';
+			$toDate = !empty($_POST['todate']) ? date('Y-m-d 23:59:59', strtotime($_POST['todate'])) : date('Y-m-d H:i:s');
+			$orgId = $_POST['orgId'];
+			if (!empty($orgId)) {
+				$sql = 'SELECT * FROM word_replace_usage_log WHERE org_id = ' . $orgId . ' AND process_time >= "' . $fromDate . '" AND process_time <= "' . $toDate . '"';
+			} else {
+				$sql = 'SELECT * FROM word_replace_usage_log WHERE process_time >= "' . $fromDate . '" AND process_time <= "' . $toDate . '"';
+			}
+			$records = WordReplaceUsageLog::model()->findAllBySql($sql);
+
+			$xls = new oExcel();
+			$i = 1;
+			$xls->setColWidth(array(50, 20, 20, 25, 15, 25, 100));
+			$xls->addRow($i++, array('Org Name', 'Ref', 'Consol No.', 'Original Word', 'Replaced Word', 'Process Time', 'Items'));
+			foreach ($records as $r) {
+				$xls->addRow($i++, array($r->getOrgName(), $r->getRef(), $r->getConsolNo(), $r->original_word, @$r->replace_word, $r->process_time, $r->getGoods()));
+			}
+			$xls->output('Word_Replace_Usage_' . $fromDate . '_' . $toDate . '.xlsx');
+		}
+	}
+}

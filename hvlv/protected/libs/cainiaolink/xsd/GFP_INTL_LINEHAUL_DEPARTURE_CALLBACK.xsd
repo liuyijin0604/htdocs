@@ -1,0 +1,70 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<!--Created with Liquid Studio 2018 (https://www.liquid-technologies.com)-->
+<xs:schema attributeFormDefault="unqualified" elementFormDefault="qualified" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+    <xs:element name="request">
+        <xs:complexType>
+            <xs:sequence>
+                <xs:element name="orderCode" type="xs:string" minOccurs="1" />
+                <xs:element name="operateTime" type="xs:string" minOccurs="1" />
+                <xs:element name="operateTimezone" type="xs:string" minOccurs="1" />
+                <xs:element name="operator" type="xs:string" minOccurs="0" />
+                <xs:element name="port" type="xs:string" minOccurs="1" />
+                <xs:element name="atd" type="xs:string" minOccurs="1" />
+                <xs:element name="atdTimezone" type="xs:string" minOccurs="1" />
+                <xs:element name="remark" type="xs:string" minOccurs="0" />
+                <xs:element name="routeList" minOccurs="0">
+                    <xs:complexType>
+                        <xs:sequence>
+                            <xs:element name="route" minOccurs="1" maxOccurs="unbounded">
+                                <xs:complexType>
+                                    <xs:all>
+                                        <xs:element name="transportMode" minOccurs="1">
+                                            <xs:simpleType>
+                                                <xs:restriction base="xs:string">
+                                                    <xs:enumeration value="AIR" />
+                                                    <xs:enumeration value="OCEAN" />
+                                                    <xs:enumeration value="RAILWAY" />
+                                                    <xs:enumeration value="TRUCK" />
+                                                </xs:restriction>
+                                            </xs:simpleType>
+                                        </xs:element>
+                                        <xs:element name="carrierCode" type="xs:string" minOccurs="0" />
+                                        <xs:element name="vessel" type="xs:string" minOccurs="0" />
+                                        <xs:element name="voyage" type="xs:string" minOccurs="0" />
+                                        <xs:element name="pol" type="xs:string" minOccurs="0" />
+                                        <xs:element name="pod" type="xs:string" minOccurs="0" />
+                                        <xs:element name="eta" type="xs:string" minOccurs="0" />
+                                        <xs:element name="etaTimezone" type="xs:string" minOccurs="0" />
+                                        <xs:element name="vesselType" minOccurs="0">
+                                            <xs:simpleType>
+                                                <xs:restriction base="xs:string">
+                                                    <xs:enumeration value="TON" />
+                                                    <xs:enumeration value="GP" />
+                                                    <xs:enumeration value="HQ" />
+                                                </xs:restriction>
+                                            </xs:simpleType>
+                                        </xs:element>
+                                        <xs:element name="vesselSize" minOccurs="0">
+                                            <xs:simpleType>
+                                                <xs:restriction base="xs:string">
+                                                    <xs:enumeration value="3" />
+                                                    <xs:enumeration value="5" />
+                                                    <xs:enumeration value="8" />
+                                                    <xs:enumeration value="10" />
+                                                    <xs:enumeration value="20" />
+                                                    <xs:enumeration value="40" />
+                                                    <xs:enumeration value="45" />
+                                                </xs:restriction>
+                                            </xs:simpleType>
+                                        </xs:element>
+                                        <xs:element name="transportNo" type="xs:string" minOccurs="0" />
+                                    </xs:all>
+                                </xs:complexType>
+                            </xs:element>
+                        </xs:sequence>
+                    </xs:complexType>
+                </xs:element>
+            </xs:sequence>
+        </xs:complexType>
+    </xs:element>
+</xs:schema>

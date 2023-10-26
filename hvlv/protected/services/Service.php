@@ -1,0 +1,265 @@
+<?php 
+class Service //service is the middle layer between controller and model layer, with the service layer, the function can be easily extends or copy to any controller and view. Also Service can reduce the heavy of model layer can save more memory and increase speed.
+{
+	protected static  $ins =null; 
+	private $debug;
+	public $warns;
+	public function __construct($debug = false){
+		$this->debug = $debug;
+	}
+
+	public function getResult($status,$msg)
+	{
+		return ["done"=>$status,'msg'=>$msg];
+	}
+
+	public function getSuccessResultWithWarns()
+	{
+		return ["done"=>true,'msg'=>'Success','warns'=>$this->warns];
+	}
+
+	public static function getSuccessResult()
+	{
+		return ["done"=>true,'msg'=>'Success'];
+	}
+
+	public static function getFailResult($msg)
+	{
+		return ["done"=>false,'msg'=>$msg,'warns'=>[]];
+	}
+
+	public function getFileData($file)
+	{
+		if (!preg_match('/xml|csv|xls|xlsx/i', $file['name'])) 
+		{
+			return [];
+		}
+		if (preg_match('/csv/i', $file['name'])) 
+		{
+			$xls = new oExcel('CSV');
+			$xls->load($file['tmp_name']);
+		} elseif(preg_match('/xml/i', $file['name']))
+		{
+			$xml = simplexml_load_file($file['tmp_name']);
+			$invoiceCount = count($xml->Details);
+			if($invoiceCount<=0)
+			{
+				$data = [];
+			}else
+			{
+				$data = [$xml->Details];
+				return $data;
+			}
+		}else {
+			$xls = new oExcel;
+			$format = $xls->supported($file['name']);
+			$xls = new oExcel($format);
+			$xls->load($file['tmp_name']);
+		}
+		$data = [];
+		$i = 0;
+		$sheetsArray = $xls->xls->getAllSheets();
+		foreach ($sheetsArray as $n => $sheet) {
+			$xls->goSheet($n);
+			$data[$i] = $xls->getAll();
+			$i++;
+		}
+		return $data;
+	}
+
+	public function exportData($data,$header,$filename)
+	{
+		$xls = new oExcel;
+		$i = 1;
+		$hdr = $header;
+		$fn = $filename;
+		$xls->addRow($i++, $header);
+		foreach ($data as $r) {
+			$xls->addRow($i++, $r);
+		}
+		$xls->output($fn);
+	}
+
+	public function saveFiles($files,$model,$fid,$fileType)
+	{
+		if (!empty($files[$model])) 
+			{
+				$errors=[];
+				$photos=empty($files[$model]['tmp_name']['photos'])?[]:$files[$model]['tmp_name']['photos'];
+				foreach ($photos as $key => $photo) 
+				{
+					if (empty($photo)) 
+					{
+						$errors[]='images not exists';
+					} else 
+					{
+						$name = $files[$model]['name']['photos'][$key];
+						if(!is_uploaded_file($photo)) $errors[]=$name.'images not exists';
+						$obj = $model::model()->findByPk($fid);
+						$hash = FileRepo::uploadHash($obj, $fileType);
+						$filesize = filesize($photo);
+						$date = date('Y-m-d H:i:s');
+						$fileHash = hash_file('crc32b', $photo).hash('crc32b', $filesize);
+						$finfo = finfo_open(FILEINFO_MIME_TYPE);
+						$mime = finfo_file($finfo, $photo);
+						$fr = CargoProcess::updateUploadSingleFile($filesize,$date,$fileHash,$finfo,$mime,$photo,$name, $hash);
+					}
+				}
+
+				$thisfiles=empty($files[$model]['tmp_name']['files'])?[]:$files[$model]['tmp_name']['files'];
+				foreach ($thisfiles as $key => $file) 
+				{
+					if (empty($file)) 
+					{
+						$errors[]='files not exists';
+					} else 
+					{
+						$name = $files[$model]['name']['files'][$key];
+						if(!is_uploaded_file($file)) $errors[]=$name.'images not exists';
+						$obj = $model::model()->findByPk($fid);
+						$hash = FileRepo::uploadHash($obj, $fileType);
+						$filesize = filesize($file);
+						$date = date('Y-m-d H:i:s');
+						$fileHash = hash_file('crc32b', $file).hash('crc32b', $filesize);
+						$finfo = finfo_open(FILEINFO_MIME_TYPE);
+						$mime = finfo_file($finfo, $file);
+						$fr = CargoProcess::updateUploadSingleFile($filesize,$date,$fileHash,$finfo,$mime,$file,$name, $hash);
+					}
+				}
+
+			}
+	}
+
+	public function filesToBeFile($files,$model)
+	{
+		if (!empty($files[$model])) 
+			{
+				$errors=[];
+				$thisfiles=empty($files[$model]['tmp_name']['files'])?[]:$files[$model]['tmp_name']['files'];
+				foreach ($thisfiles as $key => $file) 
+				{
+					if (empty($file)) 
+					{
+						$errors[]='files not exists';
+					} else 
+					{
+						$name = $files[$model]['name']['files'][$key];
+						$tmp_name = $file;
+						return ["name"=>$name,"tmp_name"=>$tmp_name];
+					}
+				}
+			}
+	}
+
+	public static function updateUploadSingleFile($filesize,$date,$fileHash,$finfo,$mime,$filename,$name, $thisHash,$move=false,$isCargoProcess=false,$cargoProcessId = false,$isFullPod = false,$active = FileRepo::PENDING)
+	{
+		$fr = new FileRepo;
+		$fr->name = $name;
+		$fr->size = $filesize;
+		$fr->date = $date;
+		$fr->hash = $fileHash;
+		$sup = Yii::app()->session['uploads'][$thisHash];
+		$fr->type = $sup[0];
+		$fr->mime = empty($mime)? 'application/octet-stream' : $mime;
+		$fr->status = $active;
+		$fr->user_id = User::currentUserID();
+		$fr->org_id = User::currentUserOrgId();
+		$d = Yii::app()->params['fileRepoPath'].DIRECTORY_SEPARATOR.substr($fr->hash,0,2);
+		if(!is_dir($d)) mkdir($d);
+		if($move)
+		{
+			copy($filename, $d.DIRECTORY_SEPARATOR.$fr->hash);
+  			unlink($filename);
+		}else
+		{
+			move_uploaded_file($filename, $d.DIRECTORY_SEPARATOR.$fr->hash);
+		}
+		if(empty($sup[1])){
+			$fr->fid = 0;
+			$fr->save();
+			if(!isset($sup[2])) $sup[2] = array();
+			$sup[2][] = $fr->id;
+			$su = Yii::app()->session['uploads'];
+			$su[$thisHash] = $sup;
+			Yii::app()->session['uploads'] = $su;
+		}else{
+			$fr->fid = $sup[1];
+			if($isCargoProcess)
+			{
+				$cargoProcess = CargoProcess::model()->findByPk($fr->fid);
+				$fr->fid = $cargoProcess->shipment_id;
+				$fr->mdata = ["cargo_process_id"=>$cargoProcess->id];
+
+				if($isFullPod)
+				{
+					$fr->fid =  $sup[1];
+
+					$fr2 = new FileRepo;
+					$fr2->name = $name;
+					$fr2->size = $filesize;
+					$fr2->date = $date;
+					$fr2->hash = $fileHash;
+					$fr2->type = 25;
+					$fr2->mime = empty($mime)? 'application/octet-stream' : $mime;
+					$fr2->status = $active;
+					$fr2->fid = $cargoProcess->shipment_id;
+					$fr2->mdata = ["cargo_process_id"=>$cargoProcess->id];
+					$fr2->save();
+				}
+			}else if(!empty($cargoProcessId))
+			{
+				$fr->mdata = ["cargo_process_id"=>$cargoProcessId];
+			}
+			$fr->save();
+			if(!isset($sup[2])) $sup[2] = array();
+			$sup[2][] = $fr->id;
+		}
+		return $fr;
+	}
+
+	public static function setCacheData($key,$data,$time = 3000)
+	{
+		Yii::app()->cache->set($key,json_encode($data),$time);
+		return true;
+	}
+
+	public static function getCacheData($key)
+	{
+		$allData = json_decode(Yii::app()->cache->get($key),true);
+		return $allData;
+	}
+
+	public static function setCacheDataForever($key,$data)
+	{
+		Yii::app()->cache->set($key,json_encode($data),5184000);
+		return true;
+	}
+
+		public static function setJavaCacheData($key,$data,$time = 3000)
+	{
+		Yii::app()->cache_java->set($key,json_encode($data),$time);
+		return true;
+	}
+
+	public static function getJavaCacheData($key)
+	{
+		$check = Yii::app()->cache_java->get($key);
+		if(empty($check))
+		{
+			$allData = [];
+		}else
+		{
+			$allData = json_decode(Yii::app()->cache_java->get($key),true);
+		}
+		return $allData;
+	}
+
+	public static function setJavaCacheDataForever($key,$data)
+	{
+		Yii::app()->cache_java->set($key,json_encode($data),5184000);
+		return true;
+	}
+
+
+}
+?>

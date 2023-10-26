@@ -1,0 +1,174 @@
+<h3>Sea Process Operation <?=$model->airline." ".$model->flight?></h3>
+<br/>
+<div class="pane">
+<div class="form">
+<?php 
+	$id = $model->id;
+	$url = $this->createUrl('consolProcess/seaOperationUpdate');
+	if(isset($ids) && $ids != "")
+	{
+		$id = $ids;
+	}
+
+	$form=$this->beginWidget('CActiveForm', array(
+	'id'=>'sea-process-operation-form',
+	'enableClientValidation'=>true,
+		'action'=> $this->createURL('consolProcess/seaOperationUpdate',array('id'=>$id)),
+	'clientOptions'=>array(
+		'validateOnSubmit'=>true,
+	),
+));
+?>
+<div class="row rowcol-left">
+	<?php echo CHtml::label('status','status'); ?>
+	<?php echo CHtml::dropDownList('consol_process_status',@$model->process->status, ConsolProcess::$newSeaStates,array('prompt'=>'Select')); ?>
+	 <?php echo CHtml::button('Update', array('class' => 'updateStatus'));?>
+</div>
+
+
+<!-- <div class="row">
+<label>To Do List:</label>
+<table style="table-layout: fixed"  border="0" cellspacing="0" cellpadding="0" width="100%">
+	<?php 
+	   $index=0;
+	   $result="";
+	   foreach (ConsolProcess::$seaStates as $key=>$value){
+		   if($index%4==0){
+			   $result.="<tr>";
+			}
+			$checked= (($model->process->status & $key) >0) ? true : false;
+			$result.="<td width='25%'><input type='checkbox' id='".$key."_sea_status' name=seaStates[] value='$key' ".($checked?"checked":"")."/> ".$value."</td>";
+			$index++;
+			 if($index%4==0){
+			   $result.="</tr>";
+			}
+	   }
+	 echo $result;
+	?>
+</table>
+</div> -->
+	<?php
+		echo CHtml::button('Edit Cartage Email', array('class' => 'edit_cartage_email',"style"=>"font-size:1.5em;"));
+		echo CHtml::link('',$this->createUrl('consolProcess/editCartageEmail')."?id=".$id, array('id'=>'cartageLink','class' => 'jqm2_link',"style"=>"font-size:1.5em;display:none","data-win-class"=>"L"));
+	?>
+	<div class="row">
+		<div class='row rowcol rowleft'>
+			<?php echo CHtml::label('Eta','eta'); ?>
+			<?php echo CHtml::textField('Consol[eta]',@$model->eta, array('size' => 20,'class'=>"date_input",'id'=>'eta'.$_GET['tabid'])); ?>
+		</div>
+	</div>
+
+
+	 <div class="row buttons">
+		 <?php echo CHtml::submitButton('Save',array('class'=>'update')); ?>
+	</div>
+	</div>
+<div  style="width: 200px; float: right; margin-left: 20px;">
+	<?php echo $this->renderPartial('scan_info', array('model'=>$model));?>
+</div>
+
+<?php $this->endWidget(); ?>
+
+<br>
+<div style="clear:both"></div>
+<?php
+$invoices = Invoice::model()->findAll('consol_id= :cid AND status NOT IN (10,8)',[':cid' => $model->id]);
+$dp = new CArrayDataProvider($invoices,array(
+	'id' => 'consol_invoices-'.$_GET["tabid"]
+));
+$dp->pagination=array('pageSize' => 30,);
+$this->widget('zii.widgets.grid.CGridView', array(
+	'id'=>'consol_invoice_grid_'.$_GET['tabid'],
+	'cssFile' => false,
+	'dataProvider' => $dp,// $dp->search(),
+	'filter' => null,
+	'enableSorting' => false,
+	'columns'=>array(
+		array('name' => 'no', 'value' => '$data->no', ),
+		array('name' => 'bill_to', 'value' => '$data->cust->name', ),
+		array('header' => 'Invoice Total', 'value' => '$data->getCurrency().$data->total', ),
+		array(
+			'class'=>'oButtonColumn',
+			'template'=>'{view} ',
+			'buttons'=>array
+			(
+				'view' => array(
+					'url' => 'Yii::app()->createURL("invoice/print", array("id" => $data->id))',
+					'imageUrl'=>false,
+					'options' => array('class' => 'grid_view_btn', 'target' => '_blank'),
+				),
+			
+			),
+		),
+)));
+?>
+</div>
+</div>
+<script>
+$(function(){
+	var win = $('#jqmw_<?=$_GET["tabid"];?>');
+	var tab = $('#<?=$_GET["tabid"];?>');
+	var panel = $('#<?=$_GET["tabid"];?>').data('panel'); 
+	
+	tab.unbind('reload_sea_consol_process_grid').bind('reload_sea_consol_process_grid', function(){
+		$('#<?=$_GET["tabid"];?>_consol_process_grid', tab.data('panel')).yiiGridView('update');
+		return false;
+	});
+	
+	$('form#sea-process-operation-form',win).on('success',function(){
+		tab.trigger('reload_sea_consol_process_grid');
+	});
+
+	function save()
+	{
+		var form = new FormData(document.getElementById("sea-process-operation-form"));
+		 $.ajax({
+		            url: '<?=$url."?id=".$id?>',
+		            type: "post",
+		            data: form,
+		            processData: false,
+		            contentType: false,
+		            success: function(r) {
+		                if(r=='done')
+		                 {
+							myApp.notice('Done', 5000);
+						 }else
+						 {
+							myApp.alert(r, false);   
+			             }
+			             tab.trigger('reload_sea_consol_process_grid');
+			         },
+		            error: function(e) {
+		                console.log(e);
+		            }
+		        });	
+	}
+
+	$('.updateStatus',win).click(function(){
+		var selected=$("#consol_process_status").val();
+		if(confirm('Are you sure to update status?')){
+			$.get('<?=$this->createUrl("consolProcess/process",["id"=>$model->process->id]);?>'+"?status="+selected,function(r){
+				if(r == 'done'){
+					myApp.notice('Done', 5000);
+				}else{
+					myApp.alert(r, false);
+				}
+				tab.trigger('reload_consol_process_grid');
+			});
+	 	}
+	});
+
+	$('.update',win).on('click',function(){
+		if( confirm('Are you sure to save?')){	
+			save();	
+		}
+		return false;
+	});
+
+	$('.edit_cartage_email',win).on('click',function(){
+		$('#cartageLink',win).click();
+	});
+
+
+});
+</script>

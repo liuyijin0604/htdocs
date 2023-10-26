@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+</head>
+
+<body>
+    <h2>Update Scheduled Date</h2>
+    <div class="container" id="form_container">
+        <form id="scheduled_date_form">
+            <div class="row" style="display: none;">
+                <input type="text" id="shipment_id" name="shipment_id" value="<?= $model->id; ?>" />
+            </div>
+            <div class="row">
+                <label for="scheduled_date" style="margin-left: 20px;">Scheduled Delivery Date</label>
+                <div class="input-group input-group-md" style="margin-left: 20px;">
+                    <input type="date" id="scheduled_date" name="scheduled_date" required />
+                </div>
+            </div>
+            <div class="row">
+                <label for="amazon_po" style="margin-left: 20px;">ASN</label>
+                <div class="input-group input-group-md" style="margin-left: 20px;">
+                    <input type="text" id="amazon_po" name="amazon_po" required />
+                </div>
+            </div>
+            <div class="row">
+                <label for="amazon_shipment_id" style="margin-left: 20px;">Booking ID</label>
+                <div class="input-group input-group-md" style="margin-left: 20px;">
+                    <input type="text" id="amazon_shipment_id" name="amazon_shipment_id" />
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-lg-3">
+                    <input type="submit" value="Submit" class="btn btn-primary" style="margin-top: 25px;">
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <div class="container" id="result_container">
+
+    </div>
+
+    <script type="text/javascript">
+        $(document).ready(function() {
+            var today = new Date();
+            var tomorrow = new Date(today);
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            var yearToday = today.getFullYear();
+            var monthToday = today.getMonth() + 1;
+            var dateToday = today.getDate();
+            if (monthToday < 10) {
+                monthToday = '0' + monthToday.toString();
+            }
+            if (dateToday < 10) {
+                dateToday = '0' + dateToday.toString();
+            }
+            var minDate = yearToday + '-' + monthToday + '-' + dateToday;
+            //console.log(date);
+            $('#scheduled_date').attr('min', minDate);
+
+            const picker = document.getElementById('scheduled_date');
+            picker.addEventListener('input', function(e) {
+                var day = new Date(this.value).getUTCDay();
+                let d = new Date();
+                let diff = d.getTimezoneOffset();
+                //console.log(diff);
+                let auDiff = -600;
+                let hoursDiff = Math.trunc((auDiff - diff) / 60);
+                //console.log(hoursDiff);
+                //console.log(diff);
+                let selectedDate = new Date(this.value);
+                let availableDate = <?php echo json_encode($available_date, JSON_HEX_TAG); ?>;
+                availableDate = new Date(availableDate);
+                if ([6, 0, 1, 5].includes(day)) {
+                    e.preventDefault();
+                    this.value = '';
+                    alert('Currently we only accept Tuesday, Wednesday, and Thursday for booking. Please select another date.');
+                } else if (today.getHours() >= (12 + hoursDiff) && selectedDate.getFullYear() == tomorrow.getFullYear() && selectedDate.getMonth() == tomorrow.getMonth() && selectedDate.getDate() == tomorrow.getDate()) {
+                    e.preventDefault();
+                    this.value = '';
+                    alert('Currently we cannot make a delivery booking for tomorrow after 12:00 PM');
+                } else if (selectedDate < availableDate) {
+                    e.preventDefault();
+                    this.value = '';
+                    alert('Items are not available on your selected date, the earliest available date for this shipment is ' + availableDate.toISOString().split("T")[0] + '. Please choose another date.');
+                }
+            });
+
+            $('form#scheduled_date_form').on('submit', function(e) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                var formData = new FormData(this);
+                $.ajax({
+                    url: "<?= $this->createUrl('shipment/checkStorage') ?>",
+                    type: "POST",
+                    data: formData,
+                    enctype: 'multipart/form-data',
+                    cache: false,
+                    contentType: false,
+                    processData: false,
+                    success: function(res) {
+                        var response = jQuery.parseJSON(res);
+                        formData.append("storage_start", response.storageStart);
+                        formData.append("storage_fee", response.storageFee);
+                        formData.append("storage_days", response.storageDays);
+                        formData.append("storage_to", response.storageTo);
+                        if (confirm("On your chosen delivery date, there will be a storage fee of $" + Number(response.storageFee).toFixed(2) + " AUD for a storage period of " + Number(response.storageDays) + " days. Are you sure?")) {
+                            $.ajax({
+                                url: "<?= $this->createUrl('shipment/updateScheduledDate') ?>",
+                                type: "POST",
+                                data: formData,
+                                enctype: 'multipart/form-data',
+                                cache: false,
+                                contentType: false,
+                                processData: false,
+                                success: function(r) {
+                                    //debugger;
+                                    let finalRes = jQuery.parseJSON(r);
+                                    if (finalRes.success == true) {
+                                        alert("You have successfully scheduled delivery date on " + finalRes.deliveryDate + ".");
+                                    } else {
+                                        alert(finalRes.errMsg);
+                                    }
+                                }
+                            });
+                        }
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+
+</html>

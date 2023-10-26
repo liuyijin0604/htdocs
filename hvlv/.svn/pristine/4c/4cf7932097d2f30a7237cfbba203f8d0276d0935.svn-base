@@ -1,0 +1,145 @@
+<?php 
+class AddressService extends Service
+{
+   public static function isMatchAmazonOrB2B($postcode,$suburb,$address)
+    {
+        $match = false;
+        if(!empty($postcode))
+        {
+            if(strpos(CargoProcess::FBAPOSTCODE,$postcode)!==false)
+            {
+                $match = false;
+                $match = self::isMatchAmazon($postcode,$suburb,$address);
+                if (strpos(CargoProcess::OVERSEAPOSTCODE,$postcode)!==false&&!$match) {
+                    $type = CargoProcess::B2B_CARGO;
+                    $regionData = SystemSetting::getFBARegionSetting("B2B");
+                    $regionData = $regionData[$postcode];
+                    if(!empty($regionData))
+                    {
+                        $match = false;
+                        foreach ($regionData as $key => $value) {
+                            $words = explode(' ', $value[0]);
+                            $thisMatch = true;
+                            foreach ($words as $key => $word) {
+                                $word = str_replace('/', '\/', $word);
+                                if(!(preg_match("/".strtoupper($word)."/",  strtoupper($address))&&(strtoupper(trim($value[1])) == strtoupper(trim($suburb)))))
+                                {
+                                    $thisMatch =false;
+                                    break;
+                                }
+                            }
+                            if($thisMatch)
+                            {
+                                $match = true;
+                                break;
+                            }
+                        }
+                        if(!$match)
+                        {
+                            return false;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                return false;
+            }
+        }
+        
+        return $match;
+    }
+
+    public static function isMatchAmazon($postcode,$suburb,$address)
+    {
+        $match = false;
+        if(!empty($postcode))
+        {
+            if(strpos(CargoProcess::FBAPOSTCODE,$postcode)!==false)
+            {
+                $match = false;
+                if(strpos(CargoProcess::PUREFBAPOSTCODE,$postcode)!==false)
+                {
+                    $type = CargoProcess::FBA_CARGO;
+                    $regionData = SystemSetting::getFBARegionSetting("FBA");
+                    $regionData = $regionData[$postcode];
+                    if(!empty($regionData))
+                    {
+                        foreach ($regionData as $key => $value) {
+                            $words = explode(' ', $value[0]);
+                            $thisMatch = true;
+                            foreach ($words as $key => $word) {
+                                $word = str_replace('/', '\/', $word);
+                                if(!empty($word))
+                                {
+                                    if(!(preg_match("/".strtoupper($word)."/",  strtoupper($address))&&(strtoupper(trim($value[1])) == strtoupper(trim($suburb)))))
+                                    {
+                                        $thisMatch =false;
+                                        break;
+                                    }
+                                }
+                            }
+                            if($thisMatch)
+                            {
+                                $match = true;
+                                break;
+                            }
+                        }
+                        if($match)
+                        {
+                            return $match;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                return false;
+            }
+        }
+        return $match;
+    }
+
+    public static function getShipmentCargoReceipt($shipment)
+    {
+        $cargoReceipAddresses = SystemSetting::getCargoReceptAddress();
+        foreach ($cargoReceipAddresses as $key => $caAddr)
+        {
+           if($caAddr[4]==$shipment->cnee->postcode&&$caAddr[3]==$shipment->cnee->state&&strtoupper($caAddr[2])==strtoupper($shipment->cnee->suburb)&&preg_match('/'.$caAddr[1].'/i', $shipment->cnee->address)&&preg_match('/'.$caAddr[0].'/i', $shipment->cnee->address))
+           {
+                return $key;
+           }
+        }
+
+        return "";
+    }
+
+    public function isShipmentAmazon($shipment)
+    {
+        return $this->isMatchAmazon($shipment->cnee->postcode,$shipment->cnee->suburb,$shipment->cnee->address);
+    }
+
+    public static function isShipmentResidential($shipment,$courier)
+    {
+        $resiC = AddrResidential::model()->count("address=:address and suburb=:suburb and postcode=:postcode and country='Australia'",[":address"=>$shipment->cnee->address,":suburb"=>$shipment->cnee->suburb,":postcode"=>$shipment->cnee->postcode]);
+        if($resiC>0)
+        {
+            return true;
+        }else
+        {
+            $alliedHomeSurcharge = HvlvJavaService::getAlliedHomeDelFee($shipment,$courier);
+            if($alliedHomeSurcharge>0&&$alliedHomeSurcharge<9999)
+            {
+                $addrResidential = new AddrResidential();
+                $addrResidential->address = $shipment->cnee->address;
+                $addrResidential->suburb = $shipment->cnee->suburb;
+                $addrResidential->postcode = $shipment->cnee->postcode;
+                $addrResidential->country = "Australia";
+                $addrResidential->save();
+                return true;
+            }
+        }
+        return false;
+    }
+}
+?>

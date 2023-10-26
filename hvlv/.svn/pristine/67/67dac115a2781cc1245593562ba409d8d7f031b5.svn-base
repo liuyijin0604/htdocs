@@ -1,0 +1,216 @@
+<div style="right: 20px;position: absolute;">
+<a href="#" data-dropdown="#<?=$_GET["tabid"];?>-dropdown-2"><div style="background-position:-16px 0" class="icon"></div> Batch Export</a>
+<div id="<?=$_GET["tabid"];?>-dropdown-2" class="dropdown dropdown-tip dropdown-relative dropdown-anchor-right">
+	<ul class="dropdown-menu">
+        <li><a href="<?=$this->createUrl('imParcel/export', ['typ' => 'clabel'])?>" target="_blank" id="ecl">Export Courier Labels</a></li>
+        <li><a href="<?=$this->createUrl('imParcel/export', ['typ' => 'plabel'])?>" target="_blank" id="epl">Export TLA Labels</a></li>
+		<li><a href="<?=$this->createUrl('imParcel/export', ['typ' => 'dgdoc'])?>" target="_blank" id="edd">Export DG docs</a></li>
+		<li><a href="<?=$this->createUrl('imParcel/export', ['typ' => 'sodoc'])?>" target="_blank" id="eso">Export Sea Order</a></li>
+		<li><a href="<?=$this->createUrl('imParcel/export', ['typ' => 'amiauto'])?>" target="_blank" id="amio">Export AMI webmation</a></li>
+		<li><a href="<?=$this->createUrl('imParcel/export', ['typ' => 'dfe'])?>" target="_blank" id="dfe">Export DFE Shipment</a></li>
+		<li><a href="<?=$this->createUrl('imParcel/exportAllSKP')?>" target="_blank" >Export ALL SKP Shipment</a></li>
+		<li><a href="<?=$this->createUrl('imParcel/exportAllChangedLabelShipment')?>" target="_blank" >Export ALL Changed Shipment</a></li>
+		<!-- <li><a href="<?=$this->createUrl('imParcel/export', ['typ' => 'dfeCost'])?>" target="_blank" id="dfeCost">Export DFE Shipment With 4 Cost</a></li> -->
+   	</ul>
+</div>
+<a class="tab_link" href="<?=$this->createUrl('imParcel/create');?>" title="New Shipment"><div class="icon" style="background-position:-16px 0"></div> New Shipment</a> &nbsp; 
+<a class="export_search" target="_blank" href="<?=$this->createUrl('imParcel/export', ['typ' => '']);?>"><div style="background-position:-48px -688px" class="icon"></div>Export Current Search</a> &nbsp; 
+<?php if (Acl::hasAccess("B:imParcel/batchStatus")) { ?>
+<!-- <a class="jqm_link" href="<?=$this->createUrl('imParcel/batchStatus', ['status' => 60]); ?>" title="Batch Cleared"><div style="background-position:-48px -688px" class="icon"></div> Batch Cleared</a> -->
+<?php } ?>
+<a href="#" data-dropdown="#<?=$_GET["tabid"];?>-dropdown-1"><div style="background-position:-48px -688px" class="icon"></div> Import</a>
+<div id="<?=$_GET["tabid"];?>-dropdown-1" class="dropdown dropdown-tip dropdown-relative dropdown-anchor-right">
+	<ul class="dropdown-menu">
+		<?php if (Acl::hasAccess("B:imParcel/batchStatus")) { ?>
+			<li><a href="<?=$this->createUrl('uploadMani/seperateShipment')?>" class="jqm_link">Change Label</a></li>
+		<?php } ?>
+		<?php if (Acl::hasAccess("B:imParcel/batchWeight")) { ?>
+			<li><a href="<?=$this->createUrl('imParcel/batchWeight')?>" class="jqm_link">Change Weight</a></li>
+		<?php } ?>
+		<?php if (Acl::hasAccess("B:imParcel/batchIsB2B")) { ?>
+			<li><a href="<?=$this->createUrl('imParcel/batchIsB2B')?>" class="jqm_link">Change isB2B</a></li>
+		<?php } ?>
+	</ul>
+</div>
+</div>
+<h1><?=$this->t((empty($modelType)?'Import Shipments123':$modelType));?></h1>
+
+<p>
+<?=$this->t('You may optionally enter a comparison operator (<b>&lt;</b>, <b>&lt;=</b>, <b>&gt;</b>, <b>&gt;=</b>, <b>&lt;&gt;</b> or <b>=</b>) at the beginning of each of your search values to specify how the comparison should be done.');?></p>
+
+<?php echo CHtml::link($this->t('Advanced Search'), '#', ['id'=>$_GET['tabid'].'search-button']); ?>
+<div id="<?=$_GET['tabid']?>search-form" style="display:none">
+<?php $this->renderPartial('_search', [
+	'model'=>$model,
+]);
+?>
+</div>
+
+<?php
+if (Acl::hasAccess("B:imParcel/showConsolno")) {
+    $consolNoColumn = [
+        'name' => 'consol_no',
+        'type' => 'raw',
+        'value' => 'empty($data->consol_id) ? "" : "<a href=\"" . Yii::app()->createURL(Consol::getTheConsolType($data->consol_id) == 70 ? "dmawbConsol/update" : "imcoConsol/update", array("id" => $data->consol_id)) . "\" class=\"tab_link\" title=\"" . @$data->consol->no . "\">" . @$data->consol->no . "</a>"',
+    ];
+} else {
+    $consolNoColumn = [
+        'name' => 'consol_no',
+        'filter' => '',
+        'type' => 'raw',
+        'value' => 'empty($data->consol_id) ? "" : @$data->consol->no',
+    ];
+}
+
+$this->widget('zii.widgets.grid.CGridView', [
+    'id' => 'im-parcel-grid' . @$modelType,
+    'cssFile' => false,
+    'dataProvider' => $model->search(true, 10, false, false),
+    'filter' => $model,
+    'columns' => [
+        ['name' => 'hbn', 'type' => 'raw', 'value' => '"<a href=\"" . Yii::app()->createURL("imParcel/update", array("id" => $data->id)) . "\" class=\"tab_link\" title=\"" . $data->hbn . "\">" . $data->getHbn() . "</a>"'],
+        'ref',
+        'can',
+        'agent_id',
+        ['name' => 'awb_name', 'header' => 'awb', 'type' => 'raw', 'value' => '@$data->consol->service==10?@$data->consol->awb:@$data->consol->mdata["container_no"]'],
+        'pkg',
+        $consolNoColumn,
+        ['name' => 'status', 'value' => '$data->getStatus()', 'filter' => CHtml::dropDownList(get_class($model).'[status]', $model->status, $this->t(ImParcel::$states), ['prompt' => $this->t('All')])],
+        ['name' => 'ddpt_id', 'value' => '@$data->ddepot->name', 'filter' => CHtml::dropDownList(get_class($model).'[ddpt_id]', $model->ddpt_id, $this->t(Org::dptList()), ['prompt' => $this->t('All')])],
+        ['name' => 'cnee_name', 'value' => 'empty($data->cnee) ? "" : $data->cnee->name'],
+        'postcode',
+        'weight',
+        ['name' => 'scan_no', 'header' => 'unScan', 'value' => '$data->pkg - $data->getOutPkg()'],
+
+        ['name' => 'rack', 'type' => 'raw', 'value' => '$data->getRackName(false,true)'],
+        ['name' => 'bag_tag', 'value' => '@$data->bag_tag->bag_tag', 'filter' => CHtml::textField(get_class($model).'[bagTag]', $model->bagTag)],
+        ['name' => 'created', 'value' => 'substr($data->created,0,10)'],
+        ['header' => 'ChargeCode', 'value' => '$data->getChargecode()', 'filter' => CHtml::textField(get_class($model).'[chargecode]', $model->chargecode)],
+
+        ['header' => 'value', 'value' => '$data->dvalue'],
+        ['header' => 'goods available address', 'type' => 'raw', 'value' => '$data->getAvailabelLabel()', 'filter' => CHtml::dropDownList(get_class($model).'[goodsAvailableAddress]', @$model->goodsAvailableAddress, $this->t(DmawbConsol::$available_address_name), ['prompt' => 'All'])],
+        ['header' => 'extra Info', 'type' => 'raw', 'value' => '$data->getWarnings().$data->getDGWarnings()', 'filter' => CHtml::dropDownList(get_class($model).'[bwf]', $model->bwf, $this->t(ImParcel::$bwfs), ['prompt' => 'All']).CHtml::dropDownList(get_class($model).'[exInfo]', $model->exInfo, $this->t(ImParcel::$exInfos), ['prompt' => 'All'])],
+        [
+            'class' => 'oButtonColumn',
+            'template' => '{Log}{update}',
+            'buttons' => [
+                'Log' => [
+                    'imageUrl' => false,
+                    'url' => 'Yii::app()->createUrl("imParcel/clearLog", ["id" => $data->id])',
+                    'options' => ['class' => 'jqm_link grid_view_btn'],
+                ],
+                'update' => [
+                    'imageUrl' => false,
+                    'visible' => 'true',
+                    'options' => ['class' => 'tab_link grid_edit_btn', 'label' => $this->t('Update'), 'title' => '$data->hbn'],
+                ],
+            ],
+        ],
+    ],
+]);
+?>
+
+
+
+<script type="text/javascript">
+$(function(){
+	var tab = $('#<?=$_GET["tabid"];?>');
+	var panel = tab.data('panel');
+	
+
+	var resetFilters = function(){
+		$('#<?=$_GET['tabid']?>search-form form', panel).trigger('reset');
+		$('#im-parcel-grid<?=@$modelType?>', panel).yiiGridView('update', {data: 'CoParcel=reset'});
+	};
+
+	$('#<?=$_GET['tabid']?>search-button', panel).click(function(){
+		$('#<?=$_GET['tabid']?>search-form', panel).toggle();
+		return false;
+	});
+
+	$('#<?=$_GET['tabid']?>search-form form', panel).on('submit', function(){
+		$('#im-parcel-grid<?=@$modelType?>', panel).yiiGridView('update', {data: $('.filters input, .filters select', panel).serialize() + '&' + $(this).serialize()});
+		return false;
+	}).find('.reset_btn').click(resetFilters);
+
+	tab.bind('onOpen', function(){
+		$('#im-parcel-grid<?=@$modelType?>', panel).yiiGridView('update');
+	});
+
+	tab.on('gridUpdated', function(){
+		$('tr.filters td:last-child', panel).empty().append($('<input type="button" id="reset_filter" value="Reset" />').on('click', resetFilters));
+	}).trigger('gridUpdated');
+
+	$('a.export_search', panel).on('mousedown', function(){
+		var q = $('.filters input, .filters select', panel).serialize()+'&'+$('#<?=$_GET['tabid']?>search-form form', panel).serialize();
+		$(this).attr('href', $(this).attr('href') + '&' + q);
+	});
+
+	$('#ecl', panel).on('mousedown', function(){
+		var q = $('.filters input, .filters select', panel).serialize()+'&'+$('#<?=$_GET['tabid']?>search-form form', panel).serialize();
+		$(this).attr('href', $(this).attr('href') + '&' + q);
+	});
+	$('#epl', panel).on('mousedown', function(){
+		var q = $('.filters input, .filters select', panel).serialize()+'&'+$('#<?=$_GET['tabid']?>search-form form', panel).serialize();
+		$(this).attr('href', $(this).attr('href') + '&' + q);
+	});
+	$('#edd', panel).on('mousedown', function(){
+		var q = $('.filters input, .filters select', panel).serialize()+'&'+$('#<?=$_GET['tabid']?>search-form form', panel).serialize();
+		$(this).attr('href', $(this).attr('href') + '&' + q);
+	});
+	$('#eso', panel).on('mousedown', function(){
+		var q = $('.filters input, .filters select', panel).serialize()+'&'+$('#<?=$_GET['tabid']?>search-form form', panel).serialize();
+		$(this).attr('href', $(this).attr('href') + '&' + q);
+	});
+	$('#amio', panel).on('mousedown', function(){
+		var q = $('.filters input, .filters select', panel).serialize()+'&'+$('#<?=$_GET['tabid']?>search-form form', panel).serialize();
+		$(this).attr('href', $(this).attr('href') + '&' + q);
+	});
+	var dfeHref = $('#dfe').attr('href');
+	$('#dfe', panel).on('mousedown', function(){
+		var q = $('.filters input, .filters select', panel).serialize()+'&'+$('#<?=$_GET['tabid']?>search-form form', panel).serialize();
+		$(this).attr('href', dfeHref+ '&' + q);
+	});
+
+	$('input[name="yt0"]',panel).click(function(){
+		if ($('input[name="ImParcel[ref]"]', panel).length){
+			$('input[name="ImParcel[ref]"]', panel).val("");
+		}
+		if ($('input[name="TplParcel[ref]"]', panel).length){
+			$('input[name="TplParcel[ref]"]', panel).val("");
+		}
+		if ($('input[name="ImParcel[hbn]"]', panel).length){
+			$('input[name="ImParcel[hbn]"]', panel).val("");
+		}
+		if ($('input[name="TplParcel[hbn]"]', panel).length){
+			$('input[name="TplParcel[hbn]"]', panel).val("");
+		}
+	});
+
+	$('.pane', panel).on('focus', 'input[name="ImParcel[ref]"]', function()
+	{
+		if ($('input[name="ImParcel[ref]"]', panel).val() == "searching"){
+			$('input[name="ImParcel[ref]"]', panel).val("");
+		}
+	});
+
+	$('.pane', panel).on('focus', 'input[name="TplParcel[ref]"]', function()
+	{
+		if ($('input[name="TplParcel[ref]"]', panel).val() == "searching"){
+			$('input[name="TplParcel[ref]"]', panel).val("");
+		}
+	});
+
+	$('.pane', panel).on('focus', 'input[name="ImParcelArchive[ref]"]', function()
+	{
+		if ($('input[name="ImParcelArchive[ref]"]', panel).val() == "searching"){
+			$('input[name="ImParcelArchive[ref]"]', panel).val("");
+		}
+	});
+
+
+});
+
+
+
+</script>

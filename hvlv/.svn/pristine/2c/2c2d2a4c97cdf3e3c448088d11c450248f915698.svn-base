@@ -1,0 +1,2226 @@
+<?php
+
+class CustomerServiceController extends Controller{
+	/**
+	 * Declares class-based actions.
+	 */
+	protected $nonAjax=array('bulkPrint','print','export','report','sNoteDetail','cneeShipmentQuery','goLink','fbaRemoval','amazonSearch','imparcelTracking','contactUsByEmail','marketingEmailUnsubscribe','marketingEmailOnlineView','taskFeedback','getTlaFuel','containerAvailability', 'containerBookingVertify', 'bookingCheckout', 'bookingCheckoutMultiple', 'bookingPaymentSuccess', 'termsAndConditions','editContainerPickupBooking','paymentSuccess', 'bookingPaymentSuccessMultiple','salesFunnel');
+	protected $skipAcl=array('auPcSuggest','cnCitySuggest','cnSuburbSuggest','prodSuggest', 'tracking','cneeShipmentQuery','review','goLink','fbaRemoval','amazonSearch','imparcelTracking','contactUsByEmail','marketingEmailUnsubscribe','marketingEmailOnlineView','taskFeedback','getTlaFuel','containerAvailability', 'containerBookingVertify', 'containerPickupBooking', 'bookingCheckout', 'bookingCheckoutMultiple', 'bookingPaymentSuccess', 'termsAndConditions','editContainerPickupBooking','editBookingInfo','payByPaypal','paymentSuccess', 'bookingPaymentSuccessMultiple','salesFunnel');
+	protected $skipLogin = array('cneeShipmentQuery','review','goLink','fbaRemoval','amazonSearch','imparcelTracking','contactUsByEmail','marketingEmailUnsubscribe','marketingEmailOnlineView','taskFeedback','getTlaFuel','containerAvailability', 'containerBookingVertify', 'containerPickupBooking', 'bookingCheckout', 'bookingCheckoutMultiple', 'bookingPaymentSuccess', 'termsAndConditions','editContainerPickupBooking','editBookingInfo','payByPaypal','paymentSuccess', 'bookingPaymentSuccessMultiple','salesFunnel');
+
+	protected $noRecaptha = array('editBookingInfo','payByPaypal','cneeShipmentQuery','review','goLink','fbaRemoval','amazonSearch','imparcelTracking','contactUsByEmail','marketingEmailUnsubscribe','marketingEmailOnlineView','taskFeedback','getTlaFuel','containerAvailability', 'containerBookingVertify', 'containerPickupBooking', 'bookingCheckout', 'bookingCheckoutMultiple', 'bookingPaymentSuccess', 'termsAndConditions','editContainerPickupBooking','editBookingInfo','payByPaypal','paymentSuccess', 'bookingPaymentSuccessMultiple','salesFunnel');
+
+	protected $org, $type;
+
+	public function beforeAction($action){
+		$this->layout="ims";
+		if(!Yii::app()->user->isGuest){
+			$this->org = Org::model()->findByPk(Yii::app()->user->org);
+						$this->type = 'im';
+		}
+		return parent::beforeAction($action);
+	}
+		
+	public  function actionIndex(){
+		if(isset($_POST['ShipmentQuestionSubmit']))
+		{
+			$errors = [];
+			$ref = @$_POST['ShipmentQuestionSubmit']['mhbns'];
+			$shipment = ImParcel::model()->find('ref = :ref',[":ref"=>$ref]);
+			$c_note = @$_POST['ShipmentQuestionSubmit']['c_note'];
+			$email = @$_POST['ShipmentQuestionSubmit']['email'];
+			$faq = @$_POST['faq'];
+			$model=new ShipmentQuestionSubmit();
+			if(empty($faq))
+			{
+				$errors[] = "Require select a question";
+			}
+			if(empty($c_note))
+			{
+				$errors[] = "Require notes";
+			}
+			if(empty($email))
+			{
+				$errors[] = "Require email";
+			}else
+			{
+				$email = trim($email);
+				$email2 = explode("<", $email);
+				$email = $email2[0];
+				$email = preg_replace('/;/', '', $email);
+				if(!preg_match('/^(\w)+(\.\w+)*@(\w|-|_)+((\.\w+)+)$/', $email))
+				{
+					$errors[] = "Email is incorrect";
+				}
+			}
+			if(!empty($errors))
+			{
+				$model->addErrors($errors);
+				$this->ajaxResult($model);
+			}
+
+			$model=new ShipmentQuestionSubmit();
+			if(isset($_POST['ShipmentQuestionSubmit']['c_note']))
+			{
+				$shipments= null;
+				$model->attributes=$_POST['ShipmentQuestionSubmit'];
+				$model->mhbns = @$_POST['ShipmentQuestionSubmit']["mhbns"];
+				if (!empty($model->mhbns)) {
+						$ns = preg_split('/[\s,;]+/', trim($model->mhbns));
+						if (sizeof($ns) > 200) {
+							$ns = array_slice($ns, 0, 200);
+						}
+						$sc1 = new CDbCriteria;
+						$sc1->addInCondition("hbn", $ns);
+						$sc1->addInCondition("ref", $ns, 'OR');
+						$sc1->addInCondition("cref", $ns, 'OR');
+						$shipments = ImParcel::model()->findAll($sc1);
+						$sc1->compare("ShipmentQuestionSubmit.org_id", $this->org->id);
+						$sqs = ShipmentQuestion::model()->with(["Shipment","ShipmentQuestionSubmit"])->findAll($sc1);
+						// if(!empty($sqs))
+						// {
+						// 	$model->addError("Questions about ImParcels are submitted","Questions about ImParcels are submitted");
+						// 	foreach ($sqs as $key => $value) {
+						// 		$model->addError("Ticket:".$value->ShipmentQuestionSubmit->ticket." Ref:".$value->Shipment->ref,"Ticket:".$value->ShipmentQuestionSubmit->ticket." Ref:".$value->Shipment->ref);
+						// 	}
+						// 	$this->ajaxResult($model);
+						// }
+				}
+				$model->org_id = $this->org->id;
+				$model->date = date("Y-m-d H:i:s");
+				$model->faq = CsFaq::model()->findByPk($_POST['faq'])->content;
+				$model->email = $email;
+				$model->type = ShipmentQuestionSubmit::USERGENERATE;
+				$model->save();
+				$model->refresh();
+				if($shipments!=null)
+				{
+					foreach ($shipments as $key => $shipment) {
+
+
+						$shipmentQuestion = new ShipmentQuestion();
+						$shipmentQuestion->shipment_id= $shipment->id;
+						// $shipmentQuestion->c_note= "none";
+						// $shipmentQuestion->s_note= "none";
+						$shipmentQuestion->submit_id= $model->id;
+						$shipmentQuestion->faq = CsFaq::model()->findByPk($_POST['faq'])->content;
+						$shipmentQuestion->mdata["items"] = "";//ShipmentQuestionSubmit::getItems($_POST['ShipmentQuestion']['mdata']['items'],$model,$shipment);
+						// $shipmentQuestion->faq_answer = "none";
+						$shipmentQuestion->save();
+						ShipmentQuestionSubmit::saveFiles($_FILES,$shipmentQuestion,true);
+					}
+				}else
+				{
+					$shipmentQuestion = new ShipmentQuestion();
+					$shipmentQuestion->shipment_id= 0;
+					// $shipmentQuestion->c_note= "none";
+					// $shipmentQuestion->s_note= "none";
+					$shipmentQuestion->submit_id= $model->id;
+					$shipmentQuestion->faq = CsFaq::model()->findByPk($_POST['faq'])->content;
+					$shipmentQuestion->mdata["items"] = "";//ShipmentQuestionSubmit::getItems($_POST['ShipmentQuestion']['mdata']['items'],$model,$shipment);
+					// $shipmentQuestion->faq_answer = "none";
+					$shipmentQuestion->save();
+					ShipmentQuestionSubmit::saveFiles($_FILES,$shipmentQuestion,true);
+				}
+				//ShipmentQuestionSubmit::sendNoticeSystemMessageToStaff($faq,count($shipments),$model->ticket);
+				$customerServiceService = new CustomerServiceService();
+				$customerServiceService->transferCustomerServiceCaseToBeEmail($model->ticket);
+
+			    $this->ajaxResult($model);
+			}
+		}
+		$shipmentQuestionSubmit=new ShipmentQuestionSubmit();
+
+		$model=new ShipmentQuestion('search');
+		$model->unsetAttributes();  // clear any default values
+		$model->org_id = Yii::app()->user->org;
+		
+		if(isset($_GET['ShipmentQuestion']))
+		{
+			$model->setAttributes($_GET['ShipmentQuestion']);
+			if(isset($_GET['ShipmentQuestion']['ref']))
+			{
+				$model->setRef($_GET['ShipmentQuestion']['ref']);
+			}
+				if(isset($_GET["ShipmentQuestion"]["date"]))
+			{
+				$model->setDate($_GET["ShipmentQuestion"]["date"]);
+			}
+		}
+		if(isset($_GET['ref']))
+		{
+			$model->setRef($_GET['ref']);
+		}
+		if(isset($_GET['ref']))
+		{
+			$faqListArr = CsFaq::model()->findAll(" status = :status and type = 0",[":status"=>CsFaq::active]);
+		}else
+		{
+			$faqListArr = CsFaq::model()->findAll(" status = :status and type = 1",[":status"=>CsFaq::active]);
+		}
+
+		$faqList= [];
+		$faqList = [""=>"Please Select"];
+		foreach ($faqListArr as $key => $value) {
+			$faqList["".$value['id']] = $value['content'];
+		}
+
+		$result= array(
+			'model'=>$model,'org'=>$this->org,'faqList'=>$faqList,'shipmentQuestionSubmit'=>$shipmentQuestionSubmit
+		);
+
+		if(isset($_GET['ref']))
+		{
+			$result['singleCheck']=true;
+		}
+
+		$this->renderPartial('index',$result);
+	}
+
+	public function actionCneeShipmentQuery()
+	{
+		if(empty($_POST['ShipmentQuestionSubmit']['mhbns']))//for checking the ticket or go to the submittion page
+		{
+			$this->layout="frontend";
+			$shipment = ImParcel::model()->find(" ref = :ref and status != :status",[":ref"=>@$_GET['ref'],":status"=>ImParcel::STATE_CANCELLED]);
+			$type = !empty($_GET['type'])?$_GET['type']:0;
+			$model=new ShipmentQuestionSubmit('search');
+			$model->mhbns = $shipment->ref;
+			$model->unsetAttributes();  // clear any default values
+			$faqListArr = CsFaq::model()->findAll(" status = :status and type = 0",[":status"=>CsFaq::active]);
+			$trackingListArr = CsFaq::model()->findAll(" status = :status and type = 2",[":status"=>CsFaq::active]);
+			$faqList= [];
+			$trackingList = [];
+			$faqList = [""=>"Please Select"];
+			$trackingList = [""=>"Please Select"];
+			if(empty($type))
+			{
+				foreach ($faqListArr as $key => $value) 
+				{
+					$faqList["".$value['id']] = $value['frontend_content'];
+				}
+				foreach ($trackingListArr as $key => $value)
+				{
+					$trackingList["".$value['id']] = $value['frontend_content'];
+				}
+				$result= array('model'=>$model,'org'=>null,'faqList'=>$faqList,'trackingList'=>$trackingList);
+				$this->render('frontend_index',$result);// submittion page
+			}else
+			{
+				$ticket = @$_GET['ticket'];
+				$ref = @$_GET['ref'];
+				$model = ShipmentQuestion::model()->with(["ShipmentQuestionSubmit","Shipment"])->find(" ShipmentQuestionSubmit.ticket = :ticket and Shipment.ref = :ref",[":ticket"=>$ticket,":ref"=>"$ref"]);
+				$result= array('model'=>$model,'org'=>null);
+				$this->render('frontend_check',$result);//checking page
+			}
+		}else// for submitting the question
+		{
+			$errors = [];
+			$ref = @$_POST['ShipmentQuestionSubmit']['mhbns'];
+			$email = @$_POST['ShipmentQuestionSubmit']['email'];
+			$shipment = ImParcel::model()->find('ref = :ref',[":ref"=>$ref]);
+			$c_note = @$_POST['ShipmentQuestionSubmit']['c_note'];
+			$faq = @$_POST['ShipmentQuestionSubmit']['faq'];
+			$trackingOption = @$_POST['ShipmentQuestionSubmit']['tracking'];
+			$model=new ShipmentQuestionSubmit();
+			if(empty($email))
+			{
+				$errors[] = "Require email address";
+			}else
+			{
+				$email = trim($email);
+				$email = preg_replace('/;/', '', $email);
+			}
+
+
+			if(empty($faq))
+			{
+				$errors[] = "Require faq";
+			}
+			// if(empty($faq))
+			// {
+			// 	$errors[] = "Require select a question";
+			// }
+			if(empty($c_note) && $_POST['ShipmentQuestionSubmit']['tracking'] != '30')
+			{
+				$errors[] = "Require notes";
+			}
+			if(!empty($errors))
+			{
+				$model->addErrors($errors);
+				$this->ajaxResult($model);
+			}
+
+			if(!empty($shipment!=null))
+			{
+				/**
+				 * Automatically send enquiry email to courier when customer selected 'Shipment Tracking' -> 'Track Shipment (Already with courier)'
+				 */
+				if ($trackingOption == '30') {
+					$tranship = Tranship::model()->find(" connote = :connote ",[":connote"=>$ref]);
+					$courier = Org::model()->findByPk($tranship->org_id);
+					$emailService = new EmailService();
+					$emailService->sendCustomerServiceTrackingEmail($shipment, $courier, $ref, $email);
+					echo "<script type='text/javascript'>alert('A message has been submitted to the courier. You will receive a reminder when they reply.'); window.location.href = 'https://www.toplogistics.com.au/';</script>";
+				}
+				$faq = CsFaq::model()->findByPk($faq);
+				$model->setAttributes($_POST['ShipmentQuestionSubmit']);
+				if ($trackingOption == '30') {
+					$model->c_note = CsFaq::model()->findByPk($trackingOption)->frontend_content;
+				}
+				$model->date = date("Y-m-d H:i:s");
+				$model->faq = $faq->content;
+				$model->type = ShipmentQuestionSubmit::FRONTENDGENERATE;
+				$model->save();
+				$model->refresh();
+
+				$shipmentQuestion = new ShipmentQuestion();
+				$shipmentQuestion->shipment_id= $shipment->id;
+				// $shipmentQuestion->c_note= "none";
+				// $shipmentQuestion->s_note= "none";
+				$shipmentQuestion->submit_id= $model->id;
+				$shipmentQuestion->faq = $faq->content;
+				$shipmentQuestion->mdata['items'] = "";//$_POST['ShipmentQuestion']['mdata']['items'];
+				// $shipmentQuestion->faq_answer = "none";
+				$shipmentQuestion->save();
+
+				ShipmentQuestionSubmit::saveFiles($_FILES,$shipmentQuestion,true);
+				$customerServiceService = new CustomerServiceService();
+				$customerServiceService->transferCustomerServiceCaseToBeEmail($model->ticket);
+
+				// $objEmailService = new EmailService;
+				// $objEmailService->sendCneeShipmentQuery($ref.'<br>'.$email.'<br>'.$c_note) ;
+			     echo "<script type='text/javascript'>alert('Submit Success'); window.location.href = 'https://www.toplogistics.com.au/';</script>";
+			}
+		}
+	}
+
+	public function actionPayByPaypal()
+	{
+		$invoiceNo = $_GET['no'];
+		$invoice = Invoice::model()->find('no = :no',[":no"=>$invoiceNo]);
+		if($invoice->status==Invoice::INVOICE_STATUS_PAID)
+		{
+			echo "<script type='text/javascript'> alert('This invoice had been paid');window.location.href = 'https://www.toplogistics.com.au';</script>";
+			return;
+		}
+		$invoiceService = new InvoiceService();
+		echo "<script type='text/javascript'> window.location.href = '".$invoiceService->createPaypallink($invoice->id)."';</script>";
+	}
+
+	public function actionReview()
+	{
+		$this->layout=false;
+		$this->render('review');
+	}
+
+	public function actionSubmitLowRatingReview()
+	{
+		if (!empty($_POST["comment"])) {
+			$comment = $_POST["comment"];
+			$rating = $_POST["rating"];
+			$emailService = new EmailService();
+			$toEmail = 'peter@toplogistics.com.au, david.ren@toplogistics.com.au, joanna.zhang@toplogistics.com.au';
+			$str = "Rating:  <b>" . $rating . "</b><br>User comments:  " . $comment;
+			$subject = "Customer Feedback. Rating: " .$rating;
+			$emailService->sendNormalEmail($toEmail, $subject, $str);
+		} else {
+			return;
+		}
+	}
+
+	// public function actionFbaRemoval()
+	// {
+	// 	if(empty($_POST['ImportsMetaform']['seller_name']))//for checking the ticket or go to the submittion page
+	// 	{
+	// 		$this->layout="frontend";
+	// 		$result = [];
+	// 		$this->render('frontend_fbaremoval',$result);// submittion page
+	// 	}else// for submitting the question
+	// 	{
+	// 		$imf = new ImportsMetaform();
+	// 		$formService = new FbaFormService();
+	// 		$errors = $formService->checkForm($_POST);
+	// 		if(!empty($errors))
+	// 		{
+	// 			$imf->addErrors($errors);
+	// 			$this->ajaxResult($imf);
+	// 		}
+	// 		$status = $formService->submitForm($_POST);
+	// 		if($status)
+	// 		{
+	// 			echo "<script type='text/javascript'>alert('Submit Success');window.location.href = 'https://www.toplogistics.com.au/';</script>";
+	// 		}else
+	// 		{
+	// 			echo "<script type='text/javascript'>alert('Submit Failed');</script>";
+	// 		}
+	// 	}
+	// }
+	
+	public function actionFbaRemoval()
+	{
+		if($_POST['step'] ==='1'){
+			$this->layout="frontend";
+			$this->render('frontend_fbaremoval_3pl_agreement',array(
+				"model"=>$_POST['ImportsMetaform'],
+			));
+		}
+		else if($_POST['step'] ==='2'){
+			
+			$json = json_encode($_POST);
+			$strData = base64_encode($json);
+			// $de = base64_decode($strData);
+			
+			// $objData = json_decode($_POST['strData']);
+			$strEmail = $_POST['seller_email'];
+			// $strContent ='http://hvlv_branch.test/ims/customerService/fbaRemoval?ref='.$strData;
+			$strContent ='https://ims.toplogistics.com.au/customerService/fbaRemoval?ref='.$strData;
+			
+			$objEmailService = new EmailService;
+			$objEmailService->sendFabRemovalActiveAccount($strEmail,$strContent) ;
+			
+			$this->layout="frontend";
+			$result = [];
+			$this->render('frontend_fbaremoval_3pl_email',array(
+				"model"=> $_POST,
+			));
+		}
+		else if(!empty($_GET['ref'])){
+			$strData = base64_decode($_GET['ref']);
+			$objData = json_decode($strData);
+			// $strEmail = $objData->seller_email;
+			
+			//check email exist
+			$result = User::model()->findAll('email=:email',[':email'=> $objData->seller_email]);
+			if(sizeof($result)> 0){
+				$model = new stdClass;
+				// $model->url = 'http://hvlv_branch.test/pcaw/';
+				$model->url = 'https://ims.toplogistics.com.au/pcaw/';
+				$model->user = $objData->seller_email.' already exist !';
+				$model->password = 'please contact 3PL@toplogistics.com.au';
+				$this->layout="frontend";
+				$this->render('frontend_fbaremoval_3pl_active',array(
+					"model"=> $model,
+				));
+				Yii::app()->end();
+			}
+			
+			$objOrg = Org::model()->find('email=:email',[':email'=> $objData->seller_email]);
+			if($objOrg == null){
+				$objOrg = new Org;
+				$objOrg['type']= Org::CLIENTTYPE;
+				$objOrg['by']= 1;
+				$objOrg['name']= $objData->seller_company;
+				$objOrg['country']= 'Australia';
+				$objOrg['phone']= $objData->seller_mobile;
+				$objOrg['email']= $objData->seller_email;
+				$objOrg['status']= 1;
+				
+				$objOrg->extra = ['client_billing_email'=> $objData->seller_email];
+	
+				$objOrg->save();
+			}
+			
+			$strPassword = $this->make_password();
+			$objUser=new User;
+			$objUser['type']= User::Type_Export_Agent_Manager;
+			$objUser['org_id']= $objOrg->id;
+			$objUser['title']= 'Mr';
+			$objUser['fname']= $objData->seller_name;
+			$objUser['lname']= $objData->seller_name;
+			$objUser['email']= $objData->seller_email;
+			$objUser['password']= md5($strPassword);
+			$objUser['mobile']= $objData->seller_mobile;
+			$objUser['active']= 1;
+			$objUser->dpmt=0;
+			$objUser->save();
+			
+			$objEmailService = new EmailService;
+			
+			$listData = (array)$objData;
+			$strEmailBody = '';
+			foreach($listData  as $key=>$value){
+				if($key == 'yt0' || $key == 'step'){
+					continue;
+				}
+				$strEmailBody.= $key.': '.$value.'<br/>';
+			}
+			
+			// $objEmailService->sendNormalEmail('lwj55555@live.cn','Fba Removal',$strData) ;
+			$objEmailService->sendNormalEmail('peter@toplogistics.com.au;michelle@toplogistics.com.au;david.ren@toplogistics.com.au;vanessa.chen@toplogistics.com.au;3PL@toplogistics.com.au','Fba Removal',$strEmailBody) ;
+			
+			$model = new stdClass;
+			// $model->url = 'http://hvlv_branch.test/pcaw/';
+			$model->url = 'https://ims.toplogistics.com.au/pcaw/';
+			$model->user = $objData->seller_email;
+			$model->password = $strPassword;
+			$this->layout="frontend";
+			$this->render('frontend_fbaremoval_3pl_active',array(
+				"model"=> $model,
+			)); 
+			
+		}
+		else if(empty($_POST['ImportsMetaform']['seller_email']))//for checking the ticket or go to the submittion page
+		{
+			$this->layout="frontend";
+			$result = [];
+			$this->render('frontend_fbaremoval_3pl',$result);// submittion page
+		}
+	}
+
+	public function actionAmazonSearch()
+	{
+		if(empty($_POST)){
+			$this->layout="frontend";
+			$this->render('frontend_amazon_searching');
+		}
+		else{
+			$errors = [];
+			$ref = @$_POST['form']['amazon_booking_ref'];
+			$bookingTime = @$_POST['form']['amazon_booking_booking'];
+			if(empty($bookingTime))
+			{
+				$errors[] = "Require amazon_booking_time";
+			}
+			if(!empty($errors))
+			{
+				$model->addErrors($errors);
+				$this->ajaxResult($model);
+			}
+
+			$filtersForm=new FiltersForm();
+			if (isset($_GET['FiltersForm'])) {
+				$filtersForm->filters=$_GET['FiltersForm'];
+			}
+			$data = [];
+			$provide=[];
+			$criteria=new CDbCriteria;
+			if (!empty($ref)) {
+				$criteria->compare('booking_ref', $ref, true);
+			}
+			if (!empty($bookingTime)) {
+				$criteria->compare('amazon_booking_time', $bookingTime, true);
+			}
+			$rs= AmazonInfo::model()->findAll($criteria);
+			$totalWeight = [];
+			foreach ($rs as $r) {
+				$p = $r->model::model()->findByPk($r->fid);
+				if(empty($p)) continue;
+				if(!empty($p->shipment))
+				{
+					$p = $p->shipment;
+				}
+				$totalWeight[$p->id] = floatval($p->weight);
+			}
+			$totalWeight = array_sum($totalWeight);
+			foreach ($rs as $index=>$r) {
+				$p = $r->model::model()->findByPk($r->fid);
+				if(empty($p)) continue;
+				if(!empty($p->shipment))
+				{
+					$p = $p->shipment;
+				}
+				$po = @$p->mdata['amazon_po'];
+				$fbaId = @$p->mdata['amazon_shipment_ids'];
+				$sdc = @$p->pkg;
+				if(!empty($p->cargo_process))
+				{
+					$sdc = @$p->cargo_process->getPackages();
+				}
+				$totalCartons = @$p->pkg;
+
+				$thisIndex = ($r->model=='ImParcel'||$r->model=='CargoProcess')?$p->id:$r->fid;
+				$provide[$thisIndex]=['id'=>$index,"fid"=>($r->model=='ImParcel'||$r->model=='CargoProcess')?$p->id:$r->fid,'model'=>($r->model=='ImParcel'||$r->model=='CargoProcess')?'ImParcel':$r->model,'no'=>($r->model=='ImParcel'||$r->model=='CargoProcess')?$p->hbn:$p->no,'booking_ref'=>$r->booking_ref,'amazon_booking_time'=>$r->amazon_booking_time,'ref'=>($r->model=='ImParcel'||$r->model=='CargoProcess')?$p->ref:$p->awb,'amazon_po'=>$po,'amazon_fba' => $fbaId,'shipment_delivery_cartons'=>$sdc,'total_cartons'=>$totalCartons];
+			}
+			$filteredData = $filtersForm->filter($provide);
+			$dataprovider = new CArrayDataProvider($filteredData, array(
+				'pagination' => array(
+					'pageSize' => 1000,
+				),
+			));
+			$this->layout="frontend";
+			$this->render('frontend_amazon_searching_result',['dataProvider'=>[$dataprovider,$filtersForm]]);
+		}
+	}
+	
+	function make_password( $length = 8 )
+	{
+		$chars = array('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 
+		'i', 'j', 'k', 'l','m', 'n', 'o', 'p', 'q', 'r', 's', 
+		't', 'u', 'v', 'w', 'x', 'y','z', 'A', 'B', 'C', 'D', 
+		'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L','M', 'N', 'O', 
+		'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y','Z', 
+		'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '!', 
+		'@','#', '$', '%', '^', '&', '*', '(', ')', '-', '_', 
+		'[', ']', '{', '}', '<', '>', '~', '`', '+', '=', ',', 
+		'.', ';', ':', '/', '?', '|');
+		$keys = array_rand($chars, $length); 
+		$password = '';
+		for($i = 0; $i < $length; $i++)
+		{
+			$password .= $chars[$keys[$i]];
+		}
+		return $password;
+	}
+	
+
+	public function actionGoLink()
+	{
+		$s = $_GET['s'];
+		$courierId = 0;
+		if(preg_match('/2X|QX/i', $s))
+		{
+			$courierId = Org::ORGID_COURIER_FASTWAY;
+		}else if(preg_match('/TLS|LMA|TBC/i', $s))
+		{
+			$courierId = Org::ORGID_COURIER_TNT_TOP;
+		} else if(preg_match('/7RFZ|4XHZ/i', $s))
+		{
+			$courierId = Org::ORGID_COURIER_STARTRACK;
+		} else if(preg_match('/'.DFEAPI::CONSIGNMENT_PREFIX_TOP.'|'.DFEAPI::CONSIGNMENT_PREFIX_TOP_MEL.'|'.DFEAPI::CONSIGNMENT_PREFIX_TOP_BNE.'/i', $s))
+		{
+			$courierId = Org::ORGID_COURIER_DFE_TOP;
+		}
+		switch($courierId){
+			case Org::ORGID_COURIER_TNT_TOP:
+				$t='https://www.tntexpress.com.au/InterAction/ASPs/CnmHxAS.asp?' . $s;
+			break;
+			case Org::ORGID_COURIER_FASTWAY:
+				$t=FastwayAPI::getDirectTrackingUrl($s);
+			break;
+			case Org::ORGID_COURIER_DFE_TOP:
+				$t='https://www.directfreight.com.au/ConsignmentStatus.aspx?consignment_no='.$s.'&lookuptype=0';
+			break;
+			case Org::ORGID_COURIER_STARTRACK:
+				$t='https://msto.startrack.com.au/track-trace/?id='.$s;
+			break;
+			case Org::ORGID_COURIER_SF:
+				$t='https://www.sf-express.com';
+			break;
+			default:
+				$t ='https://www.toplogistics.com.au?s='.$s;
+			break;
+		}
+
+		echo "<script type='text/javascript'>window.location.href = '{$t}';</script>";
+	}
+
+
+	public function actionCheckTicket($ticket)
+	{
+		$sqs=ShipmentQuestionSubmit::model()->find("ticket = :ticket",array(":ticket"=>$ticket));
+		$model = new ShipmentQuestion('search');
+		$model->unsetAttributes();
+		$model->submit_id = $sqs->id;
+		$this->render('check_ticket',array(
+			"model"=>$model,
+			"ticket"=>$ticket
+		));
+	}
+
+	public function actionCheckDetail($id)
+	{
+		$sq=ShipmentQuestion::model()->find("id = :id",array(":id"=>$id));
+		$this->render('check_detail',array(
+			"model"=>$sq
+		));
+	}
+
+	public function actionCsRead($id)
+	{
+		$shipmentQuestion = ShipmentQuestion::model()->findByPk($id);
+		$shipmentQuestion->c_read = ShipmentQuestion::CREAD;
+		$shipmentQuestion->cr_date = date("Y-m-d H:i:s");
+		$shipmentQuestion->update(["c_read","cr_date"]);
+		$ticket = ShipmentQuestionSubmit::model()->findByPk($shipmentQuestion->submit_id);
+		$this->actionCheckTicket($ticket->ticket);
+	}
+
+	public function actionGetImages()
+	{
+		$model=ShipmentQuestion::model()->findByPk(@$_GET['id']);
+		if(!empty($_POST['ShipmentQuestion']))
+		{
+			$model=ShipmentQuestion::model()->findByPk($_POST['ShipmentQuestion']['id']);
+			ShipmentQuestionSubmit::saveFiles($_FILES,$model,true);
+			$this->ajaxResult($model);
+			return;
+		}
+		$this->render("images",["model"=>$model]);
+
+	}
+	
+	public function actionImparcelTracking()
+	{
+		$noEnqury = empty($_GET['noEnqury'])?false:true ;
+		// if ($_SERVER['REQUEST_METHOD'] == 'POST' || $_GET['s'] != null) {
+		// 	$strTrackingNumber = $_POST['tracking_number'];
+			if( isset($_GET['s'] )){
+				$strTrackingNumber = $_GET['s'] ;
+			}
+			// $lisrResult = ImParcel::model()->findAll('hbn=:hbn',[':hbn'=>$strTrackingNumber]);
+			// if(sizeof($lisrResult) === 0){
+
+			// }
+
+			$service = new Service();
+			$cache = $service->getCacheData("Tracking:".$strTrackingNumber);
+			if(!empty($cache))
+			{
+				$objModel = json_decode($cache);
+				$objModel->tracking = json_encode($objModel->tracking);
+				$objModel->tracking = json_decode($objModel->tracking,true);
+				$this->renderPartial('tracking', ['model' => $objModel]);
+				return;
+			}
+
+			$objImParcel = null;
+			$objImParcels = ImParcel::model()->findAll('(ref=:ref or hbn=:ref or cref=:ref) and status !=:status', [':ref' => $strTrackingNumber,':status'=>ImParcel::STATE_CANCELLED]);
+			if(empty($objImParcels))
+			{
+				$sn = 0;
+				$courierId = 0;
+				$noConsol = true;
+				$agentId= 0;
+				$changedLabel = 0;
+				$containerNo = false;
+				$isForScan = false;
+				$objImParcels = ShipmentScan::getShipmentByBarcode($strTrackingNumber,$sn,$courierId,$noConsol);
+				if(!empty($objImParcels))
+				{
+					$objImParcels = [$objImParcels];
+				}
+			}
+			if(empty($objImParcels))
+			{
+				$csl = ChangeShipmentLabel::model()->find(['condition'=>'pref=:pref OR phbn = :pref', 'params'=>[':pref'=>$strTrackingNumber],'order'=>'id desc']);
+				if(!empty($csl)){
+					$objImParcel = $csl->shipment;
+				}
+			}else
+			{
+				// Check multiple imparcels with the same ref, only keeps the one with consol
+				// If multiple result have consol or none of the results has consol, keeps the last record
+				foreach($objImParcels as $imParcel) {
+					if (!empty($imParcel->consol)) {
+						$objImParcel = $imParcel;
+					}
+				}
+				if (empty($objImParcel)) {
+					$objImParcel = $objImParcels[count($objImParcels)-1];
+				}
+			}
+			// Show Error message when cannot find ImParcel
+			if($objImParcel==null){
+				$this->renderPartial('tracking', ['model' => null]);
+				return;
+			}
+			if ($objImParcel != null) {
+				$objImParcel->trackingInfo(0,true);
+				$listTracking = [];
+				$listTrackingRecord=[];
+				$listResult = Tracking::model()->findAll('pid=:pid', [':pid' => $objImParcel->id]);
+				foreach ($listResult as $objTracking) {
+					if(strtotime($objTracking->dt)>time()){
+						continue;
+					}
+					$obj = new stdClass;
+					// $obj->date = $objTracking->dt;
+					$obj->date = date("d-m-Y H:i", strtotime($objTracking->dt));
+					$obj->activity = $objTracking->activity;
+					$obj->depot = $objTracking->depot;
+					$listTracking[$objTracking->type] = $obj;
+					$obj->type = $objTracking->type;
+					$listTrackingRecord[] = $obj;
+				}
+				
+				// 70 | Your shipment's with a driver
+				foreach($listTrackingRecord as $i=>$objTrackingRecord){
+					if($objTrackingRecord->activity == "Your shipment's with a driver"){
+						if(!isset($listTracking[Tracking::TYPE_HAND_OVER])){
+							$obj = new stdClass;
+							$obj->date = $objTrackingRecord->date;
+							$obj->activity = 'Hand Over';
+							$obj->depot = $objTrackingRecord->depot;
+							$listTracking[Tracking::TYPE_HAND_OVER] = $obj;// set 70 to 68
+							$obj->type = Tracking::TYPE_HAND_OVER;
+							// $listTrackingRecord[] = $obj;
+							array_splice($listTrackingRecord,$i,0,[$obj]);
+						}
+					}
+				}
+				
+				$objConsol = $objImParcel ->consol;
+				krsort($listTracking);
+				foreach($listTracking as $type => $objTracking){
+					switch ($type){
+						case Tracking::TYPE_DELIVERED :
+							if(!isset($listTracking[Tracking::TYPE_HAND_OVER])){
+								$obj = new stdClass;
+								$obj->date = date("d-m-Y", strtotime('-1 day', strtotime($objTracking->date)));
+								$obj->activity = Tracking::$types[Tracking::TYPE_HAND_OVER ];
+								$listTracking[Tracking::TYPE_HAND_OVER] = $obj;
+							}
+							if(!isset($listTracking[Tracking::TYPE_CLEARED])){
+								$obj = new stdClass;
+								$obj->date = date("d-m-Y", strtotime('-2 day', strtotime($objTracking->date)));
+								$obj->activity = Tracking::$types[Tracking::TYPE_CLEARED ];
+								$listTracking[Tracking::TYPE_CLEARED] = $obj;
+							}
+							if(!isset($listTracking[Tracking::TYPE_DECONSOLIDATION])){
+								$obj = new stdClass;
+								$obj->date = date("d-m-Y", strtotime('-2 day', strtotime($objTracking->date)));
+								$obj->activity = Tracking::$types[Tracking::TYPE_DECONSOLIDATION ];
+								$listTracking[Tracking::TYPE_DECONSOLIDATION] = $obj;
+							}
+							if(!isset($listTracking[Tracking::TYPE_ARRIVAL]) && $objConsol->eta == "0000-00-00"){
+								$obj = new stdClass;
+								$obj->date = date("d-m-Y", strtotime('-3 day', strtotime($objTracking->date)));
+								$obj->activity = Tracking::$types[Tracking::TYPE_ARRIVAL ];
+								$listTracking[Tracking::TYPE_ARRIVAL] = $obj;
+							}
+							if(!isset($listTracking[Tracking::TYPE_DISPATCHED]) && $objConsol->etd == "0000-00-00"){
+								$obj = new stdClass;
+								$obj->date = date("d-m-Y", strtotime('-4 day', strtotime($objTracking->date)));
+								$obj->activity = Tracking::$types[Tracking::TYPE_DISPATCHED ];
+								$listTracking[Tracking::TYPE_DISPATCHED] = $obj;
+							}
+							break;
+						case Tracking::TYPE_HAND_OVER:
+							if(!isset($listTracking[Tracking::TYPE_CLEARED])){
+								$obj = new stdClass;
+								$obj->date = date("d-m-Y", strtotime('-2 day', strtotime($objTracking->date)));
+								$obj->activity = Tracking::$types[Tracking::TYPE_CLEARED ];
+								$listTracking[Tracking::TYPE_CLEARED] = $obj;
+							}
+							if(!isset($listTracking[Tracking::TYPE_DECONSOLIDATION])){
+								$obj = new stdClass;
+								$obj->date = date("d-m-Y", strtotime('-2 day', strtotime($objTracking->date)));
+								$obj->activity = Tracking::$types[Tracking::TYPE_DECONSOLIDATION ];
+								$listTracking[Tracking::TYPE_DECONSOLIDATION] = $obj;
+							}
+							if(!isset($listTracking[Tracking::TYPE_ARRIVAL]) && $objConsol->eta == "0000-00-00"){
+								$obj = new stdClass;
+								$obj->date = date("d-m-Y", strtotime('-3 day', strtotime($objTracking->date)));
+								$obj->activity = Tracking::$types[Tracking::TYPE_ARRIVAL ];
+								$listTracking[Tracking::TYPE_ARRIVAL] = $obj;
+							}
+							if(!isset($listTracking[Tracking::TYPE_DISPATCHED]) && $objConsol->etd == "0000-00-00"){
+								$obj = new stdClass;
+								$obj->date = date("d-m-Y", strtotime('-4 day', strtotime($objTracking->date)));
+								$obj->activity = Tracking::$types[Tracking::TYPE_DISPATCHED ];
+								$listTracking[Tracking::TYPE_DISPATCHED] = $obj;
+							}
+							break;
+						case Tracking::TYPE_DECONSOLIDATION:
+							if(!isset($listTracking[Tracking::TYPE_ARRIVAL]) && $objConsol->eta == "0000-00-00"){
+								$obj = new stdClass;
+								$obj->date = date("d-m-Y", strtotime('-3 day', strtotime($objTracking->date)));
+								$obj->activity = Tracking::$types[Tracking::TYPE_ARRIVAL ];
+								$listTracking[Tracking::TYPE_ARRIVAL] = $obj;
+							}
+							if(!isset($listTracking[Tracking::TYPE_DISPATCHED]) && $objConsol->etd == "0000-00-00"){
+								$obj = new stdClass;
+								$obj->date = date("d-m-Y", strtotime('-4 day', strtotime($objTracking->date)));
+								$obj->activity = Tracking::$types[Tracking::TYPE_DISPATCHED ];
+								$listTracking[Tracking::TYPE_DISPATCHED] = $obj;
+							}
+							break;
+						case Tracking::TYPE_CLEARED:
+							if(!isset($listTracking[Tracking::TYPE_ARRIVAL]) && $objConsol->eta == "0000-00-00"){
+								$obj = new stdClass;
+								$obj->date = date("d-m-Y", strtotime('-3 day', strtotime($objTracking->date)));
+								$obj->activity = Tracking::$types[Tracking::TYPE_ARRIVAL ];
+								$listTracking[Tracking::TYPE_ARRIVAL] = $obj;
+							}
+							if(!isset($listTracking[Tracking::TYPE_DISPATCHED]) && $objConsol->etd == "0000-00-00"){
+								$obj = new stdClass;
+								$obj->date = date("d-m-Y", strtotime('-4 day', strtotime($objTracking->date)));
+								$obj->activity = Tracking::$types[Tracking::TYPE_DISPATCHED ];
+								$listTracking[Tracking::TYPE_DISPATCHED] = $obj;
+							}
+							break;
+						case Tracking::TYPE_ARRIVAL:
+							if(!isset($listTracking[Tracking::TYPE_DISPATCHED]) && $objConsol->etd == "0000-00-00"){
+								$obj = new stdClass;
+								$obj->date = date("d-m-Y", strtotime('-4 day', strtotime($objTracking->date)));
+								$obj->activity = Tracking::$types[Tracking::TYPE_DISPATCHED ];
+								$listTracking[Tracking::TYPE_DISPATCHED] = $obj;
+							}
+							break;
+					}
+				}
+				krsort($listTracking);
+				
+				// dead , held
+				// if(!isset($listTracking[Tracking::TYPE_HAND_OVER] )&& !isset($listTracking[Tracking::TYPE_DELIVERED])){
+				// 	if(isset($listTracking[Tracking::TYPE_HELD])){
+				// 		unset($listTracking[Tracking::TYPE_CLEARED]);
+				// 		// foreach($listTrackingRecord as $i=>$objTrackingRecord){
+				// 		// 	if($objTrackingRecord->type == Tracking::TYPE_CLEARED){
+				// 		// 		unset($listTrackingRecord[$i]);
+				// 		// 	}
+				// 		// }
+				// 	}
+				// }
+				if($objImParcel->scanCount()==0)//this is for showing the cleared tracking data only when the parcel is scanned
+				{
+					unset($listTracking[Tracking::TYPE_CLEARED]);
+				}
+				
+				
+				// console eta replace arrival australia
+				//$objConsol = $objImParcel ->consol;
+				/* if(isset($listTracking[Tracking::TYPE_ARRIVAL]) && $objConsol != null){
+					$strEta = $objConsol->eta;
+					$listTracking[Tracking::TYPE_ARRIVAL]->date = date("d-m-Y", strtotime($strEta));
+				} */
+				if(!isset($listTracking[Tracking::TYPE_ARRIVAL]) && $objConsol != null){
+					$strEta = $objConsol->eta;
+					$obj = new stdClass;
+					$obj->date = date("d-m-Y", strtotime($strEta));
+					$obj->activity = Tracking::$types[Tracking::TYPE_ARRIVAL ];
+					$listTracking[Tracking::TYPE_ARRIVAL] = $obj;
+				}
+				
+				// console etd replace departure
+				/* if(isset($listTracking[Tracking::TYPE_DISPATCHED]) && $objConsol != null){
+					$strEtd = $objConsol->etd;
+					$listTracking[Tracking::TYPE_DISPATCHED]->date = date("d-m-Y", strtotime($strEtd));
+				} */
+				if(!isset($listTracking[Tracking::TYPE_DISPATCHED]) && $objConsol != null){
+					$strEtd = $objConsol->etd;
+					$obj = new stdClass;
+					$obj->date = date("d-m-Y", strtotime($strEtd));
+					$obj->activity = Tracking::$types[Tracking::TYPE_DISPATCHED ];
+					$listTracking[Tracking::TYPE_DISPATCHED] = $obj;
+				}
+				
+				
+				krsort($listTrackingRecord);
+				$listTempt =[];
+				foreach($listTrackingRecord as $i=>$item){
+					$listTempt[] = $item;
+				}
+				$listTrackingRecord = $listTempt;	
+				
+				$objModel = new stdClass;
+				$objModel->shipment = $objImParcel;
+				$objModel->tracking = $listTracking;
+
+				//From To
+				// $objModel->from = $objImParcel->cnor->suburb . ' ' . $objImParcel->cnor->city . ' ' . $objImParcel->cnor->state;
+				// if(empty(trim($objModel->from))){
+				// 	$listWord = explode(' ',$objImParcel->cnor->address);
+				// 	$objModel->from ='******'.$listWord[sizeof($listWord)-1];
+				// }
+				// if(empty(trim($objModel->from))){
+				// 	$objModel->from = 'Not Entered';
+				// }
+				// $objModel->to = $objImParcel->cnee->suburb . ' ' . $objImParcel->cnee->city . ' ' . $objImParcel->cnee->state;
+				$pol = !empty($objConsol->pol)?$objConsol->pol:"";
+				$pod = !empty($objConsol->pod)?$objConsol->pod:"";
+				$objModel->from = $this->funcLocode($pol);
+				$objModel->to = $this->funcLocode($pod);
+				$listETASea = [];
+				$listETAAir = [];
+				
+				//ETA
+				if (isset($listTracking[Tracking::TYPE_DISPATCHED])) {
+					$listETASea = [
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date)),
+						[
+							date("d-m-Y", strtotime('+20 day', strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date))),
+							date("d-m-Y", strtotime('+23 day', strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date))),
+						],
+						[
+							date("d-m-Y", strtotime('+27 day', strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date))),
+							date("d-m-Y", strtotime('+30 day', strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date))),
+						],
+						[
+							date("d-m-Y", strtotime('+30 day', strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date))),
+							date("d-m-Y", strtotime('+33 day', strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date))),
+						],
+						[
+							date("d-m-Y", strtotime('+33 day', strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date))),
+							date("d-m-Y", strtotime('+36 day', strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date))),
+						],
+					];
+					$listETAAir = [
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date)),
+						[
+							date("d-m-Y", strtotime('+2 day', strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date))),
+							date("d-m-Y", strtotime('+5 day', strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date))),
+						],
+						[
+							date("d-m-Y", strtotime('+9 day', strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date))),
+							date("d-m-Y", strtotime('+12 day', strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date))),
+						],
+						[
+							date("d-m-Y", strtotime('+12 day', strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date))),
+							date("d-m-Y", strtotime('+15 day', strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date))),
+						],
+						[
+							date("d-m-Y", strtotime('+15 day', strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date))),
+							date("d-m-Y", strtotime('+20 day', strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date))),
+						],
+					];
+				}
+
+				if (isset($listTracking[Tracking::TYPE_ARRIVAL])) {
+					$listETASea = [
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date)),
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_ARRIVAL]->date)),
+						[
+							date("d-m-Y", strtotime('+7 day', strtotime($listTracking[Tracking::TYPE_ARRIVAL]->date))),
+							date("d-m-Y", strtotime('+10 day', strtotime($listTracking[Tracking::TYPE_ARRIVAL]->date))),
+						],
+						[
+							date("d-m-Y", strtotime('+10 day', strtotime($listTracking[Tracking::TYPE_ARRIVAL]->date))),
+							date("d-m-Y", strtotime('+13 day', strtotime($listTracking[Tracking::TYPE_ARRIVAL]->date))),
+						],
+						[
+							date("d-m-Y", strtotime('+13 day', strtotime($listTracking[Tracking::TYPE_ARRIVAL]->date))),
+							date("d-m-Y", strtotime('+16 day', strtotime($listTracking[Tracking::TYPE_ARRIVAL]->date))),
+						],
+					];
+					$listETAAir = [
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date)),
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_ARRIVAL]->date)),
+						[
+							date("d-m-Y", strtotime('+7 day', strtotime($listTracking[Tracking::TYPE_ARRIVAL]->date))),
+							date("d-m-Y", strtotime('+10 day', strtotime($listTracking[Tracking::TYPE_ARRIVAL]->date))),
+						],
+						[
+							date("d-m-Y", strtotime('+10 day', strtotime($listTracking[Tracking::TYPE_ARRIVAL]->date))),
+							date("d-m-Y", strtotime('+13 day', strtotime($listTracking[Tracking::TYPE_ARRIVAL]->date))),
+						],
+						[
+							date("d-m-Y", strtotime('+13 day', strtotime($listTracking[Tracking::TYPE_ARRIVAL]->date))),
+							date("d-m-Y", strtotime('+16 day', strtotime($listTracking[Tracking::TYPE_ARRIVAL]->date))),
+						],
+					];
+				}
+
+				if (isset($listTracking[Tracking::TYPE_DECONSOLIDATION])) {
+					$listETASea = [
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date)),
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_ARRIVAL]->date)),
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_DECONSOLIDATION]->date)),
+						[
+							date("d-m-Y", strtotime('+3 day', strtotime($listTracking[Tracking::TYPE_DECONSOLIDATION]->date))),
+							date("d-m-Y", strtotime('+6 day', strtotime($listTracking[Tracking::TYPE_DECONSOLIDATION]->date))),
+						],
+						[
+							date("d-m-Y", strtotime('+6 day', strtotime($listTracking[Tracking::TYPE_DECONSOLIDATION]->date))),
+							date("d-m-Y", strtotime('+9 day', strtotime($listTracking[Tracking::TYPE_DECONSOLIDATION]->date))),
+						],
+					];
+					$listETAAir = [
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date)),
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_ARRIVAL]->date)),
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_DECONSOLIDATION]->date)),
+						[
+							date("d-m-Y", strtotime('+3 day', strtotime($listTracking[Tracking::TYPE_DECONSOLIDATION]->date))),
+							date("d-m-Y", strtotime('+6 day', strtotime($listTracking[Tracking::TYPE_DECONSOLIDATION]->date))),
+						],
+						[
+							date("d-m-Y", strtotime('+6 day', strtotime($listTracking[Tracking::TYPE_DECONSOLIDATION]->date))),
+							date("d-m-Y", strtotime('+9 day', strtotime($listTracking[Tracking::TYPE_DECONSOLIDATION]->date))),
+						],
+					];
+				}
+
+				if (isset($listTracking[Tracking::TYPE_DECONSOLIDATION]) && isset($listTracking[Tracking::TYPE_HAND_OVER])) {
+					$listETASea = [
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date)),
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_ARRIVAL]->date)),
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_DECONSOLIDATION]->date)),
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_HAND_OVER]->date)),
+						[
+							date("d-m-Y", strtotime('+3 day', strtotime($listTracking[Tracking::TYPE_HAND_OVER]->date))),
+							date("d-m-Y", strtotime('+6 day', strtotime($listTracking[Tracking::TYPE_HAND_OVER]->date))),
+						],
+
+					];
+					$listETAAir = [
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date)),
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_ARRIVAL]->date)),
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_DECONSOLIDATION]->date)),
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_HAND_OVER]->date)),
+						[
+							date("d-m-Y", strtotime('+3 day', strtotime($listTracking[Tracking::TYPE_HAND_OVER]->date))),
+							date("d-m-Y", strtotime('+6 day', strtotime($listTracking[Tracking::TYPE_HAND_OVER]->date))),
+						],
+					];
+				}
+
+				if (isset($listTracking[Tracking::TYPE_DECONSOLIDATION]) && isset($listTracking[Tracking::TYPE_HAND_OVER] )&& isset($listTracking[Tracking::TYPE_DELIVERED])) {
+					$listETASea = [
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date)),
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_ARRIVAL]->date)),
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_DECONSOLIDATION]->date)),
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_HAND_OVER]->date)),
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_DELIVERED]->date)),
+					];
+					$listETAAir = [
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_DISPATCHED]->date)),
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_ARRIVAL]->date)),
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_DECONSOLIDATION]->date)),
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_HAND_OVER]->date)),
+						date("d-m-Y", strtotime($listTracking[Tracking::TYPE_DELIVERED]->date)),
+					];
+				}
+				$objModel->listETASea = $listETASea;
+				$objModel->listETAAir = $listETAAir;
+
+				//sea air
+				$objModel->consolType = "";
+				$objModel->strConsolEta ="";
+				$objConsol = Consol::model()->findByPk($objImParcel->consol_id);
+				if (!empty($objConsol))
+				{
+					if ($objConsol->service == Consol::AIRCONSOL) {
+						$objModel->consolType = 'air';
+					}else
+					{
+						$objModel->consolType = 'sea';
+					}
+					$objModel->strConsolEta = $objConsol->eta;
+				}
+				
+				//multiple records
+				$objModel->listTrackingRecord = $listTrackingRecord;
+				$objModel->ref = $objImParcel->ref;
+
+
+				$objModel->driverID = 0;
+				if(!empty($objModel->shipment->cargo_process)&&!empty( $objModel->shipment->cargo_process->job_relation->job)&&!empty($objModel->shipment->cargo_process->job_relation->job->vehicle_id))
+				{
+				   $objModel->driverID = $objModel->shipment->cargo_process->job_relation->job->vehicle_id;
+				}
+
+				$objModel->ot_id = $objModel->shipment->ot_id;
+				$objModel->trans = $objModel->shipment->trans;
+				$objModel->id = $objModel->shipment->id;
+				$objModel->noEnqury = $noEnqury;
+				foreach ($objModel->trans as $key => $t) {
+					$objModel->trans[$key]->infoLink = $t->infoLink();
+				}
+				$service->setCacheData("Tracking:".$strTrackingNumber,json_encode($objModel),1000);
+				$this->renderPartial('tracking', ['model' => $objModel]);
+				return;
+			}
+			$this->renderPartial('tracking', ['model' => null]);
+		// } else if ($_SERVER['REQUEST_METHOD'] == 'GET') {
+		// 	$this->renderPartial('tracking_get');
+		// }
+		
+	}
+	
+	public function actionGetTlaFuel()
+	{
+		$service = new Service();
+		$cache = $service->getCacheData("TlaFuel");
+		if(!empty($cache))
+		{
+			$this->renderPartial('getTlaFuel', $cache);
+			return;
+		}
+
+		$model = ImportsSystemFuel::model();
+		$model->type = ImportsSystemFuel::COURIER_TYPE;
+		$data = $model->search(false)->data;
+
+		$model = ImportsSystemFuel::model();
+		$model->type = ImportsSystemFuel::CARTAGE_TYPE;
+		$data2 = $model->search(false)->data;
+		$thisData = [];
+		foreach ($data as $key => $value) {
+			$thisData[$key] = ['from_day'=>$value->from_day,'to_day'=>$value->to_day,'rate'=>$value->rate];
+		}
+		$thisData2 = [];
+		foreach ($data2 as $key => $value) {
+			$thisData2[$key] = ['from_day'=>$value->from_day,'to_day'=>$value->to_day,'rate'=>$value->rate];
+		}
+
+		$cache = ['data' => $thisData,'data2' => $thisData2];
+		$service->setCacheData("TlaFuel",$cache,43200);
+
+		$this->renderPartial('getTlaFuel', $cache);
+		
+	}
+	private function funcLocode($strShortCode){
+		$listShortCode2Name=[
+			// https://locode.info/AEDXB
+			"AEDXB"=>"Dubai",
+			"AUBNE"=>"Brisbane",
+			"AUMEL"=>"Melbourne",
+			"AUPER"=>"Perth",
+			"AUSYD"=>"Sydney",
+			"CNCAN"=>"Guangzhou Baiyun International Apt",
+			"CNCGO"=>"Zhengzhou Xinzheng International Apt",
+			"CNCHQ"=>"Chongqing Pt",
+			"CNCKG"=>"Chongqing Jiangbei International Apt",
+			"CNCSX"=>"Changsha Huanghua International Apt",
+			"CNCTU"=>"Chengdu Shuangliu International Apt",
+			"CNDLC"=>"Dalian Zhoushuizi International Apt",
+			"CNFOC"=>"Fuzhou Changle International Apt",
+			"CNHAK"=>"Haikou Meilan International Apt",
+			"CNHET"=>"Hohhot Baita International Apt",
+			"CNHFE"=>"Hefei Xinqiao International Apt",
+			"CNHGH"=>"Hangzhou Xiaoshan International Apt",
+			"CNHHA"=>"HUANGHUA",
+			"CNHUA"=>"Huangpu Pt",
+			"CNJMN"=>"Jiangmen Pt",
+			"CNKMG"=>"Kunming Wujiaba International Apt",
+			"CNNGB"=>"Ningbo Lishe International Apt",
+			"CNNBG"=>"Ningbo Lishe International Apt",
+			"CNNKG"=>"Nanjing Lukou International Apt",
+			"CNPEK"=>"Beijing Shoudu International Apt",
+			"CNPVG"=>"Shanghai Pudong International Apt",
+			"CNSHA"=>"Shanghai Hongqiao International Apt",
+			"CNSHK"=>"Shekou Pt",
+			"CNSIA"=>"Xian Xianyang International Apt",
+			"CNSZX"=>"Shenzhen Baoan International Apt",
+			"CNTAO"=>"Qingdao Liuting International Apt",
+			"CNTSN"=>"Tianjin Binhai International Apt",
+			"CNWUH"=>"Wuhan Tianhe International Apt",
+			"CNXIY"=>"Xinyi",
+			"CNXMN"=>"Xiamen Gaoqi International Apt",
+			"CNYTN"=>"Yantian Pt",
+			"EGCAI"=>"El Qahira (Cairo)",
+			"HKHKG"=>"Hong Kong",
+			"JPNRT"=>"Narita Apt/Tokyo",
+			"KRICN"=>"Incheon Intl Apt/Seoul",
+			"KRPUS"=>"Busan",
+			"MMRGN"=>"Yangon",
+			"MYKUL"=>"Kuala Lumpur",
+			"NZAKL"=>"Auckland",
+			"PTOPO"=>"Porto",
+			"SGSIN"=>"Singapore",
+			"THBKK"=>"Bangkok",
+			"TWTPE"=>"Taipei",
+			"USEWR"=>"Newark",
+			"VNSGN"=>"Ho Chi Minh City",
+			"USSFO"=>"San Francisco",
+			"VNHAN"=>"Hanoi",
+		];
+		
+		if(isset($listShortCode2Name[$strShortCode])){
+			return $listShortCode2Name[$strShortCode];
+		}
+		else{
+			return $strShortCode;
+		}
+	}
+	
+	public function actionContactUsByEmail(){
+		if(!isset($_GET['apikey'])||$_GET['apikey']!='62003cb2689347f0990006ff9432f3eb'){
+			throw new CHttpException(403,'invalid api key!');
+		}
+		
+		$objCustomerService = new CustomerServiceService;
+		
+		$strEmailBody = '';
+		$data = [];
+		foreach($_GET as $key=>$value){
+			if($key == 'g-recaptcha-response' || $key == 'apikey'){
+				continue;
+			}
+			$data[$key] = $value;
+		}
+		
+		if($objCustomerService->saveContactUsToBeTicket($data)){
+			echo '1';
+		}
+		else{
+			echo '0';
+		}
+	}
+
+	public function actionGetEmails($id)
+	{
+		$emailIds = [0];
+		$model = new ImportsMail('search');
+		$model->unsetAttributes();
+		if(!empty($_GET['ImportsMail']))
+		{
+			$model->setAttributes($_GET['ImportsMail']);
+		}
+		$shipmentQuestion = ShipmentQuestion::model()->findByPk($id);
+		// $sendEmails = Emailog::model()->findAll(' json_value(meta,"$.shipmentQuestionId") = :shipmentQuestionId ',[":shipmentQuestionId"=>$shipmentQuestion->id]);
+		// foreach ($sendEmails as $key => $sendEmail) {
+		// 	$relatedEmails = ImportsMail::model()->findAll(" subject like :subject",[":subject"=>"%".trim($sendEmail->subject)."%"]);
+		// 	$ids = array_column($relatedEmails, "id");
+		// 	$emailIds = array_merge($ids,$emailIds);
+		// }
+		// if(!empty($shipmentQuestion->Shipment))
+		// {
+		// 	$relatedEmails = ImportsMail::model()->findAll(" json_value(meta,'$.cs_ref') = :ref ",[":ref"=>$shipmentQuestion->Shipment->ref]);
+		// 	$ids = array_column($relatedEmails, "id");
+		// 	$emailIds = array_merge($ids,$emailIds);
+		// }
+
+		$relatedEmails = ImportsMail::model()->findAll(" ticket = :ticket ",[":ticket"=>$shipmentQuestion->ShipmentQuestionSubmit->ticket]);
+		$ids = array_column($relatedEmails, "id");
+		$emailIds = array_merge($ids,$emailIds);
+
+		$model->emailIds = $emailIds;
+		$this->render("emails",["model"=>$model,'shipmentQuestion'=>$shipmentQuestion]);
+	}
+
+	public function actionUpdateEmail($id)
+	{
+		$model = ImportsMail::model()->findByPk($id);
+		$this->render('email_form', ['model' => $model]);
+	}
+
+	public function actionBody($id)
+	{
+		$model = ImportsMail::model()->findByPk($id);
+		$loadResult = $model->loadContent();
+		if($loadResult)
+		{
+			echo '<div style="white-space:', ($model->isHtmlBody ? 'pre-inline' : 'pre-wrap'), ';overflow: auto">', $model->tempMailBody, '</div>';
+		}else
+		{
+			echo '<div style="white-space:', ($model->isHtmlBody ? 'pre-inline' : 'pre-wrap'), ';overflow: auto">', $model->plain_body, '</div>';
+		}
+	}
+
+	public function actionContactUsByEmailBackup(){
+		if(!isset($_GET['apikey'])||$_GET['apikey']!='62003cb2689347f0990006ff9432f3eb'){
+			throw new CHttpException(403,'invalid api key!');
+		}
+		
+		$objEmailService = new EmailService;
+		
+		$strEmailBody = '';
+		foreach($_GET as $key=>$value){
+			if($key == 'g-recaptcha-response' || $key == 'apikey'){
+				continue;
+			}
+			$strEmailBody.= $key.': '.$value.'<br/>';
+		}
+		
+		$strSubject = 'WES '.$_GET['Type'];
+		
+		if($objEmailService->sendNormalEmail(Org::IM_EMAIL,$strSubject,$strEmailBody) ){
+			echo '1';
+		}
+		else{
+			echo '0';
+		}
+		
+		
+	}
+
+	public function actionMarketingEmailUnsubscribe(){
+
+		if(empty($_POST)){
+			$this->layout="frontend";
+			$this->render('marketing_email_unsubscribe');
+			return;
+		}
+		$strEmailAddress = $_POST['email_address'];
+		$objMarketingAddress = MarketingAddress::model()->find('email=:email',[':email'=>$strEmailAddress]);
+		if($objMarketingAddress != null){
+			$objMarketingAddress->status = 0;
+			$objMarketingAddress->save();
+			$this->layout="frontend";
+			$this->render('marketing_email_unsubscribe_result',['strMessage'=>'Successed']);
+			return;
+		}
+		$this->layout="frontend";
+		$this->render('marketing_email_unsubscribe_result',['strMessage'=>'Email Address Not Found.']);
+		return;
+	}
+
+	public function actionMarketingEmailOnlineView(){
+		$numId = $_GET['id'];
+		$objMarketingEmail = MarketingEmail::model()->findByPk($numId);
+		echo $objMarketingEmail->html;
+	}
+	
+	public function actionTaskFeedback(){
+		$this->layout=false;
+		$taskId = $_GET['id'];
+		$taskRating = $_GET['rating'];
+		$mailTask = ImportsMail::model()->findByPk($taskId);
+		if (!empty($mailTask)) {
+			if (!isset($mailTask->mdata['rating'])) {
+				$mailTask->mdata['rating'] = $taskRating;
+				$mailTask->status = ImportsMail::STATE_FEEDBACK_RATED;
+				$mailTask->save();
+			}
+		}
+		$this->render('task_feedback');
+	}
+
+	public function actionContainerAvailability()
+	{
+		$this->layout = false;
+		if(empty($_POST)) {
+			$this->render('container_availability');
+		} else {
+			$models = Consol::model()->findAllByAttributes(['container_no' => $_POST['container_no']]);
+			foreach ($models as $model) {
+				if (!empty($model->eta)) {
+					$model->eta = date('d-m-Y', strtotime($model->eta));
+				}
+				if (!empty($model->mdata['ContainerUnloadDate'])) {
+					$model->mdata['ContainerUnloadDate'] = date('d-m-Y', strtotime($model->mdata['ContainerUnloadDate']));
+				}
+				if (!empty($model->mdata['available_date'])) {
+					$model->mdata['available_date'] = date('d-m-Y', strtotime($model->mdata['available_date']));
+				}
+				if (!empty($model->mdata['input_storage_date'])) {
+					$model->mdata['input_storage_date'] = date('d-m-Y', strtotime($model->mdata['input_storage_date']));
+				}
+				if (empty($model->mdata['input_storage_date']) && !empty($model->mdata['available_date'])) {
+					$model->mdata['input_storage_date'] = $this->addWorkingDays($model->mdata['available_date'], 3)->format('d-m-Y');
+				}
+			}
+			$this->render('container_availability', ['model' => $models, 'status' => 'success']);
+		}
+	}
+
+	private function addWorkingDays($date, $day)
+	{
+		if (!($date instanceof \DateTime) || is_string($date)) {
+			$date = new \DateTime($date);
+		}
+		if ($date instanceof \DateTime) {
+			$newDate = clone $date;
+		}
+		if ($day == 0) {
+			return $newDate;
+		}
+		$i = 1;
+		while ($i <= abs($day)) {
+			$newDate->modify(($day > 0 ? ' +' : ' -') . '1 day');
+			$next_day_number = $newDate->format('N');
+			if (!in_array($next_day_number, [6, 7])) {
+				$i++;
+			}
+		}
+		return $newDate;
+	}
+
+	public function actionEditContainerPickupBooking()
+	{
+		$this->layout = false;
+		if (empty($_POST)) {
+			$this->render('edit_container_booking_vertify');
+		}else
+		{
+			$pb = PickupBooking::model()->find("booking_number = :booking_number and status = :status",[":booking_number"=>$_POST['booking_number'],":status"=>PickupBooking::PAID]);
+			if(empty($pb))
+			{
+				$this->render('edit_container_booking_vertify',['status' => 'failed', 'msg' => 'We cannot find this booking number in our system, please check your input information and try again.','booking_number'=>$_POST['booking_number']]);
+			}else
+			{
+				$service = new Service();
+				$bookingCache = $service->getCacheData($_POST['booking_number']."_edit_booking");
+				if(true)
+				{
+					$token = $pb->getEditToken();
+					$bookingCache = $service->setCacheData($_POST['booking_number']."_edit_booking",$token);
+					// Send edit booking email to customer
+					$emailService = new EmailService();
+					$emailService->sendBookingEditEmail($pb,$token);
+					$this->render('edit_container_booking_vertify',['status' => 'failed', 'msg' => 'The link has been sent to your booking email, please check the inbox of your booking email.','booking_number'=>$_POST['booking_number']]);
+				}else
+				{
+					$this->render('edit_container_booking_vertify',['status' => 'failed', 'msg' => 'The link has been sent to your booking email, please check the inbox of your booking email.','booking_number'=>$_POST['booking_number']]);
+				}
+			}
+			
+		}
+	}
+
+
+	public function actionEditBookingInfo()
+	{
+		$this->layout = false;
+		$service = new Service();
+		$bookingNumber = $_GET['booking_number'];
+		$token = $_GET['token'];
+		$availableDate = null;
+		$bookingCache = $service->getCacheData($bookingNumber."_edit_booking");
+		if(empty($bookingCache))
+		{
+			echo "Link was expired";
+			return;
+		}
+
+		$pb = PickupBooking::model()->find("booking_number = :booking_number and status = :status",[":booking_number"=>$bookingNumber,":status"=>PickupBooking::PAID]);
+		if(empty($pb))
+		{
+			echo "Link was expired";
+			return;
+		}
+
+		if (empty($_POST))
+		{
+
+			$model = $pb->shipment;
+			if (!empty($model->consol->mdata['available_date']) && !empty($model->mdata['amzon_pallet']) && ($model->status == ImParcel::STATE_CLEAR || $model->status == ImParcel::STATE_CLEAR_WAIT) && $model->status != ImParcel::DELIVERED) {
+				$availableDate = date('Y-m-d H:i:s', strtotime($model->consol->mdata['available_date']));
+				$today = date('Y-m-d H:i:s', strtotime('today'));
+				if ($availableDate < $today) {
+					$availableDate = $today;
+				}
+				$endDate = date('Y-m-d H:i:s', strtotime($availableDate . '+8 day'));
+				$depot="";
+				switch($model->consol->dpt_id) {
+					case Org::TLA_DEPARTMENT_SYDNEY:
+						$depot="Sydney";
+						$sql = 'SELECT * FROM pickup_booking WHERE `booking_time` >= "' . $availableDate . '" AND `booking_time` < "' . $endDate . '" AND `status` != 3 AND `booking_number` LIKE "S%"';
+						break;
+					case Org::TLA_DEPARTMENT_MELBOURNE:
+						$depot="Melbourne";
+						$sql = 'SELECT * FROM pickup_booking WHERE `booking_time` >= "' . $availableDate . '" AND `booking_time` < "' . $endDate . '" AND `status` != 3 AND `booking_number` LIKE "M%"';
+						break;
+					case Org::TLA_DEPARTMENT_BRISBANE:
+						$depot="Brisbane";
+						$sql = 'SELECT * FROM pickup_booking WHERE `booking_time` >= "' . $availableDate . '" AND `booking_time` < "' . $endDate . '" AND `status` != 3 AND `booking_number` LIKE "B%"';
+						break;
+				}
+				$bookings = PickupBooking::model()->findAllBySql($sql);
+				$days = [];
+				for ($i = 0; $i < 8; $i++) {
+					array_push($days, date('Y-m-d', strtotime($availableDate . '+' . $i . ' day')));
+				}
+
+				$occupiedSlots = [];
+				if (!empty($bookings)) {
+					foreach ($bookings as $booking) {
+						$bookingDate = explode(" ", $booking->booking_time)[0];
+						$bookingTime = explode(" ", $booking->booking_time)[1];
+
+						if (empty($occupiedSlots[$bookingDate])) {
+							$occupiedSlots[$bookingDate] = [$bookingTime];
+						} else {
+							array_push($occupiedSlots[$bookingDate], $bookingTime);
+						}
+					}
+				}
+
+				$bookingDate = explode(" ",$pb->booking_time)[0];
+				$bookingTimeArr = explode(":",explode(" ",$pb->booking_time)[1]);
+				$bookingTime=$bookingTimeArr[0].":".$bookingTimeArr[1];
+				$staticTimeSlot = ["7"=>["7:00","7:15","7:30","7:45"],"8"=>["8:00","8:15","8:30","8:45"],"9"=>["9:00","9:15","9:30","9:45"],"10"=>["","","10:00","10:30"],"11"=>["","","11:00","11:30"],"12"=>["","","12:00","12:30"],"13"=>["","","","13:00"],"14"=>["","","","14:00"],"15"=>["15:00","15:15","15:30","15:45"],"16"=>["16:00","16:15","16:30","16:45"],"17"=>["","","","17:30"]];
+				$timeSlot = [];
+
+				$slots = PickupBookingSlot::model()->findAll(['condition'=>'depot = :depot and status = 1',"params"=>[":depot"=>$model->consol->dpt_id],'order'=>" slot_time "]);
+				foreach ($slots as $key => $value) {
+					$vr = explode(":",$value->slot_time);
+					$v1 = intval($vr[0]);
+					$timeSlot[$v1][] = $v1.":".$vr[1];
+				}
+
+				foreach ($timeSlot as $key => $value) {
+					$less = 6-count($value);
+					if($less>0)
+					{
+						$createArr = [];
+						for ($i=0; $i < $less; $i++) { 
+							$createArr[] = "";
+						}
+						foreach ($value as $key2 => $value2) {
+							$createArr[] = $value2;
+						}
+						$timeSlot[$key] = $createArr;
+					}
+				}
+
+
+				$this->render('edit_booking_info', array(
+					'availableDate' => $availableDate,
+					'endDate' => $endDate,
+					'occupiedSlots' => $occupiedSlots,
+					'container_no' => $model->consol->container_no,
+					'house_bl' => $model->hbn,
+					'packages' => $model->pkg,
+					'pallets' => $model->mdata['amzon_pallet'],
+					'weight' => $model->weight,
+					'volume' => (!empty($model->mdata['total_cbm'])?number_format($model->cbm*$model->pkg,'4','.',''):$model->mdata['total_cbm']),
+					'driver_name'=>$pb->driver_name,
+					'rego'=>$pb->rego,
+					'company_name'=>$pb->company_name,
+					'company_email'=>$pb->company_email,
+					'depot' => $depot,
+					'booking_number'=>$bookingNumber,
+					'booking_date'=>$bookingDate,
+					'booking_time'=>$bookingTime,
+					'token'=>$token,
+					'staticTimeSlot'=>$timeSlot
+				));
+			}else
+			{
+					echo "Booking information can not be adjusted.";
+
+			}
+		}else
+		{
+			$oldBookingTime = $pb->booking_time;
+			$pb->booking_time = $_POST['booking_date'] . ' ' . $_POST['booking_time'] . ':00';
+			$pb->driver_name = $_POST['name'];
+			$pb->company_name = $_POST['company_name'];
+			$pb->company_email = $_POST['email'];
+			$pb->rego = $_POST['rego'];
+
+			if($pb->booking_time==$oldBookingTime)
+			{
+				$pb->save();
+				echo $pb->booking_number;
+				// Send confirmation email to customer
+				$emailService = new EmailService();
+				$emailService->sendBookingConfirmationEmail($pb, $pb->shipment->mdata['amzon_pallet']);
+			}else
+			{
+				// Check if the choosen slot has already been occupied, only save this record when the slot is available.
+				switch($pb->shipment->consol->dpt_id) {
+					case Org::TLA_DEPARTMENT_SYDNEY:
+						$sql = 'SELECT `booking_time` FROM pickup_booking WHERE `status` != 3 AND `booking_number` LIKE "S%"';
+						//$dependency = new CDbCacheDependency('SELECT MAX(id) FROM pickup_booking WHERE `status` != 3 AND `booking_number` LIKE "S%"');
+						break;
+					case Org::TLA_DEPARTMENT_MELBOURNE:
+						$sql = 'SELECT `booking_time` FROM pickup_booking WHERE `status` != 3 AND `booking_number` LIKE "M%"';
+						//$dependency = new CDbCacheDependency('SELECT MAX(id) FROM pickup_booking WHERE `status` != 3 AND `booking_number` LIKE "M%"');
+						break;
+					case Org::TLA_DEPARTMENT_BRISBANE:
+						$sql = 'SELECT `booking_time` FROM pickup_booking WHERE `status` != 3 AND `booking_number` LIKE "B%"';
+						//$dependency = new CDbCacheDependency('SELECT MAX(id) FROM pickup_booking WHERE `status` != 3 AND `booking_number` LIKE "B%"');
+						break;
+				}
+				//$slotCheck = Yii::app()->db->cache($depot."54321", $dependency)->createCommand($sql)->queryAll();
+				$slotCheck = Yii::app()->db->createCommand($sql)->queryAll();
+				if (empty($slotCheck)||!in_array(['booking_time' => $pb->booking_time], $slotCheck)) {
+					$pb->save();		// save record to database
+					$pb->shipment->mdata['pickup_booking_time'] = $pb->booking_time;
+					$pb->shipment->updateMeta();
+					echo $pb->booking_number;
+					// Send confirmation email to customer
+					$emailService = new EmailService();
+					$emailService->sendBookingConfirmationEmail($pb, $pb->shipment->mdata['amzon_pallet']);
+				}else {
+					// Selected slot is occupied, return error message
+					echo 'Slot has been occupied, please pick another time slot.';
+				}
+			}
+		}
+	}
+
+	public function actionContainerBookingVertify()
+	{
+		$this->layout = false;
+		if (empty($_POST)) {
+			$this->render('container_booking_vertify');
+		} else {
+			$direct = $_POST['direct'];
+			$depot = $_POST['depot'];
+			$containerNoArr = $_POST['container_no'];
+			$connoteArr = $_POST['house_bl'];
+			$finalResult = [];
+			$error = 0;
+			$dataArr = [];
+			$checkHbns = [];
+			foreach ($containerNoArr as $key => $value) {
+				$container_no = $containerNoArr[$key];
+				$connote = $connoteArr[$key];
+				if(empty($depot)||empty($container_no)||empty($connote))
+				{
+					$thisResult = ["status"=>0,"msg"=>"Please input the container number and house bill number"];
+					$finalResult[$key] = $thisResult;
+					$error = 1;
+					continue;
+				}
+
+				if(in_array($connote,$checkHbns))
+				{
+					$thisResult = ["status"=>0,'msg'=>'This house bill is duplicated'];
+					$finalResult[$key] = $thisResult;
+					$error = 1;
+					continue;
+				}
+
+				$checkHbns[] = $connote;
+				$thisResult = [];
+				$result = $this->handlingSingleBookingSlot($depot,$container_no,$connote);// this function will process the result for every booking slot
+				if(!empty($result['status']))
+				{
+					$dataArr[] = $result['data'];// when it is successful, push data into the arr for the final render operation
+					$thisResult = ["status"=>$result['status'],'msg'=>''];
+				}else
+				{
+					$thisResult = ["status"=>$result['status'],'msg'=>$result['msg']];//when it is failed ,get the message for frontend
+					$error = 1;
+				}
+				$finalResult[$key] = $thisResult;
+			}
+
+			if(empty($direct))
+			{
+				echo json_encode(['error'=>$error,'data'=>$finalResult]);
+				return;
+			}
+
+			if($error==0&&!empty($direct))
+			{
+				$staticTimeSlot = ["7"=>["7:00","7:15","7:30","7:45"],"8"=>["8:00","8:15","8:30","8:45"],"9"=>["9:00","9:15","9:30","9:45"],"10"=>["","","10:00","10:30"],"11"=>["","","11:00","11:30"],"12"=>["","","12:00","12:30"],"13"=>["","","","13:00"],"14"=>["","","","14:00"],"15"=>["15:00","15:15","15:30","15:45"],"16"=>["16:00","16:15","16:30","16:45"],"17"=>["","","","17:30"]];
+				$timeSlot = [];
+				switch ($depot) {
+					case 'Sydney':
+						$dptId= Org::TLA_DEPARTMENT_SYDNEY;
+						break;
+					case 'Melbourne':
+						$dptId= Org::TLA_DEPARTMENT_MELBOURNE;
+						break;
+					case 'Brisbane':
+						$dptId= Org::TLA_DEPARTMENT_BRISBANE;
+						break;
+					
+					default:
+						$dptId= Org::TLA_DEPARTMENT_SYDNEY;
+						break;
+				}
+
+				$slots = PickupBookingSlot::model()->findAll(['condition'=>'depot = :depot and status = 1',"params"=>[":depot"=>$dptId],'order'=>" slot_time "]);
+				foreach ($slots as $key => $value) {
+					$vr = explode(":",$value->slot_time);
+					$v1 = intval($vr[0]);
+					$timeSlot[$v1][] = $v1.":".$vr[1];
+				}
+
+				foreach ($timeSlot as $key => $value) {
+					$less = 6-count($value);
+					if($less>0)
+					{
+						$createArr = [];
+						for ($i=0; $i < $less; $i++) { 
+							$createArr[] = "";
+						}
+						foreach ($value as $key2 => $value2) {
+							$createArr[] = $value2;
+						}
+						$timeSlot[$key] = $createArr;
+					}
+				}
+				$this->render('container_pickup_booking',['data'=>$dataArr,'staticTimeSlot'=>$timeSlot]);
+			}else
+			{
+				$this->render('container_booking_vertify');
+			}
+		}
+	}
+
+	private function handlingSingleBookingSlot($depot,$container_no,$connote)
+	{	
+		if(empty($depot)||empty($container_no)||empty($connote))
+		{
+			return ["status"=>0,"msg"=>"Please input the container number and house bill number"];
+		}
+
+		switch($depot) {
+			case "Sydney":
+				$sql = 'SELECT * FROM shipment WHERE `hbn` = "' . $connote . '" AND `consol_id` IN (SELECT `id` FROM consol WHERE `container_no` = "' . $container_no . '" AND `dpt_id` = 106)';
+				break;
+			case "Melbourne":
+				$sql = 'SELECT * FROM shipment WHERE `hbn` = "' . $connote . '" AND `consol_id` IN (SELECT `id` FROM consol WHERE `container_no` = "' . $container_no . '" AND `dpt_id` = 218)';
+				break;
+			case "Brisbane":
+				$sql = 'SELECT * FROM shipment WHERE `hbn` = "' . $connote . '" AND `consol_id` IN (SELECT `id` FROM consol WHERE `container_no` = "' . $container_no . '" AND `dpt_id` = 530)';
+				break;
+		}
+		$model = ImParcel::model()->findBySql($sql);
+		$availableDate = null;
+		if (!empty($model)) {
+			// For checking whether booking record is already exist
+			$bookingCheck = PickupBooking::model()->findBySql('SELECT * FROM pickup_booking WHERE `shipment_id` = "' . $model->id .'" AND `status` = 2');
+			//$bookingCheck = null;  // For test
+			if (!empty($model->consol->mdata['available_date']) && !empty($model->mdata['amzon_pallet']) && ($model->status == ImParcel::STATE_CLEAR || $model->status == ImParcel::STATE_CLEAR_WAIT) && $model->status != ImParcel::DELIVERED && $model->status != ImParcel::STATE_SUB_UBM && empty($bookingCheck)) {
+				$availableDate = date('Y-m-d H:i:s', strtotime($model->consol->mdata['available_date']));
+				$today = date('Y-m-d H:i:s', strtotime('today'));
+				if ($availableDate < $today) {
+					$availableDate = $today;
+				}
+				$endDate = date('Y-m-d H:i:s', strtotime($availableDate . '+8 day'));
+				switch($depot) {
+					case "Sydney":
+						$sql = 'SELECT * FROM pickup_booking WHERE `booking_time` >= "' . $availableDate . '" AND `booking_time` < "' . $endDate . '" AND `status` != 3 AND `booking_number` LIKE "S%"';
+						break;
+					case "Melbourne":
+						$sql = 'SELECT * FROM pickup_booking WHERE `booking_time` >= "' . $availableDate . '" AND `booking_time` < "' . $endDate . '" AND `status` != 3 AND `booking_number` LIKE "M%"';
+						break;
+					case "Brisbane":
+						$sql = 'SELECT * FROM pickup_booking WHERE `booking_time` >= "' . $availableDate . '" AND `booking_time` < "' . $endDate . '" AND `status` != 3 AND `booking_number` LIKE "B%"';
+						break;
+				}
+				$bookings = PickupBooking::model()->findAllBySql($sql);
+				$days = [];
+				for ($i = 0; $i < 8; $i++) {
+					array_push($days, date('Y-m-d', strtotime($availableDate . '+' . $i . ' day')));
+				}
+
+				$occupiedSlots = [];
+				if (!empty($bookings)) {
+					foreach ($bookings as $booking) {
+						$bookingDate = explode(" ", $booking->booking_time)[0];
+						$bookingTime = explode(" ", $booking->booking_time)[1];
+
+						if (empty($occupiedSlots[$bookingDate])) {
+							$occupiedSlots[$bookingDate] = [$bookingTime];
+						} else {
+							array_push($occupiedSlots[$bookingDate], $bookingTime);
+						}
+					}
+				}
+				return array(
+					'status' => 1, 
+					'data'=>[
+					'availableDate' => $availableDate,
+					'endDate' => $endDate,
+					'occupiedSlots' => $occupiedSlots,
+					'container_no' => $container_no,
+					'house_bl' => $connote,
+					'packages' => $model->pkg,
+					'pallets' => $model->mdata['amzon_pallet'],
+					'weight' => $model->weight,
+					'volume' => (empty($model->mdata['total_cbm'])?number_format($model->cbm*$model->pkg,'4','.',''):$model->mdata['total_cbm']),
+					'depot' => $depot,
+					'pallet_type'=>@$model->mdata["amzon_pallet_type"]
+					]
+				);
+			} elseif (empty($model->consol->mdata['available_date'])) {
+				return ['status' => 0, 'msg' => 'We cannot find available date for this pick up.', 'container_no' => $container_no, 'house_bl' => $connote, 'depot' => $depot];
+			} elseif (empty($model->mdata['amzon_pallet'])) {
+				return ['status' => 0, 'msg' => 'The shipment is not avaiable for booking, please contact us by sending email to imports@toplogistics.com.au', 'container_no' => $container_no, 'house_bl' => $connote, 'depot' => $depot];
+			} elseif ($model->status != ImParcel::STATE_CLEAR && $model->status != ImParcel::STATE_CLEAR_WAIT) {
+				if ($model->status == ImParcel::DELIVERED) {
+					return ['status'=>0, 'msg'=>'This shipment has been successfully picked up.', 'container_no'=>$container_no, 'house_bl'=>$connote, 'depot' => $depot];
+				} elseif ($model->status == ImParcel::STATE_SUB_UBM) {
+					return ['status'=>0, 'msg'=>'Please book with per lowest bill', 'container_no'=>$container_no, 'house_bl'=>$connote, 'depot' => $depot];
+				} else {
+					return ['status' => 0, 'msg' => 'The shipment is not Customs cleared, please try again later.', 'container_no' => $container_no, 'house_bl' => $connote, 'depot' => $depot];
+				}	
+			} elseif (!empty($bookingCheck)) {
+				return ['status' => 0, 'msg' => 'You have already booked a pickup time, please check your company email for booking details.', 'container_no' => $container_no, 'house_bl' => $connote, 'depot' => $depot];
+			}
+		} else {
+			return ['status' => 0, 'msg' => 'We cannot find this record in our system, please check your input information and try again.', 'container_no' => $container_no, 'house_bl' => $connote, 'depot' => $depot];
+		}
+	}
+
+	public function actionContainerPickupBooking()
+	{
+		if (!empty($_POST)) {
+			echo json_encode($this->saveBookingSubmit());
+		}
+	}
+
+	private function saveBookingSubmit()
+	{
+		$hbnArr = $_POST['house_bl'];
+		$accountCode = empty($_POST['account_code'])?"":$_POST['account_code'];
+		$rego = $_POST['rego_default'];
+		$name = $_POST['name_default'];
+		$company_name = $_POST['company_name_default'];
+		$email = $_POST['email_default'];
+		$resultArr = [];
+		$errors = [];
+		$fee = 0;
+		$dateTimeArr = [];
+		foreach ($hbnArr as $i => $hbn) {
+			$booking_date = $_POST['booking_date'][$i];
+			$booking_time = $_POST['booking_time'][$i];
+			$dateTimeArr[] = $booking_date." ".$booking_time;
+		}
+
+		if(count(array_unique($dateTimeArr))!=count($hbnArr))
+		{
+			$errors[] = "Duplicated pickup date and time selected";
+		}
+
+		if(!empty($errors))
+		{
+			return ["status"=>3,"msg"=>join(",",$errors)];
+		}
+
+
+		foreach ($hbnArr as $i => $hbn) {
+			$containerNo = $_POST['container_no'][$i];
+			$depot = $_POST['depot'];
+			$palletRequirement = $_POST['pallet_requirement_'.$i][0];
+			$shrinkWrap = $_POST['shrink_wrap_'.$i][0];
+			$booking_date = $_POST['booking_date'][$i];
+			$booking_time = $_POST['booking_time'][$i];
+			$rego = !empty($_POST['rego'][$i])?$_POST['rego'][$i]:$rego;
+			$name =  !empty($_POST['name'][$i])?$_POST['name'][$i]:$name;
+			$company_name =  !empty($_POST['company_name'][$i])?$_POST['company_name'][$i]:$company_name;
+			$email =  !empty($_POST['email'][$i])?$_POST['email'][$i]:$email;
+
+
+			$note = $_POST['note'][$i];
+			$thisResult = $this->saveSingleBooking($containerNo,$depot,$hbn,$accountCode,$rego,$name,$company_name,$email,$palletRequirement,$shrinkWrap,$booking_date,$booking_time,$note);
+			if($thisResult['status'])
+			{
+				$resultArr[$hbn.'-'.$i] = $thisResult['msg'];
+				$fee+=$thisResult['fee'];
+			}else
+			{
+				$errors[$hbn] = $thisResult["msg"];
+			}
+		}
+		if(empty($errors))
+		{
+			$pickupBookingSubmit = new PickupBookingSubmit();
+			$pickupBookingSubmit->generateSubmitNumber(date("Y-m-d H:i:s"),$depot);
+			$pickupBookingSubmit->created = date("Y-m-d H:i:s");
+			$pickupBookingSubmit->fee = $fee;
+			$pickupBookingSubmit->gst = $pickupBookingSubmit->fee*0.1;
+			$pickupBookingSubmit->total = $fee*1.1;
+			$pickupBookingSubmit->save();
+			$bookingStatus = [];
+			foreach ($hbnArr as $i => $hbn) {
+				$bookingNumber = $resultArr[$hbn.'-'.$i];
+				$pickupBooking = PickupBooking::model()->find("booking_number = :bookingNumber",[":bookingNumber"=>$bookingNumber]);
+				$pickupBooking->submit_id = $pickupBookingSubmit->id;
+				$pickupBooking->booking_number = $pickupBookingSubmit->submit_no."-".($i+1);
+				if (!empty($_FILES)) {
+					$j = 1;
+					foreach ($_FILES as $fk=> $file) {
+						if(preg_match("/file_{$i}/",$fk))
+						{
+							if ($file['error'] == 0 && !empty($file['name'])) {
+								$fileType = substr($file['type'], strpos($file['type'], "/")+1);
+								$file['name'] = $hbn . "-DO-" . $j .'.'. $fileType;
+								$target_dir = Yii::app()->basePath . DIRECTORY_SEPARATOR . "runtime" . DIRECTORY_SEPARATOR . "pickup_booking_DO" . DIRECTORY_SEPARATOR;
+								if (!is_dir($target_dir)) {
+									mkdir($target_dir);
+								}
+								$target_file = $target_dir . basename($file["name"]);
+								move_uploaded_file($file['tmp_name'], $target_file);
+								// TODO: create a new file type in FileRepo class istead of 18
+								$filerepoId = FileRepo::storeFile($target_file, basename($file["name"]), 200, $pickupBooking->shipment_id);
+								unlink($target_file);
+								$j++;
+							}
+						}
+					}
+
+					if(!empty($accountCode))
+					{
+						$pickupBooking->status = PickupBooking::PAID;
+						$pickupBooking->mdata['pay_with_account_code'] = 1;
+						$pickupBooking->save();
+						$bookingStatus[] = 2;
+					}else
+					{
+						$pickupBooking->save();
+						$bookingStatus[] = 1;
+					}
+				}
+
+			}
+
+			if(round(array_sum($bookingStatus))==round((2*count($hbnArr))))
+			{
+				$this->sendSubmitBookingConfirm($pickupBookingSubmit->submit_no,false);
+				$this->multipleBookingSuccessWithPayment($pickupBookingSubmit->submit_no,true);
+				return ["status"=>2,"msg"=>$pickupBookingSubmit->submit_no];
+			}elseif(round(array_sum($bookingStatus))==round(count($hbnArr)))
+			{
+				return ["status"=>1,"msg"=>$pickupBookingSubmit->submit_no];
+			}
+
+		}else
+		{
+			foreach ($resultArr as $i => $bookingNumber) {
+				$pickupBooking = PickupBooking::model()->find("booking_number = :bookingNumber",[":bookingNumber"=>$bookingNumber]);
+				$pickupBooking->status = PickupBooking::CANCELLED;
+				$pickupBooking->update(['status']);
+			}
+			return ["status"=>3,"msg"=>join(",",$errors)];
+		}
+	}
+	private function saveSingleBooking($containerNo,$depot,$hbn,$accountCode,$rego,$name,$company_name,$email,$palletRequirement,$shrinkWrap,$booking_date,$booking_time,$note)
+	{
+		$sql = 'SELECT * FROM shipment WHERE `hbn` = "' . $hbn . '" AND `consol_id` IN (SELECT `id` FROM consol WHERE `container_no` = "' . $containerNo . '")';
+		$shipment = ImParcel::model()->findBySql($sql);
+		$palletFee = SystemSetting::getSetting("BookingFee","palletFee");
+		$wrapFee = SystemSetting::getSetting("BookingFee","wrapFee");
+		$baseFee = SystemSetting::getSetting("BookingFee","baseFee");
+		$totalPalletFee = 0.00;
+		$totalWrapFee = 0.00;
+		$discount = 0;
+		$percentage = 1;
+		if(!empty($accountCode))
+		{
+			$accountCode = SellRate::findImCode($accountCode);
+			if(empty($accountCode))
+			{
+				return ["status"=>false,"msg"=>'Account Code is invalid.'];
+			}
+			$percentage = $percentage-$accountCode->item;
+		}
+
+		$baseFee = $baseFee*$percentage;
+		$fee = $baseFee;
+		if (!empty($shipment->mdata['amzon_pallet']) && $shipment->mdata['amzon_pallet'] > 0) {
+			if ($palletRequirement == 'plain') {
+				$fee += $shipment->mdata['amzon_pallet'] * $palletFee*$percentage;
+				$totalPalletFee = $shipment->mdata['amzon_pallet'] * $palletFee*$percentage;
+			}
+			if ($shrinkWrap == 'wrap') {
+				$fee += $shipment->mdata['amzon_pallet'] * $wrapFee*$percentage;
+				$totalWrapFee = $shipment->mdata['amzon_pallet'] * $wrapFee*$percentage;
+			}
+		}
+
+		$pickupBooking = new PickupBooking();
+		$pickupBooking->rego = $rego;
+		$pickupBooking->status = 1;
+		$pickupBooking->booking_time = $booking_date . ' ' . $booking_time . ':00';
+		$pickupBooking->create_date = date("Y-m-d H:i:s");
+		$pickupBooking->driver_name = $name;
+		$pickupBooking->company_name = $company_name;
+		$pickupBooking->company_email = $email;
+		$pickupBooking->fee = $fee;
+		$pickupBooking->mdata['container_no'] = $containerNo;
+		$pickupBooking->mdata['house_bl'] = $hbn;
+		$pickupBooking->mdata['pallet_requirement'] = $palletRequirement;
+		$pickupBooking->mdata['shrink_wrap'] = $shrinkWrap;
+		$pickupBooking->mdata['pallet_fee'] = $totalPalletFee;
+		$pickupBooking->mdata['wrap_fee'] = $totalWrapFee;
+		$pickupBooking->mdata['base_fee'] = $baseFee;
+
+		if(!empty($accountCode))
+		{
+			$pickupBooking->mdata['account_code'] = $accountCode->code;
+		}
+
+		$pickupBooking->note = $note;
+		$pickupBooking->generateBookingNumber($depot);
+		$pickupBooking->shipment_id = $shipment->id;
+		$pickupBooking->ref = $shipment->ref;
+
+		// Check if the choosen slot has already been occupied, only save this record when the slot is available.
+		//$slotCheck = PickupBooking::model()->findByAttributes(['booking_time' => $pickupBooking->booking_time]);
+		switch($depot) {
+			case "Sydney":
+				$sql = 'SELECT `booking_time` FROM pickup_booking WHERE `status` != 3 AND `booking_number` LIKE "S%"';
+				//$dependency = new CDbCacheDependency('SELECT MAX(id) FROM pickup_booking WHERE `status` != 3 AND `booking_number` LIKE "S%"');
+				break;
+			case "Melbourne":
+				$sql = 'SELECT `booking_time` FROM pickup_booking WHERE `status` != 3 AND `booking_number` LIKE "M%"';
+				//$dependency = new CDbCacheDependency('SELECT MAX(id) FROM pickup_booking WHERE `status` != 3 AND `booking_number` LIKE "M%"');
+				break;
+			case "Brisbane":
+				$sql = 'SELECT `booking_time` FROM pickup_booking WHERE `status` != 3 AND `booking_number` LIKE "B%"';
+				//$dependency = new CDbCacheDependency('SELECT MAX(id) FROM pickup_booking WHERE `status` != 3 AND `booking_number` LIKE "B%"');
+				break;
+		}
+		//$slotCheck = Yii::app()->db->cache($depot."54321", $dependency)->createCommand($sql)->queryAll();
+		$slotCheck = Yii::app()->db->createCommand($sql)->queryAll();
+		if (empty($slotCheck)||!in_array(['booking_time' => $pickupBooking->booking_time], $slotCheck))
+		{
+			$pickupBooking->save();
+			return ["status"=>true,"msg"=>$pickupBooking->booking_number,"fee"=>$pickupBooking->fee];
+		} else {
+			// Selected slot is occupied, return error message.
+			return ["status"=>false,"msg"=>'House bl '.$hbn.' : Slot has been occupied, please pick another time slot.'];
+		}
+	}
+
+	public function actionBookingCheckout($bookingNo)
+	{
+		$this->layout = false;
+		$booking = PickupBooking::model()->findByAttributes(['booking_number' => $bookingNo]);
+		$sql = 'SELECT * FROM shipment WHERE `hbn` = "' . $booking->mdata['house_bl'] . '" AND `consol_id` IN (SELECT `id` FROM consol WHERE `container_no` = "' . $booking->mdata['container_no'] . '")';
+		$imParcel = ImParcel::model()->findBySql($sql);
+		$numPallets = intval($imParcel->mdata['amzon_pallet']);
+		$this->render('booking_checkout', array('model' => $booking, 'numPallets' => $numPallets));
+	}
+
+	public function actionBookingCheckoutMultiple($submitNo)
+	{
+		$this->layout = false;
+		$submit = PickupBookingSubmit::model()->findByAttributes(['submit_no' => $submitNo]);
+		$this->render('booking_checkout_multiple', array('model' => $submit));
+	}
+
+	public function actionBookingPaymentSuccess($pbn)
+	{
+		$this->bookingSuccessWithPayment($pbn,false);
+	}
+
+	public function actionBookingPaymentSuccessMultiple($pbn)
+	{
+		$this->multipleBookingSuccessWithPayment($pbn,false);
+		$this->sendSubmitBookingConfirm($pbn,false);
+		$this->actionPaymentSuccess();
+	}
+
+	public function actionBookingSuccess($pbn)
+	{
+		$this->layout = false;
+		$booking = PickupBooking::model()->findByAttributes(['booking_number' => $pbn]);
+		if (!empty($booking)) {
+			$booking->status = 2;
+			$booking->mdata['temp_skip_paid'] = 1;
+			$booking->save();
+			// update shipment, set pickup time
+			$shipment = ImParcel::model()->findByPk($booking->shipment_id);
+			$shipment->mdata['pickup_booking_time'] = $booking->booking_time;
+			$shipment->mdata['pickup_booking_number'] = $booking->booking_number;
+			if($booking->mdata['shrink_wrap'] == "wrap") {
+				$shipment->mdata['pickup_booking_wrap'] = "Yes";
+			} else {
+				$shipment->mdata['pickup_booking_wrap'] = "No";
+			}
+			$shipment->updateMeta();
+
+			// Send confirmation email to customer
+			$emailService = new EmailService();
+			$emailService->sendBookingConfirmationEmail($booking, $shipment->mdata['amzon_pallet'],true);
+		}
+	}
+
+	public function actionBookingSuccessWithAccountCode($pbn)
+	{
+		$this->bookingSuccessWithPayment($pbn,true);
+	}
+
+	private function multipleBookingSuccessWithPayment($pbn,$isPayWithAccountCode)
+	{
+		$this->layout = false;
+		$pb = PickupBookingSubmit::model()->findByAttributes(['submit_no' => $pbn]);
+		foreach ($pb->booking as $key => $booking)
+		{
+			$booking->status = 2;
+			$booking->save();
+			// update shipment, set pickup time
+			$shipment = ImParcel::model()->findByPk($booking->shipment_id);
+			$shipment->mdata['pickup_booking_time'] = $booking->booking_time;
+			$shipment->mdata['pickup_booking_number'] = $booking->booking_number;
+			if($booking->mdata['shrink_wrap'] == "wrap") {
+				$shipment->mdata['pickup_booking_wrap'] = "Yes";
+			} else {
+				$shipment->mdata['pickup_booking_wrap'] = "No";
+			}
+			$shipment->updateMeta();
+		}
+
+		if (!empty($pb)) {
+			$booking->status = 2;
+			$booking->save();
+			// update shipment, set pickup time
+			$shipment = ImParcel::model()->findByPk($booking->shipment_id);
+			$shipment->mdata['pickup_booking_time'] = $booking->booking_time;
+			$shipment->mdata['pickup_booking_number'] = $booking->booking_number;
+			if($booking->mdata['shrink_wrap'] == "wrap") {
+				$shipment->mdata['pickup_booking_wrap'] = "Yes";
+			} else {
+				$shipment->mdata['pickup_booking_wrap'] = "No";
+			}
+			$shipment->updateMeta();
+
+			$service = new Service();
+			$cache = $service->getCacheData("BookingInvoice".$pbn);
+			if(empty($cache)){
+				$service->setCacheData("BookingInvoice".$pbn, 1, 50000);
+				// create invoice
+				$invoiceService = new InvoiceService();
+				$invoiceService->createContainerPickupBookingInvoiceMultiple($pb,$isPayWithAccountCode);
+				// Create invoice line
+				$invoiceLineService = new InvLineService();
+				$invoiceLineService->createContainerPickupBookingInvLineMultiple($pb->submit_no,$isPayWithAccountCode);
+			}
+
+			// Send confirmation email to customer
+			$emailService = new EmailService();
+			$emailService->sendMultiBookingInvoiceEmail($pb->submit_no, $shipment->mdata['amzon_pallet']);
+		}
+	}
+
+	private function sendSubmitBookingConfirm($pbn,$isPayWithAccountCode)
+	{
+		$this->layout = false;
+		$pb = PickupBookingSubmit::model()->findByAttributes(['submit_no' => $pbn]);
+		foreach ($pb->booking as $key => $booking)
+		{
+			// update shipment, set pickup time
+			$shipment = ImParcel::model()->findByPk($booking->shipment_id);
+			// Send confirmation email to customer
+			$emailService = new EmailService();
+			$emailService->sendBookingConfirmationEmailOnly($booking, $shipment->mdata['amzon_pallet']);
+		}
+	}
+
+
+	private function bookingSuccessWithPayment($pbn,$isPayWithAccountCode)
+	{
+		$this->layout = false;
+		$booking = PickupBooking::model()->findByAttributes(['booking_number' => $pbn]);
+		if (!empty($booking)) {
+			$booking->status = 2;
+			$booking->save();
+			// update shipment, set pickup time
+			$shipment = ImParcel::model()->findByPk($booking->shipment_id);
+			$shipment->mdata['pickup_booking_time'] = $booking->booking_time;
+			$shipment->mdata['pickup_booking_number'] = $booking->booking_number;
+			if($booking->mdata['shrink_wrap'] == "wrap") {
+				$shipment->mdata['pickup_booking_wrap'] = "Yes";
+			} else {
+				$shipment->mdata['pickup_booking_wrap'] = "No";
+			}
+			$shipment->updateMeta();
+
+			$service = new Service();
+			$cache = $service->getCacheData("BookingInvoice".$pbn);
+			if(empty($cache)){
+				$service->setCacheData("BookingInvoice".$pbn, 1, 50000);
+				// create invoice
+				$invoiceService = new InvoiceService();
+				$invoiceService->createContainerPickupBookingInvoice($booking,$isPayWithAccountCode);
+				// Create invoice line
+				$invoiceLineService = new InvLineService();
+				$invoiceLineService->createContainerPickupBookingInvLine($pbn, $shipment,$isPayWithAccountCode);
+			}
+
+			// Send confirmation email to customer
+			$emailService = new EmailService();
+			$emailService->sendBookingConfirmationEmail($booking, $shipment->mdata['amzon_pallet']);
+		}
+	}
+
+	public function actionPaymentSuccess()
+	{
+		$this->layout = false;
+		$this->render('payment_success');
+	}
+
+	public function actionTermsAndConditions()
+	{
+		$this->layout = false;
+		$this->render('terms_and_conditions');
+	}
+
+	public function actionSalesFunnel()
+	{
+		$this->layout = false;
+		$this->render('sales_funnel');
+	}
+
+	public function loadModel($id){
+
+		$model = ShipmentQuestionSubmit::model()->findByPk($id);
+
+		if($model===null)
+			throw new CHttpException(404,'The requested page does not exist.');
+		return $model;
+	}
+}

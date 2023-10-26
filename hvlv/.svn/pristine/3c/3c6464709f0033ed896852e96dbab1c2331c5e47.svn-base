@@ -1,0 +1,193 @@
+<?php
+
+if (!empty($model)) {
+    $questionId = $model['id'];
+    $questionNum = $model['question_num'];
+    $question = $model['question'];
+    $questionType = $model['question_type'];
+}
+
+$salesService = new SalesfunnelRequirementsService();
+
+?>
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-MrcW6ZMFYlzcLA8Nl+NtUVF0sA7MsXsP1UyJoMp4YLEuNSfAP+JcXn/tWtIaxVXM" crossorigin="anonymous"></script>
+    <!-- jQuery -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <!-- reCaptcha  -->
+    <!-- <script src="https://www.google.com/recaptcha/api.js"></script> -->
+    <!-- Custom CSS -->
+    <style>
+        .pe-label {
+            font-weight: 600;
+        }
+
+        .text-input-row {
+            margin-top: 8px;
+        }
+
+        #displayPrice {
+            display: none;
+        }
+    </style>
+    <title>Customer Requirements Login</title>
+</head>
+
+<body>
+    <div class="container-lg">
+        <br />
+        <main id="site-content" role="main">
+<?php 
+    $url = $this->createUrl('salesfunnelRequirements/saveCustomerDetail');
+    if(!empty($model->id))
+    {
+        $url = $url."?id=".$model->id;
+    }
+
+    $form=$this->beginWidget('CActiveForm', array(
+    'id'=>'customer_detail_form',
+    'enableAjaxValidation'=>false)
+    );
+?>
+                <div class="container" id="items">
+                    <header class="entry-header has-text-align-center header-footer-group">
+                        <div class="entry-header-inner section-inner medium">
+                            <h1 class="entry-title">Contact detail for requirement</h1>
+                        </div><!-- .entry-header-inner -->
+                    </header>                    
+
+                    <div class="item" id="item">
+                        <h2>Please complete the contact before the requirement form.</h2>
+                        <div class="row">
+                            <div class="col-md-12">
+                                <label for="company_name" class="form-label pe-label text-input-row">Company Name</label>
+                                <input type="text" class="form-control" id="company_name" name="company_name" required
+                                <?php
+                                    if (!empty($submissionModel)){
+                                        echo 'value="'.$submissionModel->company_name.'"';
+                                    }
+                                ?>
+                                >
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <label for="first_name" class="form-label pe-label text-input-row">First name</label>
+                                <input type="text" class="form-control" id="first_name" name="first_name" required
+                                <?php
+                                    if (!empty($submissionModel)){
+                                        echo 'value="'.$submissionModel->first_name.'"';
+                                    }
+                                ?>
+                                >
+                            </div>
+                            <div class="col-md-6">
+                                <label for="last_name" class="form-label pe-label text-input-row">Last Name</label>
+                                <input type="text" class="form-control" id="last_name" name="last_name" required
+                                <?php
+                                    if (!empty($submissionModel)){
+                                        echo 'value="'.$submissionModel->last_name.'"';
+                                    }
+                                ?>
+                                >
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-12">
+                                <label for="email" class="form-label pe-label text-input-row">Email address</label>
+                                <input type="email" class="form-control" id="email" name="email" placeholder="xxxxxx@xx.xx" pattern="[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,4}$" required
+                                <?php
+                                    if (!empty($submissionModel)){
+                                        echo 'value="'.$submissionModel->email.'"';
+                                    }
+                                ?>
+                                >
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-12">
+                                <label for="contact_number" class="form-label pe-label text-input-row">Contact mobile number</label>
+                                <input type="number" class="form-control" id="contact_number" name="contact_number" placeholder="04xxxxxxxx" required
+                                <?php
+                                    if (!empty($submissionModel)){
+                                        echo 'value="'.$submissionModel->contact_number.'"';
+                                    }
+                                ?>
+                                >
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <br><br><br>
+                
+                <!-- <div class="g-recaptcha" data-sitekey="6LfyO2saAAAAAJ6CdVI_q_Nt8pFZkcVqbO7aGZHJ" style="float:left"></div> -->
+                <div class="col-12">
+                    <button type="submit" class="btn btn-primary" onclick="return submitForm();">Check and Process</button>
+                </div>
+<?php $this->endWidget(); ?>
+    </div>
+
+    <script type="text/javascript">
+        var numCountItem = 1;
+        var strHtmlItem = "";
+        var questionsArray = [];
+        var answersArray = [];
+
+
+        function submitForm() {
+
+            let email = $('#email').val();
+            let valid = email.match(
+                /^(([^<>()[\]\\.,;:\s@\"]+(\.[^<>()[\]\\.,;:\s@\"]+)*)|(\".+\"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/
+              );
+
+              if (!valid) {
+                alert("email is not valid");
+                return false;
+              }
+              
+            // alert("");
+
+            var form = new FormData(document.getElementById("customer_detail_form"));
+             $.ajax({
+                        url: '<?=$url?>',
+                        type: "post",
+                        data: form,
+                        processData: false,
+                        contentType: false,
+                        success: function(r) {
+
+                            var response = JSON.parse(r);
+                            if(!response.done)
+                            {
+                                console.log(response);
+                                alert(response.msg);
+                            }else
+                            {
+                                var submit_id = response['submit_id'];  
+                                // console.log(submit_id); 
+                                // debugger;                       
+                                window.location.replace("<?=$this->createUrl('salesfunnelRequirements/requirement')?>"+"?submit_id="+submit_id);
+                            }
+                         },
+                        error: function(e) {
+                            console.log(e);
+                        }
+                    });
+             return false;
+
+        }
+
+
+    </script>
+</body>
+
+</html>

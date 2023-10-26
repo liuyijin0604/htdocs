@@ -1,0 +1,137 @@
+<?php
+class EweAPI extends APILog
+{
+	public $result;
+	public $err;
+	public $is_test;
+	public $debug;
+
+	public function getFtpTracking($ss,$fileName)
+	{
+		$events = [Tracking::TYPE_HELD=>['CC2','Customs held'],Tracking::TYPE_CLEARED=>['CC4','Customs Cleared'],Tracking::TYPE_HAND_OVER=>['T5','Handed over to Carrier'],Tracking::TYPE_DECONSOLIDATION=>['T4','Deconsolidation in warehouse']];
+		$xlsave = new oExcel('CSV');
+		$xlsave->addRow(1, ["Tracking #","Location","Event State","Event Datetime","Event Status","Event Detail"]);
+		$start = 2;
+		foreach ($ss as $key => $s) 
+		{
+			$newEWE = new EweAPI("EWE",Org::$importWarehouseList[$s->consol->dpt_id]);
+			if(empty($s->ref)) continue;
+			if(!empty($s->tracks))
+			{
+				foreach ($s->tracks as $k2 => $track)
+				{
+					if(!empty($track->mdata['sync_ewe'])) continue;
+					if(!in_array($track->type,array_keys($events))) continue;
+
+					if(!empty($s->consol->container_no))
+					{
+						$xlsave->addRow($start, [$s->ref,$newEWE->fromInfo['suburb'],$newEWE->fromInfo['state'],date("Y-m-d H:i",strtotime($track->dt)),Tracking::$status[$track->type],$track->activity]);
+					}else
+					{
+						$xlsave->addRow($start, [$s->ref,$newEWE->fromInfo['suburb'],$newEWE->fromInfo['state'],date("Y-m-d H:i",strtotime($track->dt)),Tracking::$status[$track->type],$track->activity]);
+					}
+					$start++;
+				}
+			}
+		}
+		$xlsave->output($fileName, null, false);
+		if($start==2) return false;
+		return file_get_contents($fileName);
+	}
+
+	public function ftpTracking($ss)
+	{
+		require_once Yii::app()->basePath . '/vendor/autoload.php';
+		$man_no = date('YmdHis');
+		$mfn = 'TLA_EWE_'.$man_no.'_event.csv';
+		$fileName=Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR  . 'EWE' . DIRECTORY_SEPARATOR.'tracking'. DIRECTORY_SEPARATOR.$mfn;
+		$sftp = new phpseclib\Net\SFTP('103.230.159.64');
+		// Check SFTP Connection
+		if ($sftp->login('ewe', 'sd123^*&j!')) {
+			// $lists = $sftp->rawlist('/Manifests');
+			$sftp->chdir('tracking');
+			$ftpFileData = $this->getFtpTracking($ss,$fileName);
+			if(empty($ftpFileData)||$sftp->put($mfn, $ftpFileData)){
+				//update tranship
+				$trans = Yii::app()->db->beginTransaction();
+				try{
+					foreach($ss as $s){
+						if(empty($s->ref)) continue;
+						foreach ($s->tracks as $k2 => $track)
+						{
+							$track->mdata['sync_ewe'] = 1;
+							$track->save();
+						}
+					}
+					$trans->commit();
+				} catch (Exception $ex) {
+					$trans->rollback();
+					unlink($fileName);
+					throw $ex;
+				}
+
+				return true;
+			}else
+			{
+				echo "failed";
+				unlink($fileName);
+			}
+		}
+		return false;
+	}
+
+
+	public function receiveEWEManifestFile()
+	{
+		require_once Yii::app()->basePath . '/vendor/autoload.php';
+		$sftp = new phpseclib\Net\SFTP('103.230.159.64');
+		$rootPath = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR.'EWE'.DIRECTORY_SEPARATOR.'manifest';
+		// Check SFTP Connection
+		if ($sftp->login('ewe', 'sd123^*&j!')) {
+			$sftp->chdir('manifest');
+			$get_path = $sftp->pwd();
+			$filepaths = $sftp->nlist();
+			foreach ($filepaths as $key => $filepath) {
+				if($filepath=="."||$filepath=="..") continue;
+				$fileCalculator = explode('.', $filepath)[0];
+				if($fileCalculator>'1')
+				{
+					//this table will be also used for EWE manifest
+					$oldRecord = FastwayTrackingFileImport::model()->find('content = :content',[":content"=>$filepath]);
+					if(!empty($oldRecord))
+					{
+						$sftp->delete($filepath);
+						continue;
+					}
+
+					$result = $sftp->get($filepath);
+					$fileFullName = $rootPath.DIRECTORY_SEPARATOR.$filepath;
+					file_put_contents($fileFullName, $result);
+					$imsService = new ImsService(Org::ORGID_CLIENT_EWE_GROUP,'0258');
+					[$errors,$successes] = $imsService->importImsManifestWithFile($fileFullName,$filepath,1);
+					$record = new FastwayTrackingFileImport();
+					$record->content = $filepath;
+					$record->created = date('Y-m-d H:i:s');
+					if($record->save())
+					{
+						if(!empty($errors))
+						{
+							Emailog::sendEmailTo('SEAFREIGHT@EWE.COM.AU',"success：".join('</br>',$successes).'</br>'."errors:".join('</br>',$errors),"EWE ".$filepath."  manifest error","dev@toplogistics.com.au","dev",[],'dev@toplogistics.com.au');
+						}else
+						{
+							Emailog::sendEmailTo('SEAFREIGHT@EWE.COM.AU',"success：".join('</br>',$successes).'</br>'."errors:".join('</br>',$errors),"EWE ".$filepath."  manifest success","dev@toplogistics.com.au","dev",[],'dev@toplogistics.com.au');
+						}
+						
+					}
+					$sftp->disconnect();
+					return true;
+				}
+
+			}
+		}
+
+		$sftp->disconnect();
+		return false;
+	}
+
+}

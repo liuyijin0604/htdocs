@@ -1,0 +1,110 @@
+<?php
+$criteria=new CDbCriteria;
+//$criteria->addCondition('t.bwf&4>0 OR t.cbwf&128>0');
+$org= Org::model()->findByPk($agentId);
+$name=isset($org->name)?$org->name:'All';
+if ($agentId==1401) $name="商壹";
+$shipment_model->isCustomSearching = 1;
+?>
+<input type="hidden" value="<?=$agentId?>" id='agent_id' />
+<h4><?=$name?></h4>
+<style>
+    .cloumn_red{
+        background-color:red;
+    }   
+</style>
+<?php echo CHtml::link($this->t('Advanced Search'), '#', ['class'=>'search-button']); ?>
+<div class="search-form" style="display:none">
+<?php $this->renderPartial('_search', [
+    'model'=>$shipment_model,
+]);
+?>
+</div>
+<?php
+$this->widget('zii.widgets.grid.CGridView', [
+    'id'=>$_GET["tabid"].'_custom_grid',
+    'cssFile' => false,
+    'dataProvider'=>$shipment_model->search(true, 30, $criteria),
+    'filter'=>$shipment_model,
+    'columns'=>[
+        ['name' => 'hbn', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->createURL("imParcel/update", array("id" => $data->id))."\" class=\"tab_link\" title=\"".$data->hbn."\">".$data->hbn."</a>"',],
+        'ref',
+        'can',
+        ['name'=>'awb_name','header'=>'awb','type'=>'raw','value'=>'empty($data->consol)?"":$data->consol->awb',],
+        ['name'=>'consol_eta','header'=>'eta','type'=>'raw','value'=>'@$data->consol->eta','htmlOptions'=>['width'=>'80px'],'cssClassExpression' => 'isset($data->consol)?(@$data->consol->getEtaToNow()>5? "cloumn_red" : ""):""'],
+        ['name'=>'pkg','htmlOptions'=>['width'=>'10px'],'filterHtmlOptions'=>['style'=>'width:10px']],
+        ['name' => 'consol_no', 'type'=>'raw', 'value' => 'empty($data->consol_id)? "" : "<a href=\"".Yii::app()->createURL(preg_match("/DW\d{8}/i",@$data->consol->no)?"dmawbConsol/update":"imcoConsol/update", array("id" => $data->consol_id))."\" class=\"tab_link\" title=\"".$data->consol->no."\">".$data->consol->no."</a>"',],
+        ['name' => 'status', 'value' => '$data->getStatus()',
+            'filter'=>CHtml::dropDownList('ImParcel[status]', $shipment_model->status, $this->t(ImParcel::$states), ['prompt'=>$this->t('All')]),],
+        ['name' => 'ddpt_id', 'value' => '@$data->depot->name',
+            'filter'=>CHtml::dropDownList('ImParcel[ddpt_id]', $shipment_model->ddpt_id, $this->t(Org::dptList()), ['prompt'=>$this->t('All')]),],
+        ['name' => 'cnee_name', 'type' => 'raw', 'value'=>function ($data) {
+            $cnee = empty(@$data->receiver->name)? $data->cnee : $data->receiver;
+
+            return empty($cnee)? '' : CHtml::tag('div', ['title'=>@$cnee->name."\n".$cnee->company."\n".$cnee->fullAddress()."\n".$cnee->tel."\n".$cnee->email],@ $cnee->name);
+        },],
+        ['name'=>'postcode','htmlOptions'=>['width'=>'10px'],'filterHtmlOptions'=>['style'=>'width:10px']],
+        // ['name' => 'cnee_addr','header'=>'Address' ,'value' => 'empty($data->cnee)?"":substr($data->cnee->address,0,20)'],
+        // ['name' => 'cnee_company','header'=>'Company', 'value' => 'empty($data->cnee)?"":$data->cnee->company'],
+        // ['name' => 'cnee_tel','header'=>'Tel', 'value' => 'empty($data->cnee)?"":$data->cnee->tel'],
+        /* ['name' => 'cnee_email','header'=>'Email', 'type' => 'raw',   'value'=>function ($data) {
+            return CHtml::tag('div', ['title'=>@$data->cnee->email,], substr(@$data->cnee->email, 0, 25));
+        },],*/
+        ['header' => 'Note', 'type' => 'raw',   'value'=>function ($data) {
+            return CHtml::tag('div', ['title'=>@$data->mdata["custom_note"],], mb_substr(@$data->mdata["custom_note"], 0, 15));
+        },'filter'=>CHtml::textField('ImParcel[customNote]',@$shipment_model->customNote)],
+        ['header'=>'value','value'=>'$data->dvalue'],
+        ['name'=>'process_broker','header'=>'Broker','value'=>'@$data->process->getBrokerName()','filter'=>CHtml::dropDownList('ImParcel[process_broker]', $shipment_model->process_broker, $this->t(ShipmentProcess::brokerList()), ['prompt'=>$this->t('All')]), 'visible' => Yii::app()->user->grp != 72],
+        ['name'=>'process_status','value'=>'$data->getProcessStatus()','filter'=>CHtml::dropDownList('ImParcel[process_status]', $shipment_model->process_status, $this->t(Yii::app()->user->grp == 72? ShipmentProcess::brokerStats() : ShipmentProcess::$states), ['prompt'=>$this->t('All')]),],
+        ['header'=>'Process Type','type'=>'raw','value'=>'$data->process->getProcessType()'],
+        ['header'=>'goods available address', 'type' => 'raw','value'=>'$data->getAvailabelLabel()','filter'=>CHtml::dropDownList('ImParcel[goodsAvailableAddress]', @$shipment_model->goodsAvailableAddress, $this->t(DmawbConsol::$available_address_name), ['prompt'=>'All'])],
+        ['header'=>'extra Info','type'=>'raw','value'=>'$data->getWarnings()','filter'=>CHtml::dropDownList('ImParcel[bwf]', $shipment_model->bwf, $this->t(ImParcel::$bwfs), ['prompt'=>'All'])],
+        [
+            'class'=>'oButtonColumn',
+            'template'=>'{update}{log}',
+            'buttons'=>[
+                
+                'update' => [
+                    'url'=>'Yii::app()->createURL("customProcess/updateFile",array("id"=>$data->id,"parentTab"=>$_GET["tabid"],"type"=>isset($data->process->status)?$data->process->status:0))',
+                    'imageUrl'=>false,
+                    'visible'=>'true',
+                    'options' => ['class' => 'tab_link grid_edit_btn', 'label'=>$this->t('Update'), 'title' => '$data->hbn', 'data-win-class' => 'L'],
+                ],
+                'log' => [
+                    'imageUrl'=>false,
+                    'options' => ['class' => 'jqm_link grid_view_btn', 'label' => 'Log', 'data-win-class' => 'L'],
+                    'visible' => 'true',
+                    'url' => 'Yii::app()->createUrl("customProcess/log", ["id" => $data->id])',
+                    'label' => 'Log'
+                ],
+            ],
+        ],
+    ],
+]); ?>
+
+<script type="text/javascript">
+$(function(){
+    var tab = $('#<?=$_GET["tabid"];?>');
+    var panel = tab.data('panel');
+    
+    var resetFilters = function(){
+        $('.search-form form', panel).trigger('reset');
+        $('#<?=$_GET["tabid"];?>_custom_grid', panel).yiiGridView('update', {data: 'ImParcel=reset'});
+    };
+
+    tab.bind('onOpen', function(){
+        $('#<?=$_GET["tabid"];?>_custom_grid', panel).yiiGridView('update');
+    });
+
+    $('.search-button', panel).on('click', function(){
+        $('.search-form', panel).toggle();
+        return false;
+    });
+
+    $('.search-form form', panel).on('submit', function(){
+        $('#<?=$_GET["tabid"];?>_custom_grid', panel).yiiGridView('update', {data: $('.filters input, .filters select', panel).serialize() + '&' + $(this).serialize()});
+        return false;
+    }).find('.reset_btn').on('click', resetFilters);
+
+});
+</script>

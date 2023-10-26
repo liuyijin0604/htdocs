@@ -1,0 +1,1252 @@
+<?php
+
+class ConsolProcessController extends Controller
+{
+	protected $nonAjax=['scanInfo','export'];
+	public function actionIndex()
+	{
+		$filtersForm1=new FiltersForm1;
+		$filtersForm=new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+		if (isset($_GET['FiltersForm1'])) {
+			$filtersForm1->filters=$_GET['FiltersForm1'];
+		}
+		$provide=[];
+		$permissionArr = ConsolProcessService::getUserPermission();
+		$serviceStr = "";
+		$statusStr = "";
+		if(!empty($permissionArr[0]))
+		{
+			$serviceStr = " and service in (".join(',',$permissionArr[0]).")";
+		}
+
+		if(!empty($permissionArr[1]))
+		{
+			$statusStr = " and s.status".$permissionArr[1];
+		}
+
+		$sql='SELECT count(*) as number, s.status as status FROM `consol` t INNER JOIN `consol_process` s ON t.id=s.fid WHERE t.status!=100 AND t.type in (15,70) AND s.status<80 AND s.main_type=1 '.$serviceStr.$statusStr.' group by s.status ';
+		$rs=Yii::app()->db->createCommand($sql)->queryAll();
+		foreach ($rs as $id=>$r) {
+			$n1=0;
+			$n2=0;
+			$n3=0;
+			$sql='SELECT count(*) as number FROM `consol` t INNER JOIN `consol_process` s ON t.id=s.fid WHERE t.type in(15,70) AND t.status!=100 AND s.status=:status AND s.main_type=1 AND DATEDIFF(NOW(),eta)<=1 '.$serviceStr.$statusStr;
+			$n1=Yii::app()->db->createCommand($sql)->bindValues([':status'=>$r['status']])->queryScalar();
+			$sql='SELECT count(*) as number FROM `consol` t INNER JOIN `consol_process` s ON t.id=s.fid WHERE t.type in(15,70)  AND t.status!=100 AND s.status=:status AND s.main_type=1 AND DATEDIFF(NOW(),eta)=2 '.$serviceStr.$statusStr;
+			$n2=Yii::app()->db->createCommand($sql)->bindValues([':status'=>$r['status']])->queryScalar();
+			$sql='SELECT count(*) as number FROM `consol` t INNER JOIN `consol_process` s ON t.id=s.fid WHERE t.type in(15,70)  AND t.status!=100 AND s.status=:status AND s.main_type=1 AND DATEDIFF(NOW(),eta)>=3 '.$serviceStr.$statusStr;
+			$n3=Yii::app()->db->createCommand($sql)->bindValues([':status'=>$r['status']])->queryScalar();
+			$provide[]=['id'=>$id,'number'=>$r['number'],'status'=> $r['status'],'day1'=>$n1,'day2'=>$n2,'day3'=>$n3];
+		}
+		$filteredData=$filtersForm->filter($provide);
+		$dataprovider=new CArrayDataProvider($filteredData);
+		$dataprovider->pagination=['pageSize' =>10,];
+		$sort=new CSort();
+		$sort->attributes=[
+			'number'=>[
+				'asc'=>'number ASC',
+				'desc'=>'number DESC',
+			],
+			'status'=>[
+				'asc'=>'status ASC',
+				'desc'=>'status DESC',
+			],
+		];
+		$sort->defaultOrder = "status ASC";
+		$dataprovider->sort=$sort;
+
+
+		$provide3=[];
+		$sql='SELECT count(*) as number, s.status as status FROM `consol` t INNER JOIN `consol_process` s ON t.id=s.fid WHERE t.status!=100 AND t.type in (15,70) AND s.status not in (80,255) AND s.main_type=2 '.$serviceStr.$statusStr.' group by s.status ';
+		$rs=Yii::app()->db->createCommand($sql)->queryAll();
+		foreach ($rs as $id=>$r) {
+			$n1=0;
+			$n2=0;
+			$n3=0;
+			$sql='SELECT count(*) as number FROM `consol` t INNER JOIN `consol_process` s ON t.id=s.fid WHERE t.type in(15,70) AND t.status!=100 AND s.status=:status AND s.main_type=2 AND DATEDIFF(NOW(),eta)<=14 '.$serviceStr.$statusStr;
+			$n1=Yii::app()->db->createCommand($sql)->bindValues([':status'=>$r['status']])->queryScalar();
+			$sql='SELECT count(*) as number FROM `consol` t INNER JOIN `consol_process` s ON t.id=s.fid WHERE t.type in(15,70)  AND t.status!=100 AND s.status=:status AND s.main_type=2 AND DATEDIFF(NOW(),eta)>14 AND DATEDIFF(NOW(),eta)<=30 '.$serviceStr.$statusStr;
+			$n2=Yii::app()->db->createCommand($sql)->bindValues([':status'=>$r['status']])->queryScalar();
+			$sql='SELECT count(*) as number FROM `consol` t INNER JOIN `consol_process` s ON t.id=s.fid WHERE t.type in(15,70)  AND t.status!=100 AND s.status=:status AND s.main_type=2 AND DATEDIFF(NOW(),eta)>=30 '.$serviceStr.$statusStr;
+			$n3=Yii::app()->db->createCommand($sql)->bindValues([':status'=>$r['status']])->queryScalar();
+			$provide3[]=['id'=>$id,'number'=>$r['number'],'status'=> $r['status'],'day1'=>$n1,'day2'=>$n2,'day3'=>$n3];
+		}
+
+		$filteredData3=$filtersForm->filter($provide3);
+		$dataprovider3=new CArrayDataProvider($filteredData3);
+		$dataprovider3->pagination=['pageSize' =>10,];
+		$sort=new CSort();
+		$sort->attributes=[
+			'number'=>[
+				'asc'=>'number ASC',
+				'desc'=>'number DESC',
+			],
+			'status'=>[
+				'asc'=>'status ASC',
+				'desc'=>'status DESC',
+			],
+		];
+		$sort->defaultOrder = "status ASC";
+		$dataprovider3->sort=$sort;
+
+
+		$provide=[];
+		$list=Org::dptList();
+		$pod = "";
+		if(!empty($permissionArr[0]))
+		{
+			if(in_array(Consol::AIRCONSOL,$permissionArr[0]))
+			{
+				$provide[]=['id'=>10,'name'=>'Air Process','type'=>10, 'pod' => $pod];
+			}
+			if(in_array(Consol::SEACONSOL,$permissionArr[0]))
+			{
+				$provide[]=['id'=>20,'name'=>'Sea Process','type'=>20, 'pod' => $pod];
+			}
+			if(!empty($permissionArr[1]))
+			{
+
+			}
+		}else
+		{
+			$provide[]=['id'=>10,'name'=>'Air Process','type'=>10, 'pod' => $pod];
+			$provide[]=['id'=>20,'name'=>'Sea Process','type'=>20, 'pod' => $pod];
+		}
+		$provide[]=['id'=>999,'name'=>'Warehouse Process','type'=>999, 'pod' => $pod];
+
+		$filteredData=$filtersForm->filter($provide);
+		$dataprovider999=new CArrayDataProvider($filteredData);
+		$dataprovider999->pagination=['pageSize' =>10];
+		$sort=new CSort();
+		$sort->attributes=[
+			'number'=>[
+				'asc'=>'number ASC',
+				'desc'=>'number DESC',
+			],
+			'status'=>[
+				'asc'=>'status ASC',
+				'desc'=>'status DESC',
+			],
+		];
+		$sort->defaultOrder = "status ASC";
+		$dataprovider999->sort=$sort;
+
+		$kpiService = new KpiService();
+		$provide = $kpiService->getConsolProcessMtdKpiReport($permissionArr);
+		$list=Org::dptList();
+		$pod = "";
+		$filteredData=$filtersForm->filter($provide);
+		$dataProviderSummary=new CArrayDataProvider($filteredData);
+		$dataProviderSummary->pagination=['pageSize' =>10];
+		$sort=new CSort();
+		$sort->attributes=[
+			'number'=>[
+				'asc'=>'number ASC',
+				'desc'=>'number DESC',
+			],
+			'status'=>[
+				'asc'=>'status ASC',
+				'desc'=>'status DESC',
+			],
+		];
+		$sort->defaultOrder = "status ASC";
+		$dataProviderSummary->sort=$sort;
+
+
+		$this->render('index', ['dataProvider999'=>[$dataprovider999,$filtersForm],'dataProvider'=>[$dataprovider,$filtersForm],'dataProvider4'=>[$dataprovider3,$filtersForm],'dataProviderSummary'=>[$dataProviderSummary,$filtersForm],'name'=>'']);
+	}
+		
+	public function actionTypeList()
+	{
+		$filtersForm = new FiltersForm;
+		$filtersForm1 = new FiltersForm1;
+		$dpt_id = isset($_GET['pod_id']) ? $_GET['pod_id'] : -1;
+
+		if (isset($_GET['FiltersForm'])) {
+		    $filtersForm->filters = $_GET['FiltersForm'];
+		}
+
+		if (isset($_GET['FiltersForm1'])) {
+		    $filtersForm1->filters = $_GET['FiltersForm1'];
+		}
+
+		$provide3 = [];
+		$sql = 'SELECT count(*) as number, s.status as status FROM `consol` t 
+		        INNER JOIN `consol_process` s ON t.id=s.fid 
+		        WHERE t.status != 100 AND t.type in (15,70) AND s.status != 80 
+		        AND s.main_type = 1 AND t.dpt_id = :dpt_id 
+		        group by s.status ';
+		$rs = Yii::app()->db->createCommand($sql)->bindValues([':dpt_id' => $dpt_id])->queryAll();
+
+		foreach ($rs as $id => $r) {
+		    $n1 = 0;
+		    $n2 = 0;
+		    $n3 = 0;
+
+		    $sql = 'SELECT count(*) as number FROM `consol` t 
+		            INNER JOIN `consol_process` s ON t.id=s.fid 
+		            WHERE t.type in (15,70) AND t.status != 100 AND t.dpt_id = :dpt_id 
+		            AND s.status = :status AND s.main_type = 1 
+		            AND DATEDIFF(NOW(),eta) <= 1';
+		    $n1 = Yii::app()->db->createCommand($sql)
+		        ->bindValues([':status' => $r['status'], ':dpt_id' => $dpt_id])
+		        ->queryScalar();
+
+		    $sql = 'SELECT count(*) as number FROM `consol` t 
+		            INNER JOIN `consol_process` s ON t.id=s.fid 
+		            WHERE t.type in (15,70) AND t.status != 100 AND t.dpt_id = :dpt_id 
+		            AND s.status = :status AND s.main_type = 1 
+		            AND DATEDIFF(NOW(),eta) = 2';
+		    $n2 = Yii::app()->db->createCommand($sql)
+		        ->bindValues([':status' => $r['status'], ':dpt_id' => $dpt_id])
+		        ->queryScalar();
+
+			$params = [
+			    ':status' => $r['status'],
+			    ':dpt_id' => $dpt_id
+			];
+
+			$sql = "SELECT count(*) as number
+			        FROM `consol` t 
+			        INNER JOIN `consol_process` s ON t.id = s.fid
+			        WHERE t.type in (15,70)
+			          AND t.status != 100
+			          AND s.status = :status
+			          AND t.dpt_id = :dpt_id
+			          AND s.main_type = 1
+			          AND DATEDIFF(NOW(), eta) >= 3";
+
+			$n3 = Yii::app()->db->createCommand($sql)
+			    ->bindValues($params)
+			    ->queryScalar();
+
+			$provide3[] = [
+			    'id' => $id,
+			    'number' => $r['number'],
+			    'status' => $r['status'],
+			    'day1' => $n1,
+			    'day2' => $n2,
+			    'day3' => $n3
+			];
+		}
+
+
+		$filteredData3=$filtersForm1->filter($provide3);
+		$dataprovider3=new CArrayDataProvider($filteredData3);
+		$dataprovider3->pagination=['pageSize' =>10,];
+		$sort=new CSort();
+		$sort->attributes=[
+			'number'=>[
+				'asc'=>'number ASC',
+				'desc'=>'number DESC',
+			],
+			'status'=>[
+				'asc'=>'status ASC',
+				'desc'=>'status DESC',
+			],
+		];
+		$sort->defaultOrder = "status ASC";
+		$dataprovider3->sort=$sort;
+
+
+		$provide5=[];
+		$sql='SELECT count(*) as number, s.status as status FROM `consol` t INNER JOIN `consol_process` s ON t.id=s.fid WHERE t.status!=100 AND t.type in (15,70) AND s.status not in (80,255) AND s.main_type=2 AND  t.dpt_id='.$dpt_id.' group by s.status ';
+		$rs=Yii::app()->db->createCommand($sql)->queryAll();
+		foreach ($rs as $id=>$r) {
+			$n1=0;
+			$n2=0;
+			$n3=0;
+			$sql='SELECT count(*) as number FROM `consol` t INNER JOIN `consol_process` s ON t.id=s.fid WHERE t.type in(15,70) AND t.status!=100 AND t.dpt_id=:dpt_id AND s.status=:status  AND s.main_type=2 AND DATEDIFF(NOW(),eta)<=14';
+			$n1=Yii::app()->db->createCommand($sql)->bindValues([':status'=>$r['status'],':dpt_id'=>$dpt_id])->queryScalar();
+			$sql='SELECT count(*) as number FROM `consol` t INNER JOIN `consol_process` s ON t.id=s.fid WHERE t.type in(15,70)  AND t.status!=100 AND t.dpt_id=:dpt_id AND s.status=:status AND s.main_type=2 AND DATEDIFF(NOW(),eta)>14 AND DATEDIFF(NOW(),eta)<=30';
+			$n2=Yii::app()->db->createCommand($sql)->bindValues([':status'=>$r['status'],':dpt_id'=>$dpt_id])->queryScalar();
+			$sql='SELECT count(*) as number FROM `consol` t INNER JOIN `consol_process` s ON t.id=s.fid WHERE t.type in(15,70)  AND t.status!=100 AND s.status=:status AND t.dpt_id=:dpt_id AND s.main_type= 2 AND DATEDIFF(NOW(),eta)>30';
+			$n3=Yii::app()->db->createCommand($sql)->bindValues([':status'=>$r['status'],':dpt_id'=>$dpt_id])->queryScalar();
+			$provide5[]=['id'=>$id,'number'=>$r['number'],'status'=> $r['status'],'day1'=>$n1,'day2'=>$n2,'day3'=>$n3];
+		}
+		$filteredData5=$filtersForm1->filter($provide5);
+		$dataprovider5=new CArrayDataProvider($filteredData5);
+		$dataprovider5->pagination=['pageSize' =>10,];
+		$sort=new CSort();
+		$sort->attributes=[
+			'number'=>[
+				'asc'=>'number ASC',
+				'desc'=>'number DESC',
+			],
+			'status'=>[
+				'asc'=>'status ASC',
+				'desc'=>'status DESC',
+			],
+		];
+		$sort->defaultOrder = "status ASC";
+		$dataprovider5->sort=$sort;
+
+
+
+
+
+
+		$provide=[];
+		$list=Org::dptList();
+		$name=isset($list[$dpt_id])?$list[$dpt_id]:"";
+		$pod = preg_replace('/\s+.+$/', '', Org::model()->findByPk($_GET["pod_id"])->name);
+		$provide[]=['id'=>10,'name'=>'Air Process','type'=>10, 'pod' => $pod];
+		$provide[]=['id'=>20,'name'=>'Sea Process','type'=>20, 'pod' => $pod];
+		$provide[]=['id'=>999,'name'=>'Warehouse Process','type'=>999, 'pod' => $pod];
+
+		$filteredData=$filtersForm->filter($provide);
+		$dataprovider=new CArrayDataProvider($filteredData);
+		$dataprovider->pagination=['pageSize' =>10];
+		$sort=new CSort();
+		$sort->attributes=[
+			'number'=>[
+				'asc'=>'number ASC',
+				'desc'=>'number DESC',
+			],
+			'status'=>[
+				'asc'=>'status ASC',
+				'desc'=>'status DESC',
+			],
+		];
+		$sort->defaultOrder = "status ASC";
+		$dataprovider->sort=$sort;
+		$this->render('sub_type_list', ['dataProvider2'=>[$dataprovider,$filtersForm],'dataProvider3'=>[$dataprovider3,$filtersForm1],'name'=>$name,'dataProvider5'=>[$dataprovider5,$filtersForm1]]);
+	}
+
+	public function actionPodList()
+	{
+		$filtersForm=new FiltersForm;
+		$typeId=isset($_GET['type_id'])?$_GET['type_id']:-1;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+		
+		$provide1=[];
+		$dpts = [
+			['id' => -1, 'pod_id' => -1, 'pod' => '    All'],
+			['id' => 1, 'pod_id' => 106, 'pod' => '    Sydney'],
+			['id' => 2, 'pod_id' => 218, 'pod' => '   Melbourne'],
+			['id' => 3, 'pod_id' => 530, 'pod' => '  Brisbane'],
+			['id' => 4, 'pod_id' => 811, 'pod' => ' Perth'],
+			['id' => 5, 'pod_id' => 529, 'pod' => 'Adelaide'],
+			['id' => 6, 'pod_id' => 2936, 'pod' => 'Fremantle'],
+		];
+
+		$_GET['name'] = !isset(Consol::$services[$_GET['type_id']])?"Warehouse Process":Consol::$services[$_GET['type_id']];
+
+		foreach($dpts as $dpt){
+			if($dpt['pod_id']<0)
+			{
+				$sql='SELECT count(*) as number FROM `consol` t INNER JOIN `consol_process` s ON t.id=s.fid WHERE t.status!=100 AND t.type in (15,70) AND s.status<80 AND t.service='.$typeId.' ';
+			}elseif($typeId==999)
+			{
+				$sql='SELECT count(*) as number FROM `consol` t INNER JOIN `consol_process` s ON t.id=s.fid WHERE t.status!=100 AND t.type in (15,70) AND s.status=24'.' AND dpt_id= '.$dpt['pod_id'].' ';
+			}else
+			{
+				$sql='SELECT count(*) as number FROM `consol` t INNER JOIN `consol_process` s ON t.id=s.fid WHERE t.status!=100 AND t.type in (15,70) AND s.status<80 AND t.service='.$typeId.' AND dpt_id='.$dpt['pod_id'].' ';
+			}
+			$rs=Yii::app()->db->createCommand($sql)->queryAll();
+			$n = 0;
+			if(!empty($rs))
+			{
+				$n = $rs[0]['number'];
+			}
+			$dpt['pod'] = $dpt['pod']."(".$n.")";
+			$provide1[]=$dpt;
+		}
+
+		$dataprovider2=new CArrayDataProvider([]);
+		$dataprovider5=new CArrayDataProvider([]);
+		$filterData1=$filtersForm->filter($provide1);
+		$dataprovider1=new CArrayDataProvider($filterData1);
+		$dataprovider1->pagination=['pageSize'=>10];
+		$sort=new CSort();
+		$sort->defaultOrder = "pod";
+		$dataprovider1->sort=$sort;
+
+
+		$this->render('pod_list', ['dataProvider1'=>[$dataprovider1,$filtersForm]]);
+	}
+		
+	/**
+	 * Air and normal consol list;
+	 */
+	public function actionConsolList()
+	{
+		$consol=new Consol('search');
+		$consol->unsetAttributes();
+		$consol->process_not_status=[80];
+		$podid=$_GET['pod_id'];
+		if($podid>0)
+		{
+			$consol->dpt_id=$podid;
+		};
+		$consol->cargoType=@$_GET['ImcoConsol']['cargoType'];
+		$consol->service=10;
+		if (isset($_GET['Consol'])) {
+			$consol->setAttributes($_GET['Consol']);
+		}
+
+		if (isset($_GET['status'])) {
+			if (!empty($_GET['status'])) {
+				$consol->setAttribute('process_status', $_GET['status']);
+			}
+			$this->renderPartial('_sub_consols', [
+				'consol' => $consol,
+				'name' => 'All',
+			]);
+			return;
+		}
+
+
+
+		$filtersForm=new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+		$provide=[];
+		$dptIdStr = "";
+		if($podid>0)
+		{
+			$dptIdStr = ' AND t.dpt_id='.$podid;
+		}
+
+		$permissionArr = ConsolProcessService::getUserPermission();
+		$serviceStr = "";
+		$statusStr = "";
+		if(!empty($permissionArr[0]))
+		{
+			$serviceStr = " and service in (".join(',',$permissionArr[0]).")";
+		}
+
+		if(!empty($permissionArr[1]))
+		{
+			$statusStr = " and s.status".$permissionArr[1];
+		}
+
+
+		$sql='SELECT count(*) as number, s.status as status FROM `consol` t INNER JOIN `consol_process` s ON t.id=s.fid WHERE t.status!=100 AND t.type in (15,70,90) AND s.status<80 AND main_type=1 '.$dptIdStr.$serviceStr.$statusStr.' group by s.status ';
+		$rs=Yii::app()->db->createCommand($sql)->queryAll();
+		foreach ($rs as $id=>$r) {
+			$n1=0;
+			$n2=0;
+			$n3=0;
+			$sql='SELECT count(*) as number FROM `consol` t INNER JOIN `consol_process` s ON t.id=s.fid WHERE t.type in(15,70,90) AND t.status!=100 AND s.status=:status AND DATEDIFF(NOW(),eta)<=1 AND s.main_type=1 '.$dptIdStr.$serviceStr.$statusStr;
+			$n1=Yii::app()->db->createCommand($sql)->bindValues([':status'=>$r['status']])->queryScalar();
+			$sql='SELECT count(*) as number FROM `consol` t INNER JOIN `consol_process` s ON t.id=s.fid WHERE t.type in(15,70,90)  AND t.status!=100 AND s.status=:status AND DATEDIFF(NOW(),eta)=2 AND s.main_type=1 '.$dptIdStr.$serviceStr.$statusStr;
+			$n2=Yii::app()->db->createCommand($sql)->bindValues([':status'=>$r['status']])->queryScalar();
+			$sql='SELECT count(*) as number FROM `consol` t INNER JOIN `consol_process` s ON t.id=s.fid WHERE t.type in(15,70,90)  AND t.status!=100 AND s.status=:status AND DATEDIFF(NOW(),eta)>=3 AND s.main_type=1 '.$dptIdStr.$serviceStr.$statusStr;
+			$n3=Yii::app()->db->createCommand($sql)->bindValues([':status'=>$r['status']])->queryScalar();
+			$provide[]=['id'=>$id,'number'=>$r['number'],'status'=> $r['status'],'day1'=>$n1,'day2'=>$n2,'day3'=>$n3];
+		}
+		$filteredData=$filtersForm->filter($provide);
+		$dataprovider=new CArrayDataProvider($filteredData);
+		$dataprovider->pagination=['pageSize' =>10,];
+		$sort=new CSort();
+		$sort->attributes=[
+			'number'=>[
+				'asc'=>'number ASC',
+				'desc'=>'number DESC',
+			],
+			'status'=>[
+				'asc'=>'status ASC',
+				'desc'=>'status DESC',
+			],
+		];
+		$sort->defaultOrder = "status ASC";
+		$dataprovider->sort=$sort;
+
+		$permissionArr = ConsolProcessService::getUserPermission();
+		$this->render('consol_list', ['dataProvider'=>[$dataprovider,$filtersForm],'consol'=>$consol,'permissionArr'=>$permissionArr]);
+	}
+		
+	/**
+	 * sea consol_list
+	 */
+	public function actionSeaConsolList()
+	{
+		$filtersForm=new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+		$provide=[];
+		$result=[];
+		$id=1;
+		$podid=$_GET['pod_id'];
+		$dptIdStr = "";
+		if($podid>0)
+		{
+			$dptIdStr = ' AND t.dpt_id='.$podid;
+		}
+
+		$permissionArr = ConsolProcessService::getUserPermission();
+		$serviceStr = "";
+		$statusStr = "";
+		if(!empty($permissionArr[0]))
+		{
+			$serviceStr = " and service in (".join(',',$permissionArr[0]).")";
+		}
+
+		if(!empty($permissionArr[1]))
+		{
+			$statusStr = " and s.status".$permissionArr[1];
+		}
+
+
+		foreach (ConsolProcess::$newSeaStates as $state=>$name) {
+			$sql='SELECT count(*) as number, s.status as status FROM `consol` t INNER JOIN `consol_process` s ON t.id=s.fid WHERE t.status!=100 AND t.type in (15,70) AND s.main_type=2 AND s.status!='.ConsolProcess::SEA_FINISH_STATES.' AND s.status = :status '.$dptIdStr.$serviceStr.$statusStr;
+			${$state."exist"}=Yii::app()->db->createCommand($sql)->bindValues([':status'=> $state])->queryScalar();
+			$result[$state]=${$state."exist"};
+			$n1=0;
+			$n2=0;
+			$n3=0;
+			$sql='SELECT count(*) as number FROM `consol` t INNER JOIN `consol_process` s ON t.id=s.fid WHERE t.type in(15,70) AND t.status!=100 AND DATEDIFF(NOW(),t.eta)<=3 AND s.main_type=2 AND s.status!='.ConsolProcess::SEA_FINISH_STATES.' AND s.status = :status '.$dptIdStr.$serviceStr.$statusStr;
+			$n1=Yii::app()->db->createCommand($sql)->bindValues([':status'=>$state])->queryScalar();
+			$sql='SELECT count(*) as number FROM `consol` t INNER JOIN `consol_process` s ON t.id=s.fid WHERE t.type in(15,70) AND t.status!=100 AND DATEDIFF(NOW(),t.eta)>3 AND DATEDIFF(NOW(),t.eta)<7 AND s.main_type=2 AND s.status!='.ConsolProcess::SEA_FINISH_STATES.' AND s.status = :status '.$dptIdStr.$serviceStr.$statusStr;
+			$n2=Yii::app()->db->createCommand($sql)->bindValues([':status'=>$state])->queryScalar();
+			$sql='SELECT count(*) as number FROM `consol` t INNER JOIN `consol_process` s ON t.id=s.fid WHERE t.type in(15,70) AND t.status!=100 AND DATEDIFF(NOW(),t.eta)>=7 AND s.main_type=2 AND s.status!='.ConsolProcess::SEA_FINISH_STATES.' AND s.status = :status '.$dptIdStr.$serviceStr.$statusStr;
+			$n3=Yii::app()->db->createCommand($sql)->bindValues([':status'=>$state])->queryScalar();
+			$provide[] = ['id' => $id++, 'number' => ${$state . "exist"}, "status" => $state,'status_name'=>$name,'day1'=>$n1,'day2'=>$n2,'day3'=>$n3];
+		}
+		$filteredData=$filtersForm->filter($provide);
+		$dataprovider=new CArrayDataProvider($filteredData);
+		$dataprovider->pagination=['pageSize' =>10,];
+		$sort=new CSort();
+		$sort->defaultOrder = "status ASC";
+		$dataprovider->sort=$sort;
+		$consol=new Consol('search');
+		$consol->unsetAttributes();
+		$consol->process_not_status=[ConsolProcess::SEA_FINISH_STATES, ConsolProcess::STATE_CONSOL_PROCESS_DONE];
+		if($podid>0)
+		{
+			$consol->dpt_id=$podid;
+		};
+		$consol->cargoType=@$_GET['ImcoConsol']['cargoType'];
+		$consol->service=20;
+		if (isset($_GET['Consol'])) {
+			$consol->setAttributes($_GET['Consol']);
+		}
+		if (isset($_GET['ImcoConsol'])) {
+			$imcoAttr = [];
+			foreach ($_GET['ImcoConsol'] as $key => $value) {
+				if(!empty($value))
+				{
+					$imcoAttr[$key] = $value;
+				}
+			}
+
+			$consol->setAttributes($imcoAttr);
+		}
+		$permissionArr = ConsolProcessService::getUserPermission();
+		$this->render('sea_consol_list', ['dataProvider'=>[$dataprovider,$filtersForm],'consol'=>$consol,'permissionArr'=>$permissionArr]);
+	}
+
+	public function actionGetExceptionShipmentNumber()
+	{
+		$model = $this->getExceptionShipmentModel($_GET["pod_id"],$_GET["consol_type"]);
+		$allExceptionShipments = count($model->search(false)->data);
+		echo $allExceptionShipments;
+	}
+	
+	public function actionNewConsol()
+	{
+		$model=new Consol('search');
+		$model->unsetAttributes();
+		if (!empty($_GET['ImcoConsol'])) {
+			$model->setAttributes($_GET['ImcoConsol']);
+		}
+		$model->dpt_id=$_GET['pod_id'];
+		$model->service=$_GET['consol_type'];
+		$podName=Org::dptList()[$_GET['pod_id']]."-".($_GET['consol_type']==20?"Sea":"Air");
+		$model->process_statuses=[ConsolProcess::STATE_NEW];
+		if($_GET['consol_type']==Consol::SEACONSOL)
+		{
+			$this->render('sea_sub_consols', ['consol'=>$model,'name'=>$podName.' New']);
+		}else
+		{
+			$this->render('_sub_consols', ['consol'=>$model,'name'=>$podName.' New']);
+		}
+	}
+
+	public function actionSeaConsolListByStatus()
+	{
+		$model=new Consol('search');
+		$model->unsetAttributes();
+		if (!empty($_GET['Consol'])) {
+			$model->setAttributes($_GET['Consol']);
+		}
+		if(!empty($_GET['pod_id'])&&$_GET['pod_id']>0)
+		{
+			$model->dpt_id=$_GET['pod_id'];
+		}
+		$model->service=$_GET['consol_type'];
+		$podName="Sea";
+		$model->process_statuses=[$_GET['process_status']];
+
+		$this->render('sea_sub_consols', ['consol'=>$model,'name'=>$podName]);
+	}
+
+	public function actionCloseUnknownShipment()
+	{
+		$id = $_GET['id'];
+		$obj = ImportsUnknownShipment::model()->findByPk($id);
+		$obj->status = ImportsUnknownShipment::PROCESSDONE;
+		$obj->update('status');
+		echo 'done';
+	}
+
+	public function actionExceptionShipmentList()
+	{
+		$model = $this->getExceptionShipmentModel($_GET['pod_id'],$_GET['consol_type']);
+		$this->render('exception_shipment_list', ['model'=>$model,'podName'=>$_GET['podName']]);
+
+	}
+
+	private function getExceptionShipmentModel($podId,$consolType)
+	{
+		$model=new Consol('search');
+		$model->unsetAttributes();
+		if (!empty($_GET['ImcoConsol'])) {
+			$model->setAttributes($_GET['ImcoConsol']);
+		}
+		if($podId>0)
+		{
+			$model->dpt_id=$podId;
+		}
+		$model->service=$consolType;
+		$allData = $model->search(false, 30,false,false,false,true)->data;
+		$ids = array_column($allData,"id");
+		if(empty($ids))
+		{
+			$ids = -1;
+		}
+
+		$model = new ImportsUnknownShipment('search');
+		$model->unsetAttributes();
+		if(!empty($_GET['ImportsUnknownShipment']))
+		{
+			$model->setAttributes($_GET['ImportsUnknownShipment']);
+		}
+		$model->consol_id = $ids;
+		return $model;
+	}
+		
+	public function actionWaitAcr()
+	{
+		$model=new Consol('search');
+		$model->unsetAttributes();
+		if (!empty($_GET['Consol'])) {
+			$model->setAttributes($_GET['Consol']);
+		}
+		if(!empty($_GET['pod_id'])&&$_GET['pod_id']>0)
+		{
+			$model->dpt_id=$_GET['pod_id'];
+		}
+		$model->service=$_GET['consol_type'];
+		$podName=Org::dptList()[$_GET['pod_id']]."-".($_GET['consol_type']==20?"Sea":"Air");
+		$model->process_statuses=[ConsolProcess::STATE_WAITING_MAIN_ACR, ConsolProcess::STATE_WAITING_SUB_ACR];
+		$model->process_types=[ConsolProcess::TYPE_FULL_PROCESS, ConsolProcess::TYPE_DIRECT_AIR_CONSOL, ConsolProcess::TYPE_DIRECT_SEA_CONSOL];
+		$this->render('_sub_consols', ['consol'=>$model,'name'=>$podName.' Waiting ACR']);
+	}
+		
+	public function actionWaitUbm()
+	{
+		$model=new Consol('search');
+		$model->unsetAttributes();
+		if (!empty($_GET['Consol'])) {
+			$model->setAttributes($_GET['Consol']);
+		}
+		if(!empty($_GET['pod_id'])&&$_GET['pod_id']>0)
+		{
+			$model->dpt_id=$_GET['pod_id'];
+		}
+		$model->service=$_GET['consol_type'];
+		$podName=Org::dptList()[$_GET['pod_id']]."-".($_GET['consol_type']==20?"Sea":"Air");
+		$model->process_statuses=[ConsolProcess::STATE_WAITING_SEND_UBM, ConsolProcess::STATE_UB_ON_SCHEDULE, ConsolProcess::STATE_UB_REJECT];
+		$model->process_types=[ConsolProcess::TYPE_FULL_PROCESS, ConsolProcess::TYPE_DIRECT_AIR_CONSOL, ConsolProcess::TYPE_DIRECT_SEA_CONSOL];
+		$this->render('_sub_consols', ['consol'=>$model,'name'=>$podName.' Waiting UBM']);
+	}
+	public function actionWaitAirportCheckIn()
+	{
+		$model=new Consol('search');
+		$model->unsetAttributes();
+		if (!empty($_GET['Consol'])) {
+			$model->setAttributes($_GET['Consol']);
+		}
+		if(!empty($_GET['pod_id'])&&$_GET['pod_id']>0)
+		{
+			$model->dpt_id=$_GET['pod_id'];
+		}
+		$model->service=$_GET['consol_type'];
+		$podName=Org::dptList()[$_GET['pod_id']]."-".($_GET['consol_type']==20?"Sea":"Air");
+		$model->process_statuses=[ConsolProcess::STATE_WAITING_AIRPORT_CKIN];
+		$model->process_types=[ConsolProcess::TYPE_FULL_PROCESS, ConsolProcess::TYPE_DIRECT_AIR_CONSOL, ConsolProcess::TYPE_DIRECT_SEA_CONSOL];
+		$this->render('_sub_consols_airport', ['consol'=>$model,'name'=>$podName.' Waiting Airport Check In']);
+	}
+		
+	public function actionWaitingDriverPickUp()
+	{
+		$model=new Consol('search');
+		$model->unsetAttributes();
+		if (!empty($_GET['Consol'])) {
+			$model->setAttributes($_GET['Consol']);
+		}
+		if(!empty($_GET['pod_id'])&&$_GET['pod_id']>0)
+		{
+			$model->dpt_id=$_GET['pod_id'];
+		}
+		$model->service=$_GET['consol_type'];
+		$podName=Org::dptList()[$_GET['pod_id']]."-".($_GET['consol_type']==20?"Sea":"Air");
+		$model->process_statuses=[ConsolProcess::STATE_WAITING_NOTIFY_DRIVER_PICKUP, ConsolProcess::STATE_NOTIFIED_DRIVER];
+		$model->process_types=[ConsolProcess::TYPE_FULL_PROCESS, ConsolProcess::TYPE_LOCAL_PROCESS,ConsolProcess::TYPE_DIRECT_AIR_CONSOL, ConsolProcess::TYPE_DIRECT_SEA_CONSOL];
+		$this->render('_sub_consols_airport', ['consol'=>$model,'name'=>$podName.' Waiting Driver Pick up','defaultOrder'=>'process.airport DESC']);
+	}
+	public function actionWaitingWhScan()
+	{
+		$model=new Consol('search');
+		$model->unsetAttributes();
+		if (!empty($_GET['Consol'])) {
+			$model->setAttributes($_GET['Consol']);
+		}
+		if(!empty($_GET['pod_id'])&&$_GET['pod_id']>0)
+		{
+			$model->dpt_id=$_GET['pod_id'];
+		}
+		$model->service=$_GET['consol_type'];
+		$podName=$_GET['pod_id']<0?"All":(Org::dptList()[$_GET['pod_id']]."-".($_GET['consol_type']==20?"Sea":"Air"));
+		$model->process_statuses=[ConsolProcess::STATE_WAITING_WH_SCAN];
+		$model->process_types=[ConsolProcess::TYPE_FULL_PROCESS, ConsolProcess::TYPE_LOCAL_PROCESS,ConsolProcess::TYPE_DIRECT_AIR_CONSOL, ConsolProcess::TYPE_DIRECT_SEA_CONSOL, ConsolProcess::TYPE_CONSOL_SEA];
+		$this->render('_sub_consols', ['consol'=>$model,'name'=>$podName.' Waiting WH SCAN']);
+	}
+	public function actionWaitingAirout()
+	{
+		$model=new Consol('search');
+		$model->unsetAttributes();
+		if (!empty($_GET['Consol'])) {
+			$model->setAttributes($_GET['Consol']);
+		}
+		if(!empty($_GET['pod_id'])&&$_GET['pod_id']>0)
+		{
+			$model->dpt_id=$_GET['pod_id'];
+		}
+		$model->service=$_GET['consol_type'];
+		$podName=Org::dptList()[$_GET['pod_id']]."-".($_GET['consol_type']==20?"Sea":"Air");
+		$model->process_statuses=[ConsolProcess::STATE_WAITING_AIR_MANI];
+		$model->process_types=[ConsolProcess::TYPE_FULL_PROCESS, ConsolProcess::TYPE_LOCAL_PROCESS,ConsolProcess::TYPE_DIRECT_AIR_CONSOL, ConsolProcess::TYPE_DIRECT_SEA_CONSOL];
+		$this->render('_sub_consols', ['consol'=>$model,'name'=>$podName.' Waiting Airout And Manifest']);
+	}
+	public function actionWaitingInvoice()
+	{
+		$model=new Consol('search');
+		$model->unsetAttributes();
+		if (!empty($_GET['Consol'])) {
+			$model->setAttributes($_GET['Consol']);
+		}
+		if(!empty($_GET['pod_id'])&&$_GET['pod_id']>0)
+		{
+			$model->dpt_id=$_GET['pod_id'];
+		}
+		$model->service=$_GET['consol_type'];
+		$podName=Org::dptList()[$_GET['pod_id']]."-".($_GET['consol_type']==20?"Sea":"Air");
+		$model->process_statuses=[ConsolProcess::STATE_WAITING_CREATE_INVOICE];
+		$this->render('_sub_consols', ['consol'=>$model,'name'=>$podName.' Waiting To Create Invoice']);
+	}
+		
+	public function actionProcessDone()
+	{
+		$model=new Consol('search');
+		$model->unsetAttributes();
+		if (!empty($_GET['Consol'])) {
+			$model->setAttributes($_GET['Consol']);
+		}
+		if(!empty($_GET['pod_id'])&&$_GET['pod_id']>0)
+		{
+			$model->dpt_id=$_GET['pod_id'];
+		}
+		$model->service=$_GET['consol_type'];
+		$podName=Org::dptList()[$_GET['pod_id']]."-".($_GET['consol_type']==20?"Sea":"Air");
+		$model->process_statuses=[ConsolProcess::STATE_CONSOL_PROCESS_DONE, ConsolProcess::SEA_FINISH_STATES];
+		$this->render('_sub_consols', ['consol'=>$model,'name'=>$podName.' Process Done']);
+	}
+	public function actionOperation($id)
+	{
+		$model= $this->loadModel($id);
+		$process = $model->process;
+		if($process->status>ConsolProcess::STATE_WAITING_AIRPORT_CKIN)// for underbond movement , we need to use the shadow model
+		{
+			$model= $model->getReal();
+		}
+		$this->render('operation_tab', ['model'=>$model,'real'=>$model->getReal(),'process'=>$process]);
+	}
+
+	public function actionSeaOperation($id)
+	{
+		$id = $_GET["id"];
+		$consol = new Consol();
+		$ids = [];
+		$result =[];
+		if(strpos($id,Process::IP_SEPERATOR))
+		{
+			$ids = explode(Process::IP_SEPERATOR,$id);
+			$model= $consol->findByPk($ids[0]);
+			$result['ids'] = $id;
+		}else
+		{
+			$model= $consol->findByPk($id);
+		}
+		$process = $model->process;
+
+		// $model= $this->loadModel($id);
+		// if (!empty($_POST)) {
+		// 	$model->process->status=1;
+		// 	if (!empty($_POST['seaStates'])) {
+		// 		foreach ($_POST['seaStates'] as $value) {
+		// 			$model->process->status=($model->process->status |intval($value));
+		// 		}
+		// 	}
+		// 	$model->process->save();
+		// 	$this->ajaxResult($model);
+		// }
+
+		$this->render('sea_operation_tab', ['model'=>$model,'ids'=>$id, 'process'=>$process]);
+	}
+
+	public function actionSeaDocumentationUpdate()
+	{
+		$id = $_POST["id"];
+		$consol = $this->loadModel($id);
+		$processType = $_POST['processType'];
+		$isIgnore = @$_POST['isIgnore'];
+		if($isIgnore=="false") $isIgnore = 0;
+		$consolService = SeaConsolService::getInstance();
+		$result = $consolService->updateSeaDocumentationStatus($consol,$processType,$isIgnore,$_POST);
+		echo json_encode($result);
+	}
+
+	public function actionSeaOperationUpdate($id)
+	{
+		$id = $_GET["id"];
+		$consol = new Consol();
+		$ids = [];
+		$result =[];
+		$ids = explode(Process::IP_SEPERATOR,$id);
+
+		foreach ($ids as $key => $id) {
+			$consol = Consol::model()->findByPk($id);
+			$this->saveSeaOperationUpdate($consol);
+		}
+
+		echo 'done';
+	}
+
+	private function saveSeaOperationUpdate($consol)
+	{
+		if(!empty($_POST['Consol']['eta']))
+		{
+			$consol->eta = $_POST['Consol']['eta'];
+		}
+
+		$consol->update('eta');
+	}
+
+	public function actionLog($id)
+	{
+		$model = ConsolProcess::model()->find('fid=:fid', [':fid'=>$id]);
+		if ($model==null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		$this->render('log', [
+			'model'=>$model,
+		]);
+	}
+	/*
+	* change the shipmentProcess status
+	*/
+	public function actionProcess()
+	{
+		if (empty($_GET['id'])||empty($_GET['status'])) {
+			return false;
+		} else {
+			$process= ConsolProcess::model()->findByPk($_GET['id']);
+			$result = $process->updateStatus($_GET['status']);
+			if($result ==1)
+			{
+				echo 'done';
+			}else
+			{
+				echo $result;
+			}
+		}
+		return true;
+	}
+
+	public function actionCheckConsolDO()
+	{
+		$consol = $this->loadModel($_GET['id']);
+		$result = SeaConsolService::updateDOProcessStatus($consol);
+		echo json_encode($result);
+	}
+	
+	public function actionUpdate($id)
+	{
+		//$model= $this->loadModel($id);
+		$process = ConsolProcess::model()->findByPk($id);
+		if (!empty($_POST)) {
+			foreach ($_POST as $k=>$v) {
+				if ($k=='airport') {
+					$process->airport=$v;
+					continue;
+				}
+				if ($k=='deadtime_for_pickup') {
+					if (preg_match('/(\d{4}\-\d{2}\-\d{2})/i', $v, $m)) {
+						$process->pick_dead_date=$m[1]." 16:00:00";
+					}
+				}
+				$process->mdata[$k]=$v;
+			}
+			if ($process->save()) {
+				echo 'done';
+			} else {
+				echo 'failed save';
+			}
+		}
+	}
+	public function actionSendMsgToDriver($id)
+	{
+		$process = ConsolProcess::model()->findByPk($id);
+		$model=$process->consol->getReal();
+		if (!empty($_POST['msg_to_driver'])) {
+			$model->mdata['msg_to_driver']=$_POST['msg_to_driver'];
+			$model->mdata['driver_tel_no']=$_POST['driver_tel_no'];
+			$msg= $model->mdata['msg_to_driver'];
+			$no=$model->mdata['driver_tel_no'];
+			if (Sms::sendMessageLocal($no, $msg)) {
+				$model->custom_log_note=$msg;
+				$model->save();
+			}
+			$this->ajaxResult($model);
+		}
+		if (empty($model->mdata['msg_to_driver'])) {
+			$msg="can you go to ".@$model->airport."  to pick up ".@$model->mdata['pmc_for_pickup']." before the dead time:".@$model->mdata['deadtime_for_pickup']." 16:00";
+			$model->mdata['msg_to_driver']=$msg;
+		}
+		$this->render('msg_driver', ['model'=>$model]);
+	}
+		
+	public function actionProcessCheckDone($id)
+	{
+		$process = ConsolProcess::model()->findByPk($id);
+		$model=$process->consol->getReal();
+
+		$process->updateStatus(ConsolProcess::STATE_WAITING_NOTIFY_DRIVER_PICKUP);
+		echo 'done';
+	}
+	public function actionNotifyDriver($id)
+	{
+		$process = ConsolProcess::model()->findByPk($id);
+		$model=$process->consol->getReal();
+		$process->updateStatus(ConsolProcess::STATE_NOTIFIED_DRIVER);
+		echo 'done';
+	}
+	public function actionSendToWarehouseScan($id)
+	{
+		$process = ConsolProcess::model()->findByPk($id);
+		$model=$process->consol->getReal();
+		$result = $process->updateStatus(ConsolProcess::STATE_WAITING_WH_SCAN);
+		if($result ==1)
+		{
+			echo 'done';
+		}else
+		{
+			echo $result;
+		}
+	}
+		
+	public function actionProcessManifestDone($id)
+	{
+		$process = ConsolProcess::model()->findByPk($id);
+		$model=$process->consol->getReal();
+		$process->updateStatus(ConsolProcess::STATE_WAITING_CREATE_INVOICE);
+		echo 'done';
+	}
+	public function actionInvoiceDone($id)
+	{
+		$process = ConsolProcess::model()->findByPk($id);
+		$model=$process->consol->getReal();
+		$process->updateStatus(ConsolProcess::STATE_CONSOL_PROCESS_DONE);
+		echo 'done';
+	}
+	public function actionScanInfo($id)
+	{
+		$model=$this->loadModel($id);
+		$this->render('scan_info', ['model'=>$model]);
+	}
+		
+	public function actionCreateInvoice($id)
+	{
+		$process = ConsolProcess::model()->findByPk($id);
+		$model=$process->consol->getReal();
+		$imconsolService = new ImConsolService();
+		if (!empty($_POST['mdata'])) {
+			foreach ($_POST['mdata'] as $k=>$v) {
+				$model->mdata[$k] = $v;
+			}
+		}
+		$model->save();
+		// create invoice for special import agent client
+		if (!empty($_POST['gen_inv'])) {
+			if ($_POST['gen_inv'] == 1) {
+				$selectedOrg = !empty($_POST['inv_client_select']) ? [$_POST['inv_client_select']] : [];
+				$errors = $model->genSpecialInvoice(false, false, $selectedOrg);
+				if (!empty($errors) && (sizeof($errors) > 1 || !in_array($errors[0], ['Invoice created', 'Credit Note created', 'Total Amount does not changed']))) {
+					$model->addError('GenInvoice Failed', implode('; ', $errors));
+				}
+			}
+		}
+		if (!empty($_POST['gen_air_type_inv'])) {
+			if ($_POST['gen_air_type_inv'] == 1) {
+				$errors = $model->genLooseInvoice(false);
+				if (!empty($errors)) {
+					$model->addError('GenInvoice Failed', implode('; ', $errors));
+				}
+			}
+		}
+		// create invoice for awb difference
+		if (!empty($_POST['gen_awb_inv'])) {
+			if ($_POST['gen_awb_inv'] == 1) {
+				$errors = $model->genAwbDiffInvoice();
+				if (!empty($errors)) {
+					$model->addError('GenInvoice Failed', implode('; ', $errors));
+				}
+			}
+		}
+
+		// create invoice for clearance invoice
+		if (!empty($_POST['gen_clearance_inv'])) {
+			if ($_POST['gen_clearance_inv'] == 1) {
+				$errors = $imconsolService->genClearanceInvoice($model);
+				if (!empty($errors)) {
+					$model->addError('Gen AQ Invoice Failed', implode('; ', $errors));
+				}
+			}
+		}
+
+		if (!empty($model->getErrors())) {
+			var_dump($model->getErrors());
+		} else {
+			echo 'done';
+		}
+	}
+	public function actionGenDirectConsolInvoice($id)
+	{
+		$process = ConsolProcess::model()->findByPk($id);
+		$model=$process->consol->getReal();
+		if (!empty($_POST['gen_inv'])) {
+			if ($_POST['gen_inv'] == 1) {
+				$errors = $model->genInvoice();
+				if (!empty($errors)) {
+					$model->addError('make Invoice Failed', $errors[0]);
+				}
+			}
+		}
+		if (!empty($model->getErrors())) {
+			var_dump($model->getErrors());
+		} else {
+			echo 'done';
+		}
+	}
+	public function actionExport()
+	{
+		$model=new ImcoConsol('search');
+		$model->unsetAttributes();  // clear any default values
+		if (isset($_GET['ImcoConsol'])) {
+			$model->attributes=$_GET['ImcoConsol'];
+		}
+		$model->process_not_status=[80];
+		$model->dpt_id=$_GET['pod_id'];
+
+		$dp = $model->search(false);
+		$xls = new oExcel;
+		$i = 1;
+		$xls->addRow($i++, ['Consol No','Awb','Customer','Depot','Status','process status','Flight No.', 'eta', 'Process Note', 'No of shipments', 'weight']);
+		foreach ($dp->data as $r) {
+			$process_status=$r->getProcessStatus();
+			$xls->addRow($i++, [$r->no, $r->getReal()->awb, $r->getReal()->getOwnerName(),$r->depot->name,$r->getReal()->getStatus(),$process_status,$r->getReal()->flight,$r->eta,@$r->process->mdata["process_note"],$r->getReal()->totShipments(),$r->getReal()->totWeight()]);
+		}
+		$xls->output('imco_search_export_'.time().'.xlsx');
+	}
+	public function actionNotes($id)
+	{
+		$model = ConsolProcess::model()->findByPk($id);
+		Log::add($model, Log::LOG_TYPE_NOTES, ['notes' => $_POST['notes']]);
+		$this->ajaxResult($model);
+	}
+
+	public function actionSplitConsol()
+	{
+		$model = new ShadowConsol();
+		if(!empty($_POST))
+		{
+			$consoLNo = $_POST['no'];
+			if(empty($consoLNo))
+			{
+				$model->addError("Consol No. Empty","Consol No. Empty");
+				$this->ajaxResult($model);
+			}
+
+
+			$consol = Consol::model()->find("no = :no",[":no"=>$consoLNo]);
+			if(empty($consoLNo))
+			{
+				$model->addError("Consol No. can not be found","Consol No. can not be found");
+				$this->ajaxResult($model);
+			}
+			$consolProcess = $consol->process;
+			
+			$count = count($consol->shadowMap)+1;
+
+			$shadowConsol = new ShadowConsol('search');
+			$shadowConsol->setAttributes($consol->getAttributes());
+			if(!empty($_POST['airline']))
+			{
+				$shadowConsol->airline = $_POST['airline'];
+			}
+			if(!empty($_POST['flight']))
+			{
+				$shadowConsol->flight = $_POST['flight'];
+			}
+			if(!empty($_POST['eta']))
+			{
+				$shadowConsol->eta = $_POST['eta'];
+			}
+			$shadowConsol->id = null;
+			$shadowConsol->no = $consol->no."-S".$count;
+			$shadowConsol->mdata['ubmsent'] = 0;
+			$shadowConsol->type = ShadowConsol::$my_type;
+			$shadowConsol->save();
+			$consolProcessShadow = $shadowConsol->process;
+			if(empty($consolProcessShadow))
+			{
+				$consolProcessShadow = new ConsolProcess();
+				$consolProcessShadow->setAttributes($consolProcess->getAttributes());
+			}else
+			{
+				$cid = $consolProcessShadow->id;
+				$consolProcessShadow->setAttributes($consolProcess->getAttributes());
+				$consolProcessShadow->id = $cid;
+			}
+
+			$consolProcessShadow->setAttributes($consolProcess->getAttributes());
+			$consolProcessShadow->fid = $shadowConsol->id;
+			$consolProcessShadow->status = ConsolProcess::STATE_WAITING_SEND_UBM;
+			$consolProcessShadow->save();
+			$consolShadowMap = new ConsolShadowMap();
+			$consolShadowMap->consol_id = $consol->id;
+			$consolShadowMap->shadow_id = $shadowConsol->id;
+			$consolShadowMap->save();
+			$this->ajaxResult($shadowConsol);
+
+
+		}else
+		{
+			$this->render("split_consol");
+		}
+	}
+
+	public function actionGeneratePortCharge()
+	{
+		$id = $_GET["id"];
+		$consol = $this->loadModel($id);
+		$seaConsolService = new SeaConsolService();
+		$reconcileService = new ReconcileService();
+		$data = $_POST['port_charge'];
+		$consol->process->mdata['port_charge'] = $data;
+		$consol->process->updateMeta();
+		$result = $seaConsolService->updateSeaConsolPortChargeFlexibleRate($consol,$data);
+		if($result['done'])
+		{
+			echo json_encode($reconcileService->generatePortChargeSiReconcile($consol,$data));
+		}else
+		{
+			echo json_encode($result);
+		}
+	}
+
+	public function actionSeaDocumentationOperation()
+	{
+		$id = $_GET['id'];
+		$processType = $_GET['process_type'];
+		$model = $this->loadModel($id);
+		if (empty($model->mdata['ubm_dest'])) {
+			$model->mdata['ubm_dest'] = $model->getEstID();
+			$model->save();
+		}
+		$this->render("sea_documentation_operation",["processType"=>$processType,'model'=>$model,'process'=>$model->process]);
+	}
+
+	public function actionEditCartageEmail()
+	{
+		$id = $_GET["id"];
+		$ids = [];
+		if(strpos($id,Process::IP_SEPERATOR))
+		{
+			$ids = explode(Process::IP_SEPERATOR,$id);
+		}else
+		{
+			$ids[] = $id;
+		}
+
+		$seaConsolService = new SeaConsolService();
+		[$model,$data] = $seaConsolService->editCartageEmail($_POST,$_GET,$ids);
+		if($data===1)
+		{
+			$this->ajaxResult($model);
+		}
+		$this->render('//importsMail/create_email', ['model' => $model,'data'=>$data]);
+
+	}
+
+	public function actionExceptionShipmentOperation()
+	{
+		$model = ImportsUnknownShipment::model()->findByPk($_GET["id"]);
+		if(!empty($_POST))
+		{
+			$model->comment = $_POST['comment'];
+			$model->save();
+			echo "done";
+			return;
+		}
+		$this->render("exception_shipment_operation",['model'=>$model]);
+	}
+
+	public function actionSeaUpdate($id)
+	{
+		//$model= $this->loadModel($id);
+		$process = ConsolProcess::model()->findByPk($id);
+		if (!empty($_POST)) {
+			// print_r($_POST);
+			// print_r($id);
+			// Yii::app()->end();
+			foreach ($_POST as $k=>$v) {
+				$process->mdata[$k]=$v;
+			}
+			if ($process->save()) {
+				echo 'done';
+			} else {
+				echo 'failed save';
+			}
+		}
+	}
+		
+	public function loadModel($id)
+	{
+		$model= Consol::model()->findByPk($id);
+		if ($model===null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		return $model;
+	}
+}

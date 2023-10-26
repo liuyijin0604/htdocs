@@ -1,0 +1,637 @@
+<?php
+
+class CargoBookingController extends Controller
+{
+    protected $nonAjax = [];
+    protected $skipAcl = [];
+
+    public function actionIndex()
+    {
+        $userId = Yii::app()->user->id;
+        $orgId = Yii::app()->user->org;
+        $rejected = CargoBooking::model()->findAllByAttributes(['org_id' => $orgId, 'status' => CargoBooking::REJECTED]);
+        $rejectedCount = count($rejected);
+        $this->render('index', ['uid' => $userId, 'oid' => $orgId, 'rejectedCount' => $rejectedCount]);
+    }
+
+    public function actionProcessPage()
+    {
+        $this->layout = false;
+        $userId = Yii::app()->user->id;
+        $user = User::model()->findByPk($userId);
+        switch ($_GET['tab']) {
+            case 'booking_list':
+                $model = new CargoBooking('search');
+                $model->unsetAttributes();  // clear any default values
+                if (isset($_GET['CargoBooking']))
+                    $model->attributes = $_GET['CargoBooking'];
+                $this->render('booking_list', [
+                    'model' => $model,
+                ]);
+                break;
+            case 'rejected_list':
+                $model = new CargoBooking('search');
+                $model->unsetAttributes();
+                $model->status = CargoBooking::REJECTED;
+                if (isset($_GET['CargoBooking']))
+                    $model->attributes = $_GET['CargoBooking'];
+                $this->render('rejected_list', [
+                    'model' => $model,
+                ]);
+                break;
+            case 'create_booking':
+                $this->render('create_booking', ['uid' => $userId]);
+                break;
+            case 'create_booking_without_hbn': 
+                $this->render('create_booking_without_hbn', ['uid' => $userId]);
+                break;
+        }
+    }
+
+    public function actionSearch()
+    {
+        $containerNo = $_POST['container_no'];
+        $hbn = $_POST['hbn'];
+        $depot = $_POST['depot'];
+        switch ($depot) {
+            case 'Sydney':
+                $sql = 'SELECT * FROM shipment WHERE hbn = "' . $hbn . '" AND consol_id IN (SELECT id FROM consol WHERE dpt_id = 106 AND (container_no = "' . $containerNo . '" OR awb = "' . $containerNo . '"))';
+                break;
+            case 'Melbourne':
+                $sql = 'SELECT * FROM shipment WHERE hbn = "' . $hbn . '" AND consol_id IN (SELECT id FROM consol WHERE dpt_id = 218 AND (container_no = "' . $containerNo . '" OR awb = "' . $containerNo . '"))';
+                break;
+            case 'Brisbane':
+                $sql = 'SELECT * FROM shipment WHERE hbn = "' . $hbn . '" AND consol_id IN (SELECT id FROM consol WHERE dpt_id = 530 AND (container_no = "' . $containerNo . '" OR awb = "' . $containerNo . '"))';
+                break;
+            case 'Perth':
+                $sql = 'SELECT * FROM shipment WHERE hbn = "' . $hbn . '" AND consol_id IN (SELECT id FROM consol WHERE dpt_id = 811 AND (container_no = "' . $containerNo . '" OR awb = "' . $containerNo . '"))';
+                break;
+        }
+
+        $shipment = ImParcel::model()->findBySql($sql);
+        $model = new stdClass;
+
+        if (!empty($shipment)) {
+            if (!in_array($shipment->status, array(ImParcel::STATE_CLEAR, ImParcel::STATE_LOCAL_ARRIVAL, ImParcel::STATE_COURIER, ImParcel::DELIVERED, ImParcel::RTS_RECEIVED))) {
+                $model->success = false;
+                $model->msg = 'This shipment has not been cleared yet.';
+                echo json_encode($model);
+                return;
+            }
+            $sql = 'SELECT * FROM cargo_booking WHERE shipment_id = ' . $shipment->id . ' AND `status` IN (1,2,3,6)';
+            $booking = CargoBooking::model()->findBySql($sql);
+            if (empty($booking)) {
+                $model->success = true;
+                $model->hbn = $hbn;
+                $model->shipment_id = $shipment->id;
+                $model->weight = $shipment->weight;
+                $model->cbm = $shipment->cbm;
+                $model->pallets = @$shipment->mdata['amzon_pallet'];
+                $model->packages = $shipment->pkg;
+                $cnee = Addr::model()->findByPk($shipment->cnee_id);
+                if (!empty($cnee)) {
+                    $model->cnee = new stdClass;
+                    $model->cnee->name = $cnee->name;
+                    $model->cnee->company = $cnee->company;
+                    $model->cnee->address = $cnee->address;
+                    $model->cnee->suburb = $cnee->suburb;
+                    $model->cnee->city = $cnee->city;
+                    $model->cnee->state = $cnee->state;
+                    $model->cnee->postcode = $cnee->postcode;
+                    $model->cnee->tel = $cnee->tel;
+                    $model->cnee->email = $cnee->email;
+                }
+                echo json_encode($model);
+                return;
+            } else {
+                $model->success = false;
+                $model->msg = 'You have already booked a delivery for this shipment.';
+                echo json_encode($model);
+                return;
+            }
+        } else {
+            $model->success = false;
+            $model->msg = 'We cannot find this shipment information in our system, please check your input.';
+            echo json_encode($model);
+        }
+    }
+
+    public function actionShowPrice()
+    {
+        $model = new stdClass;
+        $model->booking = new stdClass;
+        $model->cnee = new stdClass;
+        
+        if (!empty($_POST['shipment_id'])) {
+            $shipment = ImParcel::model()->findByPk($_POST['shipment_id']);
+            if (!empty($shipment)) {
+                if (!empty($shipment->cnee)) {
+                    if (empty($shipment->receiver)) {
+                        $receiver = new Addr();
+                        $receiver->name = $shipment->cnee->name;
+                        $receiver->company = $shipment->cnee->company;
+                        $receiver->address = $shipment->cnee->address;
+                        $receiver->suburb = $shipment->cnee->suburb;
+                        $receiver->city = $shipment->cnee->city;
+                        $receiver->state = $shipment->cnee->state;
+                        $receiver->postcode = $shipment->cnee->postcode;
+                        $receiver->tel = $shipment->cnee->tel;
+                        $receiver->email = $shipment->cnee->email;
+                        $receiver->save();
+                        $shipment->receiver_id = $receiver->id;
+                        $shipment->save();
+                    } else {
+                        $shipment->receiver->name = $shipment->cnee->name;
+                        $shipment->receiver->company = $shipment->cnee->company;
+                        $shipment->receiver->address = $shipment->cnee->address;
+                        $shipment->receiver->suburb = $shipment->cnee->suburb;
+                        $shipment->receiver->city = $shipment->cnee->city;
+                        $shipment->receiver->state = $shipment->cnee->state;
+                        $shipment->receiver->postcode = $shipment->cnee->postcode;
+                        $shipment->receiver->tel = $shipment->cnee->tel;
+                        $shipment->receiver->email = $shipment->cnee->email;
+                        $shipment->receiver->save();
+                    }
+                    $shipment->cnee->name = $_POST['cnee_name'];
+                    $shipment->cnee->company = @$_POST['cnee_company'];
+                    $shipment->cnee->address = $_POST['cnee_address'];
+                    $shipment->cnee->suburb = $_POST['cnee_suburb'];
+                    $shipment->cnee->city = $_POST['cnee_city'];
+                    $shipment->cnee->state = $_POST['cnee_state'];
+                    $shipment->cnee->postcode = $_POST['cnee_postcode'];
+                    $shipment->cnee->tel = $_POST['cnee_tel'];
+                    $shipment->cnee->email = @$_POST['cnee_email'];
+                    $shipment->cnee->save();
+                } else {
+                    $cnee = new Addr();
+                    $cnee->name = $_POST['cnee_name'];
+                    $cnee->company = @$_POST['cnee_company'];
+                    $cnee->address = $_POST['cnee_address'];
+                    $cnee->suburb = $_POST['cnee_suburb'];
+                    $cnee->city = $_POST['cnee_city'];
+                    $cnee->state = $_POST['cnee_state'];
+                    $cnee->postcode = $_POST['cnee_postcode'];
+                    $cnee->tel = $_POST['cnee_tel'];
+                    $cnee->email = @$_POST['cnee_email'];
+                    $cnee->save();
+                    $shipment->cnee_id = $cnee->id;
+                    $shipment->save();
+                }
+                
+                $model->cnee->name = $_POST['cnee_name'];
+                $model->cnee->company = @$_POST['cnee_company'];
+                $model->cnee->address = $_POST['cnee_address'];
+                $model->cnee->suburb = $_POST['cnee_suburb'];
+                $model->cnee->city = $_POST['cnee_city'];
+                $model->cnee->state = $_POST['cnee_state'];
+                $model->cnee->postcode = $_POST['cnee_postcode'];
+                $model->cnee->tel = $_POST['cnee_tel'];
+                $model->cnee->email = @$_POST['cnee_email'];
+
+                $chargecode = '2280';
+                //$chargecode = '8143';
+                $basePrice = round($shipment->getChargeByChargecode($chargecode), 2);
+                $oversizePrice = $shipment->getChargeByChargecode($chargecode, false, null, true, false, true);
+                $oversize = round($oversizePrice['amount'], 2);
+                $specificDeliveryTimeFee = 0.00;
+                $unloadingFee = 0.00;
+                if ($_POST['delivery_time'] != 'none') {
+                    $specificDeliveryTimeFee = ($basePrice + $oversize) * 0.20;
+                    /* if ($specificDeliveryTimeFee == 0) {
+                        $specificDeliveryTimeFee = 30.00;
+                    } */
+                    if ($specificDeliveryTimeFee > 100) {
+                        $specificDeliveryTimeFee = 100.00;
+                    }
+                }
+                if ($_POST['folk'] == 'true') {
+                    if (!empty($_POST['pallets'])) {
+                        $unloadingFee = round((20 * $_POST['pallets']), 2);
+                    } else {
+                        $unloadingFee = 30.00;
+                    }
+                }
+                $gst = ($basePrice + $oversize + $specificDeliveryTimeFee + $unloadingFee) * 0.1;
+                $total = $basePrice + $oversize + $specificDeliveryTimeFee + $unloadingFee;
+
+
+                // Save Cargo booking record
+                
+                $model->booking->create_date = date('Y-m-d H:i:s');
+                $model->booking->booking_date_1 = date('Y-m-d', strtotime($_POST['booking_date_1']));
+                if (!empty($_POST['booking_date_2'])) {
+                    $model->booking->booking_date_2 = date('Y-m-d', strtotime($_POST['booking_date_2']));
+                }
+                
+                $model->booking->delivery_period = $_POST['delivery_time'];
+                
+                $model->booking->shipment_id = $shipment->id;
+                
+
+
+                if ($_POST['folk'] == 'true') {
+                    $model->booking->need_unloading = 'Yes';
+                } else {
+                    $model->booking->need_unloading = 'No';
+                }
+                $model->booking->special_need_other = $_POST['other'];
+                $model->booking->base_price = number_format((float)$basePrice, 2, '.', '');
+                $model->booking->oversize_fee = number_format((float)$oversize, 2, '.', '');
+                $model->booking->time_deliver_fee = number_format((float)$specificDeliveryTimeFee, 2, '.', '');
+                $model->booking->unloading_fee = number_format((float)$unloadingFee, 2, '.', '');
+                $model->booking->fee = number_format((float)$total, 2, '.', '');
+                $model->booking->hbn = $_POST['shipment_hbn'];
+                $model->booking->other_ref = @$_POST['other_reference'];
+                // Save Cargo Booking DO files
+                if (!empty($_FILES)) {
+                    $i = 1;
+                    $hbn = $_POST['shipment_hbn'];
+                    foreach ($_FILES as $fk => $file) {
+                        if ($file['error'] == 0 && !empty($file['name'])) {
+                            $fileType = substr($file['type'], strpos($file['type'], "/") + 1);
+                            $file['name'] = $hbn . "-DO-" . $i . '.' . $fileType;
+                            $target_dir = Yii::app()->basePath . DIRECTORY_SEPARATOR . "runtime" . DIRECTORY_SEPARATOR . "cargo_booking_DO" . DIRECTORY_SEPARATOR;
+                            if (!is_dir($target_dir)) {
+                                mkdir($target_dir);
+                            }
+                            $target_file = $target_dir . basename($file["name"]);
+                            move_uploaded_file($file['tmp_name'], $target_file);
+                            // TODO: create a new file type in FileRepo class istead of 18
+                            $filerepoId = FileRepo::storeFile($target_file, basename($file["name"]), 200, $shipment->id);
+                            unlink($target_file);
+                            $i++;
+                        }
+                    }
+                }
+
+                $model->success = true;
+                $model->basePrice = number_format((float)$basePrice, 2, '.', '');
+                $model->oversize = number_format((float)$oversize, 2, '.', '');
+                $model->specificDeliveryTimeFee = number_format((float)$specificDeliveryTimeFee, 2, '.', '');
+                $model->unloadingFee = number_format((float)$unloadingFee, 2, '.', '');
+                $model->gst = number_format((float)$gst, 2, '.', '');
+                $model->total = number_format((float)$total+(float)$gst, 2, '.', '');
+                echo json_encode($model);        
+            }
+        }
+    }
+
+    public function actionCreateBooking()
+    {
+        /* $cargoBooking = CargoBooking::model()->findByPk($_POST['booking_id']);
+        if (!empty($cargoBooking)) {
+            $cargoBooking->status = CargoBooking::PENDING;
+            $cargoBooking->save();
+            $res = new stdClass;
+            $res->success = true;
+            $res->message = "Cargo booking successfully created.";
+            echo json_encode($res);
+        } else {
+            $res = new stdClass;
+            $res->success = false;
+            $res->message = "Ops, some error occured.";
+            echo json_encode($res);
+        } */
+        $res = new stdClass;
+        if (!empty($_POST['final_booking_shipment_id'])) {
+            $shipment = ImParcel::model()->findByPk($_POST['final_booking_shipment_id']);
+            if (!empty($shipment)) {
+                $cargoBooking = new CargoBooking();
+                $cargoBooking->create_date = date('Y-m-d H:i:s');
+                $cargoBooking->booking_date_1 = $_POST['final_booking_date_1'];
+                if (!empty($_POST['final_booking_date_2']) && $_POST['final_booking_date_2'] != '') {
+                    $cargoBooking->booking_date_2 = $_POST['final_booking_date_2'];
+                } else {
+                    $cargoBooking->booking_date_2 = null;
+                }
+                $cargoBooking->status = CargoBooking::PENDING;
+                $cargoBooking->delivery_period = $_POST['final_booking_special_time'];
+                $cargoBooking->org_id = Yii::app()->user->org;
+                $cargoBooking->shipment_id = $shipment->id;
+                $cargoBooking->generateBookingNumber($shipment->consol->dpt_id);
+                $cargoBooking->mdata['need_unloading'] = $_POST['final_booking_special_unloading'];
+                $cargoBooking->mdata['special_need_othe'] = $_POST['final_booking_special_other'];
+                $cargoBooking->mdata['base_price'] = $_POST['final_booking_base_fee'];
+                $cargoBooking->mdata['oversize_fee'] = $_POST['final_booking_oversize_fee'];
+                $cargoBooking->mdata['time_deliver_fee'] = $_POST['final_booking_time_fee'];
+                $cargoBooking->mdata['unloading_fee'] = $_POST['final_booking_unloading_fee'];
+
+                if (!empty($shipment->cnee)) {
+                    $shipment->receiver->name = $shipment->cnee->name;
+                    $shipment->receiver->company = $shipment->cnee->company;
+                    $shipment->receiver->address = $shipment->cnee->address;
+                    $shipment->receiver->suburb = $shipment->cnee->suburb;
+                    $shipment->receiver->city = $shipment->cnee->city;
+                    $shipment->receiver->state = $shipment->cnee->state;
+                    $shipment->receiver->postcode = $shipment->cnee->postcode;
+                    $shipment->receiver->country = $shipment->cnee->country;
+                    $shipment->receiver->tel = $shipment->cnee->tel;
+                    $shipment->receiver->email = $shipment->cnee->email;
+                    $shipment->receiver->save();
+                    $shipment->cnee->name = $_POST['final_booking_cnee_name'];
+                    $shipment->cnee->company = $_POST['final_booking_cnee_company'];
+                    $shipment->cnee->address = $_POST['final_booking_cnee_address'];
+                    $shipment->cnee->suburb = $_POST['final_booking_cnee_suburb'];
+                    $shipment->cnee->city = $_POST['final_booking_cnee_city'];
+                    $shipment->cnee->state = $_POST['final_booking_cnee_state'];
+                    $shipment->cnee->postcode = $_POST['final_booking_cnee_postcode'];
+                    $shipment->cnee->country = 'Australia';
+                    $shipment->cnee->tel = $_POST['final_booking_cnee_tel'];
+                    $shipment->cnee->email = $_POST['final_booking_cnee_email'];
+                    $shipment->cnee->save();
+                } else {
+                    $cnee = new Addr();
+                    $cnee->name = $_POST['final_booking_cnee_name'];
+                    $cnee->company = $_POST['final_booking_cnee_company'];
+                    $cnee->address = $_POST['final_booking_cnee_address'];
+                    $cnee->suburb = $_POST['final_booking_cnee_suburb'];
+                    $cnee->city = $_POST['final_booking_cnee_city'];
+                    $cnee->state = $_POST['final_booking_cnee_state'];
+                    $cnee->postcode = $_POST['final_booking_cnee_postcode'];
+                    $cnee->country = 'Australia';
+                    $cnee->tel = $_POST['final_booking_cnee_tel'];
+                    $cnee->email = $_POST['final_booking_cnee_email'];
+                    $cnee->save();
+                    $shipment->cnee = $cnee;
+                }
+
+                $cargoBooking->destination = $shipment->cnee_id;
+                $cargoBooking->fee = $_POST['final_booking_fee'];
+                $cargoBooking->hbn = $shipment->hbn;
+                $cargoBooking->other_ref = $_POST['final_booking_other_ref'];
+                $cargoBooking->depot = $shipment->consol->dpt_id;
+                
+                if ($cargoBooking->save()) {
+                    $res->message = 'You have successfully booked cargo delivery.';
+                    echo json_encode($res);
+                } else {
+                    $res->message = 'Cargo delivery booking unsuccessful, please contact TLA customer service team.';
+                    echo json_encode($res);
+                }
+            }
+        }
+    }
+
+    public function actionCalculatePrice()
+    {
+        if (!empty($_POST)) {
+            $data = new stdClass;
+            $data->items = json_decode($_POST['items']);
+            $data->cbm = 0;
+            $data->weight = 0;
+            $data->pkg = 0;
+            $data->pallets = 0;
+            $data->item_type = $_POST['item_type'];
+            $data->unloading_location_type = $_POST['unloading_location_type'];
+            $unloading = false;
+            $data->other_ref = $_POST['other_ref'];
+            $data->other_needs = $_POST['other'];
+            $data->collection_before = $_POST['pickup_time'];
+            $data->delivery_period = $_POST['delivery_time'];
+            foreach ($data->items as $item) {
+                $cbm = ($item->length/100) * ($item->width/100) * ($item->height/100) * $item->quantity;
+                $data->cbm += $cbm;
+                $data->weight += ($item->weight * $item->quantity);
+                if ($data->item_type == 'cartons') {
+                    $data->pkg += $item->quantity;
+                } else if ($data->item_type == 'pallets') {
+                    $data->pallets += $item->quantity;
+                }
+            }
+            $data->delivery_date_1 = date('Y-m-d', strtotime(str_replace('/', '-', $_POST['pickup_date_1'])));
+            $data->delivery_date_2 = !empty($_POST['pickup_date_2']) ? date('Y-m-d', strtotime(str_replace('/', '-', $_POST['pickup_date_2']))) : '';
+            
+            $collectionAddress = new stdClass;
+            $deliveryAddress = new stdClass;
+
+            $collectionAddress->name = $_POST['collection_name'];
+            $collectionAddress->tel = $_POST['collection_tel'];
+            $collectionAddress->company = $_POST['collection_company'];
+            $collectionAddress->email = $_POST['collection_email'];
+            $collectionAddress->streetAddress = $_POST['collection_address'];
+            $collectionAddress->suburb = $_POST['collection_suburb'];
+            $collectionAddress->city = $_POST['collection_city'];
+            $collectionAddress->state = $_POST['collection_state'];
+            $collectionAddress->postcode = $_POST['collection_postcode'];
+
+            $deliveryAddress->name = $_POST['delivery_name'];
+            $deliveryAddress->tel = $_POST['delivery_tel'];
+            $deliveryAddress->company = $_POST['delivery_company'];
+            $deliveryAddress->email = $_POST['delivery_email'];
+            $deliveryAddress->streetAddress = $_POST['delivery_address'];
+            $deliveryAddress->suburb = $_POST['delivery_suburb'];
+            $deliveryAddress->city = $_POST['delivery_city'];
+            $deliveryAddress->state = $_POST['delivery_state'];
+            $deliveryAddress->postcode = $_POST['delivery_postcode'];
+
+            $cnorId = $this->saveAddress($collectionAddress);
+            $cneeId = $this->saveAddress($deliveryAddress);
+            $shipment = $this->saveShipment($data, $cnorId, $cneeId);
+
+            // Save Cargo Booking DO files
+            if (!empty($_FILES)) {
+                $i = 1;
+                $hbn = $shipment->hbn;
+                foreach ($_FILES as $fk => $file) {
+                    if ($file['error'] == 0 && !empty($file['name'])) {
+                        $fileType = substr($file['type'], strpos($file['type'], "/") + 1);
+                        $file['name'] = $hbn . "-DO-" . $i . '.' . $fileType;
+                        $target_dir = Yii::app()->basePath . DIRECTORY_SEPARATOR . "runtime" . DIRECTORY_SEPARATOR . "cargo_booking_DO" . DIRECTORY_SEPARATOR;
+                        if (!is_dir($target_dir)) {
+                            mkdir($target_dir);
+                        }
+                        $target_file = $target_dir . basename($file["name"]);
+                        move_uploaded_file($file['tmp_name'], $target_file);
+                        // TODO: create a new file type in FileRepo class istead of 18
+                        $filerepoId = FileRepo::storeFile($target_file, basename($file["name"]), 200, $shipment->id);
+                        unlink($target_file);
+                        $i++;
+                    }
+                }
+            }
+
+            $chargecode = '';
+            switch ($data->unloading_location_type) {
+                case 'b2c':
+                    $chargecode = '5791';
+                    $unloading = true;
+                    break;
+                case 'b2b':
+                    $chargecode = '1805';
+                    break;
+                case 'fba':
+                    $chargecode = '0499';
+                    break;
+                case 'interstate':
+                    $chargecode = '9536';
+                    break;
+            }
+            
+            $basePrice = round($shipment->getChargeByChargecode($chargecode), 2);
+            $oversizePrice = $shipment->getChargeByChargecode($chargecode, false, null, true, false, true);
+            $oversize = round($oversizePrice['amount'], 2);
+            $specificDeliveryTimeFee = 0.00;
+            $unloadingFee = 0.00;
+            if ($data->delivery_period != 'none' || $data->collection_before != 'none') {
+                $specificDeliveryTimeFee = ($basePrice + $oversize) * 0.20;
+                /* if ($specificDeliveryTimeFee == 0) {
+                    $specificDeliveryTimeFee = 30.00;
+                } */
+                if ($specificDeliveryTimeFee > 100) {
+                    $specificDeliveryTimeFee = 100.00;
+                }
+            }
+            if ($unloading) {
+                if ($data->pallets > 0) {
+                    $unloadingFee = round((20 * $data->pallets), 2);
+                } else {
+                    $unloadingFee = 30.00;
+                }
+            }
+            $gst = ($basePrice + $oversize + $specificDeliveryTimeFee + $unloadingFee) * 0.1;
+            $total = $basePrice + $oversize + $specificDeliveryTimeFee + $unloadingFee;
+            $data->base_price = $basePrice;
+            $data->oversize_price = $oversize;
+            $data->timed_delivery_fee = $specificDeliveryTimeFee;
+            $data->unloading_fee = $unloadingFee;
+            $data->gst = $gst;
+            $data->total = $total;
+            
+            if($this->saveCargoBooking($data, $shipment)) {
+                $data->success = true;
+            } else {
+                $data->success = false;
+            }
+            echo json_encode($data);
+        }
+    }
+
+    private function saveAddress($address)
+    {
+        $addr = new Addr();
+        $addr->name = $address->name;
+        $addr->company = empty($address->company) ? '' : $address->company;
+        $addr->address = $address->streetAddress;
+        $addr->suburb = $address->suburb;
+        $addr->city = $address->city;
+        $addr->state = $address->state;
+        $addr->postcode = $address->postcode;
+        $addr->country = 'Australia';
+        $addr->tel = $address->tel;
+        $addr->email = $address->email;
+
+        $addr->save();
+        return $addr->id;
+    }
+
+    private function saveShipment($data, $cnorId, $cneeId)
+    {
+        $cnor = Addr::model()->findByPk($cnorId);
+        $cnee = Addr::model()->findByPk($cneeId);
+        switch ($cnor->state) {
+            case 'NSW':
+                $dpt_id = 106;
+                $pol = 'AUSYD';
+                break;
+            case 'VIC':
+                $dpt_id = 218;
+                $pol = 'AUMEL';
+                break;
+            case 'QLD':
+                $dpt_id = 530;
+                $pol = 'AUBNE';
+                break;
+            case 'WA':
+                $dpt_id = 811;
+                $pol = 'AUPER';
+                break;
+        }
+        $day = date('w');
+		$week_start = date('Y-m-d', strtotime('-'.($day-1).' days'));
+		$week_end = date('Y-m-d', strtotime('+'.(7-$day).' days'));
+        $sql = 'SELECT * FROM consol WHERE `owner_id` = ' . Yii::app()->user->org . ' AND `dpt_id` = ' . $dpt_id .' AND `created` >= "' . $week_start . '" AND `created` <= "' . $week_end . '" AND `meta` LIKE "%is_cargo_casual_booking%"';
+
+        $consol = Consol::model()->findBySql($sql);
+
+        if (empty($consol)) {
+            $consol = new Consol();
+            $consol->pc_id = 0;
+            $consol->owner_id = Yii::app()->user->org;
+            $consol->dpt_id = $dpt_id;
+            $consol->carrier_id = 0;
+            $consol->type = Consol::IMCOCONSOLTYPE;
+            $consol->service = Consol::AIRCONSOL;
+            $consol->exrate = 0.0000;
+            $consol->pol = $pol;
+            $consol->pod = $pol;
+            $consol->eta = date('Y-m-d');
+            $consol->created = date('Y-m-d');
+            $consol->status = 60;
+            $consol->bwf = 0;
+            $consol->mdata['is_cargo_casual_booking'] = 1;
+            //$consol->mdata['for3PL'] = 1;
+            $consol->save();
+        }
+        
+        $shipment = new ImParcel();
+        $shipment->consol_id = $consol->id;
+        $shipment->agent_id = Yii::app()->user->org;
+        $shipment->odpt_id = $dpt_id;
+        $shipment->ddpt_id = $dpt_id;
+        $shipment->cnor_id = $cnorId;
+        $shipment->cnee_id = $cneeId;
+        $shipment->status = 10;
+        $shipment->type = 10;
+        $shipment->hbn = $shipment->genHbn();
+        $shipment->ref = $shipment->genBPHbn();
+        $shipment->pkg = $data->pkg;
+        $shipment->state = $cnee->state;
+        $shipment->postcode = $cnee->postcode;
+        $shipment->value = 1.00;
+        $shipment->dvalue = 1.00;
+        $shipment->insurance = 0.00;
+        $shipment->currency = 1;
+        $shipment->weight = $data->weight;
+        $shipment->cbm = $data->cbm;
+        $shipment->created = date('Y-m-d');
+        $shipment->mdata['amzon_pallet'] = $data->pallets;
+        $shipment->mdata['force_tld_status'] = 1;
+        $shipment->save();
+        return $shipment;
+    }
+
+    private function saveCargoBooking($data, $shipment)
+    {
+        if (!empty($shipment)) {
+            $cargoBooking = new CargoBooking();
+            $cargoBooking->create_date = date('Y-m-d H:i:s');
+            $cargoBooking->booking_date_1 = $data->delivery_date_1;
+            $cargoBooking->booking_date_2 = $data->delivery_date_2;
+            $cargoBooking->status = CargoBooking::PENDING;
+            $cargoBooking->org_id = Yii::app()->user->org;
+            $cargoBooking->shipment_id = $shipment->id;
+            $cargoBooking->generateBookingNumber($shipment->consol->dpt_id);
+            $cargoBooking->destination = $shipment->cnee_id;
+            $cargoBooking->ref = $shipment->ref;
+            $cargoBooking->hbn = $shipment->hbn;
+            $cargoBooking->depot = $shipment->odpt_id;
+            $cargoBooking->mdata['items'] = $data->items;
+            $cargoBooking->mdata['need_unloading'] = ($data->unloading_location_type == 'b2c') ? 'Yes' : 'No';
+            $cargoBooking->mdata['special_need_othe'] = $data->other_needs;
+            $cargoBooking->mdata['collection_before'] = $data->collection_before;
+            $cargoBooking->mdata['delivery_before'] = $data->delivery_period;
+            $cargoBooking->mdata['base_price'] = $data->base_price;
+            $cargoBooking->mdata['oversize_fee'] = $data->oversize_price;
+            $cargoBooking->mdata['time_deliver_fee'] = $data->timed_delivery_fee;
+            $cargoBooking->mdata['unloading_fee'] = $data->unloading_fee;
+            $cargoBooking->other_ref = $data->other_ref;
+            $cargoBooking->fee = $data->total;
+            if($cargoBooking->save()){
+                return true;
+            } else {
+                return false;
+            }
+        }
+        return false;
+    }
+}

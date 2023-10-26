@@ -1,0 +1,136 @@
+<head>
+    <link rel="stylesheet" type="text/css" href="<?php echo Yii::app()->request->baseUrl; ?>/css/styles.css">
+</head>
+<br>
+<div class="form">
+<?php
+$form=$this->beginWidget('CActiveForm', array(
+    'id'=>'report_consol_form',
+)); ?>
+    <div class="row">
+        <div class="col col-md-2 col-sm-4">
+            <div class="form-group">
+                <?php echo CHtml::label('ETA From', 'ETA From'); ?>
+                <?php echo CHtml::textField('from', date("Y-m-d",strtotime("-3 day")), array('size' => 12, 'id' => 'from', 'class' => 'datetime_input form-control')); ?>
+            </div>
+        </div>
+        <div class="col col-md-2 col-sm-4">
+            <div class="form-group">
+                <?php echo CHtml::label('ETA To', 'ETA To'); ?>
+                <?php echo CHtml::textField('to', date("Y-m-d"), array('size' => 12, 'id' => 'to', 'class' => 'datetime_input form-control')); ?>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col col-md-2 col-sm-4">
+            <div class="form-group">
+                <?php echo CHtml::label('Air/Sea', 'Air/Sea'); ?>
+                <?php echo CHtml::dropDownList('air_sea','',[''=>'ALL',10=>'Air',20=>'Sea'],['class' => 'form-control']); ?>
+            </div>
+        </div>
+        <br>
+        <div class="col col-md-2 col-sm-4">
+            <div class="form-group">
+                <?php echo CHtml::label('By State', 'By State'); ?>
+                <?php
+                $dicPort2State = [
+                    ''=>'ALL',
+                    'AUSYD'=>'NSW',
+                    'AUMEL'=>'VIC',
+                    'AUBNE'=>'QLD',
+                    'AUPER'=>'WA',
+                    'AUADL'=>'SA',
+                ];
+                echo CHtml::dropDownList('state','',$dicPort2State,['class' => 'form-control']);
+            ?>
+            </div>
+        </div>
+        <br>
+        <div class="col col-md-2 col-sm-4">
+            <div class="form-group">
+                <?php echo CHtml::label('By Accumulative Delay', 'By Accumulative Delay'); ?>
+                <?php echo CHtml::dropDownList('by_urgent','des',['des'=>'More to Less','asc'=>'Less to More'],['class' => 'form-control']); ?>
+            </div>
+        </div>
+
+    </div>
+
+    <div class="row">
+     <div class="col col-md-2 col-sm-4">
+        <div class="form-group">
+            <label for="awb-or-container-id">AWB OR Container No:</label>
+            <input type="text" id="awb-or-container-id" name="awb_or_container_id" class="form-control">
+        </div>
+     </div>
+    </div>
+
+    <?php $this->endWidget(); ?>
+
+</div><!-- form -->
+<br>
+<input class="btn btn-primary" id="btn_search" type="submit" value="Search" onclick="funcSearch()">
+<!-- <input class="btn btn-primary" id="btn_export" type="submit" value="export" onclick="funcExport()"> -->
+
+<br />
+<br />
+
+
+<h1>Consol Report</h1>
+<table class="table table-striped table-bordered">
+    <thead>
+        <tr>
+            <th>State</th>
+            <th>Air/Sea</th>
+            <th>awb/Ocean Bill</th>
+            <th>ETD</th>
+            <th>ETA</th>
+            <th>Checkin</th>
+            <th>Arrived at Airport</th>
+            <th>Collected</th>
+            <th>Arrived at TLA</th>            
+            <th>Unloaded at TLA</th>            
+            <th>Unpack</th>
+            <th>Despatch</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody id="table_records">
+        <?php
+            echo $strTbody;
+            ?>
+    </tbody>
+</table>
+
+
+
+<div class="load" id='div_loading' style="display: none;">
+        <span></span>
+        <span></span>
+        <span></span>
+        <span></span>
+        <span></span>
+</div>
+
+
+<script type="text/javascript">
+function funcSearch() {
+    $('#table_records').html('');
+    $('#btn_search').attr('disabled', true);
+    $('#div_loading').attr('style', '');
+    listData = $('#report_consol_form').serializeArray();
+    $.ajax({
+            url: "<?=$this->createUrl("/ConsolReport/consolReportSearch");?>",
+            data: listData,
+            async: true,
+            success:(data)=>{
+                $('#table_records').html(data);
+            },
+            complete: function() {
+            $('#btn_search').attr('disabled', false);
+            $('#div_loading').attr('style', 'display:none');
+            }
+        });    
+}
+
+</script>

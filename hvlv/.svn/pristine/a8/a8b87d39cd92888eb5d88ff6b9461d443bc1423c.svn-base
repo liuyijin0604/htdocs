@@ -1,0 +1,134 @@
+
+	<br/>
+	<div>
+		<div style="float: right; font-size: 1.5em; height: 5px; right: 5px; top: 2px; ">
+			<h4>Pallet Label</h4>
+		</div>		
+		<table width="100%" border="0" cellspacing="0" cellpadding="0">
+			<tr>
+				<td width="35%" valign="top" class="dto">
+					<p class="logo"><img src="<?=Yii::app()->request->hostInfo.Yii::app()->baseUrl;?>/images/tla_logo.png" alt="TLA Pallet Label" height="50%" align="center" /></p>		
+				</td>
+				<td valign="middle" class="dto">					
+					<?php $dates = explode('-', $inputModel['date']);?>
+					<h3 class="dest">Date:&nbsp;<?= $dates[2] ?>日/<?= $dates[1] ?>月/<?= $dates[0] ?></h3>
+				</td>
+			</tr>
+		</table>
+		 
+		<!-- <div class="connote" style="font-size:60px"><?=$model->ref."-".$pkg_sn;?></div> -->
+		<!-- <div style=" text-align:center">
+		</div> -->
+		<table width="100%" border="0" cellspacing="0" cellpadding="0">
+			<tr>
+				<?php
+				if ($model->consol->service == ImcoConsol::AIRCONSOL) {
+					echo '
+					<td width="50%" valign="top" class="di">
+					<b>AWB (后五位号):</b>
+					</td>
+					<td width ="15%" valign="top" class="di">
+						<b>'.$inputModel['awb'].'</b>
+					</td>
+					';
+				}
+				else{
+					echo '
+					<td width="50%" valign="top" class="di">
+					<b>Cont No. (后五位柜号):</b>
+					</td>
+					<td width ="15%" valign="top" class="di">
+						<b>'.$inputModel['cont_no'].'</b>
+					</td>
+					';
+				}
+				?>
+				
+				<td valign="top" class="di">
+					<img src="data:image/svg+xml;base64,<?php
+				    $dm = new TCPDF2DBarcode(chr(232).$model->ref."-".$pkg_sn, 'QRCODE, H');
+				    echo base64_encode(str_replace([chr(232),chr(29)], ['',''], $dm->getBarcodeSVGcode(8, 8, 'black')));
+				    ?>" width="130" style="float: right; margin-left:1%; right: 20px; margin-top: -50px;"/>
+
+				</td>
+			</tr>
+		</table>
+		<div style=" padding: 5px; text-align:center">
+		</div>
+		<table width="100%" border="0" cellspacing="0" cellpadding="0">
+			<tr>
+				<td width="25%" valign="middle" class="di">
+					<b>HBL:</b>
+				</td>
+				<td valign="top">
+					<b style="font-size:40px"><?= $model->hbn ?></b>
+				</td>
+			</tr>
+		</table>
+		<div style="padding: 15px; text-align:center">
+		</div>
+		<table width="100%" border="0" cellspacing="0" cellpadding="0">
+			<tr>
+				<td width="65%" valign="top" class="di">
+					<b>No. of Pcs (本板箱数):</b>
+				</td>
+				<td style="padding: 0;" valign="top">
+					<b>____________/<?= $inputModel['total_pcs'] ?></b>
+				</td>
+			</tr>
+		</table>
+		<div style="padding: 15px; text-align:center">
+		</div>
+		<table width="100%" border="0" cellspacing="0" cellpadding="0">
+			<tr>
+				<td width="65%" valign="top" class="di">
+					<b>Pallet No. (第几板):</b>
+				</td>
+				<td style="padding: 0;" valign="top">
+					<!-- <b>______/<?= $inputModel['total_pallets'] ?></b> -->
+					<b>____________</b>
+				</td>
+			</tr>
+		</table>
+		<div style="padding: 15px; text-align:center">
+		</div>
+		<table width="100%" border="0" cellspacing="0" cellpadding="0">
+			<tr>
+				<td width="65%" valign="top" class="di">
+					<b>Total Pallets (总板数):</b>
+				</td>
+				<td style="padding: 0;" valign="top">
+					<b>____________</b>
+				</td>
+			</tr>
+		</table>
+		<div style="padding: 15px; text-align:center">
+		</div>
+		<table width="100%" border="0" cellspacing="0" cellpadding="0">
+			<tr>
+				<td width="65%" valign="top" class="di">
+					<b>Notes (拆柜人大写字母):</b>
+				</td>
+				<td style="padding: 0;" valign="top">
+					<b><?= $inputModel['notes'] ?></b>
+				</td>
+			</tr>
+		</table>
+		<div style="padding: 20px; text-align:center">
+		</div>
+		<table width="100%" border="0" cellspacing="0" cellpadding="0">
+			<tr>
+				<div class="label">
+				<div class="barcode">
+				<?php
+					$bc = new TCPDFBarcode($cs[$pkg_sn-1], 'C128');
+					echo $bc->getBarcodeSVGcode(4, 140);
+				?>					
+				</div>
+				<div class="connote" style="font-size:60px"><?=$cs[$pkg_sn-1];?></div>				
+				<div style="font-size:60px;padding: 30px;"><?=$dup? '*REPRINT*' : '';?></div>
+				</div>
+			</tr>
+		</table>
+		
+	</div>

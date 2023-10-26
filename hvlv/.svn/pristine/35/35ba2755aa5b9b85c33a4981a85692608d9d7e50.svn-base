@@ -1,0 +1,185 @@
+<style>
+	.operate_button {
+		font: bold 11px Arial;
+		text-decoration: none;
+		background-color: #EEEEEE;
+		color: #333333;
+		padding: 2px 6px 2px 6px;
+		border-top: 1px solid #CCCCCC;
+		border-right: 1px solid #333333;
+		border-bottom: 1px solid #333333;
+		border-left: 1px solid #CCCCCC;
+	}
+	
+</style>
+<?php
+/* @var $this GoogleReviewController */
+/* @var $model GoogleReview */
+
+$this->breadcrumbs = array(
+	'Google Reviews' => array('index'),
+	'Manage',
+);
+
+$this->menu = array(
+	array('label' => 'List GoogleReview', 'url' => array('index')),
+	array('label' => 'Create GoogleReview', 'url' => array('create')),
+);
+
+Yii::app()->clientScript->registerScript('search', "
+$('.search-button').click(function(){
+	$('.search-form').toggle();
+	return false;
+});
+$('.search-form form').submit(function(){
+	$('#google-review-grid').yiiGridView('update', {
+		data: $(this).serialize()
+	});
+	return false;
+});
+");
+?>
+
+<h1>Manage Google Reviews</h1>
+
+<p>
+	You may optionally enter a comparison operator (<b>&lt;</b>, <b>&lt;=</b>, <b>&gt;</b>, <b>&gt;=</b>, <b>&lt;&gt;</b>
+	or <b>=</b>) at the beginning of each of your search values to specify how the comparison should be done.
+</p>
+
+<?php echo CHtml::link('Advanced Search', '#', array('class' => 'search-button')); ?>
+<div class="search-form" style="display:none">
+	<?php $this->renderPartial('_search', array(
+		'model' => $model,
+	)); ?>
+</div><!-- search-form -->
+<br/><br/>
+<h3 style="color: black;">New Review Task(Yesterday/Last Week/Last Month): <?php echo "{$numNewReviewServiceYesterday}  {$numNewReviewServiceLastWeek}  {$numNewReviewServiceLastMonth}";?></h3>
+<h3 style="color: green;">Email Sent(Yesterday/Last Week/Last Month): <?php echo "{$numEmailSentYesterday}  {$numEmailSentLastWeek}  {$numEmailSentLastMonth}";?></h3>
+<h3 style="color: orange;">No Response(Yesterday/Last Week/Last Month): <?php echo "{$numNoResponseYesterday}  {$numNoResponseLastWeek}  {$numNoResponseLastMonth}";?></h3>
+<h3 style="color: red;">Refused(Yesterday/Last Week/Last Month): <?php echo "{$numRefusedYesterday}  {$numRefusedLastWeek}  {$numRefusedLastMonth}";?></h3>
+
+<div style="right: 80px;position: absolute;top:50px;">
+	<a href="<?= $this->createUrl('googleReview/history');?>" class="tab_link" title="Google Review Statistics"><div class="icon" style="background-position:-16px 0"></div>History Records</a>
+	<a href="<?= $this->createUrl('googleReview/addWeeklyStatistics');?>" class="jqm_link" title="Add Weekly Statistics"><div class="icon" style="background-position:-16px 0"></div>Add Weekly Statistics</a>
+</div>
+<?php $this->widget('zii.widgets.grid.CGridView', array(
+	'id' => $_GET["tabid"] . '_sub_google_review_grid',
+	'dataProvider' => $model->search(),
+	'filter' => $model,
+	'columns' => array(
+		//'id',
+		array('name' => 'hbn', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->createURL("imParcel/update", array("id" => $data->shipment_id))."\" class=\"tab_link\" title=\"".$data->shipment->hbn."\">".$data->shipment->hbn."</a>"',),
+		'ref',
+		array('name' => 'time_start', 'header' => 'Sys Ready'),
+		array('name' => 'time_done', 'header' => 'Delivery Complete'),
+		'pkg',
+		'weight',
+		'cnee_name',
+		'cnee_email',
+		'cnee_tel',
+		//'cnee_address',
+		//'cnee_suburb',
+		//'cnee_city',
+		//'cnee_state',
+		//'cnee_postcode',
+		'cnor_city',
+		'cnor_state',
+		//'status',
+		array(
+			'class' => 'CButtonColumn',
+			'template' => '{Send Email}',
+			'buttons' => [
+				'Send Email' => [
+					'url' => 'Yii::app()->createURL("googleReview/sendReviewEmail")."?id=".$data->id',
+					'imageUrl' => false,
+					'visible' => 'true',
+					'options' => ['class' => 'operate_button', 'label' => 'Send Email'],
+				],
+			]
+		),
+		array(
+			'class' => 'CButtonColumn',
+			'template' => '{No Response}',
+			'buttons' => [
+				'No Response' => [
+					'url' => 'Yii::app()->createURL("googleReview/firstCall")."?id=".$data->id',
+					'imageUrl' => false,
+					'visible' => '$data->status == 10',
+					'options' => ['class' => 'operate_button', 'id' => 'no_response', 'label' => 'No Response'],
+				],
+			]
+		),
+		array(
+			'class' => 'CButtonColumn',
+			'template' => '{No Response}',
+			'buttons' => [
+				'No Response' => [
+					'url' => 'Yii::app()->createURL("googleReview/secondCall")."?id=".$data->id',
+					'imageUrl' => false,
+					'visible' => '$data->status == 11',
+					'options' => ['class' => 'operate_button', 'id' => 'no_response', 'label' => 'No Response'],
+				],
+			]
+		),
+		array(
+			'class' => 'CButtonColumn',
+			'template' => '{No Response}',
+			'buttons' => [
+				'No Response' => [
+					'url' => 'Yii::app()->createURL("googleReview/noResponse")."?id=".$data->id',
+					'imageUrl' => false,
+					'visible' => '$data->status == 12',
+					'options' => ['class' => 'operate_button', 'id' => 'no_response', 'label' => 'No Response'],
+				],
+			]
+		),
+		array(
+			'class' => 'CButtonColumn',
+			'template' => '{Add Problem}',
+			'buttons' => [
+				'Add Problem' => [
+					'url' => 'Yii::app()->createURL("googleReview/problem")."?id=".$data->id',
+					'imageUrl' => false,
+					'visible' => 'true',
+					'options' => ['class' => 'jqm_link grid_view_btn', 'label' => 'Add Problem'],
+				],
+			]
+		),
+		array(
+			'class' => 'CButtonColumn',
+			'template' => '{Refused}',
+			'buttons' => [
+				'Refused' => [
+					'url' => 'Yii::app()->createURL("googleReview/refused")."?id=".$data->id',
+					'imageUrl' => false,
+					'visible' => 'true',
+					'options' => ['class' => 'operate_button', 'label' => 'Refused'],
+				],
+			]
+		),
+	),
+)); ?>
+
+<script type="text/javascript">
+	$(function() {
+		var tab = $('#<?= $_GET["tabid"]; ?>');
+
+		tab.unbind('reload_google_review_grid').bind('reload_google_review_grid', function() {
+			$('#<?= $_GET["tabid"]; ?>_sub_google_review_grid', tab.data('panel')).yiiGridView('update');
+			return false;
+		});
+
+		var panel = tab.data('panel');
+
+		$(panel).on('click', ' .operate_button', function(event) {
+			event.preventDefault();
+			if (confirm("Are you Confirm?")) {
+				$.get($(this).attr('href'), function(r) {
+					myApp.notice("Done!");
+					tab.trigger('reload_google_review_grid');
+				});
+			}
+		});
+	});
+</script>

@@ -1,0 +1,2667 @@
+<?php
+
+/**
+ * This is the model class for table "manifest".
+ *
+ * The followings are the available columns in table 'manifest':
+ * @property string $id
+ * @property string $fwd_id
+ * @property string $dpt_id
+ * @property string $by_id
+ * @property string $consol_id
+ * @property integer $type
+ * @property integer $status
+ * @property string $created
+ * @property string $ref
+ * @property string $total
+ * @property string $meta
+ * @property string $bwf
+ */
+class Manifest extends CActiveRecord
+{
+	public static $states = array(
+		10 => 'New',
+        11 => 'PayWaiting', // not paid or client credit limit or terms not available
+        12 => 'ConsolWaiting', // can be put into console
+		20 => 'Consolidated',
+
+        60 => 'Pending', // for gate pass only
+        65 => 'Confirmed', // fot gate pass only
+
+		80 => 'Error',
+		100 => 'Deleted',
+	);
+	
+	public static $types = array(
+		10 => 'Import Lodgement',
+		20 => 'Import Depot Receipt',
+		30 => 'Courier Dispatch',
+		32 => 'eParcel Lodgement',
+		33 => 'eLMS Lodgement',
+		40 => 'Pickup List',
+		50 => 'Gate Pass',
+		60 => 'Pallet List',
+        70 => 'RTS Reshipping List',
+        80 => 'RTS RTC List',
+        110 => 'Export Lodgement',
+        111 => 'Export Lodgement CloundChain',
+        120 => 'Export Depot Receipt',
+        130 => 'Export Air Freight',
+        210 => 'Courier Lodgement',
+        220 => 'Courier Depot Receipt',
+        90 => 'Auspost Manifest Time',
+        320 => '3rd party manifest',
+        340 => 'Packages Data Import',
+        360 => '3pl拆单分单导入',
+        380 => 'AUK Barcodes Import',
+        400 => 'AUK Manifest Template',
+		420 => 'Cargo wise manifest',
+		430 => 'FAK simple manifest',
+	);
+
+	protected static $subs = array(
+		//10 => 'ImpLodgement',
+		//110 => 'ExpLodgement',
+		//120 => 'ExpReceipt',
+		40 => 'PickupList',
+		50 => 'GatePass',
+	);
+
+	public static $my_type = 0;
+	
+	public $file, $warns, $mtype, $convert_of, $fwd_name,$allshipments, $totalWeight,$totalCBM,$isArchive;
+
+	public $_mkv = [];
+	public $mdata = [];
+	public $imCover = false;
+	public $bagTagIdentify = false;
+	public $noAddrVeri = false;
+
+	public $nolog = false;
+	public $custom_log_note = '';
+	public $exclude_lines = [];
+	public $pref = "";
+	
+	public function __construct($scenario='insert'){
+		parent::__construct($scenario);
+		if(static::$my_type > 0) $this->type = static::$my_type;
+	}
+
+	public function __get($name){
+		if(isset($this->_mkv[$name])) return $this->_mkv[$name];
+		return parent::__get($name);
+	}
+
+	public function __set($name, $value){
+		if(isset($this->_mkv[$name])) return $this->_mkv[$name] = $value;
+		return parent::__set($name, $value);
+	}
+	
+	protected function instantiate($attr){
+		$cls = isset(self::$subs[$attr['type']])? self::$subs[$attr['type']] : get_class($this);
+		return new $cls(null);
+	}
+
+	public function defaultScope(){
+		return empty(static::$my_type)? [] : ['condition' => $this->dbConnection->quoteColumnName($this->getTableAlias(false, false).'.type').'='.static::$my_type];
+	}
+
+	public function setAttributes($values,$safeOnly=true){
+		foreach($values as $k=>$v){
+			if(isset($this->_mkv[$k])){
+				$this->_mkv[$k] = $v;
+				unset($values[$k]);
+			}
+		}
+		return parent::setAttributes($values,$safeOnly);
+	}
+
+	public function unsetAttributes($names = NULL){
+		parent::unsetAttributes($names = NULL);
+		if(static::$my_type > 0) $this->type = static::$my_type;
+	}
+
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName(){
+		return 'manifest';
+	}
+
+    public function statusList(){
+        $r = Manifest::$states;
+        return $r;
+    }
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules(){
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('type', 'required'),
+			array('fwd_id, by_id, dpt_id, consol_id, created, status, ref, total, meta, bwf', 'safe'),
+			array('type, status', 'numerical', 'integerOnly'=>true),
+            array('fwd_id, by_id, consol_id', 'length', 'max'=>11),
+			array('file', 'validFile', 'on' => 'upload'),
+            // The following rule is used by search().
+            // @todo Please remove those attributes that should not be searched.
+            array('id, fwd_id, by_id, consol_id, type, created, status, ref, total, meta, fwd_name, bwf, pref', 'safe', 'on'=>'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations(){
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+			'owner' => array(self::BELONGS_TO, 'Org', 'fwd_id'),
+			'dpt' => array(self::BELONGS_TO, 'Org', 'dpt_id'),
+			'creator' => array(self::BELONGS_TO, 'User', 'by_id'),
+			'rfile' => array(self::HAS_ONE, 'FileRepo', 'fid', 'on'=>'rfile.type=10'),
+			'man_shipments' => array(self::HAS_MANY, 'Shipment', 'man_id'),
+			'rec_shipments' => array(self::HAS_MANY, 'Shipment', 'rec_id'),
+			'lines' => array(self::HAS_MANY, 'ManiMap', 'mani_id'),
+			'invoice' => array(self::HAS_ONE, 'Invoice', 'man_id'),
+			'consol' => array(self::BELONGS_TO, 'Consol', 'consol_id'),
+		);
+	}
+
+	public function map($model){
+		$attr = array(
+			'mani_id' => $this->id,
+			'model' => get_class($model),
+			'fid' => $model->id,
+		);
+		$mm = ManiMap::model()->findByAttributes($attr);
+		if(!$mm){
+			$mm = new ManiMap;
+			$mm->attributes = $attr;
+			$mm->status = 10;
+			$mm->save();
+		}
+		
+		return $mm;
+	}
+
+	public function hasMap($model, $b=true){
+		$attr = array(
+			'mani_id' => $this->id,
+			'model' => get_class($model),
+			'fid' => $model->id,
+		);
+		return $b? (ManiMap::model()->countByAttributes($attr) > 0) : ManiMap::model()->findByAttributes($attr);
+	}
+
+	public function countLines(){
+		$db = Yii::app()->db;
+		$sql = 'SELECT COUNT(fid) AS t FROM mani_map WHERE mani_id = '.$this->id;
+		$c = $db->createCommand($sql);
+		return $c->queryScalar();
+	}
+	
+	public function totPacks($wid = 0){
+		return $this->totQuery('COUNT(s.pkg)', $wid);
+	}
+	
+	public function totWeight($wid = 0){
+		return $this->totQuery('SUM(s.weight)', $wid);
+	}
+
+	public function totExShipWeight($wid = 0){
+		$w = 0;
+		foreach($this->getFids() as $pid){
+			$p = ExParcel::model()->findByPk($pid);
+			$w += $p->shipWeight();
+		}
+		return $w;
+	}
+	
+	public function totCBM($wid = 0){
+
+        // for import manifest , if total cbm set by operator in China warehouse
+        // we use setting directly
+        if ( $this->type == 10 ) { // import lodgement
+            if ( isset($this->mdata['cbm']) && $this->mdata['cbm'] > 0.0 )
+            {
+                $cbm = $this->mdata['cbm'];
+            } else {
+                $cbm = $this->totQuery('SUM(s.cbm)', $wid);
+            }
+        }  else {
+            $cbm = $this->totQuery('SUM(s.cbm)', $wid);
+        }
+
+		return round($cbm * 1000) / 1000;
+	}
+
+	protected function totQuery($s, $wid = 0){
+		// if($this->type == 30) return 0;
+		$db = Yii::app()->db;
+		if(in_array($this->type, [30, 40, 60])){
+			$sql = 'SELECT '.$s.' AS t FROM shipment s INNER JOIN mani_map m ON s.id = m.fid WHERE s.status !=100 and m.mani_id = '.$this->id;
+			if(!empty($wid)) $sql .= ' AND s.odpt_id = '.$wid;
+		}else{
+			$fid = in_array($this->type, [10,110,210])? 'man_id' : 'rec_id';
+			$sql = 'SELECT '.$s.' AS t FROM shipment s WHERE s.status !=100 and '.$fid.' = '.$this->id;
+			if(!empty($wid)) $sql .= ' AND s.odpt_id = '.$wid;
+		}
+		$c = $db->createCommand($sql);
+		return $c->queryScalar();
+	}
+
+    /**
+     * create total charge for all shipments
+     * if testing all done, we should get rid of function : totCharge()
+     * @return float|int|string
+     */
+    public function totChargePro(){
+        if($this->type == 30) return 0;
+        if(in_array($this->type, [10,210])){
+            $rs = $this->man_shipments;
+        }elseif(in_array($this->type, [20,220])){
+            $rs = $this->rec_shipments;
+        }
+        $t = 0;
+        $orgRate = OrgRate::model()->find('org_id = :oid AND type = 40', [':oid' => $this->owner->id]);
+        foreach($rs as $r){
+            $t += $r->getChargePro($this->owner,$orgRate,false);
+        }
+        return round($t*100)/100;
+    }
+
+	public function totCharge(){
+		if($this->type == 30) return 0;
+		if(in_array($this->type, [10,210])){
+			$rs = $this->man_shipments;
+		}elseif(in_array($this->type, [20,220])){
+			$rs = $this->rec_shipments;
+		}
+		$t = 0;
+		if ( empty($this->owner->extra['rate_base_1']) ) return 'No Rate!';
+
+		foreach($rs as $r){
+			$t += $r->getCharge($this->owner);
+		}
+		return round($t*100)/100;
+	}
+	
+	public function getCurrency(){
+		return empty($this->owner->extra['currency'])? '': Invoice::$currencies[$this->owner->extra['currency']];
+	}
+	
+	public function getTotal($rs, $c){
+		$t = 0;
+        $currency = '';
+		foreach ($rs as $r) {
+			switch($c){
+				case 'packs':
+					$t += $r->totPacks();
+				break;
+				case 'weight':
+					$t += $r->totWeight();
+				break;
+				case 'cbm':
+					$t += $r->totCBM();
+				break;
+				case 'charge':
+					$t += $r->totCharge();
+				break;
+                case 'chargepro':
+                    $t += $r->totChargePro();
+                    if ( empty($currency) )  $currency = $r->getCurrency();
+                    break;
+			}
+		}
+
+        if ( $c == 'chargepro' ) {
+            return $currency . ' ' . AppHelper::money_format("%i", $t);
+        } else {
+            return $t;
+        }
+    }
+
+    public function getDriver(){
+    	if(!empty($this->by_id)){
+    		return $this->creator->name;
+    	}elseif(!empty($this->mdata['scanner'])){
+    		$sc = Scanner::model()->findByPk($this->mdata['scanner']);
+    		return $sc->ref;
+    	}
+    	return 'unkown';
+    }
+	
+	public function genInvoice($up = false){
+		if($this->type != 20) return false;
+		if(empty($this->owner->extra['rate_base_1'])) return false;
+		if($up){
+			if(empty($this->invoice)) return;
+			$inv = $this->invoice;
+		}else{
+			$inv= new Invoice;
+		}
+		$inv->type = 10;
+		$inv->dpmt = Invoice::DPMT_IMPORT;
+		$inv->currency = $this->owner->extra['currency'];
+		$inv->to_id = $this->fwd_id;
+		$inv->man_id = $this->id;
+		$inv->status =1;
+		$inv->date = $this->created;
+		
+		$items = array();
+		$tot = 0;
+		$term = '';
+		foreach($this->rec_shipments as $p){
+			$amt = $p->getCharge($this->owner);
+			$items[] = array($p->hbn, $p->getDesc(), $p->pkg, $p->weight, $p->cbm, $amt,$p->cnee->postcode);
+			$tot += $amt;
+		}
+		$inv->mdata['name'] = $this->owner->name;
+		$inv->mdata['address'] = $this->owner->getAddress();
+		$inv->mdata['items'] = $items;
+		$inv->mdata['payterm'] = empty($this->owner->extra['payterm'])? '2 days' : $this->owner->extra['payterm'].' days';
+		$inv->due = Invoice::calcDue($inv->date, $inv->mdata['payterm']);
+		$inv->total = $tot;
+		$inv->save();
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels(){
+		return array(
+			'id' => 'ID',
+			'fwd_id' => 'Owner',
+			'fwd_name' => 'Owner',
+			'dpt_id' => 'Depot',
+			'by_id' => 'By',
+            'type' => 'Type',
+			'status' => 'Status',
+			'created' => 'Created',
+			'ref' => 'Ref.',
+			'total' => 'Total',
+			'meta' => 'Meta',
+			'bwf' => 'BWF',
+			'ref' => 'Ref'
+		);
+	}
+
+	public function getFids(){
+		$ids = [];
+		$sql = 'SELECT fid FROM mani_map WHERE mani_id = '.$this->id;
+		$c = Yii::app()->db->createCommand($sql);
+		$rs = $c->queryAll();
+		foreach($rs as $r){
+			$ids[] = $r['fid'];
+		}
+		return $ids;
+	}
+	
+	public function validFile(){
+		$err = array();
+		if(empty($this->file)) $this->file = empty($_FILES['manifest'])? array() : $_FILES['manifest'];
+		if(empty($this->file['tmp_name']) || !is_file($this->file['tmp_name'])){
+			$err[] = 'Manifest File Required.';
+		}else{
+			if($this->type == 130) return true;
+			
+			$hash = hash_file('crc32b', $this->file['tmp_name']).hash('crc32b', filesize($this->file['tmp_name']));
+			if(FileRepo::model()->count('hash = :h AND type = 10', [':h' => $hash]) > 0){
+				$this->addError('file', 'This Manifest file already uploaded.');
+				return false;
+			}
+
+            ini_set('precision', 12);
+
+			$xls = new oExcel;
+			if(!$xls->supported($this->file['name'])){
+				foreach($xls->getError() as $e){
+					$err[] = $e;
+				}
+			}else{
+				$xls->load($this->file['tmp_name']);
+				$service = new Service();
+				$allData = $service->getFileData($this->file);
+				$data = $xls->getAll();
+
+				switch($this->type){
+					case 10:
+                        $hdr = ['m0' => 'TYPE,CONNOTE NO.,WEIGHT,CNEE,TEL,ADDRESS,SUBURB,STATE,P/C,DESTINATION,,PCS,COMMODITY,INNER ITEMS,UNIT VALUE,TTL VALUE,CMETER,SHIPPER,SHIPPER ADD,SHIPPER STATE,SHIPPER PC,SHIPPER COUNTRY CODE,SHIPPER CONTACT',
+                            'm1' => '序号,运单号,参考号,发货人,电话,地址,区,市,省,邮编,国家,收货人,电话,地址,市/区,洲/省,邮编,国家,箱数,毛重(kg),体积(m3),英文品名,申报货币,申报单价,数量'];
+
+                        break;
+
+                    case 210:
+						$hdr = 'TYPE,CONNOTE NO.,WEIGHT,CNEE,TEL,ADDRESS,SUBURB,STATE,P/C,DESTINATION,,PCS,COMMODITY,INNER ITEMS,UNIT VALUE,TTL VALUE,CMETER,SHIPPER,SHIPPER ADD,SHIPPER STATE,SHIPPER PC,SHIPPER COUNTRY CODE,SHIPPER CONTACT';
+					break;
+					case 20: case 220:
+						$hdr = array('20m' => 'TYPE,CONNOTE NO.,WEIGHT,CNEE,TEL,ADDRESS,SUBURB,STATE,P/C,DESTINATION,,PCS,COMMODITY,INNER ITEMS,UNIT VALUE,TTL VALUE,CMETER,SHIPPER,SHIPPER ADD,SHIPPER STATE,SHIPPER PC,SHIPPER COUNTRY CODE,SHIPPER CONTACT,SAC', '20r' => 'Waybill No.,Item No.,Weight,Comments');
+					break;
+					case 30:
+						if($this->fwd_id == 101){
+							$hdr = 'M,'.rtrim(implode(',', array_slice($data[1],1)),', ');
+						}elseif($this->fwd_id == 102){
+							$hdr = 'Consignment,Date,Style,Address 1,Address 2,Address 3,Address 4,Suburb,Postcode,Items,Coupons,References,Deadweight,Volume';
+						}
+					break;
+					case 110:
+						$hdr = array('110s' => '包（箱）号,运单号,发货人,电话,收货人,地址,邮编,电话,品名,件数,重量(KG),保费,备注', '110n' => '序号,运单号,参考号,发货人,电话,地址,市/区,洲/省,邮编,国家,收货人,电话,地址,区,市,洲/省,邮编,国家,包裹数量,毛重(kg),体积(m3),分类,中文品名,品牌,规格,申报货币,申报单价,件数,HS编码,保费,备注,身份证号码,商品SKU');
+						if(in_array(rtrim(implode(',', $data[2]),', '), $hdr)){
+							$data[1] = $data[2];
+							unset($data[2]);
+						}
+					break;
+					case 320:
+						$hdr = array('m0' => 'WBN,Ref,Items,Packages,Weight,CBM,Status,Cnee Name,Cnee Tel,Address,Suburb,State,Postcode');
+						break;
+					case 340:
+						$hdr = array('m0' => '客户单号,件数,件重量,长,宽,高,客户单号,件数,数量,件实重,材积重(没有则为空),长,宽,高,备注,客户单号(cref),件数,件实重,长,宽,高,客户单号(cref),件数,件重量,长,宽,高');
+					break;
+					case 360:
+						$hdr = array('m0' => '主单号Customer_ref,LB贴标顺序,蓝标号,分单号,重量,单箱体积,件数,收件公司,地址,城市region,邮编,收件联系人,电话,chargecode,state,Email,FBA PO,FBA shipment ID,主单号Customer_ref,LB贴标顺序,蓝标号,分单号,重量,单箱体积,件数,收件公司,地址,城市suburb,邮编,收件联系人,电话,chargecode,state,Email,FBA PO,FBA shipment ID');
+						if(!empty($allData[0][2])&&$allData[0][1][1]=='主单号Customer_ref')
+						{
+							$data = $allData[0];
+						}else
+						{
+							$data = $allData[1];
+						}
+					break;
+					case 380:
+						$hdr = array('m0' => 'HBL,Barcode,Courier,Connote');
+					break;
+					case 400:
+						$hdr = array('m0' => 'HWBN,Ref,C Ref,Customer Name,Phone,Customer Address,City,State,Postcode,Marks & Numbers,Pkgs,cbm,kg,Description of goods');
+					break;
+					case 420:
+						$hdr = array('m0' => 'Shipment ID,Consignee,Consignor,Origin,Dest.,Release,INCO,House Bill Number,Packs,Type,Weight,UW,Volume,UV,Service Level,ETD,ETA,Inspection,Inners,Type,ACI Cargo Status,ACI Msg. Status,AFR Bill Status,AFR Bill Status Desc.,Customs Cargo Status,Customs Message Status,Spot Rate,Curr.,Mode,Cost,Curr.,Mode,Gateway Sell,Curr.,Mode,HBL Dlv. Mode,VW,UVW,Trans.,Cont.,Type,CN Override,CN Address Line 1,CN Address Line 2,CN City,CN State,CN Country,CN Postcode,Chargeable,Unit,Goods Description,Value,Curr.,Booked,Receipt,Shipper\'s Ref,CFS Ref.,Consol Ref.,Chargeable,Client Volume,Client Weight,Has Prohibited Packaging,Interim Rcpt,Booking,Coload Master House Bill,Packing Order,Payment Term,Marks And Numbers,Exp Broker,Pickup L.Trn.,Imp Broker,Dlv. L.Trn.,Dlv. Agent,Pickup Agent,Is Domestic,Order Refs,Est Pickup,Pic. Req. By,Trn. Booking Requested,Trn. Booking Requested,Act. Pickup,Est. Delivery,Dlv. Req. By,Act. Delivery,Customs Entry Num.,Customs Entry Number Type,Pickup CFS Org.,Pickup CFS Address,Delivery CFS Org.,Delivery CFS Address,CR Override,CR Address Line 1,CR Address Line 2,CR City,CR State,CR Country,CR Postcode,Ctrl. Customer,Ctrl. Agent,SCP Override,SCP Address Line 1,SCP Address 2,SCP City,SCP State,SCP Country,CA Override,CA Address Line 1,CA Address Line 2,CA City,CA State,CA Country,Consignee Full Name,Consignor Full Name,Insured Val,Curr.,Additional Terms,Phase,Consol ID,Possible Oversize,Branch,Department,Sales Rep,Operator,Local Client,Overseas Agent,LDM,LC Address Short Code,Issue Date,Estimated Export Clearance Date,VR,Density Remark,Density Factor,Excess VW,UVW,HBL Booking Status,Additional Reference,Planned Load,Planned Discharge,Rate Origin,Rate Destination,Is Temperature Controlled,Is Hazardous,Is Perishable,Is Timber,Is Flammable,Is Container Vent Required,Commodity,PSA Group,Hazardous Waste Code,Permit Issue Date,Permit Number,Salvage packaging,Residue Contained,Last Known Transit Warehouse Status,Master / Lead,First BKG Ref.,Sales Rep (Full Name),Operator (Full Name)');
+					break;
+					case 430:
+						$hdr = array('6m' => 'CONNOTE NO.,WEIGHT,CMETER,PCS,CNOR,CNEE,Marks and number,MEMO,Consol Number');
+						break;
+				}
+				$this->mtype = $this->type;
+				$dl1 = rtrim(implode(',', $data[1]),', ');
+				if(is_array($hdr)){
+					$m = false;
+					foreach($hdr as $t=>$h){
+						if($dl1 == $h|| mb_strpos($dl1, $h) === 0 || count(explode($dl1, $h))>=2){
+							$m = true;
+							$this->mtype = $t;
+							break;
+						}
+					}
+					if(!$m) $err[] = 'Manifest Column Mismatch!';
+				}else{
+					if($dl1 != $hdr) $err[] = 'Manifest Column Mismatch!'.$hdr;
+				}
+				//check data
+				unset($data[1]);
+                if ( $this->mtype == 'm1' ) {
+                    unset($data[2]) ; // in case import m1 type template ,we need remove english title as well
+                }
+				$this->warns = array();
+				foreach($data as $l=>$r){
+					if (array_unique(array_values($r)) == ['']) continue;
+					$this->checkData($l, $r);
+				}
+			}
+			unset($xls);
+		}
+		
+		if(!empty($err)){
+			foreach($err as $e){
+				$this->addError('file', $e);
+			}
+		}
+
+        $merros  = $this->getErrors();
+
+		return empty($err) && empty($merros);
+	}
+
+    private function checkDataForImParcelM1(&$l,&$r){
+
+        $p = ImParcel::model()->find('hbn = :h', array(':h' => $r[2]));
+        if (empty($p)) {
+            $p = new ImParcel;
+            $ar = new Addr;
+            $ae = new Addr;
+        } else {
+            $ar = $p->cnor;
+            $ae = $p->cnee;
+        }
+        $cur = Invoice::getCurID($r[23]);
+        if ($cur === false) $this->addError('file', 'Line ' . $l . ': Missing currency.');
+
+        // validate shipper address information
+        $ar->name =  $r[4];
+        $ar->tel = preg_replace('/[^\d]+/', '', $r[5]);
+        $ar->address = $r[6];
+        $ar->suburb =  $r[7];
+        $ar->city = $r[8];
+        $ar->state = $r[9];
+        $ar->postcode = $r[10];
+        $ar->country =  empty($r[11]) ? 'PR China' : $r[11];
+        if (!$ar->validate()) $this->cascadeError($l, $ar);
+
+        // validate consignee address information
+        $ae->name = $r[12];
+        $ae->tel = preg_replace('/[^\d]+/', '', $r[13]);
+        $ae->address = $r[14];
+        $ae->suburb = $r[15];
+        $ae->state = strtoupper($r[16]);
+        $ae->postcode =  $r[17];
+        $ae->country = empty($r[18]) ? 'Australia' : $r[18];
+        if (!$ae->validate()) $this->cascadeError($l, $ae);
+
+        // check for consignee postcode
+        if ( !$this->validPostcode($ae->state,$ae->suburb,$ae->postcode) ) {
+            $this->addError('file', 'Line '.$l.': postcode does not match with state and suburb.');
+        }
+
+        $p->setAttributes(array(
+            'consol_id' => 0,
+            'zr_id' => 0,
+            'agent_id' => $this->fwd_id,
+            'status' => $this->type == 10 ? 10 : 20,
+            'type' => 10,
+            'hbn' => $r[2],
+            'pkg' => $r[19],
+            'cnor_id' => $ar->id,
+            'cnee_id' => $ae->id,
+            'state' => strtoupper($r[16]),
+            'postcode' => $r[17],
+            'value' => number_format((float)$r[24] * $r[25], 2, '.', '') ,
+            'dvalue' => number_format((float)$r[24] * $r[25], 2, '.', '') ,
+            'cbm' => number_format( empty($r[21]) ? round($r[21] / 600 * 1000000) / 1000000 : round($r[21] * 1000000) / 1000000, 6, '.', ''),
+            'currency' => empty($cur) ? 1 : $cur,
+            'weight' =>  sprintf('%0.2f', ($r[20] * 100) / 100),
+        ));
+        if (!empty($errs)) $this->cascadeError($l, $p);
+        $p->man_id = $this->id;
+        if (!$p->validate()) $this->cascadeError($l, $p);
+
+        if(empty($r[19]) || intval($r[19]) < 1 ) $this->addError('file', 'Line '.$l.': inner items is invalid.');
+        if(empty($r[20]) || floatval($r[20]) == 0 ) $this->addError('file', 'Line '.$l.': Missing package weight.');
+
+        // check to see if item name , value and quantity number are matched
+        // because multiple items are separated by comma
+        $nameValueQty = true;
+        if(empty($r[22])) {
+            $nameValueQty = false;
+            $this->addError('file', 'Line '.$l.': Missing goods name.');
+        }
+        if(floatval($r[24]) == 0) {
+            $nameValueQty = false;
+            $this->addError('file', 'Line '.$l.': Missing goods value.');
+        }
+        if(floatval($r[25]) == 0) {
+            $nameValueQty = false;
+            $this->addError('file', 'Line '.$l.': Missing goods quantity.');
+        };
+        if ( $nameValueQty ) {
+            $allNames = explode(';', $r[22]);
+            $allValues = explode(';', $r[24]);
+            $allQtys = explode(';', $r[25]);
+            if ( count($allNames) != count($allValues) ) {
+                $this->addError('file', 'Line '.$l.': goods name does not match with goods value.');
+            } else if ( count($allValues) != count($allQtys) ) {
+                $this->addError('file', 'Line '.$l.': goods value does not match with goods quantity.');
+            }
+        }
+
+    }
+
+    /**
+     * check to see if postcode is correct by suburb and state
+     * search postcode in au_postcode table then compare with destination postcode
+     * @param $sate
+     * @param $suburb
+     * @param $postcode
+     * @return bool
+     */
+    private function validPostcode($state,$suburb,$postcode){
+
+        $isValid = false;
+        $state = strtoupper(trim($state));
+        $suburb = strtoupper(trim($suburb));
+        // remove all more than one space in the suburb
+        $suburbWords = explode(' ', $suburb);
+        $suburb = '';
+        foreach ( $suburbWords as $w ) {
+            if ( !empty($w) ) $suburb .= ' ' . $w;
+        }
+        $suburb = trim($suburb);
+        $postcode = trim($postcode);
+
+        // try to find postcode from au_postcode
+        $postcodes = Postcode::model()->findAll('state = :state AND suburb = :suburb AND country = "AU"',array(':state' =>$state,':suburb' => $suburb));
+        if ( !empty($postcodes) ) {
+            foreach ( $postcodes as $post ) {
+                if ( $postcode == $post->postcode ) {
+                    $isValid = true;
+                    break;
+                }
+            }
+        }
+
+        return $isValid;
+    }
+
+	public function checkData($l, $r){
+		if(in_array($this->type, array(10,210,220)) || $this->mtype == '20m'){
+
+            if ( $this->mtype == 'm1') { // for import parcels from china template
+                $this->checkDataForImParcelM1($l,$r);
+            } else {
+                $p = ImParcel::model()->find('hbn = :h', array(':h' => $r[2]));
+                if (empty($p)) {
+                    $p = new ImParcel('create');
+                    $ar = new Addr;
+                    $ae = new Addr;
+                } else {
+                    $ar = $p->cnor;
+                    $ae = $p->cnee;
+                }
+
+                $ar->name = $r[18];
+                $ar->tel = preg_replace('/[^\d]+/', '', $r[23]);
+                $ar->address = $r[19];
+                $ar->state = $r[20];
+                $ar->postcode = $r[21];
+                $ar->country = $r[22];
+                if (!$ar->validate()) $this->cascadeError($l, $ar);
+
+                $ae->name = $r[4];
+                $ae->tel = preg_replace('/[^\d]+/', '', $r[5]);
+                $ae->address = $r[6];
+                $ae->suburb = $r[7];
+                $ae->state = $r[8];
+                $ae->postcode = $r[9];
+                $ae->country = 'Australia';
+                if (!$ae->validate()) $this->cascadeError($l, $ae);
+
+                preg_match('/(.+)(?:[,\s]+hs[:\s]+(.+))$/i', $r[13], $gd);
+                $p->setAttributes(array(
+                    'consol_id' => 0,
+                    'zr_id' => 0,
+                    'agent_id' => $this->fwd_id,
+                    'cnor_id' => $ar->id,
+                    'cnee_id' => $ae->id,
+                    'status' => in_array($this->type, [10, 210]) == 10 ? 10 : 20,
+                    'hbn' => $r[2],
+                    'pkg' => $r[12],
+                    'state' => $r[8],
+                    'postcode' => $r[9],
+                    'value' => number_format((float)$r[15], 2, '.', '') ,
+                    'dvalue' => number_format((float)$r[16], 2, '.', ''),
+                    'cbm' => number_format((floatval($r[17]) * 1000000) / 1000000, 6, '.', ''),
+                    'currency' => 1,
+                    'weight' => sprintf('%0.2f', (floatval($r[3]) * 100) / 100),
+                ));
+                //if(in_array($this->type, [20,220]) && empty($p->hbn)) $this->addError('file', 'Line '.$l.': CONNOTE NO. missing');
+                $errs = $p->importMultiItems(empty($gd[1]) ? $r[13] : $gd[1], $r[14], $r[15], empty($gd[3]) ? '' : $gd[3]);
+                if (!empty($errs)) $this->cascadeError($l, $p);
+
+                if (in_array($this->type, [10, 210])) {
+                    $p->man_id = $this->id;
+                } elseif (in_array($this->type, [20, 220])) {
+                    $p->rec_id = $this->id;
+                }
+                if ( empty($errs) && !$p->validate()) $this->cascadeError($l, $p);
+
+                return true;
+            }
+		}elseif($this->mtype == '20r'){
+			if(empty($r[1])) return true;
+			$p = ImParcel::model()->find('hbn = :h', array(':h' => $r[1]));
+			if(empty($p)){
+				$this->addError('file', 'Line '.$l.': House Bill No. '.$r[1].' not found.');
+			}
+		}elseif($this->type == 30){
+			if($this->fwd_id == 101){
+				if($r[1] != 'C') return true;
+				$tn = $r[2];
+				$hbn = $r[25];
+			}elseif($this->fwd_id == 102){
+				$tn = $r[1];
+				$hbn = $r[12];
+			}
+			if(empty($tn)){
+				$this->addError('file', 'Line '.$l.': Tracking No. empty');
+			}
+			
+			$hbn = preg_replace('/[ ="\\\\]+/', '', $hbn);
+			$p = Shipment::model()->find('hbn = :h', array(':h' => $hbn));
+			if(empty($p)){
+				$this->addError('file', 'Line '.$l.': House Bill No. '.$hbn.' not found.');
+			}else{
+				if($p->status < 60){
+					$this->warns[] = 'Line '.$l.': Parcel '.$hbn.' not cleared.';
+				}elseif(!empty($p->trans)){
+					foreach($p->trans as $t){
+						if($t->org_id == $this->fwd_id && $t->connote == $tn){
+							$this->warns[] = 'Line '.$l.': '.$tn.' already matched.';
+						}
+					}
+				}
+			}
+		}elseif($this->mtype == '110s'){
+			if(empty($r[2])) return false;
+			if(ExParcel::model()->count('hbn = :h AND status > 15', array(':h' => $r[2])) > 0){
+				$this->addError('file', 'Line '.$l.': Consigment '.$r[2].' already in the system');
+			}
+			if(empty($r[3])){
+				$this->addError('file', 'Line '.$l.': Consignor Name not found');
+			}
+			/*if(empty($r[4])){
+				$this->addError('file', 'Line '.$l.': Consignor Phone not found');
+			}*/
+			if(empty($r[5])){
+				$this->addError('file', 'Line '.$l.': Consignee Name not found');
+			}
+			if(empty($r[6])){
+				$this->addError('file', 'Line '.$l.': Consignee Address not found');
+			}
+			if(!preg_match('/\d+/', $r[8])){
+				$this->addError('file', 'Line '.$l.': Consignee Phone not found');
+			}
+			if(!preg_match_all('/([BMO])\(([^\)]+)\)/i', AppHelper::semiAngle($r[9]), $m, PREG_SET_ORDER)){
+				$this->addError('file', 'Line '.$l.': Goods Detail invalid');
+			}else{
+				foreach($m as $g){
+					$g[2] = preg_replace('/(\s*)x(\d+)/', '*\\2', $g[2]);
+					$gs = preg_split('/[, ]+/', $g[2]);
+					foreach($gs as $itm){
+						$ic = explode('*', $itm);
+						if(sizeof($ic) > 2) $ic = array_slice($ic, 0, 2);
+						if(sizeof($ic) != 2){
+							$this->addError('file', 'Line '.$l.': Goods Detail invalid');
+							break;
+						}
+						if(!is_numeric($ic[1])){
+							$this->addError('file', 'Line '.$l.': Item Qty invalid');
+							break;
+						}
+					}
+				}
+			}
+			if(empty($r[11])){
+				$this->addError('file', 'Line '.$l.': Weight not found');
+			}
+		}elseif(in_array($this->mtype, ['110n'])){
+			if(!empty($r[1])){// main line
+				if(!empty($r[2])){
+					$p = ExParcel::model()->find('hbn = :hbn AND (agent_id = :a OR agent_id = 0)', array(':hbn' => $r[2], ':a' => $this->fwd_id));
+				}
+
+				if(empty($p)){
+					$p = new ExParcel('create');
+					$ar = new Addr;
+					$ae = new Addr;
+				}else{
+					if($p->status >= 20) return;
+					$ar = &$p->cnor;
+					$ae = &$p->cnee;
+				}
+				
+				$ar->name = $r[4];
+				$ar->tel = preg_replace('/[^\d]+/','',$r[5]);
+				$ar->address = $r[6];
+				$ar->suburb = $r[7];
+				$ar->state = $r[8];
+				$ar->postcode = $r[9];
+				$ar->country = empty($r[10])? 'Australia' : $r[10];
+				$ar->ExportValidate(3, true);
+				if(!$ae->validate() || $ar->hasErrors()) $this->cascadeError($l, $ar);
+				
+				$ae->name = $r[11];
+				$ae->tel = preg_replace('/[^\d]+/','',$r[12]);
+				$ae->address = $r[13];
+				$ae->suburb = $r[14];
+				$ae->city = $r[15];
+				$ae->state = $r[16];
+				$ae->postcode = $r[17];
+				$ae->ExportValidate(4, true);
+				$ae->country = empty($r[18])? 'PR China' : $r[18];
+				if(!$ae->validate() || $ae->hasErrors()) $this->cascadeError($l, $ae);
+
+				$p->setAttributes(array(
+					'consol_id' => 0,
+					'zr_id' => 0,
+					'agent_id' => $this->fwd_id,
+					'status' => 10,
+					'type' => 20,
+					'hbn' => empty($r[2])? 'AUTO' : $r[2],
+					'pkg' => $r[19],
+					'state' => $r[16],
+					'postcode' => $r[17],
+					'cbm' => sprintf('%0.6f', empty($r[21])? round(floatval($r[20])/600*1000000)/1000000 : round(floatval($r[21])*1000000)/1000000),
+					'weight' => sprintf('%0.2f', round(floatval($r[20])*100)/100),
+				));
+				if(!empty($errs)) $this->cascadeError($l, $p);
+				$p->cref = $r[3];
+				$p->man_id = $this->id;
+				if(!$p->validate()) $this->cascadeError($l, $p);
+			}
+			if(empty($r[22])) $this->addError('file', 'Line '.$l.': Missing goods category.');
+			if(empty($r[23])) $this->addError('file', 'Line '.$l.': Missing goods name.');
+			if(floatval($r[28]) == 0) $this->addError('file', 'Line '.$l.': Missing goods quantity.');
+		} elseif ($this->mtype == '6m') {
+			// use FAC simple manifest create shipment
+			if(empty($r[4]) || $r[4] == 0){
+				$this->addError('file', 'Line '.$l.': PCS cannot be null or 0.');
+				return false;
+			}
+			$p = ImParcel::model()->find('hbn = :h', array(':h' => $r[1]));
+			if (empty($p)) {
+				$p = new ImParcel('create');
+			}
+			// cnee is optional, if not empty, create cnee
+			$ae = new Addr;
+			$ar = new Addr;
+			$ar->name = empty($r[5])?'unknown':$r[5];
+			$ae->name = empty($r[6])?'unknown':$r[6];
+			$ae->save();
+			$ar->save();
+			// Consol number and marks and number are optional, if not empty, set consol's marks and number
+			if (!empty($r[9])) {
+				$consol = Consol::model()->find('no = :n', array(':n' => $r[9]));
+				if (!empty($consol) && !empty($r[7])){
+					$consol->mdata['sea_mark_number'] = $r[7];
+					$consol->save();
+				}
+			}
+
+			$p->setAttributes(array(
+				'consol_id' => !empty($consol)?$consol->id:0,
+				'zr_id' => 0,
+				'agent_id' => $this->fwd_id,
+				'cnee_id' => $ae->id,
+				'cnor_id' => $ar->id,
+				'status' => 10,
+				'hbn' => $r[1],
+				'pkg' => $r[4],
+				'cbm' => number_format(((floatval($r[3]) * 1000000) / 1000000)/$r[4], 6, '.', ''),
+				'currency' => 1,
+				'weight' => sprintf('%0.2f', (floatval($r[2]) * 100) / 100),
+				'can' => !empty($r[8])?$r[8]:'',
+			));
+			$errs = $p->importMultiItems('unknown item', 1, 1, '');
+			if(!$p->validate()) $this->cascadeError($l, $p);
+			$p->save();
+			return true;
+		}
+	}
+
+	public function cascadeError($l, $o){
+		foreach($o->getErrors() as $e){
+			$this->addError('file', 'Line '.$l.' error: '. $e[0]);
+		}
+	}
+	
+	public function beforeSave(){
+		if(empty($this->created)) $this->created = date('Y-m-d H:i:s');
+		if(!empty($this->mdata)) $this->meta = json_encode($this->mdata);
+		if(empty($this->status)) $this->status = 10;
+		if(empty($this->by_id) && !empty(Yii::app()->user)) $this->by_id = Yii::app()->user->id;
+		return parent::beforeSave();
+	}
+	
+	public function afterSave(){
+		if(!$this->checkShipmentStates())
+		{
+			return;
+		}
+		if(!empty($this->file)){
+
+			if(in_array($this->type, [10,20,210,220])){//save parcels
+                if ( $this->mtype == 'm1' ) {
+                    $this->saveImParcels();
+                } else {
+                    $this->saveParcels();
+                }
+			}elseif(in_array($this->type, [320])){//save parcels
+                $this->savePCAETemplateParcels();
+			}elseif(in_array($this->type, [340])){//save AUK packages
+                $this->saveAUKPackagesParcels();
+			}elseif(in_array($this->type,[360])){
+				$this->save3PLSubShipments();
+			}elseif(in_array($this->type,[380])){
+				$this->saveAukBarcodes();
+			}elseif(in_array($this->type,[400])){
+				$this->saveAukManifestTemplate();
+			}elseif($this->type == 420){
+				$this->saveCargoWise();
+			}elseif($this->type == 30){
+				$this->addTranship();
+			}elseif($this->type == 110){
+				$trans = Yii::app()->db->beginTransaction();
+				try{
+					$this->saveExParcels();
+					$trans->commit();
+				} catch (Exception $ex) {
+					$trans->rollback();
+					throw $ex;
+				}
+			}
+			
+			//save file
+			FileRepo::storeFile($this->file['tmp_name'], $this->file['name'], 10, $this->id);
+		}
+		Meta::saveAll($this);
+		
+		if(!$this->nolog && !empty($this)){
+			$extra = empty($this->custom_log_note)? array() : array('note' => $this->custom_log_note);
+			Log::add($this, $this->isNewRecord? 3 : 4, array_merge(array('status' => $this->getStatus()), $extra));
+		}
+	}
+
+	public function checkShipmentStates()
+	{
+		$check = true;
+		if(!$this->imCover)
+		{
+			if(!empty($this->file)){
+				if(in_array($this->type, [10,20,210,220])){//save parcels
+	                    $check = $this->checkParcels();
+				}
+			}
+		}
+		return $check;
+	}
+	
+	public function afterFind(){
+		if(!empty($this->meta)) $this->mdata = json_decode($this->meta, true);
+		Meta::getAll($this);
+		return true;
+	}
+
+    /**
+     * save import parcels
+     */
+    private function saveImParcels(){
+
+        // read all parcels data from excel template file
+        $xls = new oExcel;
+        $xls->supported($this->file['name']);
+        $xls->load($this->file['tmp_name']);
+        $data = $xls->getAll();
+        ini_set('precision', 12);
+        unset($xls); // release memory right now
+
+        // remove common header
+        unset($data[1]);
+        unset($data[2]);
+
+        // try to get default shipper address if existing
+        $user = User::model()->findByPk(Yii::app()->user->id);
+
+        $defShipperAddress = NULL;
+        if(!empty($user->org->contacts)){
+            $shipperAddress = $user->org->contacts[0]; // always use first one which should be shipper address currently
+            if ( $shipperAddress && $shipperAddress->status == 1 ) {
+                $defShipperAddress = array(
+                        'name' => $shipperAddress->name,
+                        'tel' => $shipperAddress->phone,
+                        'address' => $shipperAddress->address,
+                        'suburb' => $shipperAddress->suburb,
+                        'city' => $shipperAddress->city,
+                        'state' => $shipperAddress->state,
+                        'postcode' => $shipperAddress->postcode,
+                        'country' => $shipperAddress->country,
+                        'email' => $shipperAddress->email
+                );
+            }
+        }
+
+        $ss = new OrgRate('search');
+        $ss->org_id = $this->fwd_id;
+        $cus_services = $ss->getCustomerServicePlans($ss->org_id);
+        $dlMode = 1; // default as eParcel service
+        if ( isset($cus_services['services']->DR->dl_mode) ) $dlMode = $cus_services['services']->DR->dl_mode;
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+        foreach($data as $l=>$r){
+            if(empty($r[1])) continue; //  parcel No. column at 1 :  save real parcel ( one parcel number maybe include multiple goods lines)
+            if(empty($r[20])) break; // goods weight column at 10 :  goods must have weight value
+
+            // if parcel existing just update it
+            // otherwise will create a new one
+            $p = ImParcel::model()->find('status <= 25  AND hbn = :hbn AND owner_id = :oid', array(':hbn' => $r[2], ':oid' => Yii::app()->user->id));
+            if(empty($p)) {
+                $p = new ImParcel;
+                $ar = new Addr;
+                $ae = new Addr;
+            } else {
+                $ar = &$p->cnor;
+                $ae = &$p->cnee;
+            }
+
+            // get currency ID
+            $cur = Invoice::getCurID($r[23]);
+
+            // save or update shipper address information
+            $ar->name =  $r[4];
+            $shipperName = trim($ar->name);
+            if ( empty( $shipperName ) ) {
+                // in case no shipper name , we will try to use org's default shipper address if existing
+                if (!empty($defShipperAddress) ) {
+                    $ar->attributes = $defShipperAddress;
+                }
+            } else {
+                $ar->tel = preg_replace('/[^\d]+/', '', $r[5]);
+                $ar->address = $r[6];
+                $ar->suburb = $r[7];
+                $ar->city = $r[8];
+                $ar->state = $r[9];
+                $ar->postcode = $r[10];
+                $ar->country = empty($r[11]) ? 'PR China' : $r[11];
+            }
+            $ar->save();
+
+            // update or save consignee address information
+            $ae->name = $r[12];
+            $ae->tel = preg_replace('/[^\d]+/', '', $r[13]);
+            $ae->address = $r[14];
+            $ae->suburb = $r[15];
+            $ae->state = strtoupper($r[16]);
+            $ae->postcode =  $r[17];
+            $ae->country = empty($r[18]) ? 'Australia' : $r[18];
+            $ae->save();
+
+            $p->setAttributes(array(
+                'consol_id' => 0,
+                'zr_id' => 0,
+                'agent_id' => $this->fwd_id,
+                'cnor_id' => $ar->id,
+                'cnee_id' => $ae->id,
+                'status' => $this->type == 10 ? 10 : 20,
+                'type' => 10,
+                'hbn' => $r[2],
+                'cref' => $r[3],
+                'pkg' => $r[19],
+                'state' => strtoupper($r[16]),
+                'postcode' => $r[17],
+
+               // 'value' => number_format((float)$r[27] * $r[28], 2, '.', '') ,
+               // 'dvalue' => number_format((float)$r[27] * $r[28], 2, '.', '') ,
+                'cbm' => number_format( empty($r[21]) ? round($r[21] / 600 * 1000000) / 1000000 : round($r[21] * 1000000) / 1000000, 6, '.', ''),
+                'currency' => empty($cur) ? 1 : $cur,
+                'weight' =>  sprintf('%0.2f', ($r[20] * 100) / 100),
+
+            ));
+            
+            if($p->weight<0.01) $p->weight = 0.01;
+
+           // get all goods , currently only support maximum 100 items for one parcel
+            $items = array('g' => [], 'g_zh' => [], 'b' => [], 'm' => [], 'v' => [], 'q' => [], 'hs' => []);
+            $names = explode(';',$r[22]);
+            $values = explode(';',$r[24]);
+            $qtys = explode(';',$r[25]);
+            $allValues = 0.0;
+            $itemCounts = sizeof($names);
+            for ( $index = 0 ; $index < $itemCounts ; $index++){
+                $items['g'][$index] = $names[$index];
+                $items['g_zh'][$index] = '';
+                $items['b'][$index] = '';
+                $items['m'][$index] = '';
+                $items['v'][$index] = $values[$index];
+                $items['q'][$index] = $qtys[$index];
+                $items['hs'][$index] = '';
+                $allValues += $values[$index] * $qtys[$index];
+            }
+            $p->setAttribute('value',number_format((float)$allValues, 2, '.', '') );
+            $p->setAttribute('dvalue',number_format((float)$allValues, 2, '.', '') );
+
+            $p->eitems = $items;
+            $p->man_id = $this->id;
+
+            // if no hbn we create import parcel one
+            if ( empty($p->hbn) ) {
+                $p->hbn = 'ICN' . sprintf('%03s', $p->agent_id) . sprintf('%06s', $p->agent->getLabelNumber());
+                $p->ref = $p->hbn; // avoid creating AMQ label by shipment after save logic
+            }
+
+            $p->save();
+
+            // check to see if we should tracking the parcel by AUPOST
+            // if client select this service and having this service we create barcode by AUPOST　rule
+            //  as : AMQ + 7 digital numbers
+            $this->updateBarcodeByDlService($p,$dlMode);
+        }
+        	$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+    }
+
+    /**
+     * @param $p
+     * @param $dlMode
+     */
+    private function updateBarcodeByDlService(&$p,$dlMode){
+        switch ($dlMode) {
+            case 1: // eParcel
+            case 2: // BPA no tracking
+            case 3: // BPA with tracking
+            case 4: // Mixed select economical one ( eParcel or BPA with tracking)
+                $this->updateBarcodeWithAMQ($p);
+                break;
+        }
+
+        // Mixed select economical one ( eParcel or BPA with tracking)
+        // check to see which one is cheaper
+        // in case $dlMode should be one of ( 1 or 3)
+        if ( $dlMode == 4 ) {
+            $dlMode = 1; // default as eParcel
+            $costByeParcel = $p->getCostByeParcel();
+            $costByBpaTracking = $p->getCostByBPATracking();
+            if ( $costByeParcel > $costByBpaTracking ) {
+                $dlMode = 3; // ok, BPA with tracking is cheap
+            }
+        }
+
+        switch ($dlMode) {
+            case 1: // eParcel
+            case 2: // BPA no tracking
+            case 3: { // BPA with tracking
+                $p->mdata['au_lbl_type'] = $dlMode; // save what kind of label we should use
+                $p->save();
+                if ( $dlMode == 3 ) {
+                    // in case BPA with tracking , we should change ref with stored label ID which we get from AU post
+                    if ( !$this->updateBarcodeWithBPATracking($p) ) {
+                        // in case no more BPA tracking No. available
+                        // we set as eParcel
+                        $p->mdata['au_lbl_type'] = 1; // convert to eParcel mode
+                        $p->save();
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    /**
+     * @param $p
+     */
+    private function updateBarcodeWithBPATracking(&$p){
+        $newNo = $this->getNewBPATrackingNo();
+        if ( empty($newNo) ) return false;
+
+        $p->hbn = '57' . $newNo . '13';
+        $p->hbn .= AusPostAPI::aidChkDgt($p->hbn);
+        $p->nolog = true;
+        $p->ref = $p->hbn;
+        $p->update(['hbn','ref']);
+        $p->nolog = false;
+
+        return true;
+    }
+
+
+    private  function newBpaTrackingNo(&$pool){
+        $n = '';
+        foreach($pool as $k=>$rg){
+            if($rg[0] == $rg[1]) continue;
+            $n = $rg[0];
+            $pool[$k][0]++;
+            break;
+        }
+        return $n;
+    }
+
+    private function getNewBPATrackingNo(){
+        $confile = Yii::app()->basePath.DIRECTORY_SEPARATOR.'data'.DIRECTORY_SEPARATOR .'ap_receipted.php';
+        if(function_exists('opcache_invalidate')) opcache_invalidate($confile);
+        $sinc = include($confile);
+        $newNo = $this->newBpaTrackingNo($sinc);
+        if(!empty($sinc) && !empty($confile)) file_put_contents($confile, "<?php\nreturn ".var_export($sinc, true).';');
+
+        if ( empty($newNo) ) {
+            // not enough BPA tracking No.
+            // we should send a email to manager maybe ...
+            // TODO soon
+
+        }
+        return $newNo;
+    }
+
+    /**
+     * @param $p
+     */
+    private function updateBarcodeWithAMQ(&$p){
+        $p->hbn = ImParcel::genEparcelNo();
+        $p->nolog = true;
+        $p->ref = $p->hbn;
+
+        // currently we use 2014 format short label
+        $p->mdata['test_aupost_2017'] = 1;
+        // save long aupost tracking number in note field
+        if ( isset($p->mdata['test_aupost_2014']) ) {
+            $aid = $p->ref.sprintf('%02s', 1).'50'.'2';
+            $aid .= AusPostAPI::aidChkDgt($aid).'0'.sprintf('%04s', $p->cnee->postcode);
+
+        } else
+        {
+            $aid = $shipment->ref.sprintf('%02s', 1).'00093'.'50'.'0';
+	    $aid .= AusPostAPI::aidChkDgt($aid);
+//            $aid = $p->ref . sprintf('%02s', 1) . '00093' . '02' . '0'; // latest format
+//            $aid .= AusPostAPI::aidChkDgt($aid);
+        }
+        $p->note = $aid;
+        $p->updateMeta();
+        $p->update(['hbn','ref','note']);
+        $p->nolog = false;
+    }
+
+	public function saveParcels(){
+
+        ini_set('precision', 12);
+
+		$xls = new oExcel;
+		$xls->supported($this->file['name']);
+		$xls->load($this->file['tmp_name']);
+		$data = $xls->getAll();
+
+		unset($xls);
+		$hdr = $data[1];
+		unset($data[1]);
+		if($this->type == 20 && $this->mtype == '20r'){//save receipts
+			foreach($data as $l=>$r){
+				if(empty($r[1])) continue;
+				$p = ImParcel::model()->find('hbn = :h AND agent_id = :aid', array(':h' => $r[1], ':aid' => $this->fwd_id));
+				$p->status = 25;
+				$p->rec_id = $this->id;
+				$p->save();
+			}
+			return;
+		}
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+		foreach($data as $l=>$r){
+			if(empty($r[1])) break;
+			if($this->type > 200){
+				$p = CoParcel::model()->find('status <= 25 AND hbn = :hbn AND agent_id = :aid', array(':hbn' => $r[2], ':aid' => $this->fwd_id));
+			}else{
+				$p = ImParcel::model()->find('status <= 25 AND hbn = :hbn AND agent_id = :aid', array(':hbn' => $r[2], ':aid' => $this->fwd_id));
+			}
+			if(empty($p)){
+				$p = $this->type > 200? new CoParcel('create') : new ImParcel('create');
+				$ar = new Addr;
+				$ae = new Addr;
+			}else{
+				$ar = &$p->cnor;
+				$ae = &$p->cnee;
+			}
+			
+			$ar->name = $r[18];
+			$ar->tel = preg_replace('/[^\d]+/','',$r[23]);
+			$ar->address = $r[19];
+			$ar->state = $r[20];
+			$ar->postcode = $r[21];
+			$ar->country = $r[22];
+			$ar->save();
+			
+			$ae->name = $r[4];
+			$ae->tel = preg_replace('/[^\d]+/','',$r[5]);
+			$ae->address = $r[6];
+			$ae->suburb = $r[7];
+			$ae->state = $r[8];
+			$ae->postcode = $r[9];
+			$ae->country = 'Australia';
+			$ae->save();
+			
+			preg_match('/(.+)(?:[,\s]+hs[:\s]+(.+))$/i',$r[13],$gd);
+            $uv = preg_split('/[;,\/]+/', $r[15]);
+			$p->setAttributes(array(
+				'agent_id' => $this->fwd_id,
+				'consol_id' => 0,
+				'zr_id' => 0,
+				'cnor_id' => $ar->id,
+				'cnee_id' => $ae->id,
+				'status' => in_array($this->type, [10, 210])? 10 : 25,
+				'hbn' => $r[2],
+				'pkg' => $r[12],
+				//'goods' => empty($gd[1])? $r[13] : $gd[1],
+				//'hs' => empty($gd[3])? '' : $gd[3],
+				//'item' => $r[14],
+				'state' => $r[8],
+				'postcode' => $r[9],
+                'value' => number_format((float)$uv[0], 2, '.', '') ,
+                'dvalue' => number_format((float)$r[16], 2, '.', ''),
+                'cbm' => number_format( (floatval($r[17]) * 1000000) / 1000000, 6, '.', ''),
+                'currency' =>  $this->mdata['edi_currency'],
+                'weight' => number_format( (floatval($r[3]) * 100) / 100, 2, '.', '')
+			));
+			if($p->weight<0.01) $p->weight = 0.01;
+
+			$p->importMultiItems(empty($gd[1])? $r[13] : $gd[1], $r[14], $r[15], empty($gd[3])? '' : $gd[3]);
+
+			if(in_array($this->type, [10, 210])){
+				$p->man_id = $this->id;
+			}elseif(in_array($this->type, [20, 220])){
+				$p->rec_id = $this->id;
+			}
+
+            // save USA/AUD exchange rate
+            $p->mdata['exchange_rate'] = $this->mdata['exchange_rate'];
+
+            // save SAC flag
+            // if set as zero which means do not set SAC anyway
+            // others value will be set SAC flag based on value
+            // for example over 1000 AUD will not set SAC otherwise set SAC
+            if ( isset($r[24]) && $r[24] === '0') {
+                $p->mdata['ignore_sac'] = true;
+            }
+            if (!empty($r[25])) {
+            	if($r[25]=='DDU')
+            	{
+            		$p->bwf = $p->bwf|ImParcel::CUSTOM_DDU;
+            	}elseif($r[25]=='DDP')
+            	{
+            		$p->bwf = $p->bwf|ImParcel::CUSTOM_DDP;
+            	}
+            }
+
+            if (!empty($r[27])) {
+                $p->can = $r[27];
+            }
+
+            if (!empty($r[26])&&$this->bagTagIdentify) {
+            	$destination = empty($r[28])?"":$r[28];
+            	if(empty($p->ref))
+            	{
+            		$p->ref = $p->hbn;
+            	}
+	            if(preg_match('/UBA1050032SKU0/i', $r[26]))
+				{
+					$p->ref="SYD".$p->ref;
+				}else if(preg_match('/UBA1050034SKU0/i', $r[26]))
+				{
+					$p->ref="MEL".$p->ref;
+				}else if(preg_match('/UBA1050033SKU0/i', $r[26]))
+				{
+					$p->ref="BNE".$p->ref;
+				}else if(preg_match('/UBA1050035SKU0/i', $r[26]))
+				{
+					$p->ref="ADL".$p->ref;
+				}else
+				{
+					$p->ref=$destination.$p->ref;
+				}
+			}
+
+			$isLetter = empty($r[29])?"":$r[29];
+			if(!empty($isLetter))
+			{
+				$p->mdata['is_manual_letter'] = $isLetter;
+				$p->save();
+			}
+			$subBarcodes = empty($r[30])?"":$r[30];
+			$allBarcode = [];
+			if(!empty($subBarcodes))
+			{
+				$barcodes = explode(';', $subBarcodes);
+				$hasMain = false;
+				if(!in_array($p->hbn, $barcodes)&&!empty($barcodes))
+				{
+					$allBarcode[] = $p->hbn;
+				}
+
+				foreach ($barcodes as $key => $barcode) {
+					if(empty($barcode)) continue;
+					$allBarcode[] = $barcode;
+				}
+				
+				if(count($allBarcode)>$p->pkg)
+				{
+					unset($allBarcode[0]);
+				}
+
+				if(!empty($allBarcode))
+				{
+					$p->mdata['barcode'] = join(',',$allBarcode);
+				}
+			}
+			
+			$p->save();
+
+
+			if(!empty($allBarcode))
+			{
+				$kk = 0;
+				foreach ($allBarcode as $key => $barcode) {
+					$pb = new ParcelBarcode();
+					$pb->main_ref = $p->hbn;
+					$pb->fid = $p->id;
+					$pb->sub_ref = $barcode;
+					$pb->sn = $kk+1;
+					$pb->save();
+					$kk++;
+				}
+			}
+
+
+
+			if (!empty($r[26])) {
+                $bagTagLabel = $r[26];
+
+                $importBag = ImportBag::model()->find('bag_tag = :bag_tag',[':bag_tag'=>$bagTagLabel]);
+				if(empty($importBag))
+				{
+					$destination = empty($r[28])?"":$r[28];
+					$importBag = new ImportBag();
+					$importBag->user_id= User::currentUserID();
+					$importBag->bag_tag = $bagTagLabel;
+					$importBag->created = date("Y-m-d H:i:s");
+					if(!empty($destination))
+					{
+						$importBag->mdata['destination'] = $destination;
+					}
+					if(!empty($isLetter))
+					{
+						$importBag->mdata['is_manual_letter'] = 1;
+					}
+					$importBag->save();
+				}else
+				{
+					$destination = empty($r[28])?"":$r[28];
+					if(!empty($destination))
+					{
+						$importBag->mdata['destination'] = $destination;
+					}
+					if(!empty($isLetter))
+					{
+						$importBag->mdata['is_manual_letter'] = 1;
+					}
+					$importBag->save();
+				}
+
+				$bagTag = ImportBagTag::model()->find('shipment_id = :shipment_id',[':shipment_id'=>$p->id]);
+				if(empty($bagTag))
+				{
+					$bagTag = new ImportBagTag();
+				}
+
+				$bagTag->bag_tag = $bagTagLabel;
+				$bagTag->import_bag_id = $importBag->id;
+				$bagTag->shipment_id = $p->id;
+				$bagTag->save();
+			}
+		}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+	}
+
+	public function savePCAETemplateParcels(){
+
+        ini_set('precision', 12);
+
+		$xls = new oExcel;
+		$xls->supported($this->file['name']);
+		$xls->load($this->file['tmp_name']);
+		$data = $xls->getAll();
+
+		unset($xls);
+		$hdr = $data[1];
+		unset($data[1]);
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+		foreach($data as $l=>$r){
+				if(empty($r[1])) break;
+				$p = null;
+				if(!$this->imCover)
+				{
+					$p = ImParcel::model()->find('hbn = :hbn AND status!=100', array(':hbn' => $r[1]));
+					if(!empty($p))
+					{
+						$this->addError($p->hbn." Exist","Line ".$l.": ".$p->hbn." is existed");
+						continue;
+					}
+				}
+
+				if(empty($p)){
+					$p = new ImParcel('create');
+					$ar = new Addr;
+					$ae = new Addr;
+				}else{
+					$ar = &$p->cnor;
+					$ae = &$p->cnee;
+				}
+				
+				$ar->name = '';
+				$ar->tel = '';
+				$ar->address = '';
+				$ar->state = '';
+				$ar->postcode = '';
+				$ar->country = '';
+				$ar->save();
+				
+				$ae->name = $r[8];
+				$ae->tel = $r[9];
+				$ae->address = $r[10];
+				$ae->suburb = $r[11];
+				$ae->state = $r[12];
+				$ae->postcode = $r[13];
+				$ae->country = 'Australia';
+				$ae->save();
+				
+				preg_match('/(.+)(?:[,\s]+hs[:\s]+(.+))$/i',$r[3],$gd);
+	            $uv = preg_split('/[;,\/]+/', 1);
+				$p->setAttributes(array(
+					'agent_id' => $this->fwd_id,
+					'consol_id' => 0,
+					'zr_id' => 0,
+					'cnor_id' => $ar->id,
+					'cnee_id' => $ae->id,
+					'status' => ImParcel::NEW_STATUS,
+					'hbn' => $r[1],
+					'ref' => $r[2],
+					'pkg' => $r[4],
+					//'goods' => empty($gd[1])? $r[13] : $gd[1],
+					//'hs' => empty($gd[3])? '' : $gd[3],
+					//'item' => $r[14],
+					'state' => $r[12],
+					'postcode' => $r[13],
+	                'value' => number_format((float)$uv[0], 2, '.', '') ,
+	                'dvalue' => number_format((float)$uv[0], 2, '.', ''),
+	                'cbm' => number_format( ((floatval($r[6])/floatval($r[4])) * 1000000) / 1000000, 6, '.', ''),
+	                'currency' =>  $this->mdata['edi_currency'],
+	                'weight' => number_format( (floatval($r[5]) * 100) / 100, 2, '.', '')
+				));
+				$arritems = preg_split('/[;,\/]+/', $r[3]);
+				$arrvalues = [];
+				$arrunits = [];
+				foreach ($arritems as $key => $value) {
+					$arrvalues[] = 1;
+					$arrunits[] = 1;
+				}
+				$p->importMultiItems($r[3], join(';',$arrunits), join(';',$arrvalues), '');
+
+				$p->man_id = $this->id;
+
+	            // save USA/AUD exchange rate
+	            $p->mdata['exchange_rate'] = $this->mdata['exchange_rate'];
+	            $p->mdata['total_cbm'] = $r[6];
+	           
+				
+				if(!$p->save())
+				{
+					$this->addError($p->hbn." import error","Line ".$l.": ".json_encode($p->getErrors()));
+				}
+
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+	}
+
+	public function saveAukManifestTemplate(){
+
+        ini_set('precision', 12);
+
+		$xls = new oExcel;
+		$xls->supported($this->file['name']);
+		$xls->load($this->file['tmp_name']);
+		$data = $xls->getAll();
+
+		unset($xls);
+		$hdr = $data[1];
+		unset($data[1]);
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+		foreach($data as $l=>$r){
+				if(empty($r[1])) break;
+				$p = null;
+				if(!$this->imCover)
+				{
+					$p = ImParcel::model()->find('hbn = :hbn AND status!=100', array(':hbn' => $r[1]));
+					if(!empty($p))
+					{
+						$this->addError($p->hbn." Exist","Line ".$l.": ".$p->hbn." is existed");
+						continue;
+					}
+				}
+
+				if(empty($p)){
+					$p = new ImParcel('create');
+					$ar = new Addr;
+					$ae = new Addr;
+				}else{
+					$ar = &$p->cnor;
+					$ae = &$p->cnee;
+				}
+				
+				$ar->name = '';
+				$ar->tel = '';
+				$ar->address = '';
+				$ar->state = '';
+				$ar->postcode = '';
+				$ar->country = '';
+				$ar->save();
+				
+				$ae->name = $r[4];
+				$ae->tel = $r[5];
+				$ae->address = $r[6];
+				$ae->suburb = $r[7];
+				$ae->state = $r[8];
+				$ae->postcode = $r[9];
+				$ae->country = 'Australia';
+				$ae->save();
+				
+				preg_match('/(.+)(?:[,\s]+hs[:\s]+(.+))$/i',$r[14],$gd);
+	            $uv = preg_split('/[;,\/]+/', 1);
+				$p->setAttributes(array(
+					'agent_id' => $this->fwd_id,
+					'consol_id' => 0,
+					'zr_id' => 0,
+					'cnor_id' => $ar->id,
+					'cnee_id' => $ae->id,
+					'status' => ImParcel::NEW_STATUS,
+					'hbn' => $r[1],
+					'ref' => $r[2],
+					'cref' => $r[3],
+					'pkg' => $r[11],
+					//'goods' => empty($gd[1])? $r[14] : $gd[1],
+					//'hs' => empty($gd[3])? '' : $gd[3],
+					//'item' => $r[14],
+					'state' => $r[8],
+					'postcode' => $r[9],
+	                'value' => 1 ,
+	                'dvalue' => 1,
+	                'cbm' => number_format( ((floatval($r[12])/floatval($r[11])) * 1000000) / 1000000, 6, '.', ''),
+	                'currency' => $this->mdata['edi_currency'],
+	                'weight' => number_format( (floatval($r[13]) * 100) / 100, 2, '.', '')
+				));
+				$arritems = preg_split('/[;,\/]+/', $r[14]);
+				$arrvalues = [];
+				$arrunits = [];
+				foreach ($arritems as $key => $value) {
+					$arrvalues[] = 1;
+					$arrunits[] = 1;
+				}
+				$p->importMultiItems($r[14], join(';',$arrunits), join(';',$arrvalues), '');
+
+				$p->man_id = $this->id;
+
+	            // save USA/AUD exchange rate
+	            $p->mdata['exchange_rate'] = $this->mdata['exchange_rate'];
+	            $p->mdata['total_cbm'] = $r[6];
+	           
+				
+				if(!$p->save())
+				{
+					$this->addError($p->hbn." import error","Line ".$l.": ".json_encode($p->getErrors()));
+				}
+
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+	}
+
+	public function saveCargoWise(){
+		ini_set('precision', 12);
+
+		$xls = new oExcel;
+		$xls->supported($this->file['name']);
+		$xls->load($this->file['tmp_name']);
+		$data = $xls->getAll();
+
+		unset($xls);
+		$hdr = $data[1];
+		unset($data[1]);
+
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			foreach($data as $l=>$r){
+				if(empty($r[1])) break;
+
+				$p = ImParcel::model()->find('status <= 25 AND hbn = :hbn AND agent_id = :aid', array(':hbn' => $r[8], ':aid' => $this->fwd_id));
+				
+				if(empty($p)){
+					$p = new ImParcel('create');
+					$ar = new Addr;
+					$ae = new Addr;
+				}else{
+					$ar = &$p->cnor;
+					$ae = &$p->cnee;
+				}
+				
+				$ar->name = $r[113];
+				$ar->tel = "0000000000";
+				$ar->address = $r[92]." ".$r[93];
+				$ar->state = $r[95];
+				$ar->postcode = $r[97];
+				$ar->country = $r[96];
+				$ar->save();
+				
+				$ae->name = $r[112];
+				$ae->tel = "0000000000";
+				$ae->address = $r[43]." ".$r[44];
+				$ae->suburb = trim($r[45]);
+				$ae->state = trim($r[46]);
+				$ae->postcode = trim($r[48]);
+				$ae->country = 'Australia';
+				$ae->save();
+				
+				$preCbm = trim($r[13])/trim($r[9]);
+
+				$p->setAttributes(array(
+					'agent_id' => $this->fwd_id,
+					'consol_id' => 0,
+					'cnor_id' => $ar->id,
+					'cnee_id' => $ae->id,
+					'status' => 10,
+					'hbn' => trim($r[8]),
+					'ref' => trim($r[8]),
+					'pkg' => trim($r[9]),
+					'odpt_id' => $this->dpt_id,
+                    'ddpt_id' => $this->dpt_id,
+
+					'state' => trim($r[46]),
+					'postcode' => trim($r[48]),
+					'cbm' => !empty($preCbm)?$preCbm:0.001,
+					'currency' =>  $this->mdata['edi_currency'],
+					'weight' => !empty(trim($r[11])) ? trim($r[11]):1,
+				));
+				//(goods name , 1 , 0 )
+				$p->importMultiItems(trim($r[51]),'1','1','');
+				// save USA/AUD exchange rate
+				$p->mdata['exchange_rate'] = $this->mdata['exchange_rate'];
+				$p->mdata['sea_mark_number']=$r[68];
+				$p->save();
+				
+			}
+				$trans->commit();
+			} catch (Exception $ex) {
+				$trans->rollback();
+				throw $ex;
+			}
+	}
+
+	public function saveAUKPackagesParcels(){
+
+        ini_set('precision', 12);
+
+		$xls = new oExcel;
+		$xls->supported($this->file['name']);
+		$xls->load($this->file['tmp_name']);
+		$data = $xls->getAll();
+
+		unset($xls);
+		$hdr = $data[1];
+		$type = 0;
+		if(!empty($hdr[9]))
+		{
+			$type=1;
+		}
+		unset($data[1]);
+		foreach ($data as $key => $d)
+        {
+            if(empty($d[1])) continue;
+            $qty = $d[2];
+
+            if($type==0)
+            {
+	            $weight = number_format(floatval($d[3]),2, '.', '');
+	            $length = $d[4];
+	            $width = $d[5];
+	            $height = $d[6];
+        	}else
+        	{
+        		$weight = number_format(floatval($d[4]),2, '.', '');
+	            $length = $d[6];
+	            $width = $d[7];
+	            $height = $d[8];
+        	}
+
+            for ($i=0; $i < $qty; $i++)
+            {
+                if(empty($shipmentDatas[$d[1]]))
+                {
+                    $shipmentDatas[$d[1]] = [['weight'=>$weight,'length'=>$length,'width'=>$width,'height'=>$height,'reference'=>0,'cbm'=>0]];
+                }else
+                {
+                    $shipmentDatas[$d[1]][] = ['weight'=>$weight,'length'=>$length,'width'=>$width,'height'=>$height,'reference'=>0,'cbm'=>0];
+                }
+            }
+
+            if(empty($weight)||empty($length)||empty($width)||empty($height))
+            {
+                $errors[] = 'cref '.$d[1] .'： line '.$key.' empty package data';
+            }
+        }
+
+        foreach ($shipmentDatas as $cref => $s)
+        {
+                $pkg = count($s);
+                $p = Shipment::model()->find('(cref = :cref or ref=:cref or can=:cref) and status!=100 and agent_id = :agentId',[":cref"=>$cref,":agentId"=>$this->fwd_id]);
+
+                $shipmentPackage = ShipmentPackage::model()->find('cref = :cref',[":cref"=>"".$cref]);
+                if(empty($p))
+                {
+                    $totalWeight =0;
+                    $cbm=0;
+                    $calculateCbm=0;
+
+                    foreach ($s as $index=>$pack){
+                        $totalWeight += $pack['weight'];
+                        $cbm += $pack['cbm'];
+                        $calculateCbm += number_format($pack['length']*$pack['width']*$pack['height']/1000000, 6, '.', '');
+                    }
+                    $pkg = count($s);
+                    $cbm=number_format(max($cbm, $calculateCbm)/$pkg, 6, '.', '');
+                    $weight= max(round($totalWeight*100)/100, 0.01);
+                    if(empty($shipmentPackage))
+                    {
+                        $shipmentPackage = new ShipmentPackage();
+                    }
+                    $shipmentPackage->cref = $cref;
+                    $shipmentPackage->packages = json_encode($s);
+                    $shipmentPackage->cbm = $cbm;
+                    $shipmentPackage->weight = $weight;
+                    $shipmentPackage->pkg = $pkg;
+                    $shipmentPackage->user_id = User::CurrentUserID();
+                    $shipmentPackage->create = date('Y-m-d H:i:s');
+                    $shipmentPackage->save();
+                    $errors[] = 'cref '.$cref .': not found,the data is saved in system and waiting for shipment import';
+                    unset($shipmentDatas[$cref]);
+                    continue;
+                }
+
+
+                if(!empty($p))
+                {
+                	if(!empty($p->trans))
+	                {
+	                	$tran = end($p->trans);
+	                	if($tran->org_id != Org::ORGID_COURIER_TOLL_IPEC&&$tran->org_id != Org::ORGID_COURIER_UBI&&$tran->org_id != Org::ORGID_COURIER_TNT_TOP&&$tran->org_id != Org::ORGID_COURIER_BORDER&&$tran->org_id != Org::ORGID_COURIER_FL_HUNTER&&$tran->org_id != Org::ORGID_COURIER_ALLIED_TOP)
+	                	{
+		                    $errors[] = 'cref '.$cref .': can not be updated';
+		                    unset($shipmentDatas[$cref]);
+	                	}
+	                }
+
+	                if($pkg!=$p->pkg)
+	                {
+	                    $errors[] = 'cref '.$cref .': number of packages is '.$pkg.', but system recording is '.$p->pkg;
+	                    unset($shipmentDatas[$cref]);
+	                }
+            	}else
+            	{
+            		$errors[] = 'cref '.$cref .': is not existed';
+            		 unset($shipmentDatas[$cref]);
+            	}
+        }
+        if(!empty($errors))
+        {
+        	$this->warns = $errors;
+        }
+
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			foreach ($shipmentDatas as $cref => $s)
+            {
+                $pkg = count($s);
+                $p = ImParcel::model()->find('(cref = :cref or ref=:cref or can=:cref) and status!=100',[":cref"=>$cref]);
+                $shipmentPackages = ShipmentPackage::model()->findAll('cref = :cref',[":cref"=>$cref]);
+                foreach ($shipmentPackages as $key => $shipmentPackage) {
+                	$shipmentPackage->delete();
+                }
+
+                $totalWeight =0;
+                $cbm=0;
+                $calculateCbm=0;
+                $opacks = $p->packs;
+                $p->packs = [];
+
+                foreach ($s as $index=>$pack){
+                    $p->packs[$index] = $pack;
+                    $totalWeight += $pack['weight'];
+                    $cbm += $p->packs[$index]['cbm'];
+                    $calculateCbm += number_format($p->packs[$index]['length']*$p->packs[$index]['width']*$p->packs[$index]['height']/1000000, 6, '.', '');
+                }
+                $cbm=number_format(max($cbm, $calculateCbm)/$p->pkg, 6, '.', '');
+                $p->cbm = max($p->cbm, $cbm);
+                $p->weight= number_format($totalWeight, 2, '.', '');
+				$p->save();
+
+                if(empty($shipmentPackage))
+                {
+                    $shipmentPackage = new ShipmentPackage();
+                    $shipmentPackage->p_packages = $opacks;
+                }
+                $shipmentPackage->cref = $cref;
+                $shipmentPackage->packages = json_encode($s);
+                $shipmentPackage->cbm = $p->cbm;
+                $shipmentPackage->weight = $p->weight;
+                $shipmentPackage->user_id = User::CurrentUserID();
+                $shipmentPackage->create = date('Y-m-d H:i:s');
+                $shipmentPackage->save();
+            }
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+	}
+
+	public function saveAukBarcodes(){
+
+        ini_set('precision', 12);
+
+		$xls = new oExcel;
+		$xls->supported($this->file['name']);
+		$xls->load($this->file['tmp_name']);
+		$data = $xls->getAll();
+
+		unset($xls);
+		$hdr = $data[1];
+		unset($data[1]);
+		$shipmentDatas = [];
+		foreach ($data as $key => $d)
+        {
+            if(empty($d[1])) continue;
+            $hbn = $d[1];
+            $barcode = $d[2];
+            $ref = $d[4];
+            $sn = $d[5];
+            if(!empty($shipmentDatas[$hbn]))
+            {
+            	$shipmentDatas[$hbn][] = [$hbn,$barcode,$ref,$sn];
+            }else
+            {
+            	$shipmentDatas[$hbn] = [[$hbn,$barcode,$ref,$sn]];
+            }
+        }
+
+        foreach ($shipmentDatas as $hbn => $s)
+        {
+                $pkg = count($s);
+                $p = ImParcel::model()->find('hbn = :hbn and status!=100 and agent_id = :agentId',[":hbn"=>$hbn,":agentId"=>$this->fwd_id]);
+                if(!empty($p))
+                {
+                	if($p->status>=ImParcel::STATE_LOCAL_ARRIVAL&&$p->status!=55&&$p->status!=58&&$p->status!=60&&$p->scanCount()==0)
+                	{
+                		$errors[] = 'hbn '.$hbn .': status is '.$p->getStatus().', only import shipment can be updated';
+	                    unset($shipmentDatas[$hbn]);
+                	}
+	                if($pkg!=$p->pkg)
+	                {
+	                    $errors[] = 'hbn '.$hbn .': number of barcodes is '.$pkg.', but system recording is '.$p->pkg;
+	                    unset($shipmentDatas[$hbn]);
+	                }
+            	}else
+            	{
+            		$errors[] = 'hbn '.$hbn .': is not existed';
+            		 unset($shipmentDatas[$hbn]);
+            	}
+        }
+        if(!empty($errors))
+        {
+        	$this->warns = $errors;
+        }
+
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			foreach ($shipmentDatas as $hbn => $sArr)
+	        {
+	        	$p = ImParcel::model()->find('hbn = :hbn and status!=100 and agent_id = :agentId',[":hbn"=>$hbn,":agentId"=>$this->fwd_id]);
+	        	$pbs = ParcelBarcode::model()->findAll('fid = :fid',[":fid"=>$p->id]);
+	        	foreach ($pbs as $key => $pb) {
+	        		$pb->delete();
+	        	}
+	        	$change = false;
+	        	foreach ($sArr as $key => $s) {
+	        		$pb = new ParcelBarcode();
+	        		$pb->main_ref = $s[2];
+	        		$pb->fid = $p->id;
+	        		$pb->sub_ref = str_replace("'", '', $s[1]);
+	        		$pb->sn = $s[3];
+	        		if(!$pb->save())
+	        		{
+	        			print_r($pb);
+	        		}
+	        		if(!$change)
+	        		{
+	        			$p->ref = $s[2];
+	        			$p->save();
+	        			$change = true;
+	        		}
+	        	}
+	        }
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+	}
+
+	
+
+	public function save3PLSubShipments(){
+
+        ini_set('precision', 12);
+        $xls = new oExcel;
+		$xls->load($this->file['tmp_name']);
+		$service = new Service();
+		$allData = $service->getFileData($this->file);
+		if(!empty($allData[0][2])&&$allData[0][1][1]=='主单号Customer_ref')
+		{
+			$index = 0;
+		}else
+		{
+			$index = 1;
+		}
+
+
+		$imParcelService = new ImParcelService();
+		[$subShipmentErrors,$successes] = $imParcelService->import3PLSubShipments($this->file,true,$this->id,$index,false);
+        if(!empty($subShipmentErrors))
+        {
+        	$this->warns = $subShipmentErrors;
+        }else
+        {
+        	[$subShipmentErrors,$successes] = $imParcelService->import3PLSubShipments($this->file,false,$this->id,$index,false);
+        	if(!empty($subShipmentErrors))
+	        {
+	        	$this->warns = $subShipmentErrors;
+	        }
+	    }
+
+	}
+
+	private function NumToStr($num){
+	    if (stripos($num,'e')===false) return $num;
+	    $num = trim(preg_replace('/[=\'"]/','',$num,1),'"');//出现科学计数法，还原成字符串
+	    $result = "";
+	    while ($num > 0){
+	        $v = $num - floor($num / 10)*10;
+	        $num = floor($num / 10);
+	        $result   =   $v . $result;
+	    }
+	    return $result;
+	}
+	public function checkParcels(){
+		$xls = new oExcel;
+		$xls->supported($this->file['name']);
+		$xls->load($this->file['tmp_name']);
+		$data = $xls->getAll();
+
+		unset($xls);
+		$hdr = $data[1];
+		unset($data[1]);
+		$hbns = [];
+		$check = true;
+		if($this->type == 20 && $this->mtype == '20r'){//save receipts
+			foreach($data as $l=>$r){
+				if(empty($r[1])) continue;
+				$hbns[] = $r[1];
+			}
+		}else
+		{
+			foreach($data as $l=>$r){
+				if(empty($r[2])) continue;
+					$hbns[] = $r[2];
+			}
+		}
+
+		$criteria = new CDbCriteria();
+		$criteria->addInCondition('hbn',$hbns);
+		$data = ImParcel::model()->findAll($criteria);
+		foreach ($data as $key => $value) {
+			$this->addError('existing', 'Hbn existing please click the create checkbox '.$value->hbn);
+			$check = false;
+		}
+		return $check;
+	}
+	
+	public function saveExParcels(){
+		$xls = new oExcel;
+		$xls->supported($this->file['name']);
+		$xls->load($this->file['tmp_name']);
+		$data = $xls->getAll();
+		ini_set('precision', 12);
+		unset($xls);
+		if($this->mtype == '110s'){
+			unset($data[1]);
+			unset($data[2]);
+			
+			foreach($data as $l=>$r){
+				if(empty($r[2]) && empty($r[5])) break;
+				$p = ExParcel::model()->find('`hbn` = :hbn AND (`agent_id` = :a OR `agent_id` = 0 OR `agent_id` IN (SELECT id FROM `org` WHERE `status` = 1 AND `type` = 65 AND `by` = :a))', array(':hbn' => $r[2], ':a' => $this->fwd_id));
+				if(empty($r[2]) || empty($p)){
+					$p = new ExParcel('create');
+					$ar = new Addr;
+					$ae = new Addr;
+				}else{
+					if($p->status >= 20) continue;
+					$ar = &$p->cnor;
+					$ae = &$p->cnee;
+				}
+				
+				$ar->name = $r[3];
+				$ar->tel = preg_replace('/[^\d]+/','',$r[4]);
+				$ar->country = 'Australia';
+				$ar->save();
+				
+				$ae->name = $r[5];
+				$ae->tel = preg_replace('/[^\d]+/','',$r[8]);
+				$ae->setCnAddr($r[6], $r[7]);
+				$ae->country = 'PR China';
+				$ae->save();
+				
+				$p->setAttributes(array(
+					'agent_id' => empty($p->agent_id)? $this->fwd_id : $p->agent_id,
+					'consol_id' => 0,
+					'odpt_id' => $this->dpt_id,
+					'zr_id' => 0,
+					'cnor_id' => $ar->id,
+					'cnee_id' => $ae->id,
+					'status' => empty($p->status)? 10 : ($p->status == 14? 15 : $p->status),
+					'state' => $ae->state,
+					'postcode' => $ae->postcode,
+					'hbn' => $r[2],
+					'pkg' => 1, //empty($r[10])? 1 : $r[10]
+					'insurance' => $r[12],
+					'currency' => 1,
+					'weight' => sprintf('%0.2f', round(floatval($r[11])*100)/100),
+					'bwf' => $p->bwf | empty($ae->city)? 4 : 0,
+					'cbwf' => empty($this->owner->extra['mark_print'])? 0 : 1,
+				));
+
+				if(empty($r[2])) $p->hbn = $p->genHbn();
+
+				//save items
+				preg_match_all('/([BMO])\(([^\)]+)\)/i', AppHelper::semiAngle($r[9]), $m, PREG_SET_ORDER);
+				$p->eitems = array('type' => array(), 'g' => array(), 'q' => array());
+				foreach($m as $g){
+					$g[2] = preg_replace('/(\s*)x(\d+)/', '*\\2', $g[2]);
+					$gs = preg_split('/[, ]+/', $g[2]);
+					foreach($gs as $itm){
+						$ic = explode('*', $itm);
+						if(sizeof($ic) > 2) $ic = array_slice($ic, 0, 2);
+						$p->eitems['type'][] = strtoupper($g[1]);
+						$p->eitems['g'][] = trim($ic[0]);
+						$p->eitems['q'][] = $ic[1];
+						$p->eitems['v'][] = null;
+					}
+				}
+				$p->mdata['client_entry'] = ['items'=> $p->eitems];
+				$p->man_id = $this->id;
+				$p->save();
+
+				//add notes
+				if(!empty($r[13])) Log::add($p, 6, array('notes' => $r[13]));
+				Log::add($p, 6, array('notes' => 'Goods: '.$r[9]));
+			}
+		}elseif(in_array($this->mtype, ['110n'])){
+			unset($data[1]);
+			foreach($data as $l=>$r){
+				if(empty($r[1]) || in_array($l, $this->exclude_lines)) continue;
+				if(empty($r[22]) && empty($r[23])) break;
+				$p = ExParcel::model()->find('hbn = :hbn AND (agent_id = :a OR agent_id = 0)', array(':hbn' => $r[2], ':a' => $this->fwd_id));
+
+				if(empty($r[2]) || empty($p)){
+					$p = new ExParcel('create');
+					$ar = new Addr;
+					$ae = new Addr;
+				}else{
+					if($p->status >= 20) continue;
+					$ar = &$p->cnor;
+					$ae = &$p->cnee;
+				}
+				
+				$ar->name = $r[4];
+				$ar->tel = preg_replace('/[^\d]+/','',$r[5]);
+				$ar->address = $r[6];
+				$ar->suburb = $r[7];
+				$ar->state = $r[8];
+				$ar->postcode = $r[9];
+				$ar->country = empty($r[10])? 'Australia' : $r[10];
+				$ar->save();
+				
+				$ae->name = $r[11];
+				$ae->tel = preg_replace('/[^\d]+/','',$r[12]);
+				$ae->address = $r[13];
+				$ae->suburb = $r[14];
+				$ae->city = $r[15];
+				$ae->state = $r[16];
+				$ae->postcode = $r[17];
+				$ae->country = 'PR China';
+				//$ae->setCnAddr($r[13], $r[17]);
+				if(!empty($r[32]) && preg_match('/^(\d{15}|[\dx]{18})$/i',$r[32])){
+					$ae->cnid_no = $r[32];
+				}
+				if(empty($ae->postcode)){
+					$ae->postcode = CnArea::getZip($ae->state, $ae->city);
+				}
+				if(!$ae->save()) Yii::log($ae->id.' '.json_encode($ae->getErrors()), 'error');
+
+				/*if(preg_match('/DAU(\d{3})/', $r[2], $hm)){
+					$org = Org::model()->findByPk($hm[1]);
+					if($org) $p->agent_id = $org->id;
+				}*/
+				$styp = 0;
+				if(!empty($r[34])){
+					foreach(ExParcel::$styps as $ti=>$tv){
+						if($tv == $r[34]){
+							$styp = $ti;
+							break;
+						}
+					}
+				}
+				
+				$p->setAttributes(array(
+					'agent_id' => empty($p->agent_id)? $this->fwd_id : $p->agent_id,
+					'consol_id' => 0,
+					'odpt_id' => $this->dpt_id,
+					'zr_id' => 0,
+					'cnor_id' => $ar->id,
+					'cnee_id' => $ae->id,
+					'status' => empty($p->status)? 10 : ($p->status == 14? 15 : $p->status),
+					'hbn' => $r[2],
+					'cref' => $r[3],
+					'pkg' => $r[19],
+					'state' => $ae->state,
+					'postcode' => $r[17],
+					'insurance' => $r[30],
+					'note' => $r[31],
+					'cbm' => empty($r[21])? round(floatval($r[20])/600*1000000)/1000000 : round(floatval($r[20])*1000000)/1000000,
+					'weight' => sprintf('%0.2f', round(floatval($r[20])*100)/100),
+					'cbwf' => empty($this->owner->extra['mark_print'])? 0 : 1,
+					'styp' => $styp,
+				));
+
+				$ptyp = array_flip(ExProdb::$rtypes);
+				$items = array('type' => [], 'g' => [], 'b' => [], 'm' => [], 'v' => [], 'q' => [], 'hs' => [],);
+				for($j = 0; $j < 100; $j++){
+					if($j > 0 && (empty($data[$l+$j]) || !empty($data[$l+$j][1]))) break;
+					if(!empty($data[$l+$j][33])){
+						$pd = ExProdb::model()->find('sku = :sku', [':sku' => $data[$l+$j][33]]);
+					}else{
+						$pd = ExProdb::model()->find('name_zh LIKE :n OR sku = :nt', [':n' => '%'.$data[$l+$j][23].'%', ':nt' => $data[$l+$j][23]]);
+					}
+					if(empty($pd)){
+						$items['type'][$j] = strtoupper($data[$l+$j][22]);
+						$items['g'][$j] = $data[$l+$j][23];
+						$items['b'][$j] = $data[$l+$j][24];
+						$items['m'][$j] = $data[$l+$j][25];
+						$items['v'][$j] = $data[$l+$j][27];
+						$items['q'][$j] = $data[$l+$j][28];
+						$items['hs'][$j] = $data[$l+$j][29];
+					}else{
+						$items['type'][$j] = $ptyp[$pd->type];
+						$items['g'][$j] = $pd->name_zh;
+						$items['b'][$j] = $pd->brand;
+						$items['m'][$j] = $pd->model;
+						$items['v'][$j] = $pd->price;
+						$items['q'][$j] = $data[$l+$j][28];
+						$items['hs'][$j] = $pd->hs;
+					}
+				}
+				$p->eitems = $items;
+				$p->mdata['client_entry'] = ['items'=> $items];
+				if(empty($p->hbn)) $p->hbn = $p->genHbn();
+				$p->man_id = $this->id;
+				$p->save();
+			}
+		}
+	}
+	
+	public function addTranship(){
+		$xls = new oExcel;
+		$xls->supported($this->file['name']);
+		$xls->load($this->file['tmp_name']);
+		$data = $xls->getAll();
+		unset($data[1]);
+		foreach($data as $l=>$r){
+			if($this->fwd_id == 101){
+				if($r[1] != 'C') continue;
+				$tn = $r[2];
+				$hbn = $r[25];
+			}elseif($this->fwd_id == 102){
+				$tn = $r[1];
+				$hbn = $r[12];
+			}
+			$hbn = preg_replace('/[ ="\\\\]+/', '', $hbn);
+			$p = Shipment::model()->find('hbn = :h', array(':h' => $hbn));
+			if($p){
+				$ts = new Tranship;
+				$ts->pid = $p->id;
+				$ts->org_id = $this->fwd_id;
+				$ts->man_id = $this->id;
+				$ts->type = 80;
+				$ts->status = 19;
+				$ts->connote = $tn;
+				$ts->time = date('Y-m-d H:i:s');
+				$ts->save();
+			}
+		}
+	}
+	
+	public function getType(){
+		return Yii::t(strtolower(__CLASS__), empty(self::$types[$this->type])? '' : self::$types[$this->type]);
+	}
+	
+	public function getStatus(){
+		return Yii::t(strtolower(__CLASS__), empty(self::$states[$this->status])? '' : self::$states[$this->status]);
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search($pgn=true, $ps = 30, $ec = false,$paidonly = false){
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+		
+		if(empty($this->status)) $this->status = '<90';
+
+		$criteria->compare('t.id',$this->id);
+		$criteria->compare('fwd_id',$this->fwd_id);
+		$criteria->compare('t.dpt_id',$this->dpt_id);
+		$criteria->compare('t.by_id',$this->by_id);
+		$criteria->compare('t.consol_id',$this->consol_id);
+		$criteria->compare('t.created',$this->created,true);
+		$criteria->compare('t.type',$this->type);
+		$criteria->compare('t.status',$this->status);
+		$criteria->compare('t.ref',$this->ref,true);
+		$criteria->compare('t.total',$this->total,true);
+		$criteria->compare('t.bwf',$this->bwf,true);
+
+		$with = array();
+		if(!empty($this->fwd_name)){
+			$with[] = 'owner';
+			$criteria->compare('owner.name', $this->fwd_name, true);
+		}
+
+        // in case only search for paid manifest
+        if ( $paidonly ) {
+            $with[] = 'invoice';
+            $criteria->compare('invoice.status',9,true);
+        }
+
+		if(!empty($this->pref))
+		{
+			$with[] = 'man_shipments';
+			$criteria->addCondition('man_shipments.ref = "'.$this->pref.'" or '.'man_shipments.hbn = "'.$this->pref.'" or '.'man_shipments.cref = "'.$this->pref.'" ' );
+		}
+		
+		if(!empty($with)){
+			$criteria->with = array_unique($with);
+			$criteria->together = true;
+		}
+
+		if($ec){
+			$criteria->mergeWith($ec);
+		}
+
+		if($this->isArchive==1)
+		{
+			$criteria->compare('t.created',">2021-01-01",true);
+		}
+
+		return new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+			'sort'=>array(
+    			'defaultOrder'=>'t.created DESC',
+  			),
+			'pagination'=>$pgn? array(
+				'pageSize' => $ps,
+			) : false,
+		));
+	}
+
+    /**
+     * @param bool $pgn
+     * @param int $ps
+     * @return CActiveDataProvider
+     */
+    public function searchPaidManifest($pgn=true, $ps = 30){
+
+        // create a criteria condition
+        $criteria=new CDbCriteria;
+        if ( empty($this->status) ) $this->status = '<90';
+        $criteria->compare('dpt_id',$this->dpt_id);
+        $criteria->compare('consol_id',$this->consol_id);
+        $criteria->compare('type',$this->type);
+        $criteria->compare('status',$this->status);
+
+        // create raw data
+        $allPaidManifests = array();
+
+        return new CActiveDataProvider($allPaidManifests, array(
+            'criteria'=>$criteria,
+            'sort'=>array(
+                'defaultOrder'=>'t.created DESC',
+            ),
+            'pagination'=>array(
+                'pageSize' => $ps,
+            ),
+        ));
+    }
+
+	public function getFileName(){
+		return empty($this->rfile)? '' : (empty($this->rfile->name)? 'unknown' : $this->rfile->name);
+	}
+	
+	public function getFileLink(){
+		return empty($this->rfile)? '' : $this->rfile->getUrl();
+	}
+	
+	public function getDptName(){
+		return empty($this->dpt_id)? '' : $this->dpt->name;
+	}
+	
+	public function rSearch($criteria){
+		$rs = self::model()->findAll($criteria);
+		$ra = array();
+		$i = 0;
+		foreach($rs as $r){
+			$o = $r->attributes;
+			$o['rfile_link'] = $r->getFileLink();
+			$o['rfile_name'] = $r->getFileName();
+			$o['dpt_name'] = $r->getDptName();
+			$ra[] = $o;
+		}
+		return $ra;
+	}
+
+    /**
+     * @param $consoleId
+     */
+    public static function recreateEpsInvoice($consoleId,$invoiceId = 0){
+        //invoice
+        $rates = [
+            'N0' => ['4.95', '4.95', '0.00'],
+            'N1' => ['6.18', '6.48', '0.00'],
+            'GF' => ['6.18', '6.48', '0.50'],
+            'WG' => ['6.18', '6.48', '0.50'],
+            'NC' => ['6.18', '7.32', '0.64'],
+            'CB' => ['6.18', '7.32', '0.64'],
+            'N3' => ['6.18', '8.07', '1.35'],
+            'N4' => ['6.18', '8.07', '1.35'],
+            'N2' => ['6.18', '8.07', '1.35'],
+            'V0' => ['6.18', '6.70', '0.90'],
+            'V1' => ['6.18', '6.70', '0.90'],
+            'GL' => ['6.18', '8.00', '1.29'],
+            'BR' => ['6.18', '9.06', '1.76'],
+            'V3' => ['6.18', '7.14', '1.23'],
+            'V2' => ['6.18', '9.06', '1.76'],
+            'Q0' => ['6.18', '6.70', '0.90'],
+            'Q1' => ['6.18', '6.70', '0.90'],
+            'IP' => ['6.18', '8.00', '1.65'],
+            'GC' => ['6.18', '6.70', '1.56'],
+            'Q5' => ['6.18', '7.14', '1.23'],
+            'SC' => ['6.18', '8.00', '1.65'],
+            'Q2' => ['6.18', '9.06', '2.23'],
+            'Q3' => ['6.18', '9.06', '3.43'],
+            'Q4' => ['6.18', '9.06', '3.94'],
+            'S0' => ['6.18', '6.70', '1.19'],
+            'S1' => ['6.18', '6.70', '1.19'],
+            'S2' => ['6.18', '9.06', '3.06'],
+            'W0' => ['6.18', '8.00', '2.77'],
+            'W1' => ['6.18', '8.00', '2.77'],
+            'W2' => ['6.18', '9.06', '6.49'],
+            'W3' => ['6.18', '9.06', '6.69'],
+            'T0' => ['6.18', '8.00', '2.20'],
+            'T1' => ['6.18', '8.00', '2.20'],
+            'NT1' => ['6.18', '9.06', '6.62'],
+            'NT2' => ['6.18', '9.06', '6.62'],
+            'NF' => ['6.18', '8.29', '4.60'],
+            'W4' => ['6.18', '9.06', '6.07'],
+            'AAT' => ['6.18', '8.29', '2.70'],
+        ];
+
+        $consol = ImcoConsol::model()->findByPk($consoleId);
+        $owner = Org::model()->findByPk(1002);
+        if ( $invoiceId > 0 ) $inv = Invoice::model()->findByPk($invoiceId);
+        if ( empty($inv) ) {
+            $inv = new Invoice;
+            $inv->type = 10;
+			$inv->dpmt = Invoice::DPMT_IMPORT;
+            $inv->to_id = 1002;
+            $inv->dpt_id = Org::PCAE_DEPARTMENT_SYDNEY; // default set Sydney as warehouse
+            $inv->ref = 'ck1-ep'.date('Ymd', strtotime($consol->created));
+            $inv->currency = 1;
+            $inv->status = 1;
+            $inv->date = date('Y-m-d', strtotime($consol->created));
+            $inv->due = $inv->date;
+            $inv->save();
+        }
+        $items = [];
+        $tot = 0;
+
+        foreach($consol->shipments as $i=>$p){
+            $pc = trim($p->cnee->postcode);
+            $zm = ZoneMap::model()->find('org_id = 100 AND pc_lo <= :p AND pc_hi >= :p', [':p' => $pc]);
+            if(!empty($rates[$zm->z2])){
+                $z = $zm->z2;
+            }elseif(!empty($rates[$zm->z1])){
+                $z = $zm->z1;
+            }else{
+                echo $zm->z1.'/'.$zm->z2." has no rate<br />";
+                continue;
+            }
+            $amt = $p->weight > 0.5? $rates[$z][1] + $rates[$z][2] * $p->weight : $rates[$z][0];
+            $items[] = [$p->ref, $p->getDesc().'    '.$z, $p->pkg, $p->weight, $p->cbm, $amt];
+            $tot += $amt;
+        }
+        $inv = Invoice::model()->findByPk($inv->id);
+        InvLine::model()->deleteAll('inv_id = :invid',[':invid' => $inv->id]);
+        $il = new InvLine;
+        $il->inv_id = $inv->id;
+        $il->ccode = 'EPA';
+        $il->mdata['items'] = $items;
+        $il->det = $consol->no;
+        $il->amount = round($tot * 100) / 100;
+        $il->qty = 1;
+        $il->save();
+        $inv->total = $tot;
+        $inv->consol_id = $consol->id;
+
+        $il->fid = $consol->id;
+        $il->model = 'ImcoConsol'; // invoice connected with console directly
+
+        $inv->mdata['name'] = $owner->name;
+        $inv->mdata['address'] = $owner->getAddress();
+        $inv->mdata['payterm'] = empty($owner->extra['payterm'])? 'COD' : $owner->extra['payterm'].' days';
+        $inv->save();
+
+    }
+
+    public function getRTS()
+    {
+    	$shipment = Shipment::model()->find('hbn = :ref OR ref = :ref', [':ref' => $this->ref]);
+    	return !empty($shipment->mdata["used_location"]) ? "Already Picked" : @$shipment->mdata["location"];
+    }
+
+    public function isWDT()
+    {
+    	$shipments = $this->man_shipments;
+    	foreach ($shipments as $key => $s) {
+    		if(!empty($s->consol)&&preg_match('/WDT/i', $s->consol->no))
+			{
+				return true;
+			}
+    		
+    	}
+    	
+    	return false;
+    }
+
+
+    public function showPacksWithoutPackages()
+    {
+    	$shipments = $this->man_shipments;
+    	$tld = 0;
+    	$courier = 0;
+    	$str = '';
+    	foreach ($shipments as $key => $s) {
+    		if($s->checkIsCargoProcessWithRef())
+    		{
+    			if(empty($s->packs))
+    			{
+    				$tld += 1;
+    			}
+    		}else
+    		{
+    			if(!empty($s->mdata['org_rate_id']))
+    			{
+    				$orgRate = OrgRate::model()->findByPk($s->mdata['org_rate_id']);
+					if(in_array($orgRate->org_id,SiReconcile::$cbmCourier))
+					{
+						if(empty($s->packs))
+    					{
+							$courier += 1;
+						}
+					}
+    			}
+    		}
+    	}
+    	if($tld>0)
+    	{
+    		$str .= "TLD-".$tld."票未导入箱</br>";
+    	}
+    	if($courier>0)
+    	{
+    		$str .= "Others-".$courier."票未导入箱";
+    	}
+
+    	return $str;
+    }
+
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return Consol the static model class
+	 */
+	public static function model($className=__CLASS__){
+		return parent::model(get_called_class());
+	}
+}

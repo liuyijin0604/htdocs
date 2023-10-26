@@ -1,0 +1,2262 @@
+<?php 
+class WarehouseProcessService extends Service
+{
+
+	public function __construct()
+	{
+		
+	}
+
+	public function getCheckInReport($wid,$isBackend= false,$saveDetail = false)
+	{
+		$cache = $this->getCacheData("checkInReportConsols:".$wid.date("Ymd"));
+		$consol=new Consol('search');
+		$consol->unsetAttributes();
+		if($wid==Org::TLA_DEPARTMENT_PERTH)
+		{
+			$wid = [Org::TLA_DEPARTMENT_PERTH,Org::TLA_DEPARTMENT_FREMANTLE];
+		}
+		$consol->dpt_id=$wid;
+		$consol->isBackend = $isBackend;
+		$consol->process_statuses=[ConsolProcess::STATE_WAITING_WH_SCAN];
+		$consol->process_types=[ConsolProcess::TYPE_FULL_PROCESS, ConsolProcess::TYPE_LOCAL_PROCESS,ConsolProcess::TYPE_DIRECT_AIR_CONSOL];// ConsolProcess::TYPE_DIRECT_SEA_CONSOL, ConsolProcess::TYPE_CONSOL_SEA];
+		$dataArr = $consol->search(false, 30)->data;
+		$resultArr = [];
+		$totalConsol = 0;
+		$totalShipment = 0;
+		$totalPkg = 0;
+		$totalScanCount = 0;
+
+		if(!empty($cache))
+		{
+			$cachedConsols = Consol::model()->findAll("id in (".join(',',$cache).")");
+			$dataArr = array_merge($dataArr,$cachedConsols);
+		}
+
+		foreach($dataArr as $key => $d)
+		{
+			$d= $d->getReal();
+			if($wid==Org::TLA_DEPARTMENT_BRISBANE)
+			{
+				if(strtotime($d->process->to_warehouse)>strtotime(date('Y-m-d 23:59:00'))) continue;
+			}else
+			{
+				if(strtotime($d->process->to_warehouse)>strtotime(date('Y-m-d 16:00:00'))) continue;
+			}
+			if(!empty($resultArr[$d->id])) continue;
+			$sql = 'SELECT sum(IF((pkg-scan_no) > 0, 0, 1)*(pkg-scan_no)) as heldPkg,sum(IF((pkg-scan_no) > 0, 0, 1)) as heldShipments FROM shipment WHERE consol_id = '.$d->id.' AND status in (55)';
+			$c = Yii::app()->db->createCommand($sql);
+			$held = $c->queryAll()[0];
+
+			$sql = 'SELECT count(1) as shipments,status FROM shipment WHERE consol_id = '.$d->id.' and status not in (55,60) group by status order by status';
+			$c = Yii::app()->db->createCommand($sql);
+			$allStatusData = $c->queryAll();
+
+
+			$sql = 'SELECT count(1) as shipments, sum(pkg) as pkg, sum(IF((pkg-scan_no) > 0, 1, 0)) AS scanshipments, sum(pkg-scan_no) as scanCount,sum(IF((pkg-scan_no) > 0, 0, 1)) AS unscanshipments,sum(scan_no) as unscan FROM shipment WHERE consol_id = '.$d->id;
+			$c = Yii::app()->db->createCommand($sql);
+			$scanCount = $c->queryAll()[0];
+			$awb = $d->service==10?$d->awb:@$d->mdata["container_no"];
+			$resultArr[$d->id] = [(empty($awb)?$d->no:$awb),$scanCount['shipments'],$scanCount['pkg'],$scanCount['scanshipments'],$scanCount['scanCount'],$scanCount['unscanshipments'],$scanCount['unscan'],(empty($held['heldPkg'])?0:$held['heldPkg']),(empty($held['heldShipments'])?0:$held['heldShipments']),$allStatusData];
+			$totalConsol+=1;
+			$totalShipment+=$resultArr[$d->id][1];
+			$totalPkg+=$resultArr[$d->id][2];
+			$totalScanCount+=$resultArr[$d->id][4];
+		}
+
+		if(!empty($dataArr))
+		{
+			if($saveDetail)
+			{
+				$consolIds = array_unique(array_column($dataArr, "id"));
+				$result= [];
+				$result['header'] = ["ref","no scan quantity"];
+				$result['totalData'] = [];
+				foreach($consolIds as $key => $d)
+				{
+					$noScanShipments = ImParcel::model()->findAll("consol_id = :cid and scan_no != 0 ",[":cid"=>$d]);
+					foreach ($noScanShipments as $key => $p) {
+						$result['totalData'][] = [$p->ref,$p->pkg-$p->scan_no];
+					}
+		    	}
+
+		    	$this->saveDailyReportDetail(ReportCache::CheckInReportDaily,$result,$wid);
+		    	return;
+			}
+			
+
+			$this->setCacheData("checkInReportConsols:".$wid.date("Ymd"),array_column($dataArr, "id"),86400);
+		}
+		$totalLeft = $totalPkg-$totalScanCount;
+		if(!empty($totalPkg))
+		{
+			$scanPercent = number_format(($totalScanCount*100/$totalPkg),1,'.','')."%";
+			$leftPercent = number_format((($totalPkg-$totalScanCount)*100/$totalPkg),1,'.','')."%";
+		}else
+		{
+			$scanPercent = "0%";
+			$leftPercent = "0%";
+		}
+		$totalArr = ['consols'=>$totalConsol,'shipments'=>$totalShipment,'pkg'=>$totalPkg,'scanCount'=>$totalScanCount,'left'=>$totalLeft,'scanPercent'=>$scanPercent,'leftPercent'=>$leftPercent];
+		return [$totalArr,$resultArr];
+	}
+
+	public function saveDailyReportDetail($type,$result,$dptId)
+	{
+		$rc = ReportCache::model()->find("create_time = :createTime and type =:type and dpt_id = :dptId",[":createTime"=>date('Y-m-d 00:00:00'),":type"=>$type,":dptId"=>$dptId]);
+		if(empty($rc))
+		{
+			$rc = new ReportCache();
+		    $rc->type = $type;
+		    $rc->status = 1;
+		    $rc->mdata=$result;
+		    $rc->create_time = date("Y-m-d 00:00:00");
+		    $rc->creater = 1;
+		    $rc->modify_time = date('Y-m-d H:i:s');
+		    $rc->dpt_id = $dptId;
+		    $rc->save();
+		}else
+		{
+		 	$rc->mdata  = $result;
+		 	$rc->update(['meta']);
+		}
+	}
+
+	public function ajaxPLchart($header,$rows,$percent=null)
+	{
+		$headerStr="";
+		if(empty($percent))
+		{
+			foreach ($header as $key => $value) {
+				$headerStr.="<th>{$value}</th>";
+			}
+		}else
+		{
+			foreach ($header as $key => $value) {
+				$headerStr.="<th width='".$percent[$key]."'>{$value}</th>";
+			}
+		}
+
+		$t = '<div class="grid-view"><table class="items"><thead><tr>'.$headerStr.'</tr></thead><tbody>';
+
+		foreach ($rows as $key2 => $r)
+		{
+			$str = "";
+			if(isset($r[0])&&preg_match('/held/i', $r[0]))
+			{
+				foreach ($r as $k => $value) {
+					if(empty($percent))
+					{
+						$percentStr = "";
+					}else
+					{
+						$percentStr = "width='".$percent[$k]."'";
+					}
+					$str.= "<td {$percentStr}><font color='red'>{$value}</font></td>";
+				}
+			}else
+			{
+				foreach ($r as $k => $value) {
+					if(empty($percent))
+					{
+						$percentStr = "";
+					}else
+					{
+						$percentStr = "width='".$percent[$k]."'";
+					}
+					$str.= "<td {$percentStr}>{$value}</td>";
+				}
+			}
+			$t .= "<tr>{$str}</tr>";
+		}
+
+		return $t . '</tbody></div>';
+	}
+
+	public function getCheckInReportForConsol($consolId)
+	{
+		$consol = Consol::model()->findByPk($consolId);
+		$rows = [];
+		$shipments = $consol->shipments;
+		foreach ($shipments as $key => $shipment){
+			$orgId = $shipment->mdata['org_id'];
+			$total = $shipment->pkg;
+			$scanCount = 0;
+			$unscanCount = 0;
+			$oversizeCount = 0;
+			$scanedHeldCount = 0; 
+			$totalHeldCount = 0;
+			if($shipment->scan_no<$shipment->pkg)
+			{
+				$scanCount = $shipment->scanCount();
+				$unscanCount = $shipment->pkg-$shipment->scanCount();
+			}else
+			{
+				$type = 'unscan';
+				$unscanCount = $shipment->pkg;
+			}
+			if(in_array($shipment->status, [ImParcel::STATE_HELD,ImParcel::STATE_DUTY_HELD]))
+			{
+				$totalHeldCount = $shipment->pkg;
+				if($shipment->scan_no<$shipment->pkg)
+				{
+					$scanedHeldCount = $shipment->scanCount();
+				}
+			}
+
+			if(empty($rows[$orgId]))
+			{
+				$org = Org::model()->findByPk($orgId);
+				$rows[$orgId] = ["courierId"=>$org->id,"Courier"=>$org->name,"Total"=>$total,"Scaned"=>$scanCount,"Unscaned"=>$unscanCount,"Oversize"=>$oversizeCount,'Held_Scan'=>$scanedHeldCount,'Held_Total'=>$totalHeldCount];
+			}else
+			{
+				$rows[$orgId]['Total'] +=$total;
+				$rows[$orgId]['Scaned'] +=$scanCount;
+				$rows[$orgId]['Unscaned'] +=$unscanCount;
+				$rows[$orgId]['Oversize'] +=$oversizeCount;
+				$rows[$orgId]['Held_Scan'] +=$scanedHeldCount;
+				$rows[$orgId]['Held_Total'] +=$totalHeldCount;
+			}
+		}
+		array_multisort(array_column($rows, 'Unscaned'),SORT_DESC,$rows);
+		return $rows;
+	}
+
+	public function getCheckInReportForConsolCourier($consolId,$orgId)
+	{
+		$consol = Consol::model()->findByPk($consolId);
+		$rows = [];
+		$shipments = $consol->shipments;
+		foreach ($shipments as $key => $shipment){
+			$thisOrgId = $shipment->mdata['org_id'];
+			if($orgId!=$thisOrgId)
+			{
+				continue;
+			}
+			$total = $shipment->pkg;
+			$scanCount = 0;
+			$unscanCount = 0;
+			$oversizeCount = 0;
+			$scanedHeldCount = 0; 
+			$totalHeldCount = 0;
+			if($shipment->scan_no<$shipment->pkg)
+			{
+				$scanCount = $shipment->scanCount();
+				$unscanCount = $shipment->pkg-$shipment->scanCount();
+			}else
+			{
+				$type = 'unscan';
+				$unscanCount = $shipment->pkg;
+			}
+			if(in_array($shipment->status, [ImParcel::STATE_HELD,ImParcel::STATE_DUTY_HELD]))
+			{
+				$totalHeldCount = $shipment->pkg;
+				if($shipment->scan_no<$shipment->pkg)
+				{
+					$scanedHeldCount = $shipment->scanCount();
+				}
+			}else
+			{
+				if($unscanCount==0)
+				{
+					continue;
+				}
+			}
+			$status = $shipment->getStatus();
+			$rows[$shipment->id] = [$shipment->ref,$status,$scanCount.'/'.$unscanCount,number_format($shipment->cbm,2,'.','')."/".$shipment->weight];
+		}
+		$header = ["Ref","Status","Done/</br>Left","CBM/KG"];
+		$percent = ["45%","20%","15%","20%"];
+		return [$header,$rows,$percent];
+	}
+	/*	public function getCheckInReportForConsol($consolId)
+	{
+		$consol = Consol::model()->findByPk($consolId);
+		$rows = [];
+		$shipments = $consol->shipments;
+		foreach ($shipments as $key => $shipment){
+			$orgId = $shipment->mdata['org_id'];
+			$type = 'scaned';
+			if($shipment->scan_no<$shipment->pkg)
+			{
+				$number = $shipment->scanCount();
+			}else
+			{
+				$type = 'unscan';
+				$number = $shipment->pkg;
+			}
+			if(in_array($shipment->status, [ImParcel::STATE_HELD,ImParcel::STATE_DUTY_HELD]))
+			{
+				$type .='-held';
+			}
+
+			if(empty($rows[$type][$orgId]))
+			{
+				$rows[$type][$orgId] = [$number,$shipment->cbm,$shipment->weight];
+			}else
+			{
+				$rows[$type][$orgId][0] +=$number;
+				$rows[$type][$orgId][1] +=$shipment->cbm;
+				$rows[$type][$orgId][2] +=$shipment->weight;
+			}
+		}
+		ksort($rows);
+		$header = ['Shipment','Courier','PKG','CBM','KG'];
+		return [$header,$rows];
+	}*/
+
+	public function transferCheckInReportFormat($rowArrs)
+	{
+		$result = [];
+		foreach ($rowArrs as $key1 => $rows)
+		{
+			foreach ($rows as $key2 => $r) {
+				$org = Org::model()->findByPk($key2);
+				$key1Str = $key1;
+				$orgName = $org->name;
+				$r1 = $r[0];
+				$r2 = $r[1];
+				$r3 = $r[2];
+				$result[] = [$key1Str,$orgName,$r1,$r2,$r3];
+			}
+		}
+		return $result;
+	}
+
+	public function getPutawaySortHeldList($wid,$refreshCache = false,$saveDetail = false)
+	{
+		$key = "syd";
+		switch ($wid) {
+			case Org::TLA_DEPARTMENT_SYDNEY:
+				$key = 'syd';
+				break;
+			case Org::TLA_DEPARTMENT_MELBOURNE:
+				$key = 'mel';
+				break;
+			case Org::TLA_DEPARTMENT_BRISBANE:
+				$key = 'bne';
+				break;
+			case Org::TLA_DEPARTMENT_PERTH:
+				$key = 'per';
+				break;
+			
+		}
+		$dash = new Dash();
+		$sortHeldData1 = $dash->getWareHouseReminder(1,$refreshCache);
+		$sortHeldData2 = $dash->getWareHouseReminder(2,$refreshCache);
+		$result = [];
+		$row2 = ['name'=>'Put in Pallet','Today'=>$sortHeldData2[0][$key.'Today'],'Left'=>$sortHeldData2[0][$key.'Left']];
+		$result['sort_held'] = $row2;
+		$row = ['name'=>'Put Away','Today'=>$sortHeldData1[0][$key.'Today'],'Left'=>$sortHeldData1[0][$key.'Left']];
+		$result['putaway'] = $row;
+		$left = ($row2['Left']-$row2['Today'])+($row['Left']-$row['Today']);
+		$done = $sortHeldData1[0][$key.'All']+$sortHeldData2[0][$key.'All'];
+		$totals = $left+$done;
+		
+		if(empty($totals))
+		{
+			$donePercent = "0%";
+		}else
+		{
+			$donePercent = number_format($done*100/$totals,1,'.','')."%";
+		}
+
+		$row3 = ['total'=>$totals,'done'=>$done,'donePercent'=>$donePercent,'left'=>$left];
+		$result['total'] = $row3;
+
+		if($saveDetail)
+		{
+			$this->savePutawaySortHeldDetail($wid);
+		}
+
+		return $result;
+	}
+
+	public function getPutawaySortHeldDetail($wid,$type)
+	{
+		$result = [];
+		$header = [];
+		$typeStr = "";
+		if($type=='putaway')
+		{
+			$typeStr = "putaway";
+			$arrLeft = ReportService::getSortHeldReminder(1);
+		}else
+		{
+			$typeStr = "put in pallet";
+			$arrLeft = ReportService::getSortHeldReminder(2);
+		}
+		$header = ['Connote'=>'connote','Ref'=>'ref','AWB/Container'=>'awb/container','PKG'=>'pkg','Status'=>'status','Location'=>'location','Postcode'=>'postcode','Weight'=>'weight','Scan Date'=>['scan_date','$data["isScanTimeToday"]?"red": ""']];
+		$percent = ["35%","35%","10%","20%"];
+			$mhbns = "SORTHELD";
+			$srtlDepot = Org::model()->findByPk($wid)->name;
+			$model = new ImParcel('search');//mhbns
+			$model->unsetAttributes();
+			$model->ot_id = null;
+			$model->status = '<90';
+			$temp =[];
+			if(!empty($arrLeft))
+			{
+				if($wid==Org::TLA_DEPARTMENT_SYDNEY){
+					$temp = $arrLeft['SYD'];
+				}elseif($wid==Org::TLA_DEPARTMENT_MELBOURNE){
+					$temp = $arrLeft['MEL'];
+				}elseif($wid==Org::TLA_DEPARTMENT_BRISBANE){
+					$temp = $arrLeft['BNE'];
+				}elseif($wid==Org::TLA_DEPARTMENT_PERTH){
+					$temp = $arrLeft['PER'];
+				}
+				foreach($temp as $ref => $data){
+					$mhbns .= ",".$ref;
+				}
+			}
+			$model->mhbns = rtrim($mhbns, ',');
+			$datas = $model->search(false)->data;
+			foreach ($datas as $key => $d) {
+				$result[] = ['id'=>$d->id,'connote'=>$d->hbn,'ref'=>$d->ref,'awb/container'=>(empty($d->consol)?"":($d->consol->service==ImcoConsol::AIRCONSOL?$d->consol->awb:@$d->consol->mdata['container_no'])),'pkg'=>$d->pkg,'status'=>$d->getStatus(),'location'=>$d->getRackName(false,true),'postcode'=>$d->postcode,'weight'=>$d->weight,'scan_date'=>$d->getScanTime(),'isScanTimeToday'=>$d->isScanTimeToday()];
+			}
+
+
+
+			return [$header,$result,$percent];
+	}
+
+	public function savePutawaySortHeldDetail($wid)
+	{
+		$putaway  = $this->getPutawaySortHeldDetail($wid,"putaway")[1];
+		$putinPallet  = $this->getPutawaySortHeldDetail($wid,"put in pallet")[1];
+
+		$result= [];
+		$result['header'] = ["ref"];
+		$result['totalData'] = [];
+
+		foreach($putaway as $key => $d)
+		{
+			if(!$d['isScanTimeToday'])
+			{
+				$result['totalData'][] = [$d['ref'],'Put in Pallet',$d['scan_date']];
+			}
+		}
+
+
+		foreach($putinPallet as $key => $d)
+		{
+			$result['totalData'][] = [$d['ref'],'putaway',$d['scan_date']];
+		}
+
+		$this->saveDailyReportDetail(ReportCache::PutawayReportDaily,$result,$wid);
+		return;
+	}
+
+	public function getGapsignSummeryList($wid,$isRefresh=false,$isFull = false,$saveDetail = false,$onlyCache = false)
+	{
+		$totalArr = [];
+		$detailArr = [];
+		$cacheKey = "getGapsignSummeryList".$wid;
+		if(!$isRefresh)
+		{
+			$provide = Yii::app()->cache->get($cacheKey);
+			if(!empty($provide))
+			{
+				return json_decode($provide,true);
+			}
+			if($onlyCache)
+			{
+				return [];
+			}
+		}
+		$result = [];
+		$total = 0;
+		$done = 0;
+		$late = 0;
+		$left = 0;
+
+		foreach (GatepassCourier::$gatepass_courier as $courier => $title) {
+			$model = new GatepassShipment('search');
+			$model->status = -1;
+			$model->status = 0;
+				$warehouse = $wid;
+				if($warehouse==Org::TLA_DEPARTMENT_PERTH)
+				{
+					$warehouse = [Org::TLA_DEPARTMENT_PERTH,Org::TLA_DEPARTMENT_FREMANTLE];
+				}
+				$awb = '';
+				$search_context = '';
+				$gatepassNo = '';
+				$pickupDate = '';
+				$model->warehouse = $warehouse;
+				$model->awb = $awb;
+				if (!empty($courier)) {
+					if ($courier == 101) {
+						$model->courier_ids = [101, 1426,Org::ORGID_COURIER_GV_AUPOST];
+					}else if($courier == Org::ORGID_COURIER_TNT)
+					{
+						$model->courier_ids = [Org::ORGID_COURIER_TNT, Org::ORGID_COURIER_TNT_TOP];
+					}else if($courier == Org::ORGID_COURIER_DFE)
+					{
+						$model->courier_ids = [Org::ORGID_COURIER_DFE, Org::ORGID_COURIER_DFE_TOP];
+					}
+					else {
+						$model->courier_id = $courier;
+					}
+				}
+
+				if (!empty($search_context)) {
+					$ids = [0];
+					foreach (preg_split("/[;,\n]/", $search_context) as $hbn) {
+						if (empty(trim($hbn))) {
+							continue;
+						}
+						$cStr= '';
+						if($model->courier_id!='moving')
+						{
+							$cStr= '(cargo_process.id is null or cargo_process.status = '.CargoProcess::DELETED.') and ';
+						}
+						$shipment = ImParcel::model()->with(["cargo_process"])->find($cStr.'(hbn=:hbn OR ref=:hbn) AND cbwf&:cbwf=0', array(':hbn' => trim($hbn), ':cbwf' => ImParcel::CBWF_D2Z_CONSOL_NOT_FOR_SCAN));
+						if (!empty($shipment)) {
+							$ids[] = $shipment->id;
+						}
+						$model->ids = $ids;
+					}
+
+				}
+
+				if ($model->courier_id == 'TP') {
+					$gsModel = new GatepassShipment('search');
+					$ids = [];
+					$ids[] = 0;
+					$gsModel->gatepassNo = $gatepassNo;
+					$gsModel->pickupDate = $pickupDate;
+					if(!empty($_GET['gatepassShipment']))$gsModel->setAttributes($_GET['gatepassShipment']);
+					$cargoProcesses = $gsModel->getPreparedTruckOrPickupParcels($search_context,$warehouse);
+					foreach ($cargoProcesses as $cargoProcess) {
+						$ids[] = $cargoProcess->id;
+					}
+					$model->ids = [];
+					$model->courier_id = 'TP';
+					$model->caIds = $ids;
+					if(!empty($_GET['gatepassShipment']))$model->setAttributes($_GET['gatepassShipment']);
+				}
+
+
+				if ($model->courier_id == 2797) {
+					$ids = [0];
+					$shipments = ImParcel::model()->with('gatepass_shipment')->findAll('(t.hbn like :hbn OR t.ref like :hbn) and t.ref LIKE "CPWPA%" and t.agent_id = 2797 and t.status >= 60 and t.status < 90 and t.created > "2020-01-01" and gatepass_shipment.status = 0',[":hbn"=>"%".trim($search_context)."%"]);
+					$thisShipments = array_column($shipments, 'id');
+					$ids = array_merge($thisShipments,$ids);
+					$model->ids = $ids;
+					$model->courier_id = null;
+				}
+
+				if ($model->courier_id == 2995) {
+					$ids = [0];
+					$shipments = ImParcel::model()->with('gatepass_shipment')->findAll('(t.hbn like :hbn OR t.ref like :hbn) and t.agent_id = 2995 and t.status >= 60 and t.status < 90 and t.created > "2020-01-01" and gatepass_shipment.status = 0',[":hbn"=>"%".trim($search_context)."%"]);
+					$thisShipments = array_column($shipments, 'id');
+					$ids = array_merge($thisShipments,$ids);
+					$model->ids = $ids;
+					$model->courier_id = null;
+				}
+
+
+
+				$gp = GatepassCourier::model()->findBySql('select * from gatepass_courier g join gatepass_shipment gs on g.id =gs.parent_id where json_value(g.meta,"$.ocourier_id")="'.$courier.'" and gs.warehouse = '.$wid.' order by g.id desc limit 1');
+				$itemCount = 0;
+				$totalWeight = null;
+				$totalCBM = null;
+				if(in_array($courier,GatepassCourier::$gatepassCourierKPI))
+				{
+					$courierDatas = $model->search(false)->data;
+				}else
+				{
+					$courierDatas = $model->search()->data;
+				}
+
+				if($isFull)
+				{
+					if(!empty($courierDatas))
+					{
+						$totalWeight = 0;
+						$totalCBM = 0;
+						$ids = array_column($courierDatas, "fid");
+						$itemCount = count($courierDatas);
+						$ppg = 1000;
+						$pgs = ceil($itemCount / $ppg);
+						for($i=0; $i<$pgs; $i++){
+							$idArray = array_slice($ids, $i*$ppg, $ppg);
+							$thisShipments = Shipment::model()->findAll('id in ('.join(',',$idArray).')');
+							foreach ($thisShipments as $sk => $shipment)
+							{
+								$totalWeight+=$shipment->weight;
+								$totalCBM+=$shipment->getTotalCBM();
+							}
+						}
+					}
+
+				}else
+				{
+					$itemCount = $model->search()->getTotalItemCount();
+				}
+				$todayLeft = 0;
+				if(!empty($courierDatas)&&in_array($courier,GatepassCourier::$gatepassCourierKPI))
+				{
+					$trans = Yii::app()->db->beginTransaction();
+					try{
+						foreach ($courierDatas as $gk => $courierData)
+						{
+							if(empty($courierData->can_gatepass_date)||$courierData->can_gatepass_date=="0000-00-00 00:00:00")
+							{
+								$courierData->can_gatepass_date = date("Y-m-d H:i:s");
+								$courierData->update(['can_gatepass_date']);
+							}
+								if($courierData->can_gatepass_date<date("Y-m-d 17:30:30"))
+								{
+									$left+=1;
+									$todayLeft+=1;
+									if($saveDetail)
+									{
+										$detailData[] = [$courierData->connote_no,$courierData->can_gatepass_date,""];
+									}
+								}
+						}
+						$trans->commit();
+					} catch (Exception $ex) {
+						$trans->rollback();
+						throw $ex;
+					}
+				}
+				if(in_array($courier,GatepassCourier::$gatepassCourierKPI))
+				{
+					$result[] = ['Courier'=>$title,'Today Left'=>$todayLeft,'PKG'=>$itemCount,'Weight'=>$totalWeight,'CBM'=>$totalCBM,'courier'=>$courier,'Last Sign'=>empty($gp)?" ":$gp->create_time];
+				}else
+				{
+					$result[] = ['Courier'=>$title,'PKG'=>$itemCount,'Weight'=>$totalWeight,'CBM'=>$totalCBM,'courier'=>$courier,'Last Sign'=>empty($gp)?" ":$gp->create_time];
+				}
+		}
+
+		$allGatepassedShipments = GatepassShipment::model()->with('shipment','shipment.cargo_process','parent')->findAll("warehouse = :wid and gate_pass_time>:ft and gate_pass_time <:tt and json_value(parent.meta,'$.ocourier_id') in ('".join("','",GatepassCourier::$gatepassCourierKPI)."')",[":wid"=>$wid,":ft"=>date("Y-m-d 00:00:00"),":tt"=>date("Y-m-d 23:59:59")]);
+		foreach ($allGatepassedShipments as $key => $g) {
+			$startDate = explode(" ",$g->can_gatepass_date)[0];
+			$endDate = explode(" ",$g->gate_pass_time)[0];
+			$start_date = new DateTime($startDate);
+			$end_date = new DateTime($endDate);
+			if(!empty($g->shipment->cargo_process)&&$g->shipment->cargo_process->agg_pod_id>0)
+			{
+				$pod = FileRepo::model()->findByPk($g->shipment->cargo_process->agg_pod_id);
+				$podDate = new DateTime(explode(" ",$pod->date)[0]);
+				if($end_date->diff($podDate)->days>1)
+				{
+					$late+=1;
+					if($saveDetail)
+					{
+						$detailData[] = [$g->connote_no,$podDate->format("Y-m-d"),$end_date->format("Y-m-d")];
+					}
+				}else
+				{
+					$done+=1;
+				}
+				continue;
+			}
+
+			if(!empty($g->shipment->cargo_process))
+			{
+				$done+=1;
+				continue;
+			}
+
+			/* for calculating the dates are weekdays, we need to use cache to improve the calculating time*/
+			$pod = 'AUSYD';
+			if($wid == 218){
+				$pod = 'AUMEL';
+			}elseif($wid == 530){
+				$pod = 'AUBNE';
+			}
+			if($startDate<=$endDate&&$startDate!="0000-00-00")
+			{
+				$cache = $this->getCacheData("Holiday:".$startDate.$endDate."|".$pod);
+				if(!empty($dayCache))
+				{
+					$days = $dayCache["days"];
+				}else
+				{
+					$days = HolidayHelper::getWeekdaysBetweenTwoDates($startDate,$endDate,$pod);
+					$this->setCacheData("Holiday:".$startDate.$endDate."|".$pod,["days"=>$days]);
+				}
+			}else
+			{
+				$done+=1;
+				continue;
+			}
+
+			// Calculate the interval
+			//$interval = $end_date->diff($start_date);
+			// Get the number of days
+			//$days = $interval->days;
+			if($days>2)
+			{
+				$late+=1;
+				if($saveDetail)
+				{
+					$detailData[] = [$g->connote_no,$startDate,$endDate];
+				}
+			}else
+			{
+				$done+=1;
+			}
+		}
+		$total += $done+$late+$left;
+		if($total==0)
+		{
+			$donePercent = "0%";
+		}else
+		{
+			$donePercent = number_format($done*100/$total,1,'.','')."%";
+		}
+
+		if($total>0)
+		{
+			if($saveDetail)
+			{
+				$result= [];
+				$result['header'] = ["ref","can gatepass time","gatepass time"];
+				$result['totalData'] = [];
+				foreach($detailData as $key => $d)
+				{
+					$result['totalData'][] = [$d[0],$d[1],$d[2]];
+		    	}
+
+		    	$this->saveDailyReportDetail(ReportCache::GatepassReportDaily,$result,$wid);
+		    	return;
+			}
+		}
+		
+		$result['total'] = ['total'=>$total,'done'=>$done,'donePercent'=>$donePercent,'left'=>$left,'late'=>$late];
+
+		Yii::app()->cache->set($cacheKey,json_encode($result),86400);
+
+		return $result;
+
+	}
+
+	public function getPreparationSummeryList($wid,$params,$saveDetail = false)
+	{
+		$result = [];
+		$detailData = [];
+		if(!empty($params['gatepassNo']))
+		{
+			$params['pickupDate'] = "";
+		}
+
+		$allData = $this->getPreparationCargos($wid,$params);
+
+		foreach ($allData as $key => $d) {
+			if($saveDetail)
+			{
+				$detailData[] = [$d->ref];
+			}
+
+			$type = CargoProcess::$cargoTypeList[$d->type];
+			if($d->type==CargoProcess::PICKUP_CARGO)
+			{
+				if(!empty($result[$d->type]))
+				{
+					$result[$d->type] = ['Type'=>$type,'Shipments'=>($result[$d->type]['Shipments']+1),'ids'=>$result[$d->type]['ids'].",".$d->id];
+				}else
+				{
+					$result[$d->type] = ['Type'=>$type,'Shipments'=>1,'ids'=>$d->id];
+				}
+
+			}else
+			{
+				if(!empty($params['gatepassNo']))
+				{
+					$gatepasses = GatePass::model()->with('lines')->findAll(['condition'=>'t.status = 60 and lines.fid = :fid and json_value(lines.meta,"$.cargo_process_id")=:cargoId and ref in ("Pick Up","truck delivery")  and DATE_SUB(CURDATE(), INTERVAL 700 DAY) <= date(t.created) and t.id = :gpno and json_value(t.meta,"$.ignore_resorting") is null','params'=>[":fid"=>$d->shipment_id,":cargoId"=>$d->id,":gpno"=>$params['gatepassNo']]]);
+				}else
+				{
+					$gatepasses = GatePass::model()->with('lines')->findAll(['condition'=>'t.status = 60 and lines.fid = :fid and json_value(lines.meta,"$.cargo_process_id")=:cargoId and ref in ("Pick Up","truck delivery")  and DATE_SUB(CURDATE(), INTERVAL 700 DAY) <= date(t.created) and json_value(t.meta,"$.ignore_resorting") is null','params'=>[":fid"=>$d->shipment_id,":cargoId"=>$d->id]]);
+				}
+
+				if(!empty($result[$d->type]))
+				{
+					$result[$d->type] = ['Type'=>$type,'Gatepasses'=>array_merge($result[$d->type]['Gatepasses'],array_column($gatepasses, 'id')),'ids'=>$result[$d->type]['ids'].",".$d->id];
+				}else
+				{
+					$result[$d->type] = ['Type'=>$type,'Gatepasses'=>array_column($gatepasses, 'id'),'ids'=>$d->id];
+				}
+			}
+		}
+
+		foreach ($result as $key => $value) {
+			if(isset($value['Gatepasses']))
+			{
+				$result[$key]['Gatepasses'] = array_unique($result[$key]['Gatepasses']);
+				$result[$key]['Gatepasses'] = count($result[$key]['Gatepasses']);
+			}
+		}
+
+		foreach (CargoProcess::$cargoTypeList as $k=>$v) {
+			if(!isset($result[$k])&&$k<5)
+			{
+				if($k==CargoProcess::PICKUP_CARGO)
+				{
+					$result[$k] = ['Type'=>CargoProcess::$cargoTypeList[$k],'Shipments'=>0,'ids'=>"9999999999999"];
+				}else
+				{
+					$result[$k] = ['Type'=>CargoProcess::$cargoTypeList[$k],'Gatepasses'=>0,'ids'=>"99999999999999"];
+				}
+			}
+		}
+
+		$pickup = $result[CargoProcess::PICKUP_CARGO];
+		unset($result[CargoProcess::PICKUP_CARGO]);
+		$result["".CargoProcess::PICKUP_CARGO] = $pickup;
+
+		$resultPrepared = [];
+		$allPreparedData = $this->getPreparationCargos($wid,$params,null,true);
+		$done = count($allPreparedData);
+		$left = count($allData);
+
+		if($saveDetail)
+		{
+			return $detailData;
+		}
+
+		$total = $left +$done;
+		if($total==0)
+		{
+			$donePercent = "0%";
+		}else
+		{
+			$donePercent = number_format($done*100/$total,1,'.','')."%";
+		}
+		
+		$result['total'] = ['total'=>$total,'done'=>$done,'donePercent'=>$donePercent,'left'=>$left];
+
+
+		return $result;
+
+	}
+	private function getPreparationCargos($wid,$params,$type=null,$isPrepared= false)
+	{
+		$cargo = new CargoProcess('search');
+		$cargo->unsetAttributes();
+		// $model = new ImParcel('search');
+		// $model->unsetAttributes();
+		$ddpt_id = $wid;
+
+		if(!empty($params['gatepassNo']))
+		{
+			$cargo->gatepassNo =$params['gatepassNo'];
+		}
+
+		if(!empty($params['pickupDate'])&&empty($params['gatepassNo']))
+		{
+			$cargo->pickupDate =$params['pickupDate'];
+		}
+		if(!empty($params['pickupFutureDate'])&&empty($params['gatepassNo']))
+		{
+			$cargo->pickupBookingTime =$params['pickupFutureDate'];
+		}
+
+		if(!empty($type))
+		{
+			$cargo->type = $type;
+		}
+		return $cargo->getNeedPrepareParcel(false, 1000,false,true,$wid,null,[],$isPrepared)->data;
+	}
+
+	public function getPreparationSummeryGatepassList($wid,$params,$type)
+	{
+		$result = [];
+		$resultPrepared = [];
+		$allData = $this->getPreparationCargos($wid,$params,$type);
+		$totalNeedGatepass = 0;
+		foreach ($allData as $key => $d) {
+			if(!empty($params['gatepassNo']))
+			{
+				$gatepasses = GatePass::model()->with('lines')->findAll(['condition'=>'t.status = 60 and lines.fid = :fid and json_value(lines.meta,"$.cargo_process_id")=:cargoId and ref in ("Pick Up","truck delivery")  and DATE_SUB(CURDATE(), INTERVAL 700 DAY) <= date(t.created) and t.id = :gpno','params'=>[":fid"=>$d->shipment_id,":cargoId"=>$d->id,":gpno"=>$params['gatepassNo']]]);
+			}else
+			{
+				$gatepasses = GatePass::model()->with('lines')->findAll(['condition'=>'t.status = 60 and lines.fid = :fid and json_value(lines.meta,"$.cargo_process_id")=:cargoId and ref in ("Pick Up","truck delivery")  and DATE_SUB(CURDATE(), INTERVAL 700 DAY) <= date(t.created)','params'=>[":fid"=>$d->shipment_id,":cargoId"=>$d->id]]);
+			}
+
+			foreach ($gatepasses as $key => $gp)
+			{
+				if(!empty($result[$gp->id]))
+				{
+					$result[$gp->id]['HBL'][] = $d->getRef();
+					$result[$gp->id]['ids'] = $result[$gp->id]['ids'].",".$d->id;
+				}else
+				{				
+					$result[$gp->id] = ['GPNo'=>$gp->id,'HBL'=>[$d->getRef()],'ids'=>$d->id];
+					if($type!=CargoProcess::NORMAL_CARGO)
+					{
+						$de = AddressService::getShipmentCargoReceipt($d->shipment);
+						$result[$gp->id]['Dest'] = $de;
+					}
+				}
+			}
+		}
+
+
+		foreach ($result as $key => $value) {
+			if(isset($value['HBL']))
+			{
+				$result[$key]['HBL'] = count($result[$key]['HBL']);
+			}
+		}
+
+
+		return $result;
+	}
+
+	private function getGatepassShipments($wid,$params,$type)
+	{
+		$gatepass = GatePass::model()->findByPk($params['gatepassNo']);
+		return $gatepass->lines;
+	}
+
+	public function getPreparationGatepassShipments($wid,$params,$type,$gatepassNo,$way = 0)
+	{
+		$result = [];
+		$params['gatepassNo'] = $gatepassNo;
+		if($way==0)
+		{
+			$allData = $this->getPreparationCargos($wid,$params,$type);
+		}else
+		{
+			$allData = $this->getGatepassShipments($wid,$params,$type);
+		}
+
+		foreach ($allData as $key => $d) {
+
+				$result[] = $this->getGatepassLineData($d);
+		}
+
+		$header = ["AWB"=>"awb","Container No."=>"containerNo","HBN"=>"hbn","REF"=>"ref","Location"=>'location',"ScanOut"=>"scanout","Status"=>"status","Packs"=>"packages","Weight"=>"weight","Driver"=>"driver"];
+		return [$header,$result];
+
+	}
+
+	private function getGatepassLineData($d)
+	{
+		$r = $d->shipment;
+		if(empty($r->consol)) return [];
+		$gpscanOut = '';
+		if (isset($r->mdata['gpscan_time'])) {
+			if (is_array($r->mdata['gpscan_time'])) {
+				$gpscanOut = implode('<br/>', $r->mdata['gpscan_time']);
+			} else {
+				$gpscanOut = $r->mdata['gpscan_time'];
+			}
+		}
+		$containerNo = "";
+		if($r->consol->service==Consol::SEACONSOL)
+		{
+			$containerNo = @$r->consol->mdata['container_no'];
+		}
+		$ref = empty($rc['caref'])?$r->ref:$rc['caref'];
+		$packages = empty($rc['packages'])?$r->pkg:$rc['packages'];
+		$weight = round($r->weight*$packages/$r->pkg,2);
+		//hbn + Rack location
+		$strHbn = $r->hbn;
+		$listRack = $r->funcGetRackNameList();
+		$strRackNameStr = "";
+		foreach($listRack as $j=>$strRackName){
+			$strRackNameStr = $strRackNameStr.'<br/>'.$strRackName;
+		}
+
+		if(!empty($r->cargo_process->mdata['tony_assign_driver'])){
+			$assignDriver = $r->cargo_process->mdata['tony_assign_driver'];
+		}else{
+			$assignDriver = "";
+		}
+		$awb = (!empty($r->consol->awb)?$r->consol->awb:'');
+
+		return ['id'=>$d->id,'awb'=>$awb,'containerNo'=>$containerNo,'hbn'=>$strHbn,'location'=>$strRackNameStr,'ref'=>$ref,'scanout'=>$gpscanOut,'status'=>$r->getStatus(),'packages'=>$packages,'weight'=>$weight,'driver'=>$assignDriver];
+	}
+
+	public function getHeldShipmentGatepassSummary($wid,$saveDetail = false)
+	{
+		$result = [];
+		$totalData = [];
+		$yesterday  = HolidayHelper::getLastWeekday(date("Y-m-d"),"AUSYD");
+		$gatepasses = GatePass::model()->with('lines')->findAll('t.status = 60 and ref not in ("Pick Up","truck delivery")  and t.created>=:time1 and t.created<=:time2 and dpt_id = :dptId and json_value(t.meta,"$.ignore_resorting") is null',[':dptId'=>$wid,':time1'=>"2023-01-01 01:00:00",':time2'=>date("Y-m-d")." 17:00:00"]);
+		$allTotalShipments = 0;
+		$allTotalPkg = 0;
+		$allTotalResortShipment = 0;
+		$allTotalResort = 0;
+		$detailData = [];
+
+		foreach ($gatepasses as $k1 => $gp)
+		{
+			$row = [$gp->id,$gp->id,0,0];
+			$resort = 0;
+			$resortShipment = 0;
+			$total = 0;
+			$totalShipments = 0;
+			$totalPkg = 0;
+			foreach ($gp->lines as $k2 => $line)
+			{	
+				$p = $line->shipment;
+				$resorts = ShipmentScan::model()->findAll(['condition'=>'pid = :pid and (type = :type or type = :type2)','params'=>[':pid'=>$p->id,':type'=>ShipmentScan::RESORT,':type2'=>ShipmentScan::PALLET_TYPE],'group'=>'pid,pno']);
+				$thisResort = count($resorts);
+				if($thisResort>0)
+				{
+					$resortShipment+=1;
+				}else
+				{
+					$detailData[$p->id] = $p->ref;
+				}
+
+				$resort += $thisResort;
+				$totalShipments+=1;
+				$totalPkg+=$p->pkg;
+			}
+
+			if($resortShipment==$totalShipments&&strtotime($gp->created)<strtotime($yesterday))
+			{
+				continue;
+			}
+
+			$row[2] = $totalShipments;
+			$row[3] = $totalPkg;
+			$row[4] = $resortShipment;
+			$row[5] = $resort;
+			$allTotalShipments+= $totalShipments;
+			$allTotalPkg+= $totalPkg;
+			$allTotalResortShipment+= $resortShipment;
+			$allTotalResort+= $resort;
+			$totalData[$gp->id] = $row;
+		}
+
+		if($saveDetail)
+		{
+			return $detailData;
+		}
+
+		if(empty($allTotalShipments))
+		{
+			$donePercent = "0%";
+		}else
+		{
+			$donePercent = number_format($allTotalResortShipment*100/$allTotalShipments,'1','.','')."%";
+		}
+		$total=['gatepasses'=>count($totalData),'totalShipments'=>$allTotalShipments,'allTotalPkg'=>$allTotalPkg,'allTotalResortShipment'=>$allTotalResortShipment,'allTotalResort'=>$allTotalResort,'donePercent'=>$donePercent];
+		$result = [$total,$totalData];
+		return $result;
+
+	}
+
+	public function getPreparationOldGatepassWithoutResorting($wid,$date="")
+	{
+		$cache = $this->getCacheData("OldGatepassWithoutResorting:".$date."|".$wid);
+		if(!empty($cache))
+		{
+			return $cache;
+		}
+
+		$result = [];
+		$totalData = [];
+		$dateStr = "";
+
+		if(!empty($date))
+		{
+			$dateStr = ' and created>"'.$date.'"';
+		}else
+		{
+			$dateStr = ' and created>"2022-01-01"';
+		}
+
+		if(empty($wid))
+		{
+			$gatepasses = GatePass::model()->with('lines')->findAll('t.status = 60 and ref not in ("Pick Up","truck delivery") '.$dateStr);
+		}else
+		{
+			$gatepasses = GatePass::model()->with('lines')->findAll('t.status = 60 and ref not in ("Pick Up","truck delivery") and dpt_id = :dptId '.$dateStr,[':dptId'=>$wid]);
+		}
+		$index = 1;
+		foreach ($gatepasses as $k1 => $gp)
+		{
+			$row = [];
+			$isResort = false;
+			$shipResort = [];
+			foreach ($gp->lines as $k2 => $line)
+			{	
+				$p = $line->shipment;
+				if(empty($p)) continue;
+				$resorts = ShipmentScan::model()->findAll(['condition'=>'pid = :pid and (type = :type or type = :type2)','params'=>[':pid'=>$p->id,':type'=>ShipmentScan::RESORT,':type2'=>ShipmentScan::PALLET_TYPE],'group'=>'pid,pno']);
+				$thisResort = count($resorts);
+				if($thisResort==0)
+				{
+					$row[] = $this->getGatepassLineData($line);
+				}
+				$shipResort[$line->id] = (empty($thisResort)?"×":"√");
+			}
+
+			foreach ($row as $key => $r) {
+				if(empty($r)) continue;
+				$r['isResort'] = isset($shipResort[$r['id']])?$shipResort[$r['id']]:"";
+				$r['id'] = $index;
+				$r['no'] = $gp->id;
+				$r['gatepass_time'] = $gp->created;
+				$result[] = $r;
+				$index+=1;
+			}
+		}
+
+		$this->setCacheData("OldGatepassWithoutResorting:".$date."|".$wid,$result,1800);
+		
+
+		return $result;
+
+	}
+
+	public function prepareDoneShipment($shipmentId)
+	{
+		$status = false;
+		$p = ImParcel::model()->findByPk($shipmentId);
+		if(!empty($p->cargo_process))
+		{
+			$this->prepareDoneOne($p->cargo_process->id);
+			$status = true;
+		}
+		return $status;
+	}
+	
+	public function prepareDoneOne($id)
+	{
+		$prepareLog = ShipmentWhPrepare::model()->find('cargo_process_id = :id',[':id'=>$id]);
+		if(!empty($prepareLog)&&$prepareLog->status==ShipmentWhPrepare::PREPARED)
+		{
+			return $prepareLog;
+		}
+
+		$cargoProcess = CargoProcess::model()->findByPk($id);
+		$cjob = null;
+		if(!empty($cargoProcess->job_relation))
+		{
+			$cjob = $cargoProcess->job_relation->job;
+			if(!empty($cjob)){
+				if($cjob->driver_id==4072){
+					$sendEmail = false;
+				}else{
+					$sendEmail = true;
+				}
+				
+			}
+		}
+		$p = $cargoProcess->shipment;
+		if(empty($prepareLog))
+		{
+			$prepareLog = new ShipmentWhPrepare();
+			$prepareLog->shipment_id = $p->id;
+			$prepareLog->cargo_process_id = $id;
+			$prepareLog->status = ShipmentWhPrepare::PREPARED;
+			$prepareLog->operate_time = date('Y-m-d H:i:s');
+			$prepareLog->uid = User::currentUserID();
+			$prepareLog->save();
+		}else
+		{
+			$prepareLog->status = ShipmentWhPrepare::PREPARED;
+			$prepareLog->operate_time = date('Y-m-d H:i:s');
+			$prepareLog->uid = User::currentUserID();
+			$prepareLog->save();
+		}
+
+		if($cargoProcess->type==CargoProcess::NORMAL_CARGO)
+		{
+			if(!empty($cargoProcess->job->created)){
+				$strDeliveryDate = date('Y-m-d',strtotime($cargoProcess->job->created));
+			}
+
+			//$p->addTrackingLimited(Tracking::TYPE_SORTED, "Warehouse preparation done. Delivery date is ".$strDeliveryDate, empty($p->odepot) ? '' : $p->odepot->suburb,  $prepareLog->operate_time);
+			//if($sendEmail){
+				//EmailService::sendWarehouseCargoSmsEmail($cargoProcess);
+			//}
+		}
+
+		if(!empty($cargoProcess->mdata['caref']))
+		{	
+			$ref = $cargoProcess->mdata['caref'];
+			$gatePass = GatepassShipment::model()->findAll(" connote_no = :caref ",[":caref"=>$cargoProcess->mdata['caref']]);
+			$mdata = ['cargo_process_id'=>$id,'isSub'=>true];
+		}else
+		{
+			$gatePass = GatepassShipment::model()->findAll(" fid =:fid ",[":fid"=>$p->id]);
+			$ref = false;
+			$mdata = [];
+		}
+
+		if(empty($gatePass))//sometime because of held status, the truck delivery or pickup parcel will have not gatepassShipment record, so need to insert it.
+		{
+			$p = $cargoProcess->shipment;
+			$courier_id = null;
+			if (empty($courier_id)) 
+			{
+				$courier_id=$p->getCourierId();
+			}
+			$action = "ScanAllByPrepared";
+			GatepassShipment::gatepassScan($p, $courier_id, 1, $p->consol->dpt_id,$action,$ref,$mdata);
+		}
+
+		// subshipment 
+		$this->funcSubshipmentSmsEmail($p);
+
+		return $prepareLog;
+	}
+
+	public function checkInShipmentToBeInspection($dptId,$day = null)
+	{
+		$fromTime = date("Y-m-d 00:00:00");
+		$toTime = date("Y-m-d 23:00:00");
+		if(!empty($day))
+		{
+			$fromTime = $day." 00:00:00";
+			$toTime =  $day." 23:00:00";
+		}
+		$shipmentScans = ShipmentScan::model()->with('shipment','shipment.consol')->findAll(['condition'=>'t.type = :type and t.scan_time > :fromTime and t.scan_time <:toTime and t.warehouse=:dptId',"params"=>[":type"=>ShipmentScan::CHECKIN,":fromTime"=>$fromTime,":toTime"=>$toTime,":dptId"=>$dptId],"order"=>"consol.id"]);
+		$shipmentConsol = [];
+		foreach($shipmentScans as $key => $shipmentScan)
+		{
+			$consolId= $shipmentScan->shipment->consol_id;
+			if(!isset($shipmentConsol[$consolId]))
+			{
+				$shipmentConsol[$consolId]  = [];
+			}
+
+			if(empty($shipmentScan->shipment->mdata['org_rate_id']))
+			{
+				continue;
+			}else
+			{
+				$orgRate = OrgRate::model()->findByPk($shipmentScan->shipment->mdata['org_rate_id']);
+				if(empty($orgRate))
+				{
+					continue;
+				}else
+				{
+					$courierId = $orgRate->org_id;
+					if(!in_array($courierId, [Org::ORGID_COURIER_AUPOST,Org::ORGID_COURIER_FASTWAY,Org::ORGID_COURIER_UBI_TOLL,Org::ORGID_COURIER_TOLL_IPEC,Org::ORGID_COURIER_TLA,Org::ORGID_COURIER_PICKUP,Org::ORGID_COURIER_TNT,Org::ORGID_COURIER_TNT_TOP,Org::ORGID_COURIER_BORDER]))
+					{
+						continue;
+					}
+
+					if($courierId == Org::ORGID_COURIER_TLA&&!$shipmentScan->shipment->checkIsCargoProcessWithRef())
+					{
+						continue;
+					}
+
+					if($courierId == Org::ORGID_COURIER_PICKUP&&$shipmentScan->shipment->mdata['org_rate_id']==10498)
+					{
+						continue;
+					}
+
+
+
+					if($courierId==Org::ORGID_COURIER_UBI_TOLL||$courierId==Org::ORGID_COURIER_EIZ||$courierId==3460||$courierId==3189||$courierId==4105)
+					{
+						$courierId = Org::ORGID_COURIER_TOLL_IPEC;
+					}
+
+					if($courierId == Org::ORGID_COURIER_PICKUP)
+					{
+						$courierId = Org::ORGID_COURIER_TLA;
+					}
+				}
+			}
+
+
+			if(empty($shipmentConsol[$consolId][$courierId]))
+			{
+				$shipmentConsol[$consolId][$courierId] = [];
+			}
+
+			if(!isset($shipmentConsol[$consolId][$courierId][$shipmentScan->pid]))
+			{
+				$shipmentConsol[$consolId][$courierId][$shipmentScan->pid] = [];
+			}
+
+			$shipmentConsol[$consolId][$courierId][$shipmentScan->pid][$shipmentScan->pid."-".$shipmentScan->pno] = $shipmentScan->scan_time;
+		}
+
+		$shipmentScans = GatepassShipment::model()->with('shipment','shipment.consol')->findAll(['condition'=>'t.meta = "{\"description\":\"ScanAllByHand\"}" and t.scan_time > :fromTime and t.scan_time <:toTime and t.warehouse=:dptId',"params"=>[":fromTime"=>$fromTime,":toTime"=>$toTime,":dptId"=>$dptId],"order"=>"consol.id"]);
+		foreach($shipmentScans as $key => $shipmentScan)
+		{
+			if($shipmentScan->shipment->consol->isWDT()||$shipmentScan->shipment->consol->service!=Consol::SEACONSOL)
+			{
+				continue;
+			}
+
+			$consolId= $shipmentScan->shipment->consol_id;
+			if(!isset($shipmentConsol[$consolId]))
+			{
+				$shipmentConsol[$consolId]  = [];
+			}
+
+			if(empty($shipmentScan->shipment->mdata['org_rate_id']))
+			{
+				continue;
+			}else
+			{
+				$orgRate = OrgRate::model()->findByPk($shipmentScan->shipment->mdata['org_rate_id']);
+				if(empty($orgRate))
+				{
+					continue;
+				}else
+				{
+					$courierId = $orgRate->org_id;
+					if(!in_array($courierId, [Org::ORGID_COURIER_AUPOST,Org::ORGID_COURIER_FASTWAY,Org::ORGID_COURIER_UBI_TOLL,Org::ORGID_COURIER_TOLL_IPEC,Org::ORGID_COURIER_TLA,Org::ORGID_COURIER_PICKUP,Org::ORGID_COURIER_TNT,Org::ORGID_COURIER_TNT_TOP,Org::ORGID_COURIER_BORDER]))
+					{
+						continue;
+					}
+
+					if($courierId == Org::ORGID_COURIER_TLA&&!$shipmentScan->shipment->checkIsCargoProcessWithRef())
+					{
+						continue;
+					}
+
+					if($courierId == Org::ORGID_COURIER_PICKUP&&$shipmentScan->shipment->mdata['org_rate_id']==10498)
+					{
+						continue;
+					}
+
+
+
+					if($courierId==Org::ORGID_COURIER_UBI_TOLL||$courierId==Org::ORGID_COURIER_EIZ||$courierId==3460||$courierId==3189||$courierId==4105)
+					{
+						$courierId = Org::ORGID_COURIER_TOLL_IPEC;
+					}
+
+					if($courierId == Org::ORGID_COURIER_PICKUP)
+					{
+						$courierId = Org::ORGID_COURIER_TLA;
+					}
+				}
+			}
+
+
+			if(empty($shipmentConsol[$consolId][$courierId]))
+			{
+				$shipmentConsol[$consolId][$courierId] = [];
+			}
+
+			if(!isset($shipmentConsol[$consolId][$courierId][$shipmentScan->fid]))
+			{
+				$shipmentConsol[$consolId][$courierId][$shipmentScan->fid] = [];
+			}
+
+			$shipmentConsol[$consolId][$courierId][$shipmentScan->fid][$shipmentScan->fid."-".$shipmentScan->sno] = $shipmentScan->scan_time;
+		}
+
+
+
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			foreach($shipmentConsol as $consolId => $couriers)
+			{
+				foreach ($couriers as $courierId => $shipments)
+				{
+					$numbers = count($shipments);
+					if($numbers==0) continue;
+					$percentageArr = SystemSetting::getCourierInspectionPercentage($courierId);
+					$percentage = $percentageArr[0];
+					$isCombine  = $percentageArr[1];
+					$inspections = ceil($numbers*$percentage);
+					shuffle($shipments);
+					$i= 0;
+					$shipmentWhInspection =  null;
+					if($isCombine)
+					{
+						$shipmentWhInspection = new ShipmentWhInspection();
+						$shipmentWhInspection->courier_id = $courierId;
+						$shipmentWhInspection->process_status = ShipmentWhInspection::NEW_STATUS;
+						$shipmentWhInspection->dpt_id = $dptId;
+						$shipmentWhInspection->isCombine = $isCombine;
+						$shipmentWhInspection->created = date('Y-m-d H:i:s');
+						$shipmentWhInspection->consol_id = $consolId;
+						$shipmentWhInspection->save();
+					}
+
+					foreach ($shipments as $shipmentId => $scanTime)
+					{
+						if(!$isCombine)
+						{
+							$shipmentWhInspection = new ShipmentWhInspection();
+							$shipmentWhInspection->courier_id = $courierId;
+							$shipmentWhInspection->process_status = ShipmentWhInspection::NEW_STATUS;
+							$shipmentWhInspection->dpt_id = $dptId;
+							$shipmentWhInspection->isCombine = $isCombine;
+							$shipmentWhInspection->created = date('Y-m-d H:i:s');
+							$shipmentWhInspection->consol_id = $consolId;
+							$shipmentWhInspection->save();
+						}
+						
+						$thisShipmentId = 0;
+						foreach ($scanTime as $s => $v) {
+							$thisShipmentId = explode('-', $s)[0];
+							break;
+						}
+						$check = ShipmentWhInspectionRelations::model()->find('pid=:pid and created>:fromTime and created<:toTime',[":pid"=>$thisShipmentId,":fromTime"=>$fromTime,":toTime"=>$toTime]);
+						if(!empty($check))
+						{
+							continue;
+						}
+
+						$shipmentWhInspectionRelations = new ShipmentWhInspectionRelations();
+						$shipmentWhInspectionRelations->pid = $thisShipmentId;
+						$shipmentWhInspectionRelations->process_status = ShipmentWhInspection::NEW_STATUS;
+						$shipmentWhInspectionRelations->scan_time = json_encode($scanTime);
+						$shipmentWhInspectionRelations->created = $shipmentWhInspection->created;
+						$shipmentWhInspectionRelations->inspection_id = $shipmentWhInspection->id;
+						$shipmentWhInspectionRelations->save();
+						$inspections= $inspections-1;
+						if($inspections==0) break;
+					}
+
+					if($inspections!=0)
+					{
+						$shipmentWhInspection->delete();
+					}
+				}
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+
+
+		// $shipmentScans = ShipmentScan::model()->with('shipment','shipment.consol')->findAll(['condition'=>'t.type = :type and t.scan_time > :fromTime and t.scan_time <:toTime and t.warehouse=:dptId and shipment.status = 55',"params"=>[":type"=>ShipmentScan::CHECKIN,":fromTime"=>$fromTime,":toTime"=>$toTime,":dptId"=>$dptId],"order"=>"consol.id"]);
+
+		// $percentageArr = SystemSetting::getHeldInspectionPercentage();
+		// $percentage = $percentageArr[0];
+		// $isCombine  = $percentageArr[1];
+
+		// $shipmentHeld = [];
+		// foreach ($shipmentScans as $key => $shipmentScan) {
+		// 	$shipmentHeld[$shipmentScan->pid][$shipmentScan->pid."-".$shipmentScan->pno] = $shipmentScan->scan_time;
+		// }
+		// $numbers = count($shipmentHeld);
+		// if($numbers==0) return;
+		// $inspections = ceil($numbers*$percentage);
+		// shuffle($shipmentHeld);
+		// $i= 0;
+
+		// $trans = Yii::app()->db->beginTransaction();
+		// try{
+		// 	foreach ($shipmentHeld as $shipmentId => $scanTime)
+		// 	{
+		// 		$thisShipmentId = 0;
+		// 		foreach ($scanTime as $s => $v) {
+		// 			$thisShipmentId = explode('-', $s)[0];
+		// 			break;
+		// 		}
+		// 		$check = ShipmentWhInspection::model()->find('pid=:pid and created>:fromTime and created<:toTime',[":pid"=>$thisShipmentId,":fromTime"=>$fromTime,":toTime"=>$toTime]);
+		// 		if(!empty($check))
+		// 		{
+		// 			$i++;
+		// 			continue;
+		// 		}
+
+		// 		$shipmentWhInspection = new ShipmentWhInspection();
+		// 		$shipmentWhInspection->pid = $thisShipmentId;
+		// 		$shipmentWhInspection->process_status = ShipmentWhInspection::NEW_STATUS;
+		// 		$shipmentWhInspection->dpt_id = $dptId;
+		// 		$shipmentWhInspection->scan_time = json_encode($scanTime);
+		// 		$shipmentWhInspection->save();
+		// 		$inspections= $inspections-1;
+		// 		if($inspections==0) break;
+		// 	}
+		// 	$trans->commit();
+		// } catch (Exception $ex) {
+		// 	$trans->rollback();
+		// 	throw $ex;
+		// }
+
+	}
+
+	public function pushUploadedInspectionToBeDone()
+	{
+		$allInspections = ShipmentWhInspection::model()->findAll("process_status=:processStatus",[":processStatus"=>ShipmentWhInspection::UPLOAD_STATUS]);
+		foreach ($allInspections as $key => $inspection)
+		{
+			$inspection->process_status = ShipmentWhInspection::DONE_STATUS;
+			$inspection->save();
+		}
+	}
+
+	public function doneInspection($id)
+	{
+		$shipmentWhInspection = ShipmentWhInspection::model()->findByPk($id);
+		$shipmentWhInspection->process_status = ShipmentWhInspection::DONE_STATUS;
+		$shipmentWhInspection->save();
+		return $shipmentWhInspection;
+	}
+
+	public function getInspectionTotalInfo($dptId)
+	{
+		$result = [];
+		$sql = 'SELECT count(1) as total, sum(IF((process_status) = 20, 1, 0)) AS done, sum(IF((process_status) = 10, 1, 0)) AS `left` FROM shipment_wh_inspection WHERE (upload_time = "0000-00-00 00:00:00" or to_days(upload_time)=to_days(now())) and process_status in (10,20) and dpt_id = '.$dptId." ";
+		$c = Yii::app()->db->createCommand($sql);
+		$inspectionCount = $c->queryAll()[0];
+		$result['total'] = $inspectionCount['total'];
+		$result['done'] = $inspectionCount['done'];
+		$result['left'] = $inspectionCount['left'];
+		if(empty($result['total']))
+		{
+			$result['donePercent'] = "0%";
+		}else
+		{
+			$result['donePercent'] = number_format($inspectionCount['done']*100/$inspectionCount['total'],1,'.','')."%";
+		}
+		return $result;
+	}
+
+	private function funcSubshipmentSmsEmail($objShipment){
+		$strConsolNo = str_replace('PICKUP', 'WDT', $objShipment->ref);
+		$objImcoConsol = ImcoConsol::model()->find('no=:no',[':no'=>$strConsolNo]);
+		if($objImcoConsol != null){
+			$listSubShipment = $objImcoConsol->shipments;
+			foreach($listSubShipment as $objSubShipment){
+				$objCnee = $objSubShipment->cnee;
+				$strEmail = $objCnee->email;
+				$strTel = $objCnee->tel;
+				$strHbn = $objSubShipment->hbn;
+				$strRef = $objSubShipment->ref;
+				$strName = $objCnee->name;
+				$strAddress = $objCnee->address.' '.$objCnee->suburb.' '.$objCnee->postcode;
+				$numPcs = $objSubShipment->pkg;
+				$numWeight = $objSubShipment->weight;
+
+				$strCourier = 'TLA Delivery';
+				$objTranship = Tranship::model()->find('pid=:pid',[':pid'=>$objSubShipment->id]);
+				if($objTranship  != null){
+					$dicOrgId2Name = [
+						Org::ORGID_COURIER_AUPOST => 'Australia Post',
+						Org::ORGID_COURIER_DFE => 'DFE',
+						Org::ORGID_COURIER_DFE_TOP => 'DFE',
+						Org::ORGID_COURIER_EIZ => 'Toll',
+						Org::ORGID_COURIER_FASTWAY => 'Fastway',
+						Org::ORGID_COURIER_HUNTER => 'Hunter',
+						Org::ORGID_COURIER_SF => 'SF',
+						Org::ORGID_COURIER_STARTRACK => 'Star Truck',
+						Org::ORGID_COURIER_STARTRACK_MEL => 'Star Truck',
+						Org::ORGID_COURIER_STARTRACK_TOP => 'Star Truck',
+						Org::ORGID_COURIER_TNT => 'TNT', 
+						Org::ORGID_COURIER_TNT_TOP => 'TNT',
+						Org::ORGID_COURIER_TOLL=> 'TOLL',
+					];
+
+					$numOrgId = $objTranship->org_id;
+					if(isset($dicOrgId2Name[$numOrgId])){
+						$strCourier = $dicOrgId2Name[$numOrgId];
+					}
+					//EIZ Allied 
+					if($numOrgId == Org::ORGID_COURIER_EIZ){
+						if(strpos($strRef,'AOE') !== false){
+							$strCourier = 'Allied';
+						}
+					}
+
+				}
+
+				// $objEmailService = new EmailService;
+				// $objEmailService->funcSendSubShipmentNoticeEmail($strEmail,$strTel,$strHbn,$strRef,$strName,$strAddress,$strCourier,$numPcs,$numWeight);
+			}
+		}
+	}
+
+	public function getLocationRecommendation($palletNo)
+	{
+		$location = WmsLocation::model()->find('name = :code OR code = :code', [':code' => $palletNo]);
+		if (empty($location)) {
+			return "";
+		}
+
+		$isHeld = 0;
+		$isOversize = 0;
+		$B2B = false;
+		$B2C = false;
+		$FBA = false;
+		$PICKUP = false;
+
+		$wrs = WmsRackShipment::model()->find('rack_id = :rack_id AND status != :status', [':rack_id' => $location->id,  ':status' => WmsRackShipment::REMOVED]);
+		if(!empty($wrs)){
+			if($wrs->shipment->status==ImParcel::STATE_HELD)
+			{
+				$isHeld = 1;
+			}
+			if(isset($wrs->shipment->mdata['is_oversize']))
+			{
+				if($wrs->shipment->mdata['is_oversize']==1)
+				{
+					$isOversize=1;
+				}
+			}else
+			{
+				$surcharge=$wrs->shipment->getChargeByChargecode(SystemSetting::getTLDChargecode('checkNormalChargecode'),false,null,true,false,true,true);
+				if(!empty($surcharge['OSCharge']))
+				{
+					$wrs->shipment->mdata['is_oversize'] = 1;
+					$wrs->shipment->updateMeta();
+					$isOversize=1;
+				}
+			}
+		}
+
+		if($wrs->shipment->checkIsCargoProcessWithRef())
+		{
+			if(empty($wrs->shipment->cargo_process))// this is refresh which may call the saveToCargoProcess function
+			{
+				$wrs->shipment->update("pkg");
+			}
+
+			if(!empty($wrs->shipment->cargo_process))
+			{
+				switch ($wrs->shipment->cargo_process->type) {
+					case CargoProcess::NORMAL_CARGO:
+						$B2C = true;
+						break;
+					case CargoProcess::B2B_CARGO:
+						$B2B = true;
+						break;
+					case CargoProcess::FBA_CARGO:
+						$FBA = true;
+						break;
+					case CargoProcess::PICKUP_CARGO:
+						$PICKUP = true;
+						break;
+					
+					default:
+						$B2C = true;
+						break;
+				}
+			}
+		}else
+		{
+			$B2C = true;
+		}
+
+		$condition = "dpt_id = :dpt_id";
+		if($isHeld==1)
+		{
+			$condition .= " and (parcel_type & ".ParcelPriority::HELD_PARCEL_TYPE.")>0";
+		}else
+		{
+			if($B2C)
+			{
+				$condition .= " and (parcel_type & ".ParcelPriority::B2C_PARCEL_TYPE.")>0";
+			}
+			if($B2B)
+			{
+				$condition .= " and (parcel_type & ".ParcelPriority::B2B_PARCEL_TYPE.")>0";
+			}
+			if($FBA)
+			{
+				$condition .= " and (parcel_type & ".ParcelPriority::FBA_PARCEL_TYPE.")>0";
+			}
+		}
+
+		if($isOversize==1)
+		{
+			$condition .= " and (is_oversize & ".ParcelPriority::IS_OVERSIZE.")>0";
+		}
+
+
+		$priority = ParcelPriority::model()->find($condition,[":dpt_id"=>$location->wid]);
+		if(empty($priority))
+		{
+			return "";
+		}else
+		{
+			$levelStr = "level=-1 ";
+			$oversizeStr = "";
+			if(($priority->priority&ParcelPriority::GROUND_LEVEL)>0)
+			{
+				$levelStr .= " or level = 0 ";
+			}
+			if(($priority->priority&ParcelPriority::LEVEL_ONE)>0)
+			{
+				$levelStr .= " or level = 1 ";
+			}
+			if(($priority->priority&ParcelPriority::LEVEL_TWO)>0)
+			{
+				$levelStr .= " or level = 2 ";
+			}
+			if(($priority->priority&ParcelPriority::LEVEL_THREE)>0)
+			{
+				$levelStr .= " or  level = 3 ";
+			}
+			if(($priority->priority&ParcelPriority::LEVEL_FOUR)>0)
+			{
+				$levelStr .= " or level = 4 ";
+			}
+			if($isOversize==1)
+			{
+				$oversizeStr = " is_oversize = 1 ";
+			}
+
+			$wlr = WarehouseLocationRecommendation::model()->find(["condition"=>" status = 0 and is_held=:isHeld {$oversizeStr} and ({$levelStr}) and dpt_id = :dptId","params"=>[":isHeld"=>$isHeld,":dptId"=>$location->wid],"order"=>"level desc,ground_label asc"]);
+			if(empty($wlr))
+			{
+
+				return "";
+			}else
+			{
+				return $wlr->ground_label;
+			}
+		}
+	}
+
+	public static function checkLocationUsage($palletId,$recommend="",$groundLabel="")
+	{
+		$checkPallet =  WmsRackShipment::model()->with('shipment')->count("rack_id = :rackId and isScanned=0  and shipment.status<=90",[":rackId"=>$palletId]);// check whether pallet is empty
+
+        $pallet= WmsLocation::model()->findByPk($palletId);
+
+        if(!empty($recommend))
+		{
+			$newlog = new WarehouseLocationRecommendationLog();
+			$newlog->pallet_no = $pallet->code;
+			$newlog->recommend = $recommend;
+			$newlog->actual = $groundLabel;
+			$newlog->save();
+		}
+
+        if($pallet->type==WmsLocation::TYPE_PALLET)
+        {
+        	$storageLocation = WmsLocation::model()->find("code = :code and wid = :wid",[":code"=>$pallet->ground_label,":wid"=>$pallet->wid]);
+        }else
+        {
+        	$storageLocation = $pallet;
+    	}
+
+    	if(empty($storageLocation)) return;
+
+    	
+
+        if($storageLocation->type==WmsLocation::TYPE_RACK_BAY)//if this is in rack
+        {
+            if($checkPallet==0)// when there is no more parcel in this Pallet, this rack can be set as empty
+            {
+                WarehouseLocationRecommendation::model()->updateAll(["status"=>0],"ground_label=:groundLabel and dpt_id=:dptId",[":groundLabel"=>$storageLocation->code,":dptId"=>$pallet->wid]);
+            }else
+            {
+                WarehouseLocationRecommendation::model()->updateAll(["status"=>1],"ground_label=:groundLabel and dpt_id=:dptId",[":groundLabel"=>$storageLocation->code,":dptId"=>$pallet->wid]);
+            }
+        }else//if this is in ground
+        {
+           $wmsLocations =  WmsLocation::model()->with("rackShipments","rackShipments.shipment")->count(["condition"=>"ground_label = :ground_label and t.type = :type and rackShipments.isScanned=0 and shipment.status < :status and t.wid = :wid","params"=>[":ground_label"=>$storageLocation->code,":type"=>WmsLocation::TYPE_PALLET,":status"=>ImParcel::DELIVERED,":wid"=>$pallet->wid],"group"=>"t.id"]);
+            // check in whether this ground still have more than NN pallet
+           $wmsLocationRecommendation = WarehouseLocationRecommendation::model()->find("ground_label=:groundLabel and dpt_id=:dptId",[":groundLabel"=>$storageLocation->code,":dptId"=>$pallet->wid]);
+           if(!empty($wmsLocationRecommendation))
+           {
+	           if($wmsLocations>=$wmsLocationRecommendation->columns)
+	           {
+	           		$wmsLocationRecommendation->status = 1;
+	           		$wmsLocationRecommendation->update(["status"]);
+	           }else
+	           {
+	           		$wmsLocationRecommendation->status = 0;
+	           		$wmsLocationRecommendation->update(["status"]);
+	           }
+       		}
+        }
+	}
+
+	public function heldCheckScanBarcode($barcode)
+	{
+		$sn = 0;
+		$courierId = 0;
+		if(preg_match("/^(PLT|PS1|PM1|PB1)/",$barcode))
+		{
+			$wm = WmsLocation::model()->find("code = :code",[":code"=>$barcode]);
+			if(empty($wm))
+			{
+				$result = ["code"=>"not_found_pallet","msg"=>"not_found_pallet"];
+				return $result;
+			}else
+			{
+				$wmsRackShipments = WmsRackShipment::model()->findAll("status = 0 and rack_id = :rackId",[":rackId"=>$wm->id]);
+				if(!empty($wmsRackShipments))
+				{
+					$scanResult = [];
+					foreach ($wmsRackShipments as $key => $wmsRackShipment) {
+						$hbn = $wmsRackShipment->shipment->hbn;
+						$sn = 0;
+						$courierId = 0;
+						if($wmsRackShipment->sno!=0)
+						{
+							$hbn = $hbn."-".$wmsRackShipment->sno;
+						}
+						$scanResult[] = $this->singleShipmentHeldScanCheck($hbn,$sn,$courierId,$barcode,1);
+					}
+					return $scanResult;
+				}else
+				{
+					$result = ["code"=>"not_found_pallet_is_empty","msg"=>"not_found_pallet_is_empty"];
+					return $result;
+				}
+			}
+			return [];
+		}
+
+		$result = $this->singleShipmentHeldScanCheck($barcode,$sn,$courierId,$barcode,0);
+
+		return $result;
+	}
+
+	private function singleShipmentHeldScanCheck($barcode,$sn,$courier_id,$obarcode,$isPalletScan)
+	{
+		$p = ShipmentScan::getShipmentByBarcode($barcode, $sn, $courier_id);
+		if(!empty($p))
+		{
+			if($p->pkg<5&&$isPalletScan==1)
+			{
+				$result = ["code"=>"not_found","msg"=>"pkg<5 don't scan pallet"];
+				return $result;
+			}
+			
+			$podMap = [];
+			$pod_state_map = Yii::app()->params['settings']['pod_state_map'];
+			$dptId= 0;
+			if($p->ddpt_id==0)
+			{
+				$dptId = $p->consol->dpt_id;
+			}else
+			{
+				$dptId = $p->ddpt_id;
+			}
+
+			$org = Org::model()->findByPk($dptId);
+			$shipmentState = strtoupper($org->state);
+			$podMap = $pod_state_map[$shipmentState];
+			if($sn==0) $sn = 1;
+			$result = ["code"=>$podMap["city"],"msg"=>$podMap["city"],"id"=>$p->id,"status"=>$p->getStatus(),"barcode"=>$obarcode];
+			$hsc = new HeldScanCheck();
+			$hsc->pid = $p->id;
+			$hsc->scan = 1;
+			$hsc->dpt_id = $dptId;
+			if($isPalletScan==1)
+			{
+				$hsc->type = 2;
+			}else
+			{
+				$hsc->type = 1;
+			}
+			$hsc->barcode = $obarcode;
+			$hsc->save();
+			if(empty($p->mdata['scan_time']))
+			{
+				$result = ["code"=>"without_checkin","msg"=>"without_checkin"];
+			}
+		}else
+		{
+			$result = ["code"=>"not_found","msg"=>"not_found"];
+		}
+		return $result;
+	}
+
+	public function saveHeldScanCheck($data,$dptId = 0)
+	{
+		$saveData = [];
+		foreach ($data as $key => $value) {
+			if(!empty($value))
+			{
+				$hsc = new HeldScanCheck();
+				$hsc->pid = $value['id'];
+				$hsc->scan = $value['scanCheckData'];
+				$hsc->dpt_id = $dptId;
+				$hsc->save();
+				$saveData[]=["id"=> $value['id'],"scanCheck"=>$value['scanCheckData'],"scanLog"=>$value['scanLog'],'diff'=>$value['diff']];
+			}
+		}
+		$iSC = new ImparcelScanCheck();
+		$iSC->mdata = $saveData;
+		$iSC->created = date("Y-m-d H:i:s");
+		$iSC->user_id = Yii::app()->user->id;
+		$iSC->save();
+	}
+
+	public function getTodayHeldSummeryList($dptId,$saveDetail = false)
+	{
+		$total = 0;
+		$done = 0;
+		$left = 0;
+		$late = 0;
+		$donePercent = 0;
+		$totalShipments = $this->getTodayHeldShipments($dptId);
+		$detailData = [];
+		foreach ($totalShipments as $key => $shipment) {
+			if(empty($shipment->mdata['scan_time'])) continue;
+			if($shipment->heldScanNumType==1&&$data->palletNum==0) continue;
+			$total+= 1;
+			$c = HeldScanCheck::model()->find("pid = :pid and scan>0 and to_days(created) = to_days(NOW()) and type = 0",[":pid"=>$shipment->id]);
+			if(!empty($c))
+			{
+				$scanTime = empty($shipment->mdata['scan_time'])?date("Y-m-d"):$shipment->mdata['scan_time'];
+				$start_date = new DateTime(explode(" ",$scanTime)[0]);
+				$end_date = new DateTime(date("Y-m-d"));
+				if($end_date->diff($start_date)->days>1)
+				{
+					$late+=1;
+					$detailData[] = [$shipment->ref,$scanTime,date("Y-m-d")];
+				}else
+				{
+					$done+=1;
+				}
+			}else
+			{
+				$detailData[] = [$shipment->ref,@$shipment->mdata['scan_time'],""];
+				$left+=1;
+			}
+		}
+
+		if($saveDetail)
+		{
+			$result= [];
+			$result['header'] = ["ref","checkin time","scan time"];
+			$result['totalData'] = [];
+			foreach($detailData as $key => $d)
+			{
+				$result['totalData'][] = [$d[0],$d[1],$d[2]];
+		  	}
+
+		  	$this->saveDailyReportDetail(ReportCache::TodayHeldReportDaily,$result,$dptId);
+		  	return;
+		}
+
+
+		$donePercent = empty($total)?"":((number_format($done/$total,2,'.','')*100)."%");
+		return ["total"=>$total,"done"=>$done,"left"=>$left,"late"=>$late,'donePercent'=>$donePercent];
+	}
+
+	public function getTodayHeldShipments($dptId)
+	{
+		$rs = [];
+		$yesterday = date("Y-m-d 17:30:00",strtotime("-1 day",strtotime(date("Y-m-d"))));
+		$today = date("Y-m-d 17:30:00");
+		$beforeYesterday = date("Y-m-d 17:30:00",strtotime("-2 day",strtotime(date("Y-m-d"))));
+		$rs1 = ImParcel::model()->findAll("id in (select pid from (select pid,sum(scan) as scan from held_scan_check where dpt_id=".$dptId." and type = 0  group by pid) temp_table where scan = 0) and consol_id !=102721 and status<60");
+		$rs2 = ImParcel::model()->findAll("consol_id != 102721 and consol_id IN (select consol_id FROM shipment WHERE status IN (50,55,57,58,59) AND json_value(meta, '$.scan_time') > '".$yesterday."' AND json_value(meta, '$.scan_time') < '".$today."' GROUP BY consol_id) AND ((t.status=55 AND (to_days(json_value(meta, '$.scan_time')) = to_days(CURRENT_DATE()) or t.scan_no = t.pkg))  OR ((t.status = 57 or t.status = 50 or t.status = 58  or t.status = 59) AND t.scan_no < t.pkg))");
+
+		$rs3 = ImParcel::model()->findAll("consol_id != 102721 and consol_id IN (select consol_id FROM shipment WHERE status IN (50,55,57,58,59) AND json_value(meta, '$.scan_time') > '".$beforeYesterday."' AND json_value(meta, '$.scan_time') < '".$yesterday."' GROUP BY consol_id) AND ((t.status=55 AND (to_days(json_value(meta, '$.scan_time')) = to_days(CURRENT_DATE()) or t.scan_no = t.pkg))  OR ((t.status = 57 or t.status = 50 or t.status = 58  or t.status = 59 ) AND t.scan_no < t.pkg))");
+
+		foreach ($rs1 as $key => $r) {
+			if($r->consol->dpt_id==$dptId)
+			{
+				$rs[$r->id] = $r;
+			}
+		}
+		foreach ($rs2 as $key => $r) {
+			if(!empty($r->mdata['scan_all_op_time'])&&(strtotime($r->mdata['scan_all_op_time'])>strtotime($today)))// if the shipment is scan by scan all, compare the operate time
+			{
+				continue;
+			}
+			if($r->consol->dpt_id==$dptId)
+			{
+				$rs[$r->id] = $r;
+			}
+		}
+		foreach ($rs3 as $key => $r) {
+			if(!empty($r->mdata['scan_all_op_time'])&&(strtotime($r->mdata['scan_all_op_time'])>strtotime($yesterday)))// if the shipment is scan by scan all, compare the operate time
+			{
+				if($r->consol->dpt_id==$dptId)
+				{
+					$rs[$r->id] = $r;
+				}
+			}
+		}
+
+		foreach($rs as $key => $r)
+		{
+			$hs = [];
+			if($r->pkg>5)
+			{
+				$hs = HeldScanCheck::model()->findAll(['condition'=>"pid = :pid and scan>0 and to_days(created) = to_days(NOW()) and type = 2",'params'=>[":pid"=>$r->id],'group'=>'barcode']);
+				$rs[$key]->heldScanNumType = 1;
+				$rs[$key]->palletNum = count($r->funcGetRackNameList());
+			}else
+			{
+				$hs = HeldScanCheck::model()->findAll(['condition'=>"pid = :pid and scan>0 and to_days(created) = to_days(NOW()) and type = 1",'params'=>[":pid"=>$r->id],'group'=>'barcode']);
+				$rs[$key]->heldScanNumType = 0;
+				$rs[$key]->palletNum = count($r->funcGetRackNameList());
+			}
+			$rs[$key]->heldScanNum = count($hs);
+			$rs[$key]->scanedHeldBarcodes = join(",",array_column($hs,'barcode'));
+			$barcodeLog = [];
+			foreach ($hs as $key2 => $value) {
+				$barcodeLog[] = ["barcode"=>$value->barcode,'time'=>$value->created];
+			}
+			$rs[$key]->scanedHeldBarcodesLog = json_encode($barcodeLog);
+		}
+		return $rs;
+	}
+
+	public function saveTodayHeldShipments($dptId)
+	{
+		$todayHeldShipments = $this->getTodayHeldShipments($dptId);
+		foreach($todayHeldShipments as $key => $todayHeldShipment)
+		{
+			$heldScanCheck = HeldScanCheck::model()->count("pid = :pid and type = 0",[":pid"=>$todayHeldShipment->id]);
+			if($heldScanCheck==0)
+			{
+				$hsc = new HeldScanCheck();
+				$hsc->pid = $todayHeldShipment->id;
+				$hsc->scan = 0;
+				$hsc->dpt_id = $dptId;
+				$hsc->type = 0;
+				$hsc->save();
+			}
+		}
+	}
+
+	public function savePrepationHeldShipmentDetail($wid)
+	{
+
+		  	$params = ['pickupDate'=>'tomorrow'];
+       		$pdata = $this->getPreparationSummeryList($wid,$params,true);
+       		$hdata = $this->getHeldShipmentGatepassSummary($wid,true);
+
+       		$result= [];
+			$result['header'] = ["ref","Type"];
+			$result['totalData'] = [];
+			foreach($pdata as $key => $d)
+			{
+				$result['totalData'][] = [$d[0],"Prepation"];
+		  	}
+
+		  	foreach($hdata as $key => $d)
+			{
+				$result['totalData'][] = [$d[0],"旧"];
+		  	}
+
+		  	$this->saveDailyReportDetail(ReportCache::PreparationReportDaily,$result,$wid);
+		  	return;
+	}
+
+	public function getOnBoardConsolShipments($dptId)
+	{
+		$onRoad = 0;
+		$model=new Consol('search');
+		$model->unsetAttributes();
+		$model->dpt_id=$dptId;
+		$model->service=ImcoConsol::AIRCONSOL;
+		$model->process_statuses=[ConsolProcess::STATE_WAITING_NOTIFY_DRIVER_PICKUP, ConsolProcess::STATE_NOTIFIED_DRIVER];
+		$model->process_types=[ConsolProcess::TYPE_FULL_PROCESS, ConsolProcess::TYPE_LOCAL_PROCESS,ConsolProcess::TYPE_DIRECT_AIR_CONSOL, ConsolProcess::TYPE_DIRECT_SEA_CONSOL];
+		$consols = $model->search(false,30,false,false,false)->data;
+		foreach ($consols as $key => $consol) {
+			$onRoad+=$consol->totPacks();
+			$logs = Log::model()->count(" lid = :lid and model ='ConsolProcess' and meta like '%Notified Driver%' and time<:time",[":lid"=>$consol->process->id,":time"=>date("Y-m-d 17:00:00")]);
+		}
+		return $onRoad;
+	}
+	public function getCheckinDashboardReport($depot,$userDptId)
+	{
+		$sydneyReport = $this->getCheckInReport(Org::TLA_DEPARTMENT_SYDNEY,true,false);
+		$melbourneReport = $this->getCheckInReport(Org::TLA_DEPARTMENT_MELBOURNE,true,false);
+		$brisbaneReport = $this->getCheckInReport(Org::TLA_DEPARTMENT_BRISBANE,true,false);
+		$checkDepotId = 0;
+		if(empty($depot))
+		{
+			$checkDepotId = $userDptId;
+		}else
+		{
+			$checkDepotId = Org::$warehouse_list_re[$depot];
+		}
+		$provide = [];
+
+		switch($checkDepotId)
+		{
+			case Org::TLA_DEPARTMENT_SYDNEY:
+				$onRoad = $this->getOnBoardConsolShipments($checkDepotId);
+				$provide = ["left"=>$sydneyReport[0]['left'],'done'=>$sydneyReport[0]['scanCount'],'scanPercent'=>$sydneyReport[0]['scanPercent'],'leftPercent'=>$sydneyReport[0]['leftPercent'],'onRoad'=>$onRoad,'depot'=>'Sydney'];
+			break;
+			case Org::TLA_DEPARTMENT_MELBOURNE:
+				$onRoad = $this->getOnBoardConsolShipments($checkDepotId);
+				$provide = ["left"=>$melbourneReport[0]['left'],'done'=>$melbourneReport[0]['scanCount'],'scanPercent'=>$melbourneReport[0]['scanPercent'],'leftPercent'=>$melbourneReport[0]['leftPercent'],'onRoad'=>$onRoad,'depot'=>'Melbourne'];
+			break;
+			case Org::TLA_DEPARTMENT_BRISBANE:
+				$onRoad = $this->getOnBoardConsolShipments($checkDepotId);
+				$provide = ["left"=>$brisbaneReport[0]['left'],'done'=>$brisbaneReport[0]['scanCount'],'scanPercent'=>$brisbaneReport[0]['scanPercent'],'leftPercent'=>$brisbaneReport[0]['leftPercent'],'onRoad'=>$onRoad,'depot'=>'Brisbane'];
+			break;
+			case Org::TLA_DEPARTMENT_PERTH:
+				$onRoad = $this->getOnBoardConsolShipments($checkDepotId);
+				$provide = ["left"=>0,'done'=>0,'scanPercent'=>"0%",'leftPercent'=>"0%",'onRoad'=>0,'depot'=>'Perth'];
+			break;
+		}
+
+		$provide['total'] = $provide['left']+$provide['done']+$provide['onRoad'];
+		$provide['onHand'] = $provide['left']+$provide['done'];
+
+		$provide['rightData'] = [
+								"BNE(".$brisbaneReport[0]['scanPercent'].")"=>explode("%",$brisbaneReport[0]['scanPercent'])[0],
+								"MEL(".$melbourneReport[0]['scanPercent'].")"=>explode("%",$melbourneReport[0]['scanPercent'])[0],
+								"SYD(".$sydneyReport[0]['scanPercent'].")"=>explode("%",$sydneyReport[0]['scanPercent'])[0]];
+		$provide['checkDepotId'] = $checkDepotId;
+
+
+		return $provide;
+	}
+
+	public function getCheckinDashboardReportDetail($dptId)
+	{
+		$provide = $this->getWhscanDetailReport(date("Y-m-d"),date("Y-m-d"),$dptId,true);
+		foreach ($provide as $key => $value) {
+			$provide[$key]['total_weight'] = join('',explode(',',$provide[$key]['total_weight']));
+		}
+		usort($provide, function($a, $b) {
+		    return $b['total_weight']<=>$a['total_weight'];
+		});
+		return $provide;
+	}
+
+	public function getWhscanDetailReport($start_time,$end_time,$dptId = 0,$onlyFirstName=false,$service=0)
+	{
+		$depotMapping = Org::$warehouse_list;
+		//$cache = null;//$this->getCacheData("wdr".$dptId.$service.$start_time.$end_time);
+		if(!empty($cache))
+		{
+			return $cache;
+		}
+		$provide= [];
+		$criteria = new CDbCriteria;
+			$criteria->addCondition('t.type IN (0,5)');
+			$criteria->addCondition('scan_time > :start');
+			$criteria->addCondition('scan_time < :end');
+			if(!empty($dptId))
+			{
+				$criteria->addCondition('warehouse = '.$dptId);
+			}
+			$criteria->addCondition('pid NOT IN (
+			    SELECT shipment_id 
+			    FROM import_bag_tag 
+			    WHERE shipment_id IN (
+			        SELECT pid 
+			        FROM shipment_scan 
+			        WHERE scan_time > :substart
+			        AND scan_time < :subend
+			        AND t.type = 0
+			    )
+			)');
+
+			$criteria->params = [
+			    ':start' => $start_time. ' 00:00:00',
+			    ':end' => $end_time. ' 23:59:59',
+			    ':substart' => $start_time. ' 00:00:00',
+			    ':subend' => $end_time. ' 23:59:59',
+			];
+			if(!empty($service))
+			{
+				$criteria->addCondition('
+					CASE
+        				WHEN t.type=0 THEN consol.service = '.$service.'
+        				WHEN t.type=5 THEN consol.service is null
+        			END' );
+			}
+
+			$criteria->order = "warehouse ASC,scan_time ASC";
+			$rs = ShipmentScan::model()->with('shipment','shipment.consol')->together('user')->findAll($criteria);
+	        $scan_date_data = [];
+	        
+            $importBagTagArr = [];
+		    $importBagTags = ImportBagTag::model()->with(['imParcel'])->findAll([
+		    'condition' => 'import_bag_id IN (
+		        SELECT pid FROM shipment_scan WHERE scan_time > :start AND scan_time < :end AND type = 5 )',
+		    'params' => [
+		        ':start' => $start_time . ' 00:00:00',
+                ':end' => $end_time . ' 23:59:59'
+		    ],
+		]);
+
+			foreach ($importBagTags as $importBagTag) {
+			    $shipment = $importBagTag->imParcel;
+			    //Shipment::model()->find('id = :id', [':id' => $importBagTag->shipment_id]);
+			    if (!empty($shipment)) {
+			        $importBagTagArr[$importBagTag->import_bag_id][] = $shipment;
+			    }
+			}
+
+	        foreach ($rs as $r) {
+	            $uid = $r->user_id;
+	            $scan_date = date('Y-m-d', strtotime($r->scan_time));
+	            if (!isset($scan_date_data[$uid][$scan_date])&&$uid!==0) {
+	                $scan_date_data[$uid][$scan_date] = [
+	                    'time' => 0,
+	                    'user' => empty($r->user) ? '' : ($onlyFirstName?$r->user->fname:$r->user->getFullName()),
+	                    //'user' => $uid,
+	                    'depot' => $r->warehouse,
+	                    'dp_packs'=>0,
+	                    'dp_weight'=>0,
+	                    'pcs_packs' => 0,
+	                    'pcs_weight' => 0,
+	                    'carton_packs' => 0,
+	                    'carton_weight' => 0
+	                ];
+	                $start = $r->scan_time;
+	            }
+
+                $end = $r->scan_time;
+                $timeDiff = abs(strtotime($end) - strtotime($start));
+                $scan_date_data[$uid][$scan_date]['time'] = $timeDiff;
+                //$start = $r->scan_time;
+	            // if (abs(strtotime($start) - strtotime($r->scan_time)) < $gap) {
+	            //     $scan_date_data[$uid][$scan_date]['time'] += abs(strtotime($start) - strtotime($r->scan_time));
+	            // } else {
+	            //     $scan_date_data[$uid][$scan_date]['time'] += 1;
+	            // }
+	            // $start = $r->scan_time;
+	            if ($r->type == 0) {
+	              $scan_date_data[$uid][$scan_date]['pcs_packs'] += $r->pkg;
+	              $scan_date_data[$uid][$scan_date]['pcs_weight'] += $r->weight;
+                  if(!empty($r->shipment)){
+                     if($r->shipment->agent_id==org::ORGID_CLIENT_DAIPOST)
+	                  {
+		               	 $scan_date_data[$uid][$scan_date]['dp_packs'] += $r->pkg;
+		               	 $scan_date_data[$uid][$scan_date]['dp_weight'] += $r->weight;
+	                  }
+                  }
+	            } else if ($r->type == 5) {
+	                $scan_date_data[$uid][$scan_date]['carton_packs'] += 1;
+	                if(!empty($importBagTagArr[$r->pid]))
+	                {
+		                foreach ($importBagTagArr[$r->pid] as $key => $shipment)
+		                {
+		                	$scan_date_data[$uid][$scan_date]['carton_weight'] += $shipment->weight;
+		                }
+	            	}
+	            }
+	        }
+	        foreach ($scan_date_data as $uid => $user_data) {
+	            foreach ($user_data as $scan_date => $data) {
+	                $hrs = number_format($data['time']/ 3600,2);
+	                $dp_packs=$data['dp_packs'];
+	                $pcs_packs=$data['pcs_packs'];
+	                $carton_packs=$data['carton_packs'];
+	                $dp_weight=$data['dp_weight'];
+	                $pcs_weight=$data['pcs_weight'];
+	                $carton_weight=$data['carton_weight'];
+	                $provide[] = [
+	                	'id'=>$uid,
+	                    'user' => $data['user'],
+	                    'depot' => isset($depotMapping[$data['depot']]) ? $depotMapping[$data['depot']] : '',
+	                    'dp_packs'=>$dp_packs,
+	                    'dp_weight'=>number_format($dp_weight*10,2),
+	                    'pcs_packs' => ($pcs_packs-$dp_packs),
+	                    'pcs_weight' => number_format(($pcs_weight-$dp_weight),2),
+	                    'carton_packs' => $carton_packs,
+	                    'carton_weight' => number_format($carton_weight,2),
+	                    'scan_date' => $scan_date,
+	                    'time' => $hrs,
+	                    'total_packs' => ($pcs_packs + $carton_packs),
+	                    'total_weight' =>number_format(($dp_weight*10 +$pcs_weight-$dp_weight+$carton_weight),2),
+	                ];
+	            }
+	        }
+	    
+	    //$cache = $this->setCacheData("wdr".$dptId.$service.$start_time.$end_time,$provide,600);
+	    return $provide;
+	}
+
+}
+?>

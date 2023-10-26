@@ -1,0 +1,342 @@
+<h2>Prepare Gate Pass</h2>
+<div class="form">
+<?php $form=$this->beginWidget('CActiveForm', array(
+	'id'=>'gate-pass-form',
+	'enableAjaxValidation'=>false,
+)); ?>
+
+	<div class="row">
+		<div class="col" style="width: 50%;">
+			<div class="row rowcol rowleft">
+				<?php echo $form->labelEx($model,'dpt_id'); ?>
+				<?php echo $form->dropDownList($model,'dpt_id', Org::dptList(), array('empty' => 'Select One')); ?>
+			</div>
+			<div class="row rowcol rowleft">
+				<?php echo $form->labelEx($model,'company'); ?>
+				<?php echo $form->textField($model, 'company', array('size'=>30,'maxlength'=>50)); ?>
+			</div>
+			<div class="row rowcol">
+				<?php echo $form->labelEx($model,'ref'); ?>
+				<?php echo $form->textField($model, 'ref', array('size'=>20,'maxlength'=>30)); ?>
+			</div>
+			<div class="row rowcol">
+				<?php echo CHtml::label('ST Invoice', 'st_invoice'); ?>
+				<?php echo CHtml::checkBox('st_invoice', 1); ?>
+			</div>
+			<div class="row rowcol">
+				<?php echo CHtml::label('Ignore Resorting', 'Ignore Resorting'); ?>
+				<?php echo CHtml::checkBox('ignore_resorting', 0); ?>
+			</div>
+			<div class="row rowcol">
+				<label>&nbsp;</label>
+				<?php echo CHtml::submitButton($this->t('Create'), array('class' => 'save_btn')); ?>
+			</div>
+			<div class="row">
+				<div class="row rowcol">
+					<?php echo CHtml::hiddenField('cr',0)?>
+					<?php echo CHtml::label('Only Generate Cargo Receipt', 'Only Generate Cargo Receipt'); ?>
+					<?php echo CHtml::checkBox('generate_cargo_receipt', 0); ?>
+				</div>
+				<div class="row rowcol">
+					<label>&nbsp;</label>
+					<?php echo CHtml::submitButton($this->t('generate_cargo_receipt_and_gatepass'), array('class' => 'generate_btn')); ?>
+				</div>
+			</div>
+
+			<div class="row">
+				<?php echo CHtml::hiddenField('GatePass[sig]'); ?>
+				<?php echo CHtml::hiddenField('sids'); ?>
+			</div>
+			<div id="selected-parcels" class="grid-view" style="width:90%;">
+				<input id="all-selected-parcel-ids" type="hidden" name="parcels" value="" >
+				<label> <h2> Seleted Parcels </h2></label>
+				<div class="summary" style="text-align: left;"><b><span class="selected-item-amount">0</span></b> Items Selected.</div>
+				<table class="items">
+					<thead>
+					<tr>
+						<th>AWB No.</th>
+						<th>Connote</th>
+						<th>Status</th>
+						<th>Package</th>
+						<th>Weight</th>
+						<th>Action</th>
+					</tr>
+					</thead>
+					<tbody id="body-selected-parcles">
+					</tbody>
+				</table>
+			</div>
+			<div style="clear:both; margin-bottom: 15px;"></div>
+		</div>
+		<div class="col" style="width: 50%;">
+			<div class="row">
+					<span> <h2> Available Consols </h2></span>
+					<div id="console-view">
+						<?php
+						$ec = new CDbCriteria;
+						$ec->addCondition('t.type IN (15, 70)');
+						$this->widget('zii.widgets.grid.CGridView', array(
+							'id'=>'gp-imco-consol-grid',
+							'cssFile' => false,
+							'dataProvider'=>$modelConsole->search(true,20,$ec,false),
+							'filter'=>$modelConsole,
+							'ajaxUpdate' => 'shipments-view',
+							'columns'=>array(
+								array('name' => 'no' , 'header' => 'Consol No.','htmlOptions' => array('class'=>'show-details'),  'type' => 'raw', 'value' => '"<input type=\"hidden\" name=\"id\" value=\"". $data->id ."\"><a href=\"".Yii::app()->createURL(($data->type==15)?"imcoConsol/update":"dmawbConsol/update", array("id" => $data->id))."\" class=\"tab_link\" title=\"".$data->no."\">".$data->no."</a>"',),
+								array('name' => 'awb'),
+								array('name' => 'status', 'value' => '$data->getStatus()',
+									'filter'=>CHtml::dropDownList('ImcoConsol[status]', $modelConsole->status, $this->t($modelConsole::$states), array('prompt'=>$this->t('All'))),),
+								array('name' => 'dpt_id', 'value' => '$data->depot->name',
+									'filter'=>CHtml::dropDownList('ImcoConsol[dpt_id]', $modelConsole->dpt_id, $this->t(Org::dptList()), array('prompt'=>$this->t('All'))),
+									),
+								array(
+									'class'=>'oButtonColumn',
+									'template'=>'{Select All}',
+									'buttons'=>array(
+										'Select All' => array(
+											'imageUrl'=>false,
+											'url'=>'',
+											'options' => array('class' => 'select-all-console-shipments grid_swap_btn'),
+										),
+									),
+								),
+							),
+						)); ?>
+					</div>
+				</div>
+			<div class="row">
+					<span> <h2> Available Shipments </h2></span>
+					<div id="loadingPic"  style="width:20px;height:20px;float:left;"></div>
+					<div id="shipments-view">
+						<?php
+						$this->renderPartial('_sub_shipments', array(
+							'shipment_model' => $modelShipment,
+							'consoleId' => $consoleId,
+						));
+						?>
+					</div>
+				</div>
+		</div>
+	</div>
+
+<?php $this->endWidget(); ?>
+</div>
+
+<script type="text/javascript">
+$(function(){
+	var tab = $('#<?=$_GET["tabid"];?>');
+	var panel = tab.data('panel');
+
+	function addSelectedParcel(parcel){
+		// if existing do nothing
+		var existing = false;
+		$('#body-selected-parcles', panel).children('tr').each(function(e){
+			var id = $(this).data('id');
+			if ( id == parcel.id ) {
+				existing = true;
+				return false;
+			}
+		});
+	   
+		if ( existing )  {
+			myApp.notice('parcel already selected!');
+			return false;
+		}
+
+		var existingNum = $('#body-selected-parcles tr', panel).length;
+		var trClassType = existingNum % 2 == 0? 'even' : 'odd';
+		var parcelElements = '<tr class="' + trClassType + '" data-id="' + parcel.id + '">';
+		parcelElements +=  '<td>' + parcel.awb + '</td>';
+		parcelElements +=  '<td>' + parcel.hbn + '</td>';
+		parcelElements +=  '<td>' + parcel.status + '</td>';
+		parcelElements +=  '<td>' + parcel.pkg + '</td>';
+		parcelElements +=  '<td>' + parcel.weight + '</td>';
+		parcelElements +=  '<td><a href="javascript:;" class="remove-selected-parcel">Remove</a></td>';
+		var obj = $(parcelElements);
+		$('#body-selected-parcles', panel).append(obj.fadeIn());
+		$('.selected-item-amount', panel).text(existingNum+1);
+
+	}
+
+	function updateSelectedAmount(){
+		$('.selected-item-amount', panel).text($('#body-selected-parcles tr', panel).length);
+	}
+
+	function removeSelectedParcel(pid){
+		$('#body-selected-parcles', panel).children('tr').each(function(e){
+			var id = $(this).data('id');
+			if ( id == pid ) {
+				$(this).remove();
+				updateSelectedAmount();
+				return false;
+			}
+		});
+	}
+
+	function getAwbValueByParcel(cid){
+		var awbno = '';
+
+		$('#gp-imco-consol-grid', panel).find('input[name="id"]').each(function(e){
+			if ( $(this).val() == cid ) {
+				awbno = $(this).parent().parent().find('td:nth-child(2)').html();
+				return false;
+			}
+		});
+		return awbno;
+	}
+
+	function selectAllByConsoleId(cid){
+		console.log('add all for console :' + cid);
+		$.ajax({
+			type : 'GET',
+			url : '<?php echo Yii::app()->createAbsoluteUrl("gatepass/getAllShipments") ;?>' + '?cid=' + cid,
+			dataType: 'JSON',
+			success:function(resp){
+				if ( resp.status == 1 ) {
+					for (var i in resp.shipments ) {
+						addSelectedParcel(resp.shipments[i]);
+					}
+				}
+			},
+			complete:function(jqXHR, status ){
+			}
+		});
+	}
+
+	$('#body-selected-parcles', panel).on('click','.remove-selected-parcel',function(e){
+		if ( confirm('Are you sure remove the item?') ) {
+			$(this).parents('tr').remove();
+			updateSelectedAmount();
+		}
+	});
+	
+	$('#gate-pass-form', panel).on('click','.select-on-check-all',function(e){
+		$('#gate-pass-form input.select-on-check', panel).each(function(e){
+			$(this).click();
+		});
+	});
+
+	$('#gate-pass-form', panel).on('click','.select-on-check',function(e){
+		var selectedMe = $(this).prop('checked');
+
+		if ( selectedMe ) {
+			// try to add this one
+			var pitem = $(this).parent().parent();
+			var data = {};
+			data['id'] = $(this).val();
+			// get console id
+			var hbnCell = '<div>' +  pitem.find('td:nth-child(2)').html() + '</div>';
+
+			var obj = $($.parseHTML(hbnCell));
+			var consolItem = obj.find('input[name="consolid"]');
+			var consoleId = consolItem.val();
+
+			consolItem.remove();
+			data['awb'] = getAwbValueByParcel(consoleId);
+			data['hbn'] = obj.html();
+			data['status'] = pitem.find('td:nth-child(4)').html();
+			data['pkg'] = pitem.find('td:nth-child(5)').html();
+			data['weight'] = pitem.find('td:nth-child(6)').html();
+			addSelectedParcel(data);
+
+		} else {
+			// try to remove it
+			removeSelectedParcel($(this).val());
+		}
+	});
+
+	$('#console-view', panel).on("click", "table tbody td", function(event){
+		if ( $(this).hasClass('button-column') ) {
+			// get console id
+			var consoleId = parseInt( $(this).parent().children(':nth-child(1)').find('input[name="id"]').val() );
+			selectAllByConsoleId(consoleId);
+			return;
+		}
+
+		if ( $(this).hasClass('show-details') ) return;
+		if ( !$('#loadingPic', panel).hasClass('grid-view-loading')) {
+			$('#loadingPic', panel).addClass('grid-view-loading');
+		}
+		// get console id
+		var consoleId = parseInt( $(this).parent().children(':nth-child(1)').find('input[name="id"]').val() );
+		var data = {};
+		data['consoleId'] = consoleId;
+		$.ajax({
+			type : 'GET',
+			url : '<?php echo Yii::app()->createAbsoluteUrl("gatepass/prepare",array('tabid'=>$_GET['tabid'])) ;?>',
+			data: data,
+			dataType: 'html',
+			success:function(resp){
+				$('#shipments-view').html(resp);
+			},
+			complete:function(jqXHR, status ){
+				if ( $('#loadingPic').hasClass('grid-view-loading')) {
+					$('#loadingPic').removeClass('grid-view-loading');
+				}
+			}
+		});
+	});
+
+	$('input[class="save_btn"]', panel).on('click', function(e){
+		$('#cr').val(0);
+		var company = $('#GatePass_company', panel).val();
+		if ( company.length <= 0 ) {
+			alert('Please type company name');
+			$('#GatePass_company').focus();
+			return false;
+		}
+
+		return confirmForm();
+
+	});
+
+	$('input[class="generate_btn"]', panel).on('click', function(e){
+		$('#cr').val(1);
+		if($('#generate_cargo_receipt').is(':checked')==false)
+		{
+			if(confirm('Are you should to prepare gatepass while generating cargo receipt?'))
+			{
+				var company = $('#GatePass_company', panel).val();
+				if ( company.length <= 0 ) {
+					alert('Please type company name');
+					$('#GatePass_company').focus();
+					return false;
+				}
+			}else
+			{
+				return false;
+			}
+		}
+		return confirmForm();
+
+	});
+
+	function confirmForm()
+	{
+		if ($('#body-selected-parcles tr', panel).length < 1) {
+			alert('Please select at least one shipment');
+			return false;
+		}
+
+		var allSelectedParcelIds = [];
+		$('#body-selected-parcles tr', panel).each(function(i){
+			allSelectedParcelIds.push($(this).data('id'));
+		});
+
+		$('#all-selected-parcel-ids', panel).val(allSelectedParcelIds.join(','));
+	}
+	
+	$('form#gate-pass-form', panel).on('success', function(e, r){
+		// clear all old data for next new one
+		$('.selected-item-amount', panel).html('0');
+		$('#body-selected-parcles', panel).empty();
+	});
+
+	$('form#gate-pass-form', panel).on('error', function(e, r){
+		// clear all old data for next new one
+		$('.selected-item-amount', panel).html('0');
+		$('#body-selected-parcles', panel).empty();
+	});
+
+});
+</script>

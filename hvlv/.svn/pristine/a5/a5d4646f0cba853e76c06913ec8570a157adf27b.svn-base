@@ -1,0 +1,391 @@
+<?php 
+class SalesfunnelRequirementsService extends Service
+{
+	
+    public function createSalesfunnelRequirements($questionNum,$question,$questionType,$Answers)
+    {
+        $questionModel = new SalesfunnelRequirementsQuestions();
+        $answerModel = new SalesfunnelRequirementsAnswer();
+        $errors = [];
+        $newCBM = 0;
+        $qa = SalesfunnelRequirementsQuestions::model()->findAll(["condition"=>'question_num =  "'.$questionNum. 'and question ="'.$question.'"']);
+        if(!empty($qa))
+        	print('alert("This requirement is exited.")');
+        else{
+        	$qu = new SalesfunnelRequirementsQuestions;
+        	$qu->question_num = $questionNum;
+        	$qu->question = $question;
+        	$qu->question_type = $questionType;
+        	$qu->save();
+        }
+        $an = new SalesfunnelRequirementsAnswer;
+        foreach ($Answers as $key => $d) {
+            $an->answer = $d[0];
+            $an->question_id = $qu->id;
+            $an->next_question_id = $d[1];
+            $an->save();
+        }
+
+        return $qu->id;
+	}
+
+   public function modifySalesfunnelRequirements($questionId,$questionNum,$question,$questionType,$Answers)
+   {
+        $this->modifySalesfunnelRequirementsQuestions($questionId,$questionNum,$question,$questionType);
+        $this->modifySalesfunnelRequirementsAnswer($questionId,$Answers);
+
+    }
+
+    public function modifySalesfunnelRequirementsQuestions($questionId,$questionNum,$question,$questionType){
+    	$questionModel = SalesfunnelRequirementsQuestions::model()->findByPk($questionId);
+        $errors = [];        
+        if(!empty($questionModel)){
+        	if(!empty($questionNum)){
+        		$questionModel->question_num = $questionNum;
+        	}
+            if(!empty($question)){
+        		$questionModel->question = $question;
+        	}
+            if(!empty($questionType)){
+        		$questionModel->question_type = $questionType;
+        	}            
+            $questionModel->save();
+            $questionModel->refresh();
+        }
+        else
+        	print('console.log("empty.")');
+
+    }
+
+    public function modifySalesfunnelRequirementsAnswer($questionId,$Answers){
+    	$answerModels = SalesfunnelRequirementsAnswer::model()->findAll(['condition'=>'question_id =  "'.$questionId]);
+        foreach ($Answers as $key => $d){
+        	if(!empty($d[0])){
+            	$answerModels->answer = $d[0];
+       		}
+       		if(!empty($questionId)){
+            	$answerModels->question_id = $questionId;
+       		}
+       		if(!empty($d[1])){
+            	$answerModels->next_question_id = $d[1];
+        	}   
+    	}            
+        $answerModels->save();
+        $answerModels->refresh();
+    }
+
+    public function removeRequirementQuestion($id)
+    {
+        $requirementQu = SalesfunnelRequirementsQuestions::model()->findByPk($id);
+        $requirementQu->delete();
+        $requirementAn = SalesfunnelRequirementsAnswer::model()->findAll(["condition"=>'question_id =  '.$id]);
+        $requirementQu->delete();
+       
+        return $model;
+    }
+
+    public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return [
+			'SalesfunnelRequirementsQuestions' => [self::BELONGS_TO, 'SalesfunnelRequirementsAnswer', 'question_id'
+			]
+		];
+	}
+
+	public function showAnswers($questionId=1){
+		$requirementAns = SalesfunnelRequirementsAnswer::model()->findAll("question_id = :question_id", [":question_id" =>$questionId]);
+        if (!empty($requirementAns))
+        	return $requirementAns;
+        else 
+        	print('alert("No Answer for this question.")');
+	}
+
+	public function checkNextQuestionExited($question_id){
+		$q = SalesfunnelRequirementsQuestions::model()->findByPk($question_id);
+        $answerModel = SalesfunnelRequirementsAnswer::model()->find('question_id = :question_id', [':question_id' => $question_id]);
+        if(!empty($answerModel)){
+            if (!empty($answerModel->next_question_id)){
+                return $answerModel->next_question_id;
+            }
+            else{
+                return NULL;
+            }
+        }
+        else{
+            $nextQuestionModel = SalesfunnelRequirementsQuestions::model()->find(["condition"=>'question_num >  '.($q->question_num),"order"=>"question_num ASC"]);
+            if (!empty($nextQuestionModel)){
+                return $nextQuestionModel->id;
+            }
+            else{
+                return NULL;
+            }
+        }
+    }
+
+	public function printQuestion($data, $submitID = null){
+		
+		if (!isset($data['question_type']))
+			return print("echo'error");
+		else{
+			$questionAnswerModel = SalesfunnelRequirementsRecords::model()->find('submit_id = :submit_id AND question_id = :question_id',[':submit_id' => $submitID, ':question_id' => $data->id]);
+			// echo $questionAnswerModel->question_id;
+			// Yii::app()->end();
+
+			switch ($data['question_type']) {
+				case SalesfunnelRequirementsQuestions::QUESTIONTYPENUMBER:
+					$this->printType0($data, $questionAnswerModel);
+					break;
+				case SalesfunnelRequirementsQuestions::QUESTIONTYPETEXTFIELD:
+					$this->printType1($data, $questionAnswerModel);
+					break;
+				case SalesfunnelRequirementsQuestions::QUESTIONTYPERADIOBUTTON:
+					$this->printType2($data,$questionAnswerModel);
+					break;
+				case SalesfunnelRequirementsQuestions::QUESTIONTYPECHECKBOX:
+					$this->printType3($data, $questionAnswerModel);
+					break;
+				case SalesfunnelRequirementsQuestions::LASTQUESTIONQUESTIONTYPE:
+					$this->printType99($data);
+					break;
+
+				default:
+					// code...
+					break;
+			}
+
+		}
+
+	}
+
+	public function printType0($data, $questionAnswerModel=null){//print out number question
+		print('
+			<div class="item" id="item">                    
+	            <h1 id="qid" qid="'.$data->id.'">Question '.$data->question_num.'</h1>
+	            <h2>'.$data->question.'</h2>
+				<div class="col-12">
+		            <!-- <label for="category_'.$data->question_num.'_0" class="form-label pe-label text-input-row">'.$data->question.'</label> -->
+		            <input type="number" class="form-control" id="category_'.$data->question_num.'_0" name="_answer"');
+		if(!empty($questionAnswerModel->answer_str)){
+			print('value="'.$questionAnswerModel->answer_str.'"');
+		}
+		 print(' required >
+		        </div>
+		    </div>
+		');
+	}
+
+	public function printType1($data, $questionAnswerModel=null){//print out testfield question
+		print('
+			<div class="item" id="item">                    
+	            <h1 id="qid" qid="'.$data->id.'">Question '.$data->question_num.'</h1>
+	            <h2>'.$data->question.'</h2>
+				<div class="col-12">
+		            <!-- <label for="category_'.$data->question_num.'_0" class="form-label pe-label text-input-row">'.$data->question.'</label> -->
+		            <input type="text" class="form-control" id="category_'.$data->question_num.'_0" name="_answer"');
+		if(!empty($questionAnswerModel->answer_str)){
+			print('value="'.$questionAnswerModel->answer_str.'"');
+		}
+		print(' required >
+		        </div>
+		    </div>
+		');
+	}
+
+	public function printType2($data, $questionAnswerModel=null){//print out radio button question
+		print('
+			<div class="item" id="item">                    
+	            <h1 id="qid" qid="'.$data->id.'">Question '.$data->question_num.'</h1>
+	            <h2>'.$data->question.'</h2>
+		');
+		$answers = $this->showAnswers($data->id);
+
+		$count = 1;
+		foreach ($answers as $key => $an) {
+			$count++;
+			print('
+				<div class="form-check form-check-inline" style="fornt-size:2em">
+	                <input class="form-check-input" type="radio" name="_answer" id="category_'.$data->question_num.'_'.$count.'" value="'.$an->id.'"');
+			if (!empty($questionAnswerModel) && $an->id == $questionAnswerModel->answer_id){
+				print(' checked ');
+			}
+			Print('>
+	                <label class="form-check-label pe-label" for="category_'.$data->question_num.'_'.$count.'">'.$an->answer.'</label>
+	            </div>
+				');
+		}
+
+		Print('</div>');
+	}
+
+	public function printType3($data, $questionAnswerModel=null){//print out check box button question
+		print('
+			<div class="item" id="item">                    
+	            <h1 id="qid" qid="'.$data->id.'">Question '.$data->question_num.'</h1>
+	            <h2>'.$data->question.'</h2>
+		');
+		$answers = $this->showAnswers($data->id);
+
+		$count = 1;		
+		foreach ($answers as $key => $an) {
+			$count++;
+			print('
+				<div class="form-check form-check-inline" style="fornt-size:2em">
+	                <input class="form-check-input" type="checkbox" name="_answer" id="category_'.$data->question_num.'_'.$count.'" value="'.$an->id.'"');
+			if (!empty($questionAnswerModel)){
+				$answerArray = explode(',', $questionAnswerModel->answer_str);
+				if ( in_array($an->id, $answerArray)){
+					print(' checked ');
+				}
+			}			
+			print('>
+	                <label class="form-check-label pe-label" for="category_'.$data->question_num.'_'.$count.'">'.$an->answer.'</label>
+	            </div>
+				');
+		}
+
+		Print('</div>');
+	}
+
+	public function printType99($data){//print out last question
+		print('
+			<div class="item" id="item">                    
+	            <h1 id="qid" qid="'.$data->id.'">Question '.$data->question_num.'</h1>
+	            <h2 id="lid">'.$data->question.'</h2>
+		    </div>
+		');
+	}
+
+	public function printFinalQuestion($data, $submitID = null){
+		
+		if (!isset($data['question_type']))
+			return print("echo'error");
+		else{
+			$questionAnswerModel = SalesfunnelRequirementsRecords::model()->find('submit_id = :submit_id AND question_id = :question_id',[':submit_id' => $submitID, ':question_id' => $data->id]);
+			// echo $questionAnswerModel->question_id;
+			// Yii::app()->end();
+
+			switch ($data['question_type']) {
+				case SalesfunnelRequirementsQuestions::QUESTIONTYPENUMBER:
+					$this->printFaType0($data, $questionAnswerModel);
+					break;
+				case SalesfunnelRequirementsQuestions::QUESTIONTYPETEXTFIELD:
+					$this->printFaType1($data, $questionAnswerModel);
+					break;
+				case SalesfunnelRequirementsQuestions::QUESTIONTYPERADIOBUTTON:
+					$this->printFaType2($data,$questionAnswerModel);
+					break;
+				case SalesfunnelRequirementsQuestions::QUESTIONTYPECHECKBOX:
+					$this->printFaType3($data, $questionAnswerModel);
+					break;
+				case SalesfunnelRequirementsQuestions::LASTQUESTIONQUESTIONTYPE:
+					$this->printFaType99($data);
+					break;
+
+				default:
+					// code...
+					break;
+			}
+
+		}
+
+	}
+
+	public function printFaType0($data, $questionAnswerModel=null){//print out number question
+		print('
+			<div class="item" id="item">                    
+	            <h5 id="qid" qid="'.$data->id.'">Question '.$data->question_num.'</h5>
+				<div class="col-12">
+		            <label for="category_'.$data->question_num.'_0" class="form-label pe-label text-input-row">'.$data->question.'</label>
+		            <input disabled type="number" class="form-control" id="category_'.$data->question_num.'_0" name="'.$data->id.'_answer"');
+		if(!empty($questionAnswerModel->answer_str)){
+			print('value="'.$questionAnswerModel->answer_str.'"');
+		}
+		 print('>
+		        </div>
+		    </div>
+		');
+	}
+
+	public function printFaType1($data, $questionAnswerModel=null){//print out testfield question
+		print('
+			<div class="item" id="item">                    
+	            <h5 id="qid" qid="'.$data->id.'">Question '.$data->question_num.'</h5>
+				<div class="col-12">
+		            <label for="category_'.$data->question_num.'_0" class="form-label pe-label text-input-row">'.$data->question.'</label>
+		            <input disabled type="text" class="form-control" id="category_'.$data->question_num.'_0" name="'.$data->id.'_answer"');
+		if(!empty($questionAnswerModel->answer_str)){
+			print('value="'.$questionAnswerModel->answer_str.'"');
+		}
+		print('>
+		        </div>
+		    </div>
+		');
+	}
+
+	public function printFaType2($data, $questionAnswerModel=null){//print out radio button question
+		print('
+			<div class="item" id="item">                    
+	            <h5 id="qid" qid="'.$data->id.'">Question '.$data->question_num.'</h5>
+	            <h6>'.$data->question.'</h6>
+		');
+		$answers = $this->showAnswers($data->id);
+
+		$count = 1;
+		foreach ($answers as $key => $an) {
+			$count++;
+			print('
+				<div class="form-check form-check-inline" style="fornt-size:2em">
+	                <input disabled class="form-check-input" type="radio" name="'.$data->id.'_answer" id="category_'.$data->question_num.'_'.$count.'" value="'.$an->id.'"');
+			if (!empty($questionAnswerModel) && $an->id == $questionAnswerModel->answer_id){
+				print(' checked ');
+			}
+			Print('>
+	                <label class="form-check-label pe-label" for="category_'.$data->question_num.'_'.$count.'">'.$an->answer.'</label>
+	            </div>
+				');
+		}
+
+		Print('</div>');
+	}
+
+	public function printFaType3($data, $questionAnswerModel=null){//print out check box button question
+		print('
+			<div class="item" id="item">                    
+	            <h5 id="qid" qid="'.$data->id.'">Question '.$data->question_num.'</h5>
+	            <h6>'.$data->question.'</h6>
+		');
+		$answers = $this->showAnswers($data->id);
+
+		$count = 1;
+		foreach ($answers as $key => $an) {
+			$count++;
+			print('
+				<div class="form-check form-check-inline" style="fornt-size:2em">
+	                <input disabled class="form-check-input" type="checkbox" name="'.$data->id.'_answer" id="category_'.$data->question_num.'_'.$count.'" value="'.$an->id.'"');
+			if (!empty($questionAnswerModel)){
+				$answerArray = explode(',', $questionAnswerModel->answer_str);
+				if ( in_array($an->id, $answerArray)){
+					print(' checked ');
+				}
+			}
+			print('>
+	                <label class="form-check-label pe-label" for="category_'.$data->question_num.'_'.$count.'">'.$an->answer.'</label>
+	            </div>
+				');
+		}
+
+		Print('</div>');
+	}
+
+	public function printFaType99($data){//print out last question
+		print('
+			<div class="item" id="item">                    
+	            <h5 id="qid" qid="'.$data->id.'">Question '.$data->question_num.'</h5>
+	            <h6 id="lid">'.$data->question.'</h6>
+		    </div>
+		');
+	}
+}
+?>

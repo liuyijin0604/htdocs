@@ -1,0 +1,42 @@
+<?php 
+class HvlvJavaService extends Service
+{
+	public static function getAlliedHomeDelFee($shipment,$courier)
+	{
+		if(!empty($shipment->mdata['is_b2c']))
+		{
+			return 100;
+		}
+
+		if($shipment->isFbaShipment())
+		{
+			return 0;
+		}
+
+		// $orgRate=OrgRate::model()->findByPk($shipment->mdata['org_rate_id']);
+        // if(!preg_match('/TOLL|ALLIED|TNT|BORDER/i', $orgRate->code))
+        // {
+        //     return 0;
+        // }
+        
+		//getCache
+		$alliedRateIds = [Org::TLA_DEPARTMENT_SYDNEY=>10900,Org::TLA_DEPARTMENT_MELBOURNE=>10903,Org::TLA_DEPARTMENT_BRISBANE=>10906,Org::TLA_DEPARTMENT_PERTH=>11119];
+		$orgRate = OrgRate::model()->findByPk($alliedRateIds[$courier->mdata['ddpt_id']]);
+		$javaAPI = new HvlvJavaAPI(HvlvJavaAPI::RATE_TYPE[$orgRate->mdata['ddpt_id']],$orgRate->mdata['courier']);
+		$result = $javaAPI->checkAlliedHomeFee($shipment);
+
+		if($result['code']!="60000")
+		{
+			return 9999;
+		}else
+		{
+			if(!empty($result['data']['freight_oversized_home_del']))
+			{
+				return $result['data']['freight_oversized_home_del'];
+			}
+		}
+
+	}
+	
+}
+?>

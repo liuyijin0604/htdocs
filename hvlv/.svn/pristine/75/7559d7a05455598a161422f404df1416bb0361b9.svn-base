@@ -1,0 +1,229 @@
+<?php
+class StorageController extends Controller{
+	protected $nonAjax = ['export','report', 'ajaxImportSortingLabels','exportShipmentLocation'];
+
+	/**
+	 * Displays a particular model.
+	 * @param integer $id the ID of the model to be displayed
+	 */
+	public function actionView($id){
+		$this->render('view',array(
+			'model'=>$this->loadModel($id),
+		));
+	}
+
+	/**
+	 * Creates a new model.
+	 * If creation is successful, the browser will be redirected to the 'view' page.
+	 */
+	public function actionCreate(){
+		$model=new Storage;
+
+		// Uncomment the following line if AJAX validation is needed
+		// $this->performAjaxValidation($model);
+
+		if(isset($_POST['Storage'])){
+			$model->attributes=$_POST['Storage'];
+			$model->save();
+			$this->ajaxResult($model);
+		}
+		$model->status = 1;
+
+		$this->render('create',array(
+			'model'=>$model,
+		));
+	}
+	
+	public function actionMoveout($id){
+	        $model = StorageLog::model()->findByPk($id);
+	        if($model){
+	                $model->out();
+	                $m = new $model->model;
+	                $p = $m::model()->findByPk($model->fid);
+	                $p->custom_log_note = 'moved out '.$model->storage->name;
+	                $p->save();
+	        }
+	}
+
+	/**
+	 * Updates a particular model.
+	 * If update is successful, the browser will be redirected to the 'view' page.
+	 * @param integer $id the ID of the model to be updated
+	 */
+	public function actionUpdate($id){
+		$model=$this->loadModel($id);
+
+		// Uncomment the following line if AJAX validation is needed
+		// $this->performAjaxValidation($model);
+
+		if(isset($_POST['Storage'])){
+			$model->attributes=$_POST['Storage'];
+			$model->updateCap();
+			$model->save();
+			$this->ajaxResult($model);
+		}
+
+		$this->render('update',array(
+			'model'=>$model,
+		));
+	}
+
+	/**
+	 * Deletes a particular model.
+	 * If deletion is successful, the browser will be redirected to the 'admin' page.
+	 * @param integer $id the ID of the model to be deleted
+	 */
+	public function actionDelete($id){
+		if(Yii::app()->request->isPostRequest){
+			// we only allow deletion via POST request
+			$this->loadModel($id)->delete();
+
+			// if AJAX request (triggered by deletion via admin grid view), we should not redirect the browser
+			if(!isset($_GET['ajax']))
+				$this->redirect(isset($_POST['returnUrl']) ? $_POST['returnUrl'] : array('admin'));
+		}
+		else
+			throw new CHttpException(400,'Invalid request. Please do not repeat this request again.');
+	}
+
+	/**
+	 * Lists and search.
+	 */
+	public function actionList(){
+		$model=new Storage('search');
+		$model->unsetAttributes();  // clear any default values
+		if(isset($_GET['Storage']))
+			$model->attributes=$_GET['Storage'];
+
+		$this->render('list',array(
+			'model'=>$model,
+		));
+	}
+
+	public function actionReport($id){
+		$xls = new oExcel;
+		$i = 1;
+		$xls->addRow($i++, array('Location','WBN','Status','Cnor Name', 'Cnor Tel', 'Cnee Name', 'Cnee Tel', 'Address', 'State', 'Check-in Time', 'Delay', 'Multiple'));
+
+		$rs = Storage::model()->findAll('status = 1 AND wid = :w AND t.id NOT IN (130)', [':w' => $id]);
+		foreach($rs as $s){
+			foreach($s->items as $p){
+				$m = new $p->model;
+				$r = $m::model()->findByPk($p->fid);
+				if(empty($r)) die('Error load '.$p->fid);
+				$ln = $r->getLastLog();
+				$dd = empty($ln)? 0 : ceil((time() - strtotime($ln->time)) / 86400);
+				$xls->addRow($i++, [$s->name, $r->hbn, $r->getStatus(), $r->cnor->name, '="'.$r->cnor->tel.'"', $r->cnee->name, $r->cnee->tel, $r->cnee->address, $r->state, $p->in_dt, $dd, $r->canSwap()? 'Y' : 'N']);
+			}
+		}
+
+		$org = Org::model()->findByPk($id);
+
+		$xls->output('Storage_report_'.str_replace(' ', '_', $org->name).'_'.date('YmdHis').'.xlsx');
+	}
+
+	public function actionExport($id){
+		$model=$this->loadModel($id);
+
+		$xls = new oExcel;
+		$i = 1;
+		$xls->addRow($i++, array('Location','WBN','Status','Name','Address','State'));
+
+		foreach($model->items as $p){
+			$m = new $p->model;
+			$r = $m::model()->findByPk($p->fid);
+			$xls->addRow($i++, [$model->name, $r->hbn, $r->getStatus(), $r->cnee->name, $r->cnee->address, $r->state]);
+		}
+
+		$xls->output($model->name.'_list.xlsx');
+	}
+
+	public function actionParentSuggest(){
+		$rs = Storage::model()->findAll(array(
+			'condition' => "wid = :wid AND (t.name LIKE :t OR t.code LIKE :t)",
+			'params' => array(':t' => $_GET['term'].'%', ':wid' => $_GET['wid']),
+			'limit' => 20,
+		));
+		$a = array();
+		foreach($rs as $r){
+            $a[] = array(
+                'value' => $r->id,
+                'label' => $r->name,
+            );
+		}
+		echo json_encode($a);
+	}
+
+	public function actionAjaxImportSortingLabels() {
+		$storages = Storage::model()->findAll('type = 50');
+
+		$ps = [];
+		$td = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR;
+		foreach ($storages as $storage) {
+			$tf = tempnam($td, 'label_plt');
+			oPDF::renderPDF('label_plt', array('cs' => [$storage->code], 'dup' => false), 2, $tf);
+			$ps[] = $tf;
+		}
+		oPDF::mergePDF($ps, 1, true, 'import_sorting_labels.pdf');
+	}
+
+	public function actionExportShipmentLocation()
+	{
+		$model = new WmsRackShipment('search');
+		$model->unsetAttributes();
+
+		if(!empty($_GET['WmsRackShipment']))
+		{
+			$model->setAttributes($_GET['WmsRackShipment']);
+		}
+
+		if(!empty($_GET['export']))
+		{
+			$dp = $model->search(false, false);
+			$data = $dp->data;
+			$xls = new oExcel;
+			$i = 1;
+			$xls->addRow($i++, ["Connote","Ref","Barcode","Sno","Warehouse","status","pkg","weight","Location Code","Ground Label","Ground Label In Time","Pallets Number","Memo","Created"]);
+
+			foreach ($data as $r) {
+				$xls->addRow($i++,  [@$r->shipment->hbn,@$r->shipment->ref,$r->barcode,$r->sno,$r->location->warehouse->name,(empty($r->shipment)?"":@$r->shipment->getStatus()),
+				       		@$r->shipment->pkg,@$r->shipment->weight,@$r->getLocation(false),@$r->location->extra["ground_label"],@$r->location->extra["ground_label_in_time"],@$r->shipment->mdata["amzon_pallet"],$r->shipment->can,$r->created]);
+			}
+
+			$xls->output('shipment_location_export_'.time().'.xlsx');
+			return;
+		}
+
+		if(!empty($_GET['WmsRackShipment']))
+		{
+			$this->render('_sub_shipment_location', ['model'=>$model]);
+			return;
+		}
+
+
+		$this->render('export_shipment_location', ['model'=>$model]);
+	}
+
+	/**
+	 * Returns the data model based on the primary key given in the GET variable.
+	 * If the data model is not found, an HTTP exception will be raised.
+	 * @param integer the ID of the model to be loaded
+	 */
+	public function loadModel($id){
+		$model=Storage::model()->findByPk($id);
+		if($model===null)
+			throw new CHttpException(404,'The requested page does not exist.');
+		return $model;
+	}
+
+	/**
+	 * Performs the AJAX validation.
+	 * @param CModel the model to be validated
+	 */
+	protected function performAjaxValidation($model){
+		if(isset($_POST['ajax']) && $_POST['ajax']==='storage-form'){
+			echo CActiveForm::validate($model);
+			Yii::app()->end();
+		}
+	}
+}

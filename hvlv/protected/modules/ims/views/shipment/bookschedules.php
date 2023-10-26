@@ -1,0 +1,258 @@
+<style>
+	.row-fix {
+		color: black;
+		background: pink !important;
+	}
+</style>
+<div style="position:relative">
+	<div class="dropdown" style="position:absolute; right: 0;">
+		<!-- <a href="#" id="dropdownMenu1" data-toggle="dropdown"><span class="glyphicon glyphicon-stats"></span> Reports</a> -->
+		<ul class="dropdown-menu" aria-labelledby="dropdownMenu1">
+			<!-- <li><a href="<?= Yii::app()->createUrl('ims/shipment/report', ['type' => 'dlv']); ?>" target="_blank">Delivery Report</a></li> -->
+		</ul>
+	</div>
+</div>
+
+<?php
+$org = Org::model()->findByPk(Yii::app()->user->org);
+$this->widget(
+	'application.extensions.booster.TbExtendedGridView',
+	array(
+		'fixedHeader' => true,
+		'headerOffset' => 40,
+		'rowCssClassExpression' => 'empty($data->mdata["delivery_booking_cancelled_by"])?"":"row-fix"',
+		'type' => 'striped',
+		'dataProvider' => $model->search(true, (empty($org->extra['pager_size']) ? 20 : $org->extra['pager_size']), false, false),
+		'responsiveTable' => true,
+		'template' => "{summary}\n{items}\n{pager}",
+		'filter' => $model,
+		'selectableRows' => 2,
+		'enableSorting' => true,
+		// 'bulkActions' => array(
+		// 	'align' => 'left',
+		// 	'actionButtons' => array(
+		// 		array(
+		// 			'id' => 'bulk-print',
+		// 			'buttonType' => 'button',
+		// 			'context' => 'primary',
+		// 			'size' => 'small',
+		// 			'label' => 'Update',
+		// 			'click' => 'js:function(values){
+		// 				var locale = $("#locales").val();
+		// 				bootbox.confirm({
+		// 					message: "The schedule date you choose for selected shipments is <"+locale+">. </br> Are you sure to submit?",
+		// 					locale: locale,
+		// 					callback: function (result) {
+		// 						if(result){
+		// 							time = locale;
+		// 							shipment = values.join(",");
+		// 							ajaxUpdate(time,shipment);
+		// 						}
+		// 					}
+		// 				});
+		// 		}'
+		// 		),
+		// 	),
+		// 	'checkBoxColumnConfig' => array(
+		// 		'name' => 'id'
+		// 	),
+		// ),
+		'afterAjaxUpdate' => 'js:function(id, data){ $(\'#egw0\').after(\'<div class="pull-right"><button type="button" data-toggle="modal" data-target="#modal-export" class="btn btn-default btn-sm">Export</button></div>\'); }',
+		'columns' => array(
+			array('name' => 'hbn', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->createURL("ims/shipment/update", array("id" => $data->id))."\" class=\"ajax-link\">".$data->hbn."</a>"'),
+			'ref',
+			'cref',
+			array(
+				'header' => 'Depot',
+				'value' => 'ImParcel::$depots[$data->getDepot()]',
+				'filter' => CHtml::dropDownList(get_class($model) . '[ddpt_id]', $model->ddpt_id, $this->t(ImParcel::$depots), array('prompt' => $this->t('All'), 'class' => 'form-control')),
+			),
+			array('header' => 'Process Date', 'value' => '$data->getUnPackingDate()',),
+			array('header' => 'Available Date', 'value' => '$data->getCargoOWAvailableBookingDate()'),
+			array('header' => 'Storage Start Date', 'value' => '$data->getCargoOWStorageStartDate()'),
+			//array('name' => 'scheDate','value' => 'empty($data->mdata["CustomerBookingDate"])? "" : $data->mdata["CustomerBookingDate"]',),
+			['name' => 'awb_name', 'header' => 'awb  /  container_no', 'type' => 'raw', 'value' => '@$data->consol->awb."&nbsp;&nbsp;/&nbsp;&nbsp;".@$data->consol->mdata["container_no"]', 'filter' => CHtml::textfield('awb', @$model->awb_name, ["class" => "form-control"])],
+			array(
+				'name' => 'status', 'value' => '$data->getStatus()',
+				'filter' => CHtml::dropDownList(get_class($model) . '[status]', $model->status, $this->t($model->statusList()), array('prompt' => $this->t('All'), 'class' => 'form-control')),
+			),
+			//array('name' => 'weight'),
+			//array('header' => 'Pallets', 'value' => '$data->calculateCargoPallets()'),
+			array('header' => 'Suburb', 'value' => '$data->cnee->suburb'),
+			array('header' => 'Address', 'value' => '$data->cnee->address'),
+			// array('name' => 'cnor_name', 'value' => 'empty($data->cnor)? "" : $data->cnor->name', 'visible' => $type == 'im'),
+			// array('name' => 'cnor_tel', 'value' => 'empty($data->cnor)? "" : $data->cnor->tel', 'visible' => $type == 'im'),
+			//array('name' => 'postcode', 'value' => 'empty($data->cnee)? "" : $data->cnee->postcode',),
+			//array('header' => 'Suburb', 'value' => 'empty($data->cnee)? "" : $data->cnee->suburb',),
+			// array('name' => 'created'),
+			//'state',
+			//["header"=>"Booking Date",'type' => 'raw',"value"=>'CHtml::dropDownList($data->id, 0, $data->getArrayMondayAndThursday(), ["prompt" => empty($data->mdata["delivery_booking_time"])? "Choose Date":$data->mdata["delivery_booking_time"],"class"=>"task_assignuser","style"=>"width:90px;"])',"filter"=>false],
+			array(
+				'class' => 'application.extensions.booster.TbButtonColumn',
+				'template' => '{info} &nbsp; {update} &nbsp; ',
+				'header' => 'Actions',
+				'buttons' => array(
+					'info' => array(
+						'visible' => 'true',
+						'icon' => 'exclamation-sign',
+						'url' => 'Yii::app()->createUrl("ims/shipment/showInfo",["id" => $data->id])',
+						'options' => ['class' => 'tracking-modal-link', 'label' => $this->t('Cancellation Reason'), 'title' => 'Cancellation Reason', 'data-id' => '$data->id'],
+					),
+					'update' => array(
+						'visible' => 'true',
+						'icon' => 'upload',
+						'url' => 'Yii::app()->createUrl("ims/shipment/updateScheduledDate",["id" => $data->id])',
+						'options' => array('class' => 'tracking-modal-link', 'label' => $this->t('Update Scheduled Date'), 'title' => 'Update Scheduled Date'),
+					),
+					/* 'print' => array(
+						'visible' => 'true',
+						'icon' => 'print',
+						'url' => 'Yii::app()->createUrl("ims/shipment/print", ["id" => $data->id])',
+						'options' => ['target' => '_blank', 'label' => $this->t('Print'), 'title' => 'Print', 'data-id' => '$data->id'],
+					) */
+				),
+			),
+		),
+	)
+);
+?>
+<!-- Tracking Modal -->
+<div class="modal fade" id="modal-tracking" tabindex="-1" role="dialog" aria-labelledby="modal-tracking-label" aria-hidden="true">
+	<div class="modal-dialog">
+		<div class="modal-content">
+			<div class="modal-body">
+			</div>
+			<div class="modal-footer">
+				<button type="button" class="btn btn-default" data-dismiss="modal"><?= $this->t('Close'); ?></button>
+			</div>
+		</div>
+	</div>
+</div>
+
+<!-- Export Modal -->
+<div class="modal fade" id="modal-export" tabindex="-1" role="dialog" aria-labelledby="modal-export-label" aria-hidden="true">
+	<div class="modal-dialog">
+		<div class="modal-content">
+			<div class="modal-header">
+				<button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+				<h4 class="modal-title">Export</h4>
+			</div>
+			<form id="export-form" target="ifrm" method="post" data-ajaxf="2">
+				<div class="modal-body">
+					<div class="form-group">
+						<label><?= $this->t('Date Range'); ?></label>
+						<div class="input-daterange input-group" id="datepicker">
+							<input type="text" class="input-lg form-control" name="start" value="<?= date('Y-m-d', strtotime('-7 day')); ?>" />
+							<span class="input-group-addon">to</span>
+							<input type="text" class="input-lg form-control" name="end" value="<?= date('Y-m-d'); ?>" />
+						</div>
+					</div>
+					<div class="form-group">
+						<label><input id="ucsc" type="checkbox" name="sc" value="1" checked />
+							<?= $this->t('Use Current Search Conditions'); ?></label>
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button type="submit" class="btn btn-primary"><?= $this->t('Export'); ?></button>
+				</div>
+			</form>
+		</div>
+	</div>
+</div>
+<iframe id="ifrm" name="ifrm" style="display:none"></iframe>
+<?php ob_start(); ?>
+
+<script type="text/javascript">
+	$(function() {
+		$('body').off('click', 'a.tracking-modal-link').on('click', 'a.tracking-modal-link', function(e) {
+			$('#modal-tracking').modal();
+			$('#modal-tracking .modal-body').load($(this).attr('href'));
+			e.preventDefault();
+		});
+
+		$('body').off('change', '.task_assignuser').on('change', '.task_assignuser', function() {
+			const tr = $(this).parents('tr');
+			var listData = new FormData();
+			listData.append('date', $('.task_assignuser', tr).val());
+			listData.append('id', $('.task_assignuser', tr).attr('id'));
+			htmlobj = $.ajax({
+				url: '<?= $this->createUrl("shipment/scheduleBooking") ?>',
+				type: "post",
+				data: listData,
+				async: false,
+				contentType: false,
+				processData: false,
+			});
+			obj = JSON.parse(htmlobj.responseText);
+			//alert(obj.isSuccess);
+			if (obj.isSuccess) {
+				debugger;
+				bootbox.confirm({
+					title: 'Successful Updated',
+					message: obj.shipmentscount + " Shipments Be Updated! <br/>" + obj.info,
+					callback: function(result) {
+						if (result) {
+							//debugger;
+							location.reload();
+						}
+					}
+				});
+			} else {
+				bootbox.alert({
+					title: 'Update Error',
+					message: obj.shipmentscount + " Shipments Error! Please fix the issues! <br/>" + obj.info,
+					backdrop: true
+				});
+			}
+		});
+
+		// $('#egw0').after('<div class="pull-right"><button type="button" data-toggle="modal" data-target="#modal-export" class="btn btn-default btn-sm">Export</button></div>');
+
+		$('#export-form').on('submit', function(e) {
+			if ($('#ucsc:checked').length > 0) {
+				$(this).attr('action', 'export.app?' + $('.filters input, .filters select').serialize());
+			} else {
+				$(this).attr('action', 'export.app');
+			}
+			$('#ifrm').on('load', function() {
+				$('#modal-export').modal('hide');
+			});
+		});
+		$('.input-daterange').datepicker({
+			format: "yyyy-mm-dd"
+		});
+	});
+
+	function ajaxUpdate(time, value) {
+		var listData = new FormData();
+		listData.append('time', time);
+		listData.append('value', value);
+		htmlobj = $.ajax({
+			type: "POST",
+			url: "<?= $this->createUrl('shipment/scheduleBooking'); ?>",
+			data: listData,
+			async: false,
+			contentType: false,
+			processData: false,
+		});
+		obj = JSON.parse(htmlobj.responseText);
+		if (obj.isSuccess) {
+			bootbox.confirm({
+				title: 'Successful Updated',
+				message: obj.shipmentscount + " Shipments Be Updated! <br/>" + obj.info,
+				callback: function(result) {
+					if (result) {
+						location.reload();
+					}
+				}
+			});
+		} else {
+			bootbox.alert({
+				title: 'Update Error',
+				message: obj.shipmentscount + " Shipments Error! Please fix the issues! <br/>" + obj.info,
+				backdrop: true
+			});
+		}
+	}
+</script>
+<?php $this->registerJS(ob_get_clean()); ?>

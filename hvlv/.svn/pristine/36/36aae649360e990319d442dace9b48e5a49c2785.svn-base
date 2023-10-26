@@ -1,0 +1,473 @@
+<h1><?=$this->t('Org Flexible Rate');?></h1>
+<h5>1. The fuel charge of cartage will be calculated with the system default value(<font style="font-size: 2em;"><?=ImportsSystemFuel::getThisMonthFuel("",ImportsSystemFuel::CARTAGE_TYPE)?></font>).</h5>
+<h5>2. If you would like to customize the fuel charge of cartage, you can add/edit the fuel setting by inputting "Fuel" into the "Item" field.</h5>
+<h5>3. If the "Amount" of the customized "Fuel" setting is between 0.01-1, it will be calcualted as percentage. If the "Amount" is larger than 1, it will be </h5>
+<h5>calculated as fix value.</h5>
+<div style="min-height: 500px;display: block;">
+<div style="position: absolute; right: 10px;width:25rem;">
+	<div class="col rowcol" style="min-height:50px; margin:left: 50px">
+		<div class="form">
+				<?php
+				$form=$this->beginWidget('CActiveForm', array(
+					'id'=>'org-zone-cost-import-form',
+					'enableAjaxValidation'=>false,
+					'action' => $this->createUrl('org/AjaxImportZoneCost')
+				));
+				?>
+				<div class="row" style="margin-left:20px;">
+					<?php echo $form->hiddenField($model,'id'); ?>
+					<?php echo CHtml::hiddenField('org_id',$orgId ); ?>
+				</div>
+				<?php $this->endWidget(); ?>
+		</div>
+
+	</div>
+</div>
+<?php
+	// get zone rate based on org id
+	$orgFlexibleRate = new OrgFlexibleRate();
+
+?>
+
+<div class="form" style="position:relative">
+
+<?php $form=$this->beginWidget('CActiveForm', array(
+	'id'=>'pca-chargecode-rate-form',
+	'enableAjaxValidation'=>false,
+));
+
+?>
+
+	<?php echo $form->hiddenField($model,'id'); ?>
+	<?php echo CHtml::hiddenField('org_id',$orgId ); ?>
+
+	<div class="row">
+	</div>
+
+	<div class="row" >
+		<div class="col" style="width: 100%; margin-right: 10px;">
+			<div id="zone-rate-weight-range-grid" class="grid-view editableGrid">
+				<table class="items">
+					<thead>
+					<tr>
+						<th id="zone-rate-weight-range-grid_c0">Item</th><th id="zone-rate-weight-range-grid_c1">Amount</th><th id="zone-rate-weight-range-grid_c3">Unit</th><th id="zone-rate-weight-range-grid_c3">Minimum</th><th id="zone-rate-weight-range-grid_c3">Branch</th><th id="zone-rate-weight-range-grid_c3">Cargo</th><th id="zone-rate-weight-range-grid_c3">Service</th><th id="zone-rate-weight-range-grid_c3">Rebate</th><th class="button-column" id="zone-rate-weight-range-grid_c2">&nbsp;</th></tr>
+					</thead>
+					<tfoot>
+					<tr>
+						<td><input style="width:100%" id="org_flexible-rate-grid_item" name="OrgFlexibleRate[item]" type="text" maxlength="45"></td>
+						<td><input style="width:100%" id="org_flexible-rate-grid_amount" name="OrgFlexibleRate[amount]" type="number" maxlength="10"></td>
+						<td>
+							<select style="width:100%" id="org_flexible-rate-grid_unit" name="OrgFlexibleRate[unit]">
+								<option value ="bl">/BL</option>
+								<option value ="kg">/KG</option>
+								<option value ="kg_awb">/KG(awb weight)</option>
+								<option value ="shipment">/Shipment</option>
+								<option value ="piece">/Piece</option>
+								<option value ="pallet">/Pallet</option>
+								<option value ="cage">/Cage</option>
+								<option value ="AQIS">/AQIS</option>
+								<option value ="container">/Container</option>
+								<option value ="rebateRate">/rebateRate</option>
+							</select>
+						</td>
+						<td><input style="width:100%" id="org_flexible-rate-grid_minimum" name="OrgFlexibleRate[minimum]" type="number" maxlength="10"></td>
+						<td>
+							<?php
+
+								foreach (Org::$warehouse_list as $key => $value)
+								{
+									echo CHtml::checkbox('OrgFlexibleRate[branch]',0,array('class'=>'upload_consol','id'=>"org_flexible-rate-grid_branch",'value'=>$key)),$value;
+								}
+
+							?>
+
+						</td>
+						<td>
+							<?php
+
+								foreach (['loose'=>'loose','PMC'=>'PMC','AKE'=>'AKE','DQF'=>'DQF','40\''=>'40\'','20\''=>'20\'','<600'=>'<600','<800'=>'<800','<1000'=>'<1000','<1200'=>'<1200','<99999999'=>'<99999999'] as $key => $value)
+								{
+									echo CHtml::checkbox('OrgFlexibleRate[cargo]',0,array('class'=>'upload_consol','id'=>"org_flexible-rate-grid_cargo",'value'=>$key)),$value;
+								}
+
+							?>
+
+						</td>
+
+
+						<td>
+							<?php
+
+								foreach ([ImcoConsol::AIRCONSOL=>'AIR',ImcoConsol::SEACONSOL=>'SEA'] as $key => $value)
+								{
+									echo CHtml::checkbox('OrgFlexibleRate[service]',0,array('class'=>'upload_consol','id'=>"org_flexible-rate-grid_service",'value'=>$key)),$value;
+								}
+
+							?>
+						</td>
+
+						<td>
+							<?php
+
+								foreach ([0=>'No',1=>'Yes'] as $key => $value)
+								{
+									echo CHtml::checkbox('OrgFlexibleRate[rebate]',0,array('class'=>'upload_consol','name'=>"org_flexible-rate-grid_rebate",'value'=>$key)),$value;
+								}
+
+							?>
+						</td>
+
+						<td><a href="" class="save_btn add_btn" title="Add">Add</a></td></tr></tfoot>
+					<tbody>
+					<tr><td colspan="3" class="empty"><span class="empty">No results found.</span></td></tr>
+					</tbody>
+				</table>
+
+			</div>
+<?php
+/*
+			$this->widget('application.extensions.editablegrid.CEditableGridView', array(
+			'id'=>'zone-rate-weight-range-grid',
+			'cssFile' => false,
+			'dataProvider' => $zoneRate->getZoneRateWeightRange(-1),
+			'formUrl' => $this->createUrl('invoice/linesGrid', array('id'=>empty($model->id)? 0 : $model->id)),
+			'summaryText' => '',
+			'afterSave' => "function(r){
+			if(r.done == true){
+			myApp.notice(r.msg, 5000);
+			}else{
+			myApp.alert(r.msg, false);
+			}
+			return r.done;
+			}",
+			'columns'=>array(
+			array('header' => 'From','name' => 'weight_lo', 'class' => 'CEditableColumn'),
+			array('header' => 'To','name' => 'weight_hi', 'class' => 'CEditableColumn'),
+			array('class'=>'CEditableButtonColumn', 'template' => '{save}')
+			),
+			));
+*/
+ ?>
+
+		</div>
+	</div>
+
+
+	<div class="row buttons">
+		<?php echo CHtml::submitButton($this->t($model->isNewRecord ? 'Create' : 'Save')); ?>
+	</div>
+
+<?php $this->endWidget(); ?>
+
+</div><!-- form -->
+</div>
+<script type="text/javascript">
+	$(document).ready(function(e){
+
+	var win = $('#jqmw_<?=$_GET["tabid"];?>');
+
+	// current zone rate data
+	var curZoneRateData = <?php echo json_encode($orgFlexibleRate->getOrgFlexibleRateByOrgId($orgId)); ?>;
+
+	var allZoneRateData = [];
+	var allRowIndex = 0;
+	var selectedRowIndex = 0;
+	appendCurZoneRateData(curZoneRateData);
+	var importInProgress = false;
+
+	function isImportInProgress(){
+		return importInProgress;
+	}
+
+	function appendCurZoneRateData(rateData){
+
+		$('#zone-rate-weight-range-grid .items tbody td.empty', win).parent().remove();
+		var wtpl = $('#zone-rate-weight-range-grid .items tfoot', win);
+		var row = wtpl.find('tr').clone();
+		for ( var i in rateData ) {
+			allRowIndex++;
+			var r = wtpl.find('tr').clone();
+			$('.add_btn',r).replaceWith('<a href="javascript:;" data-index="'+allRowIndex+'"class="delete_btn" title="Remove">Remove</a>');
+			$('input', r).each(function(){
+				var n = $(this).attr('name');
+				$(this).attr('name', n+'[]');
+			});
+			$('#zone-rate-weight-range-grid .items tbody', win).append(r);
+			r.find('#org_flexible-rate-grid_item').val(rateData[i]['item']);
+			r.find('#org_flexible-rate-grid_amount').val(rateData[i]['amount']);
+			r.find('#org_flexible-rate-grid_unit').val(rateData[i]['unit']);
+			r.find('#org_flexible-rate-grid_minimum').val(rateData[i]['minimum']);
+
+			r.find("input[name='OrgFlexibleRate[branch][]']").each(function(j){
+				if(rateData[i]['branch'].indexOf($(this).val())>=0)
+				{
+					$(this).attr('checked',true);
+				}
+			});
+
+			r.find("input[name='OrgFlexibleRate[cargo][]']").each(function(j){
+				if(rateData[i]['cargo'].indexOf($(this).val())>=0)
+				{
+					$(this).attr('checked',true);
+				}
+			});
+
+
+			r.find("input[name='OrgFlexibleRate[service][]']").each(function(j){
+				if(rateData[i]['service'].indexOf($(this).val())>=0)
+				{
+					$(this).attr('checked',true);
+				}
+			});
+
+			r.find("input[name='OrgFlexibleRate[rebate][]']").each(function(j){
+				if(rateData[i]['rebate']!=null &&rateData[i]['rebate']==$(this).val())
+				{
+					$(this).attr('checked',true);
+				}
+			});
+
+
+			addOneZoneRateByData(allRowIndex,rateData[i]['data']);
+		}
+	}
+
+	 function addOneZoneRateByData(tag,rateData){
+		 var bFound = false;
+		 for ( var i in allZoneRateData ) {
+			 var oneZone = allZoneRateData[i];
+			 if ( oneZone['tag'] == tag ) {
+				 bFound = true;
+			 }
+		 }
+		 if ( !bFound ) {
+			 var zoneData = {};
+			 zoneData['tag'] = tag;
+			 zoneData['item'] = '';
+			 zoneData['amount'] = 0;
+			 zoneData['unit']='';
+			 zoneData['minimum']=0;
+			 zoneData['branch']='';
+			 zoneData['cargo']='';
+			 zoneData['service']=0;
+			 zoneData['rebate']=0;
+			 allZoneRateData.push(zoneData);
+		 }
+	 }
+
+	 function addOneZoneRate(tag)
+	 {
+		// check existing or not
+		// if not existing just create a new one
+		var bFound = false;
+		for ( var i in allZoneRateData ) {
+			var oneZone = allZoneRateData[i];
+			if ( oneZone['tag'] == tag ) {
+				bFound = true;
+			}
+		}
+		if ( !bFound ) {
+			var zoneData = {};
+			zoneData['tag'] = tag;
+			zoneData['item'] = '';
+			zoneData['amount'] = 0;
+			zoneData['unit'] = '';
+			zoneData['minimum'] = 0;
+			zoneData['branch'] = 0;
+			zoneData['cargo'] = 0;
+			allZoneRateData.push(zoneData);
+		}
+	}
+
+	function updateData(dataIndex,item,amount,unit,minimum,branch,cargo,service,rebate)
+	{
+		// get related zone rate data
+		for ( var i in allZoneRateData ) {
+			var oneZone = allZoneRateData[i];
+			if ( oneZone['tag'] == dataIndex ) {
+				allZoneRateData[i]['item'] = item;
+				allZoneRateData[i]['amount'] = amount;
+				allZoneRateData[i]['unit']=unit;
+				allZoneRateData[i]['minimum']=minimum;
+				allZoneRateData[i]['branch']=branch;
+				allZoneRateData[i]['cargo']=cargo;
+				allZoneRateData[i]['service']=service;
+				allZoneRateData[i]['rebate']=rebate;
+				break;
+			}
+		}
+	}
+
+
+	function validWeightFrom($fromWeight){
+		var lo =  parseFloat($fromWeight.val());
+		var hi =  parseFloat($fromWeight.parent().parent().find('#zone-rate-weight-range-grid_weight_hi').val());
+		if ( !isNaN(lo) && !isNaN(hi) ) {
+			if ( lo > hi ) {
+				alert( "low weight must be less than high weight");
+				return false;
+			}
+		}
+		return true;
+	}
+
+	function validWeightTo($toWeight){
+		var hi =  parseFloat($toWeight.val());
+		var lo =  parseFloat($toWeight.parent().parent().find('#zone-rate-weight-range-grid_weight_lo').val());
+		if ( !isNaN(lo) && !isNaN(hi) ) {
+			if ( lo > hi ) {
+				alert( "low weight must be less than high weight");
+				return false;
+			}
+		}
+		return true;
+	}
+
+	$('form#pca-chargecode-rate-form', win).on('success', function(e, r){
+	//	win.data('opener').trigger('reload_contact_grid');
+		win.jqmHide();
+	});
+
+
+	$('#zone-rate-weight-range-grid .add_btn', win).on('click', function(e){
+
+		e.preventDefault();
+
+
+		allRowIndex++;
+		$('#zone-rate-weight-range-grid .items tbody td.empty', win).parent().remove();
+		var r = $(this).parents('tr').clone();
+		$('.add_btn',r).replaceWith('<a href="javascript:;" data-index="'+allRowIndex+'"class="delete_btn" title="Remove">Remove</a>');
+		$('input', r).each(function(){
+			var n = $(this).attr('name');
+			$(this).attr('name', n+'[]');
+		});
+		$('#zone-rate-weight-range-grid .items tbody').append(r);
+
+		addOneZoneRate(allRowIndex);
+
+		return false;
+	});
+
+	$('#zone-rate-weight-range-grid', win).on('click','tr',function(e){
+		// exclude the dummy row data
+		if ( $(this).parent().is("tfoot") ) return;
+
+		// get related zone data related tag
+		var tag = $(this).find('.delete_btn').data('index');
+	});
+
+	$('#zone-rate-weight-range-grid', win).on('click','.delete_btn',function(e){
+		e.preventDefault();
+		if ( confirm( 'Are you sure remove the zone rate data?') ) {
+			$(this).parents('tr').remove();
+			return false;
+		}
+		return true;
+	});
+
+	$('#org-zone-rate-view', win).on('change','input[type=text]',function(e){
+		var bFound = false;
+		var oneZoneRate = [];
+		var rowIndex = 0;
+		for ( var i in allZoneRateData ) {
+			var oneZone = allZoneRateData[i];
+			if ( oneZone['tag'] == selectedRowIndex ) {
+				bFound = true;
+				oneZoneRate = oneZone['data'];
+				rowIndex = i;
+				console.log('related zone data found');
+				break;
+			}
+		}
+		if ( bFound ) {
+			// get code related data item
+			var code = $(this).data('code');
+			for ( var j in oneZoneRate ) {
+				var oneData = oneZoneRate[j];
+				if ( oneData['code'] == code ) {
+					oneData[$(this).attr('name').replace(/[\[\]]+/,'')] = $(this).val();
+					break;
+				}
+			}
+		}
+	});
+
+	$('#org-zone-rate-view', win).on('paste','tbody input[type=text]',function(e){
+		if (window.clipboardData && window.clipboardData.getData){
+			pastedText = window.clipboardData.getData('Text');
+		} else if (e.originalEvent.clipboardData && e.originalEvent.clipboardData.getData) {
+			pastedText = e.originalEvent.clipboardData.getData('text/plain');
+		}
+
+		var ppos = -1;
+		var me = $(this);
+		var cells = pastedText.trim().split(/[\t\n\r]+/);
+		$('#org-zone-rate-view tbody input[type=text]', win).each(function(i){
+			if($(this).is(me)) ppos = 0;
+			if(ppos >= cells.length) return false;
+			if(ppos > -1) $(this).val(cells[ppos++]).trigger('change');
+		});
+		
+		return false;
+	});
+
+
+	$('input[type="submit"]',win).click(function(e){
+		//alert('callme');
+		e.preventDefault();
+		// update all lo and hi weight range
+		$('#zone-rate-weight-range-grid', win).find('tr').each(function(e){
+			var dataIndex = $(this).find('.delete_btn').data('index');
+			if ( !isNaN(dataIndex) ) {
+				var item = $(this).find('#org_flexible-rate-grid_item').val();
+				var amount = $(this).find('#org_flexible-rate-grid_amount').val();
+				var unit = $(this).find('#org_flexible-rate-grid_unit').val();
+				var minimum = $(this).find('#org_flexible-rate-grid_minimum').val();
+				var branch = '';
+				var cargo = '';
+				var service = '';
+				var rebate = '';
+				$(this).find("input[name='OrgFlexibleRate[branch][]']:checked").each(function(i){
+					branch += $(this).val()+",";
+				});
+
+				$(this).find("input[name='OrgFlexibleRate[cargo][]']:checked").each(function(i){
+					cargo += $(this).val()+",";
+				});
+
+
+				$(this).find("input[name='OrgFlexibleRate[service][]']:checked").each(function(i){
+					service += $(this).val()+",";
+				});
+
+				$(this).find("input[name='OrgFlexibleRate[rebate][]']:checked").each(function(i){
+					rebate += $(this).val()+",";
+				});
+
+
+
+				updateData(dataIndex,item,amount,unit,minimum,branch,cargo,service,rebate);
+			}
+		});
+
+		var postdata = JSON.stringify(allZoneRateData);
+		// ajax post to save them
+		var orgId = $('#Org_id', win).val();
+		$.ajax({
+			type : 'POST',
+			url : '<?php echo Yii::app()->createAbsoluteUrl("org/saveOrgFlexibleRate") ;?>',
+			dataType: 'json',
+			data:{ 'oid' : orgId,'data' : postdata},
+			success:function(resp){
+				if ( resp.success == 1 ) {
+					myApp.notice('flex rate saved successfully!', 5000);
+				} else {
+					myApp.alert(resp.msg);
+				}
+			}
+		});
+
+	});
+});
+</script>

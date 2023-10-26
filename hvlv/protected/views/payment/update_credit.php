@@ -1,0 +1,352 @@
+<h1><?=$this->t('Update Credit Note');?></h1>
+
+<?php $this->widget('zii.widgets.CDetailView', array(
+	'data'=>$model,
+	'attributes'=>array(
+		array('name' => 'client', 'value' => $model->cust->name),
+		'date',
+		array('name' => 'status', 'value' => $model->getStatus()),
+		array('name' => 'bank', 'value' => $model->getBank()),
+		array('name' => 'amount', 'value' => $model->getCurrency().' '.$model->amount),
+		array('name' => 'rate', 'value' => (!empty($model->mdata['rate']) ? $model->mdata['rate'] : 1)),
+		array('name' => 'ata', 'value' => $model->getCurrency().' '.$model->ata),
+		array('name' => 'type', 'value' => $model->getType()),
+		'ref',
+		'note',
+		array('name' => 'line_gst', 'label' => 'GST', 'value' => $model->line_gst),
+		array('name' => 'mdata[consol]', 'label' => 'Consol No.', 'value' => @$model->mdata['consol']),
+	),
+));
+?>
+
+<?php if (Yii::app()->name != 'PEP' && $model->ata >= 0.01) { ?>
+<div class="form">
+<?php $form=$this->beginWidget('CActiveForm', array(
+	'id'=>'credit-update-form',
+	'enableAjaxValidation'=>false,
+)); ?>
+	<div class="row">
+			<?php echo $form->labelEx($model, 'From Invoice Numbers'); ?>
+			<?php echo CHtml::textField("from_invoice_id",$model->getFromInvoiceNumbers()); ?>
+	</div>
+
+		<div class="row rowcol">
+			<?php echo $form->labelEx($model, 'diff'); ?>
+			<?php echo $form->textField($model, 'mdata[diff]', array('size'=>12,'maxlength'=>12)); ?>
+		</div>
+
+	<div class="row buttons">
+		<?php echo CHtml::submitButton($this->t($model->isNewRecord ? 'Create' : 'Save')); ?>
+	</div>
+
+<?php $this->endWidget(); ?>
+<?php } ?>
+
+<br />
+<h3>Attachment</h3>
+<div class="row">
+          <?php
+          $fr = new FileRepo('search');
+          $fr->unsetAttributes();
+          if (empty($_GET['FileRepo'])) {
+              $fr->status = 20;
+              $fr->type = 15;
+          } else {
+              $fr->attributes = $_GET['FileRepo'];
+              if (empty($fr->type))
+                  $fr->type = 80;
+          }
+          $fr->fid = $model->id;
+          $mf = Acl::hasAccess('B:org/manageFile');
+
+          $this->widget('zii.widgets.grid.CGridView', array(
+              'id' => 'file-credit-note-grid1',
+              'summaryText' => '',
+              'dataProvider' => $fr->search(),
+              'filter' => $fr,
+              'columns' => array(
+                  array('name' => 'name', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->baseUrl."/filerepo/".$data->hash."/".$data->name."\" target=\"_blank\">".$data->name."</a>"'),
+                  array(
+                      'name' => 'size',
+                      'value' => '$data->formatSize()',
+                      'filter' => false,
+                  ),
+                  'date',
+              ),
+          ));
+          ?>
+</div>
+<div class="row">
+
+            <?php
+
+echo '<br />', CHtml::label($this->t('Upload Files'),'uploader');
+$pphash = FileRepo::uploadHash($model, 15);
+$this->widget('application.extensions.plupload.PluploadWidget', array(
+ 'config' => array(
+	 'url' => $this->createUrl('filerepo/upload/'.$pphash),
+	 'max_file_size' => Yii::app()->params['maxFileSize'],
+	 'unique_names' => true,
+	 'file_list_height' => 60,
+	 'visible_header' => false,
+	 'filters' => array(
+		  array('title' => Yii::t('app', 'JPG, PDF, Word, Excel files'), 'extensions' => 'pdf,doc,docx,xls,xlsx,jpg'),
+	  ),
+	 //'resize' => array('width' => 800, 'height' => 800, 'quality' => 80),
+	 'language' => Yii::app()->language,
+	 'max_file_number' => 2,
+	 'autostart' => true,
+	 'jquery_ui' => false,
+	 'reset_after_upload' => true,
+ ),
+ 'callbacks' => array(
+	 'FileUploaded' => 'function(up,file,response){$("#'.$_GET["tabid"].'").trigger("reload_excofile_grid");$("#file-credit-note-grid1").yiiGridView.update("file-credit-note-grid1");}',
+ ),
+ 'id' => $_GET['tabid'].'_excofile1_uploader',
+));
+echo CHtml::HiddenField('ppupload', $pphash);
+?>
+   
+</div>
+<p>
+<?php
+if ($model->status < Payment::PAYMENT_STATUS_DELETED && $model->ata == 0) {
+	$pays = new PayInv;
+	$pays->unsetAttributes();
+	if (!empty($_GET['PayInv'])) $pays->attributes = $_GET['PayInv'];
+	$pays->pay_id = $model->id;
+
+	echo '<label>Allocations</label>';
+	$this->widget('zii.widgets.grid.CGridView', array(
+		'id'=>'alllocation-grid',
+		'cssFile' => false,
+		'dataProvider'=>$pays->search(),
+		'filter'=>$pays,
+		'columns'=>array(
+			array('name' => 'inv_no', 'value' => '$data->invoice->no'),
+			array('name' => 'inv_org', 'value' => '$data->invoice->getBillto()'),
+			array('name' => 'inv_suborg', 'value' => '$data->invoice->subOrgName()'),
+			array('name' => 'inv_stat', 'value' => '$data->invoice->getStatus()', 'filter'=>CHtml::dropDownList('PayInv[inv_stat]', $pays->inv_stat, Invoice::$states, array('prompt'=>$this->t('All'))), ),
+			array('name' => 'inv_total', 'value' => '$data->invoice->total'),
+			array('header' => 'Alloc. Amount', 'name' => 'amount'),
+			array(
+				'class'=>'oButtonColumn',
+				'template'=>'{delete}',
+				'afterDelete'=>'function(){ $("#jqmw_'.$_GET["tabid"].' #outinv-grid").yiiGridView("update"); }',
+				'buttons'=>array(
+					'delete' => array(
+						'imageUrl'=>false,
+						'visible'=>'true',
+						'url' => 'Yii::app()->createUrl("payment/delAlloc", ["id" => $data->pay_id, "inv" => $data->inv_id])',
+						'options' => array('class' => 'grid_delete_btn delete_pay_alloc', 'label'=>$this->t('Delete')),
+					),
+				),
+			),
+		),
+	));
+}
+if($model->status < Payment::PAYMENT_STATUS_DELETED && $model->ata > 0):
+?>
+<div class="form">
+<?php
+if ( $model->ata != $model->amount ) {
+    echo '<div><a href="', $this->createUrl('payment/exportAllocs', ['id' => $model->id]), '" target="_blank"> Export Allocations</a></div>';
+}
+if ( $model->ata != $model->amount ) {
+	$pays = new PayInv;
+	$pays->unsetAttributes();
+	if(!empty($_GET['PayInv'])) $pays->attributes = $_GET['PayInv'];
+	$pays->pay_id = $model->id;
+
+	echo '<label>Allocations</label>';
+	$this->widget('zii.widgets.grid.CGridView', array(
+	'id'=>'alllocation-grid',
+	'cssFile' => false,
+	'dataProvider'=>$pays->search(),
+	'filter'=>$pays,
+	'columns'=>array(
+		array('name' => 'inv_no', 'value' => '$data->invoice->no'),
+		array('name' => 'inv_stat', 'value' => '$data->invoice->getStatus()', 'filter'=>CHtml::dropDownList('PayInv[inv_stat]', $pays->inv_stat, Invoice::$states, array('prompt'=>$this->t('All'))), ),
+		array('name' => 'inv_total', 'value' => '$data->invoice->total'),
+		array('name' => 'inv_org', 'value' => '$data->invoice->getBillto()'),
+		array('name' => 'inv_suborg', 'value' => '$data->invoice->subOrgName()'),
+		array('header' => 'Alloc. Amount', 'name' => 'amount'),
+		array(
+			'class'=>'oButtonColumn',
+			'template'=>'{delete}',
+			'afterDelete'=>'function(){ $("#jqmw_'.$_GET["tabid"].' #outinv-grid").yiiGridView("update"); }',
+			'buttons'=>array(
+				'delete' => array(
+					'imageUrl'=>false,
+					'visible'=>'true',
+					'url' => 'Yii::app()->createUrl("payment/delAlloc", ["id" => $data->pay_id, "inv" => $data->inv_id])',
+					'options' => array('class' => 'grid_delete_btn delete_pay_alloc', 'label'=>$this->t('Delete')),
+				),
+			),
+		),
+	),
+));
+}
+$form=$this->beginWidget('CActiveForm', array(
+	'id'=>'credit-form',
+	'enableAjaxValidation'=>false,
+)); ?>
+	<div class="row">
+	<label>Outstanding Invoices</label>
+
+	<div class="row rowcol rowleft">
+		<?php echo $form->label($model, 'allocate date'); ?>
+		<?php echo CHtml::textField('alloc_date', '', ['class' => 'date_input']); ?>
+	</div>
+
+<?php
+$inv = new Invoice('search');
+$inv->unsetAttributes();
+unset($_GET['Invoice']['rate']);
+$inv->to_id = $model->org_id;
+if(!empty($_GET['Invoice']['to_id'])){
+	$inv->unsetAttributes();
+	$inv->attributes=$_GET['Invoice'];
+}
+$ec = new CDbCriteria;
+$ec->condition = "status IN (2,3,7)";
+
+$this->widget('zii.widgets.grid.CGridView', array(
+	'id'=>'outinv-grid',
+	'cssFile' => false,
+	'dataProvider'=>$inv->search(false, 0, 't.due ASC', $ec),
+	'filter'=>$inv,
+	'columns'=>array(
+		array('name' => 'no', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->createURL("invoice/update", array("id" => $data->id))."\" class=\"tab_link\" title=\"".$data->no."\">".$data->no."</a>"'),
+		array('name' => 'to_name', 'value' => '$data->getBillto()'),
+		array('name' => 'suborg_name', 'value' => '$data->subOrgName()'),
+		array('name' => 'status', 'value' => '$data->getStatus()', 
+			'filter'=>CHtml::dropDownList('Invoice[status]', $model->status, $this->t($model::$states), array('prompt'=>$this->t('All'))),),
+		array('name' => 'type', 'value' => '$data->getType()', 
+			'filter'=>CHtml::dropDownList('Invoice[type]', $model->type, $this->t($model::$types), array('prompt'=>$this->t('All'))),),
+		'due',
+		array('name' => 'total', 'value' => '$data->getCurrency()." ".$data->total'),
+		array('header' => 'Balance', 'value' => '$data->getBalance(' . @$model->currency . ',' . (!empty($model->mdata['rate']) ? $model->mdata['rate'] : 1) . ')'),
+		array('header' => 'Allocate', 'type' => 'raw', 'value' => '"<input type=\"text\" class=\"alloc\" data-tot=\"".$data->getBalance()."\" name=\"alloc[".$data->id."]\" />"'),
+	),
+));
+?>
+	</div>
+	<div class="row">
+	<?php echo $form->labelEx($model,'note'); ?>
+	<?php echo $form->textArea($model,'note',array('rows'=>3, 'cols'=>40)); ?>
+	<?php echo CHtml::checkbox('pass');?>
+
+	</div>
+<!--
+	<div class="row">
+		<label><?php echo CHtml::checkbox('post');?> Post Receipt</label>
+	</div>
+	-->
+	<div class="row buttons">
+		<?php echo CHtml::submitButton($this->t('Save')); ?>
+		<?php echo CHtml::submitButton($this->t('Delete'), ['class' => 'btn']); ?>
+	</div>
+
+<?php $this->endWidget(); ?>
+
+
+</div><!-- form -->
+<?php endif; ?>
+<hr>
+<?php
+
+foreach($model->pays as $pay){
+    if ( isset($pay->invoice) ) {
+        echo '<p><a href="', $this->createUrl('invoice/print', ['id' => $pay->inv_id, 'bal' => 1]), '" target="_blank">', $pay->invoice->no, '</a>: $', AppHelper::money_format('%i', $pay->amount),' ( Total:',AppHelper::money_format('%i',  $pay->invoice->total),' , GST:' ,AppHelper::money_format('%i',$pay->invoice->gst) ,')', '</p>';
+    }
+}
+if($model->status == Payment::PAYMENT_STATUS_PENDING){
+	if((Acl::hasAccess("B:payment/approveCreditNote") && $model->op_id != Yii::app()->user->id) || Yii::app()->name == 'PEP')echo CHtml::submitButton($this->t('Post'), ['class' => 'btn']), ' &nbsp;';
+	echo	CHtml::submitButton($this->t('Delete'), ['class' => 'btn']);
+}elseif($model->status == Payment::PAYMENT_STATUS_POSTED){
+	echo CHtml::submitButton($this->t('Delete'), ['class' => 'btn']);
+}elseif($model->status == Payment::PAYMENT_STATUS_DELETED){
+    // does not support undelete again
+	//echo CHtml::submitButton($this->t('Undelete'), ['class' => 'btn']);
+}
+    echo '<div><a href="', $this->createUrl('payment/exportAllocs', ['id' => $model->id]), '" target="_blank"> Export Allocations</a></div>';
+
+?>
+</p>
+
+<script type="text/javascript">
+$(function(){
+	var win = $("#jqmw_<?=$_GET['tabid'];?>");
+	
+	$('input.btn', win).click(function(){
+		var act = $(this).val();
+		if(window.confirm('Are you sure to '+act+'?')){
+			$.get('<?php echo $this->createUrl("payment/btn",["id" => $model->id]);?>?act='+act, function(data){
+				data = JSON.parse(data);
+				if(data.done === true){
+		      win.data('opener').trigger('onOpen');
+					win.jqmHide();
+					myApp.notice(data.msg, 5000);
+				}else{
+
+					if(data.msg=="confirmGen")
+					{
+						if(confirm("The from invoice "+data.invoice+" already generate credit note "+data.credit_note+", are you sure to post this credit note?"))
+						{
+							$.get('<?php echo $this->createUrl("payment/btn",["id" => $model->id]);?>?act='+act+"&&pass=1", function(){
+								win.data('opener').trigger('onOpen');
+								win.jqmHide();
+							});
+
+						}else
+						{
+							$('#pass',win).val("");
+						}
+					}else
+					{
+						$('#pass',win).val("");
+						myApp.alert(data.msg, false);
+					}
+				}
+			});
+		}
+		return false;
+	});
+
+
+	$(win).on('change', 'input.alloc', function(){
+		var t = Number(<?=$model->ata;?>);
+		var it = Number($(this).data('tot'));
+		var v = $(this).val();
+
+		$('input.alloc', win).not(this).each(function(){
+			var v = Number($(this).val());
+			if(v > 0) t = Math.round((t - v) * 100) / 100;
+		});
+
+		if(v > it) v = it;
+		if(t < v) v = t;
+
+		$(this).val(v);
+	}).on('dblclick', 'input.alloc', function(){
+		var t = Number(<?=$model->ata;?>);
+		var it = Number($(this).data('tot'));
+		$(this).val('');
+		$('input.alloc', win).each(function(){
+			var v = Number($(this).val());
+			if(v > 0) t = Math.round((t - v) * 100) / 100;
+		});
+		if(t <= 0) return;
+		if(t >= it) $(this).val(it);
+		else $(this).val(t);
+	});
+	
+
+	$(document).off('click','#alllocation-grid a.grid_delete_btn.delete_pay_alloc');
+	$('#credit-form', win).on('success', function(){
+		win.data('opener').trigger('onOpen');
+		win.jqmHide();
+	});
+});
+</script>

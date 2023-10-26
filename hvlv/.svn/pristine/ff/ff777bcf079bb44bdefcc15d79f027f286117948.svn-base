@@ -1,0 +1,73 @@
+<?php
+	echo "<h1>{$podName} Exception Shipments List</h1>";
+	$this->widget('application.extensions.CSpanableGridView.CSpanableGridView', [
+				'id'=>$_GET['tabid'].'unknown_shipment-grid',
+				'cssFile' => false,
+				'summaryText'=>'',
+				'dataProvider'=> $model->search(false),
+				'filter'=>$model,
+				'columns'=>[
+					['name'=>'container_no'],
+					['header'=>'shipment','value'=>'empty($data->shipment_id)?"":$data->shipment->ref',
+						'spanable' => true, 'spanDepands' => ['@$data->shipment_id']
+					],
+					['name'=>'barcode'],
+					['name'=>'temp_barcode','value'=>function($data)
+						{
+							$file = FileRepo::model()->find("name like :name and type =:type",[":name"=>$data->temp_barcode."%",":type"=>FileRepo::UNKNOWN_SHIPMENT_PHOTO]);
+							echo "<a href=\"".Yii::app()->baseUrl."/filerepo/".$file->hash."/".$file->name."\" 		target=\"_blank\">".$data->temp_barcode."</a>";
+						}
+					],
+					['name' => 'status', 'value' => '$data->getStatus()',
+			'filter'=>CHtml::dropDownList('ImportsUnknownShipment[status]', $model->status, $this->t($model::$states), ['prompt'=>$this->t('All')]),],
+					['name'=>'ground_label'],
+					['name'=>'create_time'],
+					['name'=>'comment'],
+					['header'=>'Unknown Shipment','value'=>'empty($data->shipment_id)?"Yes":"No"'],
+					
+					['class'=>'application.extensions.CSpanableGridView.oSpanableButtonColumn',
+						'template'=>'{operation}{close}',
+						'buttons'=>[
+							'operation'=>[
+				    	      'imageUrl'=>false,
+				    	      'visible'=>'true',
+				    	      'options' => ['class' => 'jqm_link grid_edit_btn', 'label' => 'operation', 'data-win-class' => 'L'],
+				    	      'url' => 'Yii::app()->createUrl("consolProcess/exceptionShipmentOperation", ["id" => $data->id])',
+				    	      'label' => 'operation'
+				    	    ],
+							'close'=>[
+				    	      'imageUrl'=>false,
+				    	      'visible'=>'true',
+				    	      'options' => ['class' => 'close_unknown_shipment grid_edit_btn', 'label' => 'Close', 'data-win-class' => 'L'],
+				    	      'url' => 'Yii::app()->createUrl("consolProcess/closeUnknownShipment", ["id" => $data->id])',
+				    	      'label' => 'Close'
+				    	    ]
+						]
+					],
+				],
+			]);
+
+
+?>
+
+
+<script>
+	$(function(){
+		var tab=$("#<?=$_GET['tabid']?>");
+		var panel=tab.data('panel');
+
+
+		$(panel).on('click',' .close_unknown_shipment',function(event){
+			event.preventDefault();
+			if(confirm("Are you Confirm to Close?")){
+				$.get($(this).attr('href'),function(r){
+					if(r=='done'){
+						myApp.notice("Close!");
+						$('#<?=$_GET['tabid']?>unknown_shipment-grid',panel).yiiGridView('update');
+					}
+				});
+			 }
+	});
+
+	})
+</script>

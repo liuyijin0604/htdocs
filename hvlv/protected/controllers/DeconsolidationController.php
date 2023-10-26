@@ -1,0 +1,414 @@
+<?php
+
+class DeconsolidationController extends Controller
+{
+	/**
+	 * @var string the default layout for the views. Defaults to '//layouts/column2', meaning
+	 * using two-column layout. See 'protected/views/layouts/column2.php'.
+	 */
+	public $layout='//layouts/column2';
+
+	/**
+	 * @return array action filters
+	 */
+	public function filters()
+	{
+		return array(
+			'accessControl', // perform access control for CRUD operations
+			'postOnly + delete', // we only allow deletion via POST request
+		);
+	}
+
+	/**
+	 * Specifies the access control rules.
+	 * This method is used by the 'accessControl' filter.
+	 * @return array access control rules
+	 */
+	public function accessRules()
+	{
+		return array(
+			array('allow',  // allow all users to perform 'index' and 'view' actions
+				'actions'=>array('index','view'),
+				'users'=>array('*'),
+			),
+			array('allow', // allow authenticated user to perform 'create' and 'update' actions
+				'actions'=>array('create','update'),
+				'users'=>array('@'),
+			),
+			array('allow', // allow admin user to perform 'admin' and 'delete' actions
+				'actions'=>array('admin','delete'),
+				'users'=>array('admin'),
+			),
+			array('deny',  // deny all users
+				'users'=>array('*'),
+			),
+		);
+	}
+
+	/**
+	 * Displays a particular model.
+	 * @param integer $id the ID of the model to be displayed
+	 */
+	public function actionView($id)
+	{
+		$this->render('view',array(
+			'model'=>$this->loadModel($id),
+		));
+	}
+
+	/**
+	 * Creates a new model.
+	 * If creation is successful, the browser will be redirected to the 'view' page.
+	 */
+	public function actionCreate()
+	{
+		$model=new Deconsolidation;
+
+		// Uncomment the following line if AJAX validation is needed
+		// $this->performAjaxValidation($model);
+
+		if(isset($_POST['Deconsolidation']))
+		{
+			$model->attributes=$_POST['Deconsolidation'];
+			if($model->save())
+				$this->redirect(array('view','id'=>$model->id));
+		}
+
+		$this->render('create',array(
+			'model'=>$model,
+		));
+	}
+
+	/**
+	 * Updates a particular model.
+	 * If update is successful, the browser will be redirected to the 'view' page.
+	 * @param integer $id the ID of the model to be updated
+	 */
+	public function actionUpdate($id)
+	{
+		$model=$this->loadModel($id);
+
+		// Uncomment the following line if AJAX validation is needed
+		// $this->performAjaxValidation($model);
+
+		if(isset($_POST['Deconsolidation']))
+		{
+			$model->attributes=$_POST['Deconsolidation'];
+			if($model->save())
+				$this->redirect(array('view','id'=>$model->id));
+		}
+
+		$this->render('update',array(
+			'model'=>$model,
+		));
+	}
+
+	/**
+	 * Deletes a particular model.
+	 * If deletion is successful, the browser will be redirected to the 'admin' page.
+	 * @param integer $id the ID of the model to be deleted
+	 */
+	public function actionDelete($id)
+	{
+		$this->loadModel($id)->delete();
+
+		// if AJAX request (triggered by deletion via admin grid view), we should not redirect the browser
+		if(!isset($_GET['ajax']))
+			$this->redirect(isset($_POST['returnUrl']) ? $_POST['returnUrl'] : array('admin'));
+	}
+
+	/**
+	 * Lists all models.
+	 */
+	public function actionIndex()
+	{
+		$dataProvider=new CActiveDataProvider('Deconsolidation');
+		$this->render('index',array(
+			'dataProvider'=>$dataProvider,
+		));
+	}
+
+	/**
+	 * Manages all models.
+	 */
+	public function actionAdmin()
+	{
+		$model=new Deconsolidation('search');
+		$model->unsetAttributes();  // clear any default values
+		if(isset($_GET['Deconsolidation']))
+			$model->attributes=$_GET['Deconsolidation'];
+
+		$this->render('admin',array(
+			'model'=>$model,
+		));
+	}
+
+	/**
+	 * Enter page
+	 */
+	public function actionDeconsolidationManagement()
+	{
+		if (!empty($_GET['depot'])) {
+			$deconsolidation = new Deconsolidation('search');
+			$deconsolidation->unsetAttributes();
+			switch ($_GET['depot']) {
+				case 106:
+					$dpt_id = 106;
+					break;
+				case 218:
+					$dpt_id = 218;
+					break;
+				case 530:
+					$dpt_id = 530;
+					break;
+				case 811:
+					$dpt_id = 811;
+					break;
+				default:
+					$dpt_id = 106;
+			}
+			$summary = new stdClass;
+			$summary->new = Deconsolidation::model()->count("`status` = :status AND depot = :depot", array(':status' => Deconsolidation::STATUS_NEW, ':depot' => $dpt_id));
+			$summary->warehouse = Deconsolidation::model()->count("`status` = :status AND depot = :depot AND due_time <= :due", array(':status' => Deconsolidation::STATUS_WAREHOUSE_PROCESSING, ':depot' => $dpt_id, ':due' => date('Y-m-d 23:59:59')));
+			$summary->error = Deconsolidation::model()->count("json_value(meta,'$.errors') IS NOT NULL AND (error_check_user = 0 OR error_check_user IS NULL) AND depot = :depot", array(':depot' => $dpt_id));
+			$summary->errorChecking = Deconsolidation::model()->count("(error_check_user != 0 AND error_check_user IS NOT NULL) AND (error_check_complete_time IS NULL OR error_check_complete_time = '0000-00-00 00:00:00') AND depot = :depot", array(':depot' => $dpt_id));
+			$summary->waitingScan = Deconsolidation::model()->count("`status` = :status AND depot = :depot AND due_time <= :due", array(':status' => Deconsolidation::STATUS_WAITING_SCAN_ALL, ':depot' => $dpt_id, ':due' => date('Y-m-d 23:59:59')));
+			//$summary->todayNew = Deconsolidation::model()->count("(status = :status OR create_time >= '" . date('Y-m-d 00:00:00') . "' OR op_complete_time >= '" . date('Y-m-d 00:00:00') ."') AND depot = :depot", array(':status' => Deconsolidation::STATUS_NEW, ':depot' => $dpt_id));
+			$summary->todayOpDone = Deconsolidation::model()->count("op_complete_time >= '" . date('Y-m-d 00:00:00') . "' AND depot = :depot", array(':depot' => $dpt_id));
+			$summary->todayWarehouseDone = Deconsolidation::model()->count("warehouse_complete_time >= '" . date('Y-m-d 00:00:00') . "' AND depot = :depot", array(':depot' => $dpt_id));
+			$summary->todayErrorCheckAssignDone = Deconsolidation::model()->count("error_check_assign_time >= '" . date('Y-m-d 00:00:00') . "' AND depot = :depot", array(':depot' => $dpt_id));
+			$summary->todayErrorCheckDone = Deconsolidation::model()->count("error_check_complete_time >= '" . date('Y-m-d 00:00:00') . "' AND depot = :depot", array(':depot' => $dpt_id));
+			$summary->todayComplete = Deconsolidation::model()->count("task_complete_time >= '" . date('Y-m-d 00:00:00') . "' AND task_complete_time <= due_time AND `status` = 99 AND depot = :depot", array(':depot' => $dpt_id));
+			/* $summary->thisWeekNew = Deconsolidation::model()->count("(status = :status OR create_time >= '" . date('Y-m-d 00:00:00', strtotime('monday this week')) . "') AND depot = :depot", array(':status' => Deconsolidation::STATUS_NEW, ':depot' => $dpt_id));
+			$summary->thisWeekOpDone = Deconsolidation::model()->count("op_complete_time >= '" . date('Y-m-d 00:00:00', strtotime('monday this week')) . "' AND depot = :depot", array(':depot' => $dpt_id));
+			$summary->thisWeekWarehouseDone = Deconsolidation::model()->count("warehouse_complete_time >= '" . date('Y-m-d 00:00:00', strtotime('monday this week')) . "' AND depot = :depot", array(':depot' => $dpt_id));
+			$summary->thisWeekComplete = Deconsolidation::model()->count("task_complete_time >= '" . date('Y-m-d 00:00:00', strtotime('monday this week')) . "' AND `status` = 99 AND depot = :depot", array(':depot' => $dpt_id)); */
+			//$summary->mtdNew = Deconsolidation::model()->count("(status = :status OR create_time >= '" . date('Y-m-01 00:00:00') . "') AND depot = :depot", array(':status' => Deconsolidation::STATUS_NEW, ':depot' => $dpt_id));
+			$summary->mtdOpDone = Deconsolidation::model()->count("op_complete_time >= '" . date('Y-m-01 00:00:00') . "' AND depot = :depot", array(':depot' => $dpt_id));
+			$summary->mtdWarehouseDone = Deconsolidation::model()->count("warehouse_complete_time >= '" . date('Y-m-01 00:00:00') . "' AND depot = :depot", array(':depot' => $dpt_id));
+			$summary->mtdErrorCheckAssignDone = Deconsolidation::model()->count("error_check_assign_time >= '" . date('Y-m-01 00:00:00') . "' AND depot = :depot", array(':depot' => $dpt_id));
+			$summary->mtdErrorCheckDone = Deconsolidation::model()->count("error_check_complete_time >= '" . date('Y-m-01 00:00:00') . "' AND depot = :depot", array(':depot' => $dpt_id));
+			$summary->mtdComplete = Deconsolidation::model()->count("task_complete_time >= '" . date('Y-m-01 00:00:00') . "' AND `status` = 99 AND depot = :depot", array(':depot' => $dpt_id));
+			$summary->dueToday = Deconsolidation::model()->count('due_time = "' . date('Y-m-d 23:59:59') . '" AND depot = :depot AND `status` NOT IN (99, 101)', array(':depot' => $dpt_id));
+			$summary->dueThisMonth = Deconsolidation::model()->count('due_time >= "' . date('Y-m-01 00:00:00') . '" AND due_time <= "' . date('Y-m-d 23:59:59') . '" AND depot = :depot', array(':depot' => $dpt_id));
+			$summary->mtdOverDue = Deconsolidation::model()->count("task_complete_time >= '" . date('Y-m-01 00:00:00') . "' AND task_complete_time > due_time AND `status` = 99 AND depot = :depot", array(':depot' => $dpt_id));
+			$summary->mtdOpDonePercentage = $summary->new + $summary->mtdOpDone > 0 ? number_format($summary->mtdOpDone / ($summary->new + $summary->mtdOpDone)*100, 2, '.', '') : 'N/A';
+			$summary->mtdWarehouseDonePercentage = $summary->warehouse + $summary->mtdWarehouseDone > 0 ? number_format($summary->mtdWarehouseDone / ($summary->warehouse + $summary->mtdWarehouseDone)*100, 2, '.', '') : 'N/A';
+			$summary->mtdErrorCheckAssignDonecentage = $summary->error + $summary->mtdErrorCheckAssignDone > 0 ? number_format($summary->mtdErrorCheckAssignDone / ($summary->error + $summary->mtdErrorCheckAssignDone)*100, 2, '.', '') : 'N/A';
+			$summary->mtdErrorCheckDonePercentage = $summary->errorChecking + $summary->mtdErrorCheckDone > 0 ? number_format($summary->mtdErrorCheckDone / ($summary->errorChecking + $summary->mtdErrorCheckDone)*100, 2, '.', '') : 'N/A';
+			$summary->mtdScanDonePercentage = $summary->waitingScan + $summary->mtdComplete > 0 ? number_format($summary->mtdComplete / ($summary->waitingScan + $summary->mtdComplete)*100, 2, '.', '') : 'N/A';
+			$summary->mtdCompletePercentage = $summary->dueThisMonth  > 0 ? number_format(($summary->mtdComplete - $summary->mtdOverDue) / ($summary->dueThisMonth) * 100, 2, '.', '') : 'N/A';
+			//$summary->thisWeekPercentage = ($summary->thisWeekNew == 0) ? '100%' : number_format(($summary->thisWeekComplete / $summary->thisWeekNew)*100, 2, '.', '') . '%';
+			//$summary->mtdPercentage = ($summary->mtdNew == 0) ? '100%' : number_format(($summary->mtdComplete / $summary->mtdNew) * 100, 2, '.', '') . '%';
+			$this->render('deconsolidation_list', array('deconsolidation' => $deconsolidation, 'dpt_id' => $dpt_id, 'summary' => $summary));
+		} else {
+			$this->render('deconsolidation_management', array('type' => 1));
+		}	
+	}
+
+	/**
+	 * Deconsolidation List
+	 */
+	public function actionList()
+	{
+		if (!empty($_GET)) {
+			$dpt_id = $_GET['dpt_id'];
+			$model = new Deconsolidation('search');
+			$model->unsetAttributes();
+			if (isset($_GET['Deconsolidation'])) {
+				$model->setAttributes($_GET['Deconsolidation']);
+			}
+			$model->setAttribute('depot', $dpt_id);
+			switch ($_GET['tab']) {
+				case 'new':
+					$model->setAttribute('status', Deconsolidation::STATUS_NEW);
+					$this->render('tab_new', array('model' => $model));
+					break;
+				case 'warehouse':
+					$model->setAttribute('status', Deconsolidation::STATUS_WAREHOUSE_PROCESSING);
+					$this->render('tab_warehouse', array('model' => $model));
+					break;
+				case 'error':
+					$model->setAttribute('error_check_user', 0);
+					$this->render('tab_error', array('model' => $model));
+					break;
+				case 'error_checking':
+					$this->render('tab_error_checking', array('model' => $model));
+					break;
+				case 'waiting_scan_all':
+					$model->setAttribute('status', Deconsolidation::STATUS_WAITING_SCAN_ALL);
+					$this->render('tab_waiting_scan_all', array('model' => $model));
+					break;
+				case 'completed':
+					$model->setAttribute('status', Deconsolidation::STATUS_COMPLETE);
+					$this->render('tab_completed', array('model' => $model));
+					break;
+				default:
+					$model->setAttribute('status', Deconsolidation::STATUS_NEW);
+					$this->render('tab_new', array('model' => $model));
+					break;
+			}
+		}
+	}
+
+	/**
+	 * Assign deconsolidation task to warehouse
+	 */
+	public function actionAssignToWarehouse()
+	{
+		$res = new stdClass;
+		if (!empty($_POST)) {
+			$res->success = true;
+			$model = Deconsolidation::model()->findByPk($_POST['id']);
+			if (!empty($model)) {
+				$model->op_complete_time = date('Y-m-d H:i:s');
+				$model->assigned_user = $_POST['user_id'];
+				$model->status = Deconsolidation::STATUS_WAREHOUSE_PROCESSING;
+				$model->save();
+				$res->msg = 'Done';
+			} else {
+				$res->msg = 'Deconsolidation record not found.';
+			}
+		} else {
+			$res->success = false;
+			$res->msg = 'Empty post.';
+		}
+		echo json_encode($res);
+	}
+
+	/**
+	 * Manage warehouse users
+	 */
+	public function actionManageUser()
+	{
+		$systemSetting = SystemSetting::model()->findByAttributes(['key' => 'deconsolidationUser']);
+		$totalUsers = [];
+		foreach ($systemSetting->mdata as $key => $value) {
+			foreach ($value as $key1 => $active) {
+				if (empty($active)) {
+					continue; // only show active users
+				}
+				$user = new stdClass;
+				$user->id = explode(":", $key1)[0];
+				$user->userName = explode(":", $key1)[1];
+				$user->isActive = !empty($active) ? 'Active' : 'Inactive';
+				$user->warehouse = Deconsolidation::$warehouse[$key];
+				array_push($totalUsers, $user);
+			}
+		}
+		if (!empty($_POST)) {
+			$userIdInputName = $_POST['acName'];
+			$userId = $_POST[$userIdInputName];
+			$depot = $_POST['warehouse_id'];
+			
+			if (!empty($systemSetting)) {
+				$users = $systemSetting->mdata[$depot];
+				if (empty($users[$userId])) {
+					$users[$userId] = 1;	// 1 stands for active user
+					$systemSetting->mdata[$depot] = $users;
+					$systemSetting->save();
+				}
+			}
+
+		} else {
+			$this->render('manage_user', array('totalUsers' => $totalUsers));
+		}
+	}
+
+	/**
+	 * Inactivate warehouse user
+	 */
+	public function actionInactivateUser()
+	{
+		if (!empty($_POST)) {
+			$userId = $_POST['userId'];
+			$systemSetting = SystemSetting::model()->findByAttributes(['key' => 'deconsolidationUser']);
+			foreach ($systemSetting->mdata as $key => $value) {
+				foreach ($value as $key1 => $active) {
+					if ($userId == explode(":", $key1)[0]) {
+						$systemSetting->mdata[$key][$key1] = 0;
+						$systemSetting->save();
+						break 2;
+					}
+				}
+			}
+		}
+	}
+
+	public function actionSendErrorCheck()
+	{
+		$res = new stdClass;
+		$res->success = false;
+		if (!empty($_POST['id'])) {
+			$model = $this->loadModel($_POST['id']);
+			if (!empty($model)) {
+				//$model->status = Deconsolidation::STATUS_ERROR_CHECKING;
+				$model->error_check_user = $_POST['user_id'];
+				$model->error_check_assign_time = date('Y-m-d H:i:s');
+				$model->save();
+				$res->success = true;
+			}
+		}
+		echo json_encode($res);
+	}
+
+	public function actionErrorCheckDone()
+	{
+		$res = new stdClass;
+		$res->success = false;
+		if (!empty($_POST['id'])) {
+			$model = $this->loadModel($_POST['id']);
+			if (!empty($model)) {
+				//$model->status = Deconsolidation::STATUS_COMPLETE;
+				$model->error_check_complete_time = date('Y-m-d H:i:s');
+				$model->save();
+				$res->success = true;
+			}
+		}
+		echo json_encode($res);
+	}
+
+	public function actionScanAllComplete()
+	{
+		$res = new stdClass;
+		$res->success = false;
+		if (!empty($_POST['id'])) {
+			$model = $this->loadModel($_POST['id']);
+			if (!empty($model)) {
+				$model->status = Deconsolidation::STATUS_COMPLETE;
+				$model->task_complete_time = date('Y-m-d H:i:s');
+				$model->save();
+				$res->success = true;
+			}
+		}
+		echo json_encode($res);
+	}
+
+	/**
+	 * Returns the data model based on the primary key given in the GET variable.
+	 * If the data model is not found, an HTTP exception will be raised.
+	 * @param integer $id the ID of the model to be loaded
+	 * @return Deconsolidation the loaded model
+	 * @throws CHttpException
+	 */
+	public function loadModel($id)
+	{
+		$model=Deconsolidation::model()->findByPk($id);
+		if($model===null)
+			throw new CHttpException(404,'The requested page does not exist.');
+		return $model;
+	}
+
+	/**
+	 * Performs the AJAX validation.
+	 * @param Deconsolidation $model the model to be validated
+	 */
+	protected function performAjaxValidation($model)
+	{
+		if(isset($_POST['ajax']) && $_POST['ajax']==='deconsolidation-form')
+		{
+			echo CActiveForm::validate($model);
+			Yii::app()->end();
+		}
+	}
+}

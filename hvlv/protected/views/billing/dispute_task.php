@@ -1,0 +1,125 @@
+<h3>Dispute Supplier Tasks</h3>
+<style>
+    .cloumn_red{
+        background-color:pink;
+    }  
+    .column_direct{
+        color: green;
+        font-weight: bold;
+    }
+</style>
+<center>
+</center>
+</br>
+<h4 style="float:left">MTD Dispute Dash</h4>
+<div class="form">
+<?php $form=$this->beginWidget('CActiveForm', array(
+	'id' => 'pl-all-report-form',
+	'enableAjaxValidation' => false,
+	'action' => $this->createUrl('report/plReport'),
+//	'htmlOptions' => ['target' => '_blank', 'class' => 'ifrm-form'],
+)); ?>
+
+	<div class="row rowcol rowleft">
+	</div>
+
+
+	<div class="row rowcol rowleft">
+		<?php echo CHtml::label('Month:','fd'); ?>
+		<?php echo CHtml::dropDownList('month',"", $monthList,array('prompt'=>'Select')); ?><?php echo CHtml::submitButton($this->t('search'),["id"=>'searchDisputeKpi']); ?>
+	</div>
+
+<?php $this->endWidget(); ?>
+<div style="width:50%;" id="dispute-task-overview<?=$_GET['tabid']?>">
+   <?php 
+   if(!empty($dataProvider))
+   {
+	   	$this->widget('zii.widgets.grid.CGridView', [
+	    'id'=>'rts_process_list_grid'.$_GET['tabid'],
+	    'htmlOptions'=>['style'=>'width: 70%'],
+	    'cssFile' => false,
+	    'dataProvider'=>$dataProvider[0],
+	    'filter'=>$dataProvider[1],
+	    'columns'=>[
+	        ['name'=>'date','header'=>'Date'],
+	        ['name'=>'dispute_amount','header'=>'Dispute Amount'],
+	        ['name'=>'credit_amount','header'=>'Credit Amount'],
+	        ['name'=>'percentage','header'=>'Percentage'],
+	    ],
+   		]); 
+   }
+   ?>
+</div>
+</br>
+</br>
+
+
+<?php
+	$columns = [
+		array('header' => 'Processing','type'=>'raw', 'value' => '$data->getStatusForList().CHtml::hiddenField("tab","'.$tab.'")'),
+		array('name' => 'task_no'),
+		array('header' => 'Task Content','type'=>'raw','value'=>'$data->getInstance()->getTaskContent()','filter'=>CHtml::textField('DisputeSupplierTask[comment]', $model->comment),),
+		array('name' => 'status','type'=>'raw', 'value' => '$data->getStatus()','filter'=>CHtml::dropDownList('DisputeSupplierTask[status]',@$model->status, TlaTask::$processTypes,array('prompt'=>'Select'))),
+		array('name' => 'createdUserName','value'=>'empty($data->user_id)?"System":$data->createUser->fname." ".$data->createUser->lname'),
+		//array('name' => 'create'),
+		//array('name' => 'ets'),
+		array('name' => 'ete','type'=>'raw','value'=>'$data->getMyEte(true)'),
+		array('header'=>'Supplier', 'value'=>'$data->getSupplierName()'),
+		array('header' => 'Dispute Amount','type'=>'raw','value'=>'$data->getInstance()->getDisputeAmount()'),
+		array('header' => 'Credit Amount','type'=>'raw','value'=>'$data->getInstance()->getCreditAmount()'),
+		
+	];
+	$columns[] = 		['class'=>'oButtonColumn',
+			'template'=>'{operate}&nbsp;{Check Si Reconcile}&nbsp;{close}&nbsp;{log}',
+			'buttons'=>[
+				'operate' => [
+					'url'=>'Yii::app()->createURL("tlaTask/operation")."?id=".$data->id."&&tab='.$tab.'"',
+					'imageUrl'=>false,
+					'visible'=>'true',
+					'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => '$data->id', 'data-id' => '$data->id'],
+				],
+				'Check Si Reconcile' => [
+					'url'=>'$data->getInstance()->getOperationLink()."&&tab='.$tab.'"',
+					'imageUrl'=>false,
+					'visible'=>'$data->type==DisputeSupplierTask::$my_type',
+					'options' => ['class' => 'tab_link grid_edit_btn', 'label'=>'$data->getInstance()->getGoToLinkText()', 'title' => '$data->id' , 'data-id' => '$data->id'],
+				],
+				'close' => [
+					'url'=>'Yii::app()->createURL("tlaTask/close")."?id=".$data->id',
+					'imageUrl'=>false,
+					'visible'=>'true',
+					'options' => ['class' => 'close_task grid_edit_btn', 'label'=>$this->t('Close'), 'title' => '$data->id' , 'data-id' => '$data->id'],
+				],
+				'log' => [
+					'imageUrl'=>false,
+					'options' => ['class' => 'jqm_link grid_view_btn', 'label' => 'Log', 'data-win-class' => 'L'],
+					'visible' => 'true',
+					'url' => 'Yii::app()->createUrl("tlaTask/log", ["id" => $data->id])',
+					'label' => 'Log'
+				]
+			],
+		];
+$this->widget('application.extensions.CSpanableGridView.CSpanableGridView', [
+	'id'=>$_GET["tabid"].$tab.'_sub_tla_task_grid',
+	'cssFile' => false,
+	'dataProvider'=>$model->search(true, 30,false,true),
+	'filter'=>$model,
+	'columns'=>$columns,
+]);
+
+?>
+<script type="text/javascript">
+
+	$(function(){
+
+		 	var tab = $('#<?=$_GET["tabid"];?>');
+	 		var panel = tab.data('panel');
+	
+		 	$('#searchDisputeKpi', panel).on('click', function(){
+				$('#rts_process_list_grid<?=@$_GET['tabid']?>', panel).yiiGridView('update', {data: $('#month', panel).serialize() + '&' + $(this).serialize()});
+				return false;
+			})
+
+	})
+
+</script>

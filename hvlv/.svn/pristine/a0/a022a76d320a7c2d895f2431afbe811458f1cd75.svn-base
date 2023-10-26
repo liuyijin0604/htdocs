@@ -1,0 +1,65 @@
+<?php
+
+require_once 'protected/modules/REST/src/RestController.php';
+require_once 'protected/modules/REST/src/SmsNotice/ModalSmsNoticeCollection.php';
+
+
+class SmsNoticeController extends RestController
+{
+    // protected $nonAjax=['test','GetNotProcessed'];
+    protected $skipIsGuest=['GetNotProcessed','CheckNotProcessed','Test'];
+    
+    public function actionIndex(){
+        switch ($_SERVER['REQUEST_METHOD']) {
+            case 'GET':
+                
+            break;
+            case 'PUT':
+                
+            break;
+            
+        }
+        
+    }
+    
+    public function actionGetNotProcessed(){
+        $objModalSmsNoticeCollection = new ModalSmsNoticeCollection;
+        $objModalSmsNoticeCollection->funcGetNotProcessed();
+        $listCollection = $objModalSmsNoticeCollection->funcCollection2StdClass();
+        $objModalSmsNoticeCollection->funcBatchSetIsPricessedTrue();
+        
+        $this->funcRestResponse(true,$listCollection,'');
+    }
+    
+    // public function actionTest(){
+        
+    //     $objModalSmsNotice = new ModalSmsNotice;
+    //     $objModalSmsNotice->CreateFromPhoneAndMessage('0466317766','actionTest');
+        
+    //     $this->funcRestResponse(true,null,'');
+    // }
+    
+    public function actionTest(){
+        $strPhone = $_GET['phone'];
+        $strMessage = $_GET['message'];
+        
+        if($strPhone !== null &&  $strMessage != null){
+            ModalSmsNotice::Create($strPhone,$strMessage );
+            $this->funcRestResponse(true,null,'success');
+        }
+        else{
+            $this->funcRestResponse(false,null,'?phone=12345&message=string');
+        }
+        
+    }
+    
+    public function actionCheckNotProcessed(){
+        $objModalSmsNoticeCollection = new ModalSmsNoticeCollection;
+        $objModalSmsNoticeCollection->funcGetNotProcessed();
+        $listCollection = $objModalSmsNoticeCollection->funcCollection2StdClass();
+        
+        $this->funcRestResponse(true,$listCollection,'');
+    }
+    
+    
+}

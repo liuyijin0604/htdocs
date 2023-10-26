@@ -1,0 +1,699 @@
+<?php
+class EtowerAPI
+{
+	const TEST_TOKEN='test5AdbzO5OEeOpvgAVXUFE0A';
+	const TEST_KEY='79db9e5OEeOpvgAVXUFWSD';
+	const TEST_URL='http://qa.etowertech.com';
+	const PRODUCTION_KEY="2dgoDRmLu6inSJTOWMifeQ";
+	const PRODUCTION_TOKEN="pclOquXiP3-95uJTGMVmuD";
+	const PRODUCTION_URL="https://au.etowertech.com";
+	const CLIENTID = 7139;
+	public $result;
+	public $err;
+	public $is_test;
+	public $debug;
+	public $serviceCode;
+	public $orgRate;
+	private $fromInfo;
+
+	public function __construct($debug = false, $test = false,$orgRateId=0)
+	{
+		$this->is_test = $test;
+		$this->debug = $debug;
+		$this->orgRate = OrgRate::model()->findByPk($orgRateId);
+		if(!empty($this->orgRate))
+		{
+			$this->serviceCode = $this->orgRate->mdata['service_code'];
+			$facility = $this->findTheFacility($this->orgRate);
+			$type = str_replace('WW', '', $facility);
+			if(empty($type)||$type=='SYD')
+			{
+				$this->fromInfo=[
+					'suburb'=>"BANKSTOWN AERODROME",
+					'postcode'=>"2200",
+					'address'=>"1/233 Milperra Rd",
+					'state'=>"NSW"
+				];
+			}elseif($type=='MEL')
+			{
+				$this->fromInfo=[
+					'suburb'=>"Sunshine",
+					'postcode'=>"3020",
+					'address'=>"3B/8 Judge St",
+					'state'=>"VIC"
+				];
+			}elseif($type=='BNE')
+			{
+				$this->fromInfo=[
+					'suburb'=>"Coopers Plains",
+					'postcode'=>"4108",
+					'address'=>"6/55 Musgrave Rd",
+					'state'=>"QLD"
+				];
+			}elseif($type=='PER')
+			{
+				$this->fromInfo=[
+					'suburb'=>"Welshpool",
+					'postcode'=>"6106",
+					'address'=>"Warehouse, 8 Glenferrie Road",
+					'state'=>"WA"
+				];
+			}
+		}
+	}
+	
+	public function getFromInfo()
+	{
+		return $this->fromInfo;
+	}
+	
+	public static function getAPIInstance($courierId)
+	{
+		$code = OrgRate::model()->findByPk($courierId)->code;
+		return new EtowerAPI(false,false,$courierId);
+	}
+		
+	public function findTheFacility($orgRate = false)
+	{
+		if($orgRate!=null)
+		{
+			return $orgRate->mdata['facility'];
+		}else
+		{
+			return $this->orgRate->mdata['facility'];
+		}
+	}
+	 
+	 
+	private function build_headers($method, $path, $acceptType='application/json')
+	{
+		$walltech_date=date(DATE_RSS);
+		$auth = $method."\n".$walltech_date."\n".$path;
+		$hash=base64_encode(hash_hmac('sha1', $auth, $this->is_test?self::TEST_KEY : self::PRODUCTION_KEY, true));
+		//  echo $walltech_date."<br>".$auth."<br>".$hash."<br>";
+		return [ 'Content-Type: application/json',
+			'Accept: '.$acceptType,
+			'X-WallTech-Date: '.$walltech_date,
+			'Authorization: WallTech '.($this->is_test?self::TEST_TOKEN : self::PRODUCTION_TOKEN).':'.$hash
+		];
+	}
+	
+	public function getBreakWeight($weight)
+	{
+		// if ($weight <= 0.500) {
+		//     return $weight;
+		// } elseif ($weight <= 1.0) {
+		//     return $this->doTheWeight($weight, 0.5, 1.0, 0.4, 0.5);
+		// } elseif ($weight <= 2) {
+		//     return $this->doTheWeight($weight, 1, 2, 0.8, 1.0);
+		// } elseif ($weight <= 3) {
+		//     return $this->doTheWeight($weight, 2, 3, 1.8, 2.0);
+		// } elseif ($weight <= 4) {
+		//     return $this->doTheWeight($weight, 3, 4, 2.5, 3.0);
+		// } elseif ($weight <= 5) {
+		//     return $this->doTheWeight($weight, 4, 5, 3.5, 4.0);
+		// } elseif ($weight <= 7) {
+		//     return $this->doTheWeight($weight, 5, 7, 4.5, 5.0);
+		// } elseif ($weight <= 10) {
+		//     return round($weight * rand(80, 100) / 100, 3);
+		// } else {
+		//     return round($weight, 3);
+		// }
+		return  round($weight * 100) / 100;
+	}
+	public function doTheWeight($w, $x1, $x2, $y1, $y2)
+	{
+		return round(($y1-abs($y1-$y2)/abs($x1-$x2)*$x1)+abs($y1-$y2)/abs($x1-$x2)*$w, 3);
+	}
+	 
+	/**
+	 * create shipment Order;
+	 * @param  $ss is an Array of shipment
+	 */
+	public function createShipment($ss)
+	{
+		$data=[];
+		foreach ($ss as $shipment) {
+			if(!empty($shipment->mdata['etower_shipment_orderid'])){
+				continue;
+			}
+			$data= $this->prepareDataToll($shipment,false,$this->serviceCode);
+		}
+		if(empty($data)) return false;
+		$result=$this->request('/services/shipper/orders', 'POST', $data);
+		return $result;
+	}
+
+	/**
+	 * create shipment Order;
+	 * @param  $ss is an Array of shipment
+	 */
+	public function createBorderShipment($ss)
+	{
+		$data=[];
+		foreach ($ss as $shipment) {
+			if(!empty($shipment->mdata['etower_shipment_orderid'])){
+				continue;
+			}
+			$data= $this->prepareDataBorder($shipment,false,$this->serviceCode);
+		}
+		if(empty($data)) return false;
+		$result=$this->request('/services/shipper/orders', 'POST', $data);
+		return $result;
+	}
+
+	/**
+	 * update shipment Order;
+	 * @param  $ss is an Array of shipment
+	 */
+	public function updateShipment($ss)
+	{
+		$data=[];
+		foreach ($ss as $shipment) {
+			if(empty($shipment->mdata['etower_shipment_orderid'])){
+				continue;
+			}
+			$data[]= $this->prepareData($shipment,true,$this->serviceCode);
+		}
+		if(empty($data)) return false;
+		$result=$this->request('/services/shipper/update-order', 'POST', $data);
+		return $result;
+	}
+	 
+	public function manifest($ss)
+	{
+		$data=[];
+		foreach ($ss as $s) {
+			$orderIds = explode(',', $s->mdata['etower_shipment_orderid']);
+			foreach ($orderIds as $key => $orderId) {
+				$data[] = $orderId;
+			}
+		}
+		$result=$this->request('/services/shipper/manifests', 'POST', $data);
+		return $result;
+	}
+	 
+	public function getLabelInfo($ss)
+	{
+		$data=[];
+		foreach ($ss as $s) {
+			$data[]=$s->mdata['etower_shipment_orderid'];
+		}
+		$result=$this->request('/services/shipper/labelSpecs', 'POST', $data);
+		return $result;
+	}
+
+	public function getLabels($ss)
+	{
+		$barcodes = [];
+		$data=[];
+		foreach ($ss as $s) {
+			$data[]=$s->mdata['etower_shipment_orderid'];
+		}
+		$f=$this->downFile('/services/integration/shipper/labels',$data,$ss[0]->ref);
+		$f2 = tempnam(Yii::app()->basePath . DIRECTORY_SEPARATOR . "runtime" . DIRECTORY_SEPARATOR."ETOWER".DIRECTORY_SEPARATOR, 'check');
+		$result = oPDF::pdftotxt( $f,$f2);
+		$result = preg_split('/[\r\n]+/', $result);
+		foreach ($result as $key => $r) {
+			if(preg_match('/(\(00\) )(\d{18})/', $r,$m))
+			{
+				$barcodes[] = '00'.$m[2];
+			}
+		}
+		unlink($f);
+
+		return [$result[1],$result[5],$result[6],$barcodes];
+	}
+
+	public function getTrackingEvents($ss)
+	{
+		$data=[];
+		foreach ($ss as $s) {
+			if(!empty($s->mdata['article_id']))
+			{
+				$data[]=$s->mdata['article_id'];
+			}
+		}
+		$result=$this->request('/services/shipper/trackingEvents', 'POST', $data);
+		return $result;
+	}
+	public function canDeliver($shipment,$orgRate)
+	{
+		if($shipment->pkg>98)
+		{
+			return false;
+		}
+		$or = OrgRate::model()->findByPk($orgRate);
+		$o = new stdClass();
+		$o->code = 0;
+		$o->msg="";
+		$o->data = 0;
+
+		$price = 0;
+		$postcode = $shipment->cnee->postcode;
+		$suburb = $shipment->cnee->suburb;
+		$weight = $shipment->weight;
+
+		$hasOne = ZoneMap::model()->find('org_id = :oid AND zone_id = :zoneid and suburb!="" ', [':oid' =>$or->org_id ,':zoneid' => $or->zone_id]);
+		if(!empty($hasOne))
+		{
+			$zoneMap = ZoneMap::model()->find('org_id = :oid AND zone_id = :zoneid AND pc_lo <= :code AND pc_hi >= :code AND suburb=:suburb', [':oid' =>$or->org_id ,':zoneid' => $or->zone_id,':code' => $postcode,':suburb' => $suburb]);
+		}else
+		{
+			$zoneMap = ZoneMap::model()->find('org_id = :oid AND zone_id = :zoneid AND pc_lo <= :code AND pc_hi >= :code', [':oid' =>$or->org_id ,':zoneid' => $or->zone_id,':code' => $postcode]);
+		}
+		
+		$chargeCode = 'xxxxxxxxx';
+		if (!empty($zoneMap) && !empty($zoneMap['z1'])) {
+			$chargeCode = $zoneMap['z1'];
+		}
+		$zrs = ZoneRate::model()->findAll("zone = :s AND (weight_lo < :w AND weight_hi >= :w) AND rate_id = :rateid AND base+item+perkg > 0 ", [':s' => $chargeCode, ':w' => $weight, ':rateid' => $orgRate]);
+
+		if (!empty($zrs))
+		{
+			return true;
+		}else
+		{
+			return false;
+		}
+	}
+
+	public static function getCost($orgRate, $suburb, $postcode, $weight)
+	{
+		$or = OrgRate::model()->findByPk($orgRate);
+		$o = new stdClass();
+		$o->code = 0;
+		$o->msg="";
+		$o->data = 0;
+
+		$price = 0;
+		$postcode = intval($postcode)+0;
+		if(!empty($suburb))
+		{
+			$zoneMap = ZoneMap::model()->find('org_id = :oid AND zone_id = :zoneid AND pc_lo <= :code AND pc_hi >= :code AND suburb=:suburb', [':oid' =>$or->org_id ,':zoneid' => $or->zone_id,':code' => $postcode,':suburb' => $suburb]);
+		}else
+		{
+			$zoneMap = ZoneMap::model()->find('org_id = :oid AND zone_id = :zoneid AND pc_lo <= :code AND pc_hi >= :code', [':oid' =>$or->org_id ,':zoneid' => $or->zone_id,':code' => $postcode]);
+		}
+		$chargeCode = 'xxxxxxxxx';
+		if (!empty($zoneMap) && !empty($zoneMap['z1'])) {
+			$chargeCode = $zoneMap['z1'];
+		}
+		$zrs = ZoneRate::model()->findAll("zone = :s AND (weight_lo < :w AND weight_hi >= :w) AND rate_id = :rateid AND base+item+perkg > 0 ", [':s' => $chargeCode, ':w' => $weight, ':rateid' => $orgRate]);
+		if (!empty($zrs)) {
+			// get maximum one
+			foreach ($zrs as $zr) {
+				$temp = $zr['base'] + $zr['item'];
+				if ($zr['nkg'] > 0) {
+					$wl = $weight;
+					$temp += ceil($wl / $zr['nkg']) * $zr['perkg'];
+				} else {
+					$temp +=  $weight * $zr['perkg'];
+				}
+				if ($zr['minimum'] > 0 && $temp < $zr['minimum']) {
+					$temp = $zr['minimum'];
+				}
+				$price = max($price, $temp);
+			}
+
+			$levyCostRate = RemoteChargeRate::model()->find("rate_id = :rateId and (postcode =:postcode or CONCAT('0',postcode)=:postcode) and upper(suburb) = :suburb and levy>0 ",[":rateId"=>$or->id,":postcode"=>$postcode,":suburb"=>strtoupper($suburb)]);
+			if(!empty($levyCostRate))
+			{
+				$levySurcharge = $price*$levyCostRate->levy;
+				$price+=$levySurcharge;
+			}
+
+
+
+			$remoteCostRate = RemoteChargeRate::model()->find("rate_id = :rateId and (postcode =:postcode or CONCAT('0',postcode)=:postcode) and upper(suburb) = :suburb and (perkg+base)>0",[":rateId"=>$or->id,":postcode"=>$postcode,":suburb"=>strtoupper($suburb)]);
+			if(!empty($remoteCostRate))
+			{
+				$remotrSurcharge = $weight*$remoteCostRate->perkg+$remoteCostRate->base;
+				$price+=$remotrSurcharge;
+			}
+
+			if(!empty($or->mdata["fuel"]))
+			{
+				$price=$price+$price*$or->mdata["fuel"];
+			}
+			
+		}else
+		{
+			$o->code = 1;
+			$o->msg="no rate for this serivce";
+			return $o;
+		}
+
+		$o->msg = "success";
+		$o->data = $price;
+		return $o;
+	}
+
+	public function removeSpecialChars($s){
+		return preg_replace(['/[^\d\w\'\"\,\;\.\/\(\):&# \-]+/', '/[\’]+/'], ['', '\''] , $s);
+	}
+
+	public function prepareData($shipment,$isUpdate = false,$serviceCode,$consignmentId = 0,$consignmentData = false,$itemsForBorder = false)
+	{
+		$predata=new stdClass();
+		if($isUpdate)
+		{
+			$predata->orderId = $shipment->mdata['etower_shipment_orderid'];
+		}
+		//if(!empty($shipment->mdata['article_id'])) $predata->trackingNo = $shipment->mdata['article_id'];
+		$predata->referenceNo=$shipment->id;
+		if($this->is_test)
+		{
+			$predata->referenceNo=$shipment->id.ceil(rand(1, 100));
+		}
+		if(empty($serviceCode))
+		{
+			$orgRateId= $shipment->mdata['org_rate_id'];
+			$orgRate = OrgRate::model()->findByPk($orgRateId);
+			$serviceCode = $orgRate->mdata['service_code'];
+			$predata->facility= $this->findTheFacility($orgRate);
+		}else
+		{
+			if($serviceCode=="UBI.AU2AU.ALLE")
+			{
+				$predata->referenceNo=$shipment->hbn;
+			}
+			$predata->facility= $this->findTheFacility();
+		}
+
+		$predata->recipientName=substr($this->removeSpecialChars($shipment->cnee->name), 0, 35);
+		$predata->recipientCompany=substr($this->removeSpecialChars($shipment->cnee->company), 0, 49);
+		if(!empty($itemsForBorder))
+		{
+			$predata->email= empty($shipment->cnee->email)?"imports@toplogistics.com.au":substr($shipment->cnee->email, 0, 50);
+		}else
+		{
+			$predata->email= substr($shipment->cnee->email, 0, 50);
+		}
+		$predata->phone=substr($shipment->cnee->tel, 0, 20);
+		$cnee_addr = $this->removeSpecialChars($shipment->cnee->address);
+		$predata->addressLine1= substr($cnee_addr, 0, 40);
+		if (strlen($cnee_addr) > 40) {
+			$predata->addressLine2= substr($cnee_addr, 40, 100);
+		}
+		$predata->city=$shipment->cnee->suburb;
+		$predata->state=$shipment->cnee->state;
+		$predata->postcode=$shipment->cnee->postcode;
+		$predata->country='AU';
+		$predata->weight= $this->getBreakWeight($shipment->weight);
+		if(!empty($consignmentId))
+		{
+			if(!empty($predata->length))
+			{
+				$predata->length = $consignmentData->length;
+				$predata->width	=	$consignmentData->width;
+				$predata->height =	$consignmentData->height;
+			}
+			$predata->weight= $this->getBreakWeight($consignmentData->weight);
+			$predata->consignmentId = $consignmentId;
+		}
+		// $predata->volume=$shipment->cbm*($shipment->pkg);
+		$predata->invoiceValue=$shipment->dvalue;
+		$predata->invoiceCurrency='AUD';
+		$predata->description=substr($shipment->getGoods(), 0, 50);
+		$predata->serviceCode=$serviceCode;
+		$invoiceValue = 0;
+		if(!empty($itemsForBorder))
+		{
+			$predata->orderItems = [];
+			foreach ($itemsForBorder as $key => $item) {
+				$itemObj = new stdClass();
+				$itemObj->itemCount = 1;
+				$itemObj->weight = $item->weight;
+				$itemObj->length = $item->length;
+				$itemObj->width = $item->width;
+				$itemObj->height = $item->height;
+				$itemObj->originCountry=$item->originCountry;
+				$itemObj->description=$item->description;
+				$itemObj->unitValue=$item->unitValue;
+				$predata->orderItems[] = $itemObj;
+				$invoiceValue+=$item->unitValue;
+			}
+			$predata->invoiceValue=$invoiceValue;
+
+		}
+
+		$name=$shipment->agent_id;
+		$shipper = Org::model()->findByPk($this->orgRate->mdata['ddpt_id']);
+		$org=$shipment->agent;
+		if (!empty($org->extra['delivery_label_name'])) {
+			$name=$org->extra['delivery_label_name'];
+		}
+		if($shipper->suburb=='BANKSTOWN AERODROME')
+		{
+			$shipper->postcode = '2200';
+		}
+
+		$predata->shipperName=$name;
+		$predata->shipperAddressLine1=substr($this->fromInfo['address'], 0, 80);
+		$predata->shipperCity=substr($this->fromInfo['suburb'], 0, 80);
+		$predata->shipperState=substr($this->fromInfo['state'], 0, 80);
+		$predata->shipperPostcode=substr($this->fromInfo['postcode'], 0, 80);
+		$predata->shipperCountry='Australia';
+		$predata->shipperPhone=substr($shipper->phone, 0, 20);
+		$predata->returnName= $name;
+		$predata->returnAddressLine1=$this->fromInfo['address'];
+		$predata->returnCity=$this->fromInfo['suburb'];
+		$predata->returnState = $this->fromInfo['state'];
+		$predata->returnPostcode = $this->fromInfo['postcode'];
+		$predata->returnCountry = 'Australia';
+		return $predata;
+	}
+
+
+
+	public function prepareDataToll($shipment,$isUpdate = false,$serviceCode)
+	{
+		$preDataArr = [];
+		$pkg = $shipment->pkg;
+		$consignmentDataArr = [];
+		if(!empty($shipment->packs))
+		{
+			foreach ($shipment->packs as $key => $package) {
+				$consignmentData = new stdClass();
+				$consignmentData->qty = 1;
+				$consignmentData->weight = $package['weight'];
+				$consignmentData->length = $package['length'];
+				$consignmentData->width = $package['width'];
+				$consignmentData->height = $package['height'];
+				$consignmentDataArr[] = $consignmentData;
+			}
+		}else
+		{
+			if(!empty($shipment->cbm))
+			{
+				$thisCBM = (($shipment->weight/$shipment->pkg)/rand(251,280));
+				$cbm = $thisCBM*1000000;
+				$x = pow($cbm/(3*3*4), 1/3);
+				for ($i=0; $i < $shipment->pkg; $i++) { 
+					$consignmentData = new stdClass();
+					$consignmentData->qty = 1;
+					$consignmentData->weight = number_format($shipment->weight/$shipment->pkg);
+					if(4*$x>=120)
+					{
+						$x = pow($thisCBM/(3*3*3), 1/3);
+						$consignmentData->length = number_format(3*$x,0,'.','');
+						$consignmentData->width = number_format(3*$x,0,'.','');
+						$consignmentData->height = number_format(3*$x,0,'.','');
+					}else
+					{
+						$consignmentData->length = number_format(3*$x,0,'.','');
+						$consignmentData->width = number_format(3*$x,0,'.','');
+						$consignmentData->height = number_format(4*$x,0,'.','');
+					}
+					$consignmentDataArr[] = $consignmentData;
+				}
+			}else
+			{
+				$this->log2file('Time: '.date('Y-m-d H:i:s')."ref:".$shipment->hbn." empty cbm dim and packages");
+				return [];
+			}
+		}
+
+		for ($consignmentId=1; $consignmentId <= $pkg; $consignmentId++) {
+			$predata = $this->prepareData($shipment,false,$serviceCode,$consignmentId,$consignmentDataArr[$consignmentId-1]);
+			$preDataArr[] = $predata;
+		}
+		$shipment->mdata['ubi_toll'] = $consignmentDataArr;
+		$shipment->updateMeta();
+		return $preDataArr;
+	}
+
+	public function prepareDataBorder($shipment,$isUpdate = false,$serviceCode,$isSave = true)
+	{
+		$preDataArr = [];
+		$pkg = $shipment->pkg;
+		$consignmentDataArr = [];
+		$cbm = $shipment->cbm*$shipment->pkg*1000000;
+		$x = pow($cbm/(3*3*4), 1/3);
+		$consignmentData = new stdClass();
+		$consignmentData->qty = 1;
+		$consignmentData->weight = $shipment->weight;
+		$consignmentData->length = 0;
+		$consignmentData->width = 0;
+		$consignmentData->height = 0;
+		$consignmentDataArr[] = $consignmentData;
+
+		$itemsForBorder = $this->getBorderItems($shipment);
+
+
+		$predata = $this->prepareData($shipment,false,$serviceCode,1,$consignmentDataArr[0],$itemsForBorder);
+		$preDataArr[] = $predata;
+		if($isSave)
+		{
+			$shipment->mdata['ubi_border'] = $consignmentDataArr;
+			$shipment->updateMeta();
+		}
+		return $preDataArr;
+	}
+
+	public function getBorderItems($shipment)
+	{
+		$itemsForBorder = [];
+		if(!empty($shipment->packs))
+		{
+			foreach ($shipment->packs as $key => $package) {
+				$itemsForBorderObj = new stdClass();
+				$itemsForBorderObj->qty = 1;
+				$itemsForBorderObj->weight = $package['weight'];
+				$itemsForBorderObj->length = $package['length'];
+				$itemsForBorderObj->width = $package['width'];
+				$itemsForBorderObj->height = $package['height'];
+				$itemsForBorderObj->originCountry="AU";
+				$itemsForBorderObj->description="Carton";
+				$itemsForBorderObj->unitValue=number_format($shipment->getValue()/$shipment->pkg,2,".","");
+				$itemsForBorder[] = $itemsForBorderObj;
+			}
+		}else
+		{
+			if(!empty($shipment->cbm))
+			{
+				$thisCBM = (($shipment->weight/$shipment->pkg)/rand(251,280));
+				$cbm = $thisCBM*1000000;
+				$x = pow($cbm/(3*3*4), 1/3);
+				for ($i=0; $i < $shipment->pkg; $i++) { 
+					$itemsForBorderObj = new stdClass();
+					$itemsForBorderObj->qty = 1;
+					$itemsForBorderObj->weight = number_format($shipment->weight/$shipment->pkg);
+					if(4*$x>=120)
+					{
+						$x = pow($thisCBM/(3*3*3), 1/3);
+						$itemsForBorderObj->length = number_format(3*$x,0,'.','');
+						$itemsForBorderObj->width = number_format(3*$x,0,'.','');
+						$itemsForBorderObj->height = number_format(3*$x,0,'.','');
+					}else
+					{
+						$itemsForBorderObj->length = number_format(3*$x,0,'.','');
+						$itemsForBorderObj->width = number_format(3*$x,0,'.','');
+						$itemsForBorderObj->height = number_format(4*$x,0,'.','');
+					}
+					$itemsForBorderObj->originCountry="AU";
+					$itemsForBorderObj->description="Carton";
+					$itemsForBorderObj->unitValue=number_format($shipment->getValue()/$shipment->pkg,2,".","");
+					$itemsForBorder[] = $itemsForBorderObj;
+				}
+			}else
+			{
+				$this->log2file('Time: '.date('Y-m-d H:i:s')."ref:".$shipment->hbn." empty cbm dim and packages");
+				return [];
+			}
+		}
+		return $itemsForBorder;
+	}
+
+	public static function getZone($shipment)
+	{
+		$or = OrgRate::model()->findByPk($shipment->mdata['org_rate_id']);
+		$o = new stdClass();
+		$o->code = 0;
+		$o->msg="";
+		$o->data = 0;
+
+		$price = 0;
+		$postcode = $shipment->cnee->postcode;
+		$suburb = $shipment->cnee->suburb;
+		$weight = $shipment->weight;
+		$zoneMap = ZoneMap::model()->find('org_id = :oid AND zone_id = :zoneid AND pc_lo <= :code AND pc_hi >= :code AND suburb=:suburb', [':oid' =>$or->org_id ,':zoneid' => $or->zone_id,':code' => $postcode,':suburb' => $suburb]);
+
+		$z1 = '';
+		if (!empty($zoneMap) && !empty($zoneMap['z1'])) {
+			$z1 = $zoneMap['z1'];
+		}
+		return $z1;
+	}
+
+	public function downFile($action,$data,$ref)
+	{
+		$url= ($this->is_test?self::TEST_URL:self::PRODUCTION_URL).$action;
+		$method = "POST";
+		$savePath = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR . 'ETOWER' . DIRECTORY_SEPARATOR;
+		$ch = curl_init();
+		curl_setopt($ch, CURLOPT_CUSTOMREQUEST, strtoupper($method));
+		curl_setopt($ch, CURLOPT_URL, $url);
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+		curl_setopt($ch, CURLOPT_HEADER, TRUE);  //需要response header
+		curl_setopt($ch, CURLOPT_NOBODY, FALSE);  //需要response body
+		$hdr = $this->build_headers($method, $url,'application/octet-stream');
+		if (!empty($data)) {
+			$data = AppHelper::safeJsonEncode($data);
+			curl_setopt($ch,CURLOPT_POSTFIELDS, $data);
+		}
+		curl_setopt($ch,CURLOPT_HTTPHEADER, $hdr);
+		$response = curl_exec($ch);
+		$body = '';
+		$header = '';
+		if (curl_getinfo($ch, CURLINFO_HTTP_CODE) == '200') {
+		  $headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE); //头信息size
+		  $header = substr($response, 0, $headerSize);
+		  $body = substr($response, $headerSize);
+		}
+		curl_close($ch);
+		//文件名
+		$arr = array();
+		$fullName = $savePath.$ref.'.pdf';
+		if (file_put_contents($fullName, $body)) {
+		    return $fullName;
+		}
+		
+	  return false;
+	}
+
+	public function request($action, $method='POST', $data=null)
+	{
+		$this->result=false;
+		
+		$url= ($this->is_test?self::TEST_URL:self::PRODUCTION_URL).$action;
+		$c=new curl($url);
+		$c->setopt(CURLOPT_CUSTOMREQUEST, strtoupper($method));
+		$c->setopt(CURLOPT_RETURNTRANSFER, true);
+		$c->setopt(CURLOPT_SSL_VERIFYPEER, false);
+		$c->setopt(CURLOPT_TIMEOUT, 600);
+		$hdr = $this->build_headers($method, $url);
+		if (!empty($data)) {
+			$data = AppHelper::safeJsonEncode($data);
+			$c->setopt(CURLOPT_POSTFIELDS, $data);
+		}
+		$c->setopt(CURLOPT_HTTPHEADER, $hdr);
+		 
+		if (!$c->exec()) {
+			throw new Exception('cUrl Error: '.$c->err);
+		}
+		$this->rescode=$c->rcode;
+		$this->result = json_decode($c->result);
+		$this->log2file('Time: '.date('Y-m-d H:i:s')."\nURL: ".$url."\nRequest: ".urldecode($data)."\nResponse Code: ".$this->rescode."\nResponse: ".$c->result.PHP_EOL.PHP_EOL);
+		return $this->result;
+	}
+	 
+	protected function log2file($m, $file='ELabel')
+	{
+		$lf = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR . 'ETOWER' . DIRECTORY_SEPARATOR;
+		$lf .= 'etower_api_'.$file. date('Y-m-d') . '.log';
+		return file_put_contents($lf, $m, FILE_APPEND);
+	}
+
+}

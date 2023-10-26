@@ -1,0 +1,278 @@
+<?php
+class CargoProcessPlanService extends Service
+{
+    public static function upDateCargoPlan(&$model)
+    {
+        $arrItems = [];
+        $numCountItems = 0;
+        if (!empty($_POST['CargoProcessPlan'])) {
+            $model->setAttributes($_POST['CargoProcessPlan']);
+        }
+        if(!empty($_POST['CargoProcessPlan']['status']) && $_POST['CargoProcessPlan']['status']=="100"){
+            if(!empty($model->mdata['shipment_id_no'])){
+                $objShipment = ImParcel::model()->findByPk($model->mdata['shipment_id_no']);
+                if(!empty($objShipment)){
+                    $objShipment->status = 100;
+                    $objShipment->save();
+                }
+            }
+        }
+        if (!empty($_POST['mdata']['cnee']) && in_array($_POST['mdata']['cnee']['country'], ['AU'])) {
+            if (!Postcode::validateAddress($_POST['mdata']['cnee']['suburb'], $_POST['mdata']['cnee']['state'], $_POST['mdata']['cnee']['postcode'], $_POST['mdata']['cnee']['country'])) {
+                $model->addError('meta', 'Error Address');
+            }
+        }
+        if (!empty($_POST['mdata'])) {
+            foreach ($_POST['mdata'] as $k => $v) {
+                if (is_array($v)) {
+                    $v = array_map('trim', $v);
+                } elseif (is_string($v)) {
+                    $v = trim($v);
+                }
+                if (!empty($v) || strlen($v) >= 0) {
+                    $model->mdata[$k] = $v;
+                }
+            }
+        }
+        
+        if(!empty($model->mdata['Items'])){
+            $arrItems = $model->mdata['Items'];
+            $numCountItems = count($arrItems);
+        }
+
+        if(!empty($_POST['Item'])){
+            $numTotalWeight = !empty($model->mdata['weight'])?$model->mdata['weight']:0;
+            $numTotalCBM = !empty($model->mdata['cbm'])?$model->mdata['cbm']:0;
+            for($i=1+$numCountItems;$i==true;$i++){
+                if(!empty($_POST['Item']["quantity_".$i])){
+                    for($j=$_POST['Item']["quantity_".$i];$j>0;$j--){
+                        $arrItems[] = [
+                            'weight'=>$_POST['Item']["weight_".$i],
+                            'length'=>$_POST['Item']["length_".$i],
+                            'height'=>$_POST['Item']["height_".$i],
+                            'width'=>$_POST['Item']["width_".$i],
+                            'reference'=>0,
+                            'cbm'=>($_POST['Item']["length_".$i]*$_POST['Item']["height_".$i]*$_POST['Item']["width_".$i])/1000000
+                        ];
+                        $numTotalWeight += $_POST['Item']["weight_".$i];
+                        $numTotalCBM += ($_POST['Item']["length_".$i]*$_POST['Item']["height_".$i]*$_POST['Item']["width_".$i])/1000000;
+                    }
+                }else{
+                    break;
+                }
+            }
+            $model->mdata['Items']= $arrItems;
+            $model->mdata['weight'] = $numTotalWeight;
+            $model->mdata['cbm'] = $numTotalCBM;
+            $model->mdata['pkg'] = !empty(count($arrItems))?count($arrItems):0;
+        }
+
+        if (!empty($_POST['CargoProcessPlan'])) {
+            $model->save();
+        }
+    }
+
+    public static function createCargoPlan(&$model)
+    {
+        if (!empty($_POST['CargoProcessPlan'])) {
+            $model->setAttributes($_POST['CargoProcessPlan']);
+            $model->creater = Yii::app()->user->id;
+        }
+        if (!empty($_POST['mdata']['cnee']) && in_array($_POST['mdata']['cnee']['country'], ['AU'])) {
+            if (!Postcode::validateAddress($_POST['mdata']['cnee']['suburb'], $_POST['mdata']['cnee']['state'], $_POST['mdata']['cnee']['postcode'], $_POST['mdata']['cnee']['country'])) {
+                $model->addError('meta', 'Error Address');
+            }
+        }
+        if (!empty($_POST['mdata'])) {
+            foreach ($_POST['mdata'] as $k => $v) {
+                if (is_array($v)) {
+                    $v = array_map('trim', $v);
+                } elseif (is_string($v)) {
+                    $v = trim($v);
+                }
+                if (!empty($v) || strlen($v) >= 0) {
+                    $model->mdata[$k] = $v;
+                }
+            }
+        }
+        if(!empty($_POST['Item'])){
+            $arrItems = [];
+            $pkg = 0;
+            $numTotalWeight = $numTotalCBM = 0;
+            for($i=1;$i==true;$i++){
+                if(!empty($_POST['Item']["quantity_".$i])){
+                    for($j=$_POST['Item']["quantity_".$i];$j>0;$j--){
+                        $arrItems[] = [
+                            'weight'=>$_POST['Item']["weight_".$i],
+                            'length'=>$_POST['Item']["length_".$i],
+                            'height'=>$_POST['Item']["height_".$i],
+                            'width'=>$_POST['Item']["width_".$i],
+                            'reference'=>0,
+                            'cbm'=>($_POST['Item']["length_".$i]*$_POST['Item']["height_".$i]*$_POST['Item']["width_".$i])/1000000
+                        ];
+                        $numTotalWeight += $_POST['Item']["weight_".$i];
+                        $numTotalCBM += ($_POST['Item']["length_".$i]*$_POST['Item']["height_".$i]*$_POST['Item']["width_".$i])/1000000;
+                        $pkg += 1;
+                    }
+                }else{
+                    break;
+                }
+            }
+            $model->mdata['Items']= $arrItems;
+            $model->mdata['weight'] = $numTotalWeight;
+            $model->mdata['cbm'] = $numTotalCBM;
+            $model->mdata['pkg'] = !empty(count($arrItems))?count($arrItems):0;
+        }
+        if (!empty($_POST['CargoProcessPlan'])) {
+            $model->save();
+        }
+    }
+
+    public static function toShipment($id)
+    {
+        $model = CargoProcessPlan::model()->findByPk($id);
+        if (!empty($model)) {
+            if(!empty($model->mdata['shipment_id'])){
+                return "Already Synchronized.";
+            }
+            if($model->need_invoice == 2 && empty($model->invoice_id)){
+                return "Open Invoice First.";
+            }
+            $transaction = Yii::app()->db->beginTransaction();
+            try {
+                $arrAddressModel = self::createAddr($model);
+
+                $modelShipment = new ImParcel;
+
+                $weight = $cbm = $pkg = 0;
+                if(!empty($model->weight)){
+                    $weight = $model->weight;
+                }
+                if(!empty($model->mdata['weight'])){
+                    $weight = $model->mdata['weight'];
+                }
+                if(!empty($model->cbm)){
+                    $cbm = $model->cbm;
+                }
+                if(!empty($model->mdata['cbm'])){
+                    $cbm = $model->mdata['cbm'];
+                }
+                if(!empty($model->pkg)){
+                    $pkg = $model->pkg;
+                }
+                if(!empty($model->mdata['pkg'])){
+                    $pkg = $model->mdata['pkg'];
+                }
+
+                $modelShipment->setAttributes([
+                    'agent_id' => $model->agent_id,
+                    // 'odpt_id' => 106,
+                    'odpt_id' => $model->dpt_id,
+                    'ddpt_id' => $model->dpt_id,
+                    'cnor_id' => $arrAddressModel[0]->id,
+                    'cnee_id' => $arrAddressModel[1]->id,
+                    'status' => empty($modelShipment->status) ? 10 : $modelShipment->status,
+                    'state' =>  $arrAddressModel[1]->state,
+                    'postcode' =>  $arrAddressModel[1]->postcode,
+                    'pkg' => !empty($pkg)?$pkg:1,
+                    'currency' => 1,
+                    'cref' => $model->ref,
+                    'weight' => !empty($weight)?$weight:1,
+                    'cbm' => !empty($cbm)?$cbm:0.001,
+                    'packages' => !empty($model->mdata['Items'])? json_encode($model->mdata['Items']):""
+                ]);
+
+                if($model->mdata['cnor']['state']!=$model->mdata['cnee']['state']){
+                    $modelShipment->mdata['interstate'] = 1;
+                }
+                $modelShipment->mdata['amzon_pallet']=$model->pallets;
+				$modelShipment->cbwf = $modelShipment->cbwf | Imparcel::CBWF_PALLET_CARO;
+                $modelShipment->hbn = $model->ref;
+                //$modelShipment->hbn = $modelShipment->genHbn();
+                $modelShipment->ref = $model->ref;
+                $modelShipment->consol_id = 0;
+                //$modelShipment->ref = $modelShipment->genBPHbn();
+                $modelShipment->status =  ImParcel::STATE_LOCAL_ARRIVAL;
+                $modelShipment->mdata['cargo_delivery'] = 1;
+                $modelShipment->mdata['cargo_ignore_scan'] = 1;
+                $modelShipment->mdata['isPalletRequest'] = 1;
+
+                $oldShipment = ImParcel::model()->find('hbn = :hbn or ref = :hbn and status !=100',[':hbn'=> $model->ref]);
+                if(empty($oldShipment)){
+                    
+
+                    $modelShipment->save();
+
+                    $model->status = 30;
+                    $model->mdata['shipment_id'] = $modelShipment->ref;
+                    $model->mdata['shipment_id_no'] = $modelShipment->id;
+                    $model->save();
+
+                    $gatepass=new GatepassShipment();
+                    $gatepass->scan_time=date('Y-m-d H:i:s');
+                    $gatepass->fid= $modelShipment->id;
+                    $gatepass->connote_no=$modelShipment->ref;
+                    $gatepass->sno=0;
+                    $gatepass->courier_id=114;
+                    $gatepass->shipment_status=ImParcel::STATE_LOCAL_ARRIVAL;
+                    $gatepass->warehouse=$model->dpt_id;
+                    $gatepass->status = 0;
+                    $gatepass->save();
+
+
+                    $transaction->commit();
+                    return "true";
+                }else{
+                    return "Already Exsit.";
+                }
+                
+            } catch (Exception $ex) {
+                $transaction->rollback();
+                return $ex;
+            }
+        }
+    }
+
+    public static function createAddr($model)
+    {
+        //$IsCnorCnee:  true->Cnor  false->Cnee
+        $modelCnor = new Addr;
+        $modelCnee = new Addr;
+        $modelAddr = new Addr;
+        $modelOrg = Org::model()->findByPk($model->dpt_id);
+
+        if (!empty($modelOrg)) {
+            $modelAddr->name = $modelOrg->name;
+            $modelAddr->company = "TOP LOGISTICS AUSTRALIA";
+            $modelAddr->address = $modelOrg->address;
+            $modelAddr->suburb = $modelOrg->suburb;
+            $modelAddr->city = $modelOrg->suburb;
+            $modelAddr->state = $modelOrg->state;
+            $modelAddr->postcode = $modelOrg->postcode;
+            $modelAddr->country = $modelOrg->country;
+            $modelAddr->tel = $modelOrg->phone;
+            $modelAddr->email = $modelOrg->email;
+
+            if ($model->type == 10) {
+                $modelCnor = $modelAddr;
+                $modelCnor->save();
+
+                $modelCnee->setAttributes($model->mdata['cnee']);
+                $modelCnee->save();
+            } else if ($model->type == 20) {
+                $modelCnor->setAttributes($model->mdata['cnor']);
+                $modelCnor->save();
+
+                $modelCnee = $modelAddr;
+                $modelCnee->save();
+            } else if ($model->type == 30) {
+                $modelCnor->setAttributes($model->mdata['cnor']);
+                $modelCnor->save();
+
+                $modelCnee->setAttributes($model->mdata['cnee']);
+                $modelCnee->save();
+            }
+        }
+        return [$modelCnor, $modelCnee];
+    }
+}

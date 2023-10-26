@@ -1,0 +1,791 @@
+<?php
+
+class PaymentController extends Controller
+{
+	protected $nonAjax=['export','log','printCreditNote','notes','exportAllocs'];
+	protected $skipAcl = [];
+
+	/**
+	 * Displays a particular model.
+	 * @param integer $id the ID of the model to be displayed
+	 */
+	public function actionView($id)
+	{
+		$this->render('view', [
+			'model'=>$this->loadModel($id),
+		]);
+	}
+
+	/**
+	 * show invoice related logs
+	 * @param $id
+	 * @throws CHttpException
+	 */
+	public function actionLog()
+	{
+		$model = $this->loadModel($_GET['fid']);
+		$this->render('log', [
+			'model'=>$model,
+		]);
+	}
+
+	public function actionNotes($id)
+	{
+		$model = $this->loadModel($id);
+		Log::add($model, Log::LOG_TYPE_NOTES, ['notes' => $_POST['notes']]);
+		$this->ajaxResult($model);
+	}
+
+
+	/**
+	 *  pull all payments from xero to HVLV
+	 */
+	public function actionSyncxero()
+	{
+
+		// do nothing currently , stop sync with old xero account now
+		return;
+
+		// check to see if sync xero switch on or not
+		if (Yii::app()->params['settings']['sync_xero_enable']['value'] == 0) {
+			$model = new Payment();
+			$this->ajaxResult($model, ['id', 'code'], 'sync xero disabled now');
+			return ;
+		}
+
+		include(Yii::app()->basePath.DIRECTORY_SEPARATOR .'commands/XeroCommand.php');
+		$newcmd = new XeroCommand(12, 12);
+
+		$newcmd->pullPayments();
+		$newcmd->pullOverPayments();
+		$newcmd->pullCreditNotes();
+
+		// xero will change payment amount directly so the following logic not working well
+		// we must call pullInvoices after pullPayment and pullCreditNotes
+		// because adjustment for invoice is not available directly
+		// after sync payments and credit notes
+		// if invoice is fully paid , but checkPaid return false
+		// we can get adjustment amount now , then create another payment as adjustment for the invoice
+		// make the local invoice as real fully paid status
+		$newcmd->pullInvoices();
+
+		$model = new Payment();
+		$this->ajaxResult($model, ['id', 'code']);
+	}
+
+	/**
+	 * Creates a new model.
+	 * If creation is successful, the browser will be redirected to the 'view' page.
+	 */
+	public function actionCreate()
+	{
+		$model=new Payment;
+
+		// Uncomment the following line if AJAX validation is needed
+		// $this->performAjaxValidation($model);
+
+		if (isset($_POST['Payment'])) {
+			if (Yii::app()->name == 'PEP') {
+				unset($_POST['Payment']['refund']);
+			}
+			$model->attributes=$_POST['Payment'];
+			//$model->status = empty($_POST['post'])? 1 : 6;
+			//for manual credit note if not have prove rights status set as posted
+			if ($model->type==5&&$model->bank==91) {
+				if (Acl::hasAccess("B:payment/approveCreditNote")) {
+					$model->status = Payment::PAYMENT_STATUS_POSTED;
+				} else {
+					$model->status = Payment::PAYMENT_STATUS_PENDING;
+				}
+			} else {
+				$model->status = Payment::PAYMENT_STATUS_POSTED; // set as posted status directly
+			}
+			$model->transaction_date = date('Y-m-d'); // transaction date is payment created date
+			if (!empty($model->org_id)) {
+				$owner=Org::model()->findByPk($model->org_id);
+				$model->mdata['name'] = $owner->name;
+				$model->mdata['address'] = $owner->getAddress();
+			}
+			$model->mdata['diff'] = $_POST['diff'];
+			//$model->mdata['rate'] = $_POST['rate'];
+			if (!empty($_POST['exrate'])) {
+				foreach ($_POST['exrate'] as $currency => $exrate) {
+					if (!empty($exrate)) {
+						if ($currency == 'AUD') {
+							$model->mdata['rate'] = 1 / $exrate;
+						} else {
+							$model->mdata['rate'] = $exrate;
+						}
+					}
+				}
+				$model->mdata['exrate'] = $_POST['exrate'];
+			}
+			$model->save();
+			$tt = 0;
+			if (!empty($_POST['alloc'])) {
+				foreach ($_POST['alloc'] as $i => $t) {
+					if (empty($t)) {
+						continue;
+					}
+					$inv = Invoice::model()->findByPk($i);
+					$pi = new PayInv();
+					$pi->inv_id = $i;
+					$pi->pay_id = $model->id;
+					$pi->amount = $t;
+					$pi->exrate = empty($_POST['exrate'][$inv->getCurrency()])? 1 : $_POST['exrate'][$inv->getCurrency()];
+					if (!empty($_POST['alloc_date'])) {
+						$pi->transaction_date = $_POST['alloc_date'];
+					}
+					$pi->save();
+					$inv->checkPaid();
+					$inv->save();
+					$tt += $t;
+				}
+			}
+			if (!empty($_POST['inv_diff'])) {
+				foreach ($_POST['inv_diff'] as $i => $t) {
+					if (empty($t)) {
+						continue;
+					}
+					$inv = Invoice::model()->findByPk($i);
+					$inv->mdata['diff'] = $_POST['diff'] / count($_POST['inv_diff']);
+					$inv->save();
+				}
+			}
+			$model->refresh();
+			$model->updateAta();
+			if (($model->type==5&&$model->bank==91)||$model->type==1) {
+				//manual credit note //create a credit line
+				if (empty($model->credit_lines)) {
+					$il = new CreditLine();
+					$il->pid = $model->id;
+					$il->description = $model->ref;
+					$il->tax = 'EXEMPTOUTPUT';
+					$il->rate =$model->amount ;
+					$il->qty = 1;
+					$il->amount =$il->rate*$il->qty;
+					$gst = 0;
+					if (!$il->save()) {
+						var_dump($il->getErrors());
+					}
+				}
+			}
+			$this->ajaxResult($model);
+		}
+
+		$model->date = date('Y-m-d');
+		$model->bank = 'WestPac AUD';
+
+		if (!empty($_GET['bs_date']) && !empty($_GET['bs_amount'])) {
+			$model->date = $_GET['bs_date'];
+			$model->amount = $_GET['bs_amount'];
+			$model->type = 1;
+		}
+
+		$this->render('create', [
+			'model'=>$model,
+		]);
+	}
+
+	/**
+	 * Updates a particular model.
+	 * If update is successful, the browser will be redirected to the 'view' page.
+	 * @param integer $id the ID of the model to be updated
+	 */
+	public function actionUpdate($id)
+	{
+		$model=$this->loadModel($id);
+
+		// Uncomment the following line if AJAX validation is needed
+		// $this->performAjaxValidation($model);
+
+		if (isset($_POST['Payment'])) {
+			if (Yii::app()->name == 'PEP') {
+				unset($_POST['Payment']['refund']);
+			}
+			if (!empty($_POST['Payment']['mdata'])) {
+				foreach ($_POST['Payment']['mdata'] as $key => $value) {
+					$model->mdata[$key] = $value;
+				}
+				unset($_POST['Payment']['mdata']);
+			}
+			$model->attributes=$_POST['Payment'];
+
+			// currently we set as posted status when created
+			// so comment the following line
+			// $model->status = empty($_POST['post'])? 1 : 6;
+
+			$model->save();
+			if (!empty($_POST['alloc'])) {
+				$tt = 0;
+				foreach ($_POST['alloc'] as $i => $t) {
+					if (empty($t)) {
+						continue;
+					}
+					$pi = PayInv::model()->find('pay_id = :pay_id AND inv_id = :inv_id', array(':pay_id' => $model->id, ':inv_id' => $i));
+					if (empty($pi)) {
+						$pi = new PayInv();
+						$pi->inv_id = $i;
+						$pi->pay_id = $model->id;
+						$pi->amount = 0;
+					}
+
+					// we need to check the maximum allowed payment amount
+					// should not be more than invoice balance
+					$inv = Invoice::model()->findByPk($i);
+					$balance = $inv->getBalance();
+					if ($t > $balance) {
+						$t = $balance;
+					}
+
+					$pi->amount += $t;
+					$pi->exrate = empty($_POST['exrate']) ? 1 : end($_POST['exrate']);
+					// $pi->exrate = empty($model->mdata['rate']) ? 1 : ($inv->currency == 1 ? 1 / $model->mdata['rate'] : $model->mdata['rate']);
+					if (!empty($_POST['alloc_date'])) {
+						$pi->transaction_date = $_POST['alloc_date'];
+					}
+					$pi->save();
+
+					$inv->refresh();
+					$inv->checkPaid();
+					$inv->save();
+					$tt += $t;
+				}
+			}
+			if (!empty($_POST['exrate'])) {
+				$model->mdata['exrate'] = $_POST['exrate'];
+				$model->update('meta');
+			}
+			$model->updateAta();
+			$this->ajaxResult($model);
+		}
+
+		if (isset($_POST['rate'])) {
+			$model->mdata['rate'] = $_POST['rate'];
+			$model->update('meta');
+			$this->ajaxResult($model);
+		}
+
+		$this->render('update', [
+			'model'=>$model,
+		]);
+	}
+
+	public function actionBtn($id)
+	{
+		$model = $this->loadModel($id);
+		switch ($_GET['act']) {
+			case 'Delete': {
+				$model->status = Payment::PAYMENT_STATUS_DELETED;
+				// $model->transaction_date = date('Y-m-d');
+			}
+			break;
+			case 'Undelete': // does not support undelete now
+				//$model->status = Payment::PAYMENT_STATUS_POSTED;
+			break;
+			case 'Post':
+				$model->status = Payment::PAYMENT_STATUS_POSTED;
+				$checkThis = CreditNoteFromInvoice::model()->findAll(" payment_id = :creditNoteId",[":creditNoteId"=>$model->id]);
+				if(!empty($checkThis))
+				{
+					$invCheck = [];
+					$creditNoteCheck = [];
+					$invoiceArr = array_column($checkThis, 'invoice_id');
+					foreach ($invoiceArr as $key => $invoiceId) {
+						if(empty($_GET["pass"]))
+						{
+							$check = CreditNoteFromInvoice::model()->find(" invoice_id = :invId and payment_id != :thisCrediteNoteId",[":invId"=>$invoiceId,":thisCrediteNoteId"=>$model->id]);
+							if(!empty($check))
+							{
+								$invoice = Invoice::model()->findByPk($invoiceId);
+								$invCheck[] = $invoice->no;
+								$creditNoteCheck[] = Payment::model()->findByPk($check->payment_id)->no;
+							}
+						}
+					}
+
+					if(!empty($invCheck))
+					{
+						echo json_encode(['done'=>false,'msg'=>'confirmGen','invoice'=>join(',',$invCheck),'credit_note'=>join(',',$creditNoteCheck)]);
+						return;
+					}
+
+				}
+
+
+				if (in_array(Yii::app()->user->id, [402])) {
+					$model->flag=$model->flag&~1;
+				}
+			break;
+		}
+		$model->save();
+
+		// anyway we need to check the invoice paid status again
+		//if ( $model->status != 1 )
+		foreach ($model->invoices as $inv) {
+			echo $inv->no;
+			$inv->checkPaid();
+			$inv->save();
+			var_dump($inv->getErrors());
+		}
+		$this->ajaxResult($model);
+	}
+
+	/**
+	 * export payment related allocations
+	 * @param $model
+	 */
+	public function actionExportAllocs($id)
+	{
+		$model = $this->loadModel($id);
+		$xls = new oExcel;
+		$i = 1;
+		$xls->addRow($i++, ['Client',$model->cust->name]);
+		$xls->addRow($i++, ['Date',$model->date]);
+		$xls->addRow($i++, ['Status',$model->getStatus()]);
+		$xls->addRow($i++, ['Total Amount',$model->getCurrency().$model->amount]);
+		$xls->addRow($i++, ['Available Amount',$model->getCurrency().$model->ata]);
+		$xls->addRow($i++, ['Type',$model->getType()]);
+		$xls->addRow($i++, ['Reference',$model->ref]);
+		$xls->addRow($i++, ['Note',$model->note]);
+
+		$xls->addRow($i++, ['Invoice No.','Amount','GST','Total','Allocated Amount','Exrate','Origin Amount','Time']);
+		foreach ($model->pays as $pay) {
+			if (isset($pay->invoice)) {
+				$xls->addRow($i++, [ $pay->invoice->no,AppHelper::money_format('%i', $pay->invoice->total - $pay->invoice->gst),AppHelper::money_format('%i', $pay->invoice->gst),AppHelper::money_format('%i', $pay->invoice->total),AppHelper::money_format('%i', $pay->amount),$pay->exrate,AppHelper::money_format('%i', $pay->amount/$pay->exrate),$pay->transaction_date ]);
+			}
+		}
+		$xls->output('payment_'.$model->id.'_allocations.xlsx');
+	}
+
+	public function actionDelAlloc($id)
+	{
+		$model = PayInv::model()->find('pay_id = :id AND inv_id = :inv', [':id' => $id, ':inv' => $_GET['inv']]);
+		if (empty($model)) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		$model->amount = 0;
+		$model->save();
+		$model->invoice->checkPaid();
+		$model->invoice->save();
+		$model->payment->updateAta();
+		$model->delete();
+		$this->ajaxResult($model);
+	}
+
+	/**
+	 * Deletes a particular model.
+	 * If deletion is successful, the browser will be redirected to the 'admin' page.
+	 * @param integer $id the ID of the model to be deleted
+	 */
+	public function actionDelete($id)
+	{
+		if (Yii::app()->request->isPostRequest) {
+			// if AJAX request (triggered by deletion via admin grid view), we should not redirect the browser
+			if (!isset($_GET['ajax'])) {
+				$this->redirect(isset($_POST['returnUrl']) ? $_POST['returnUrl'] : ['admin']);
+			}
+		} else {
+			throw new CHttpException(400, 'Invalid request. Please do not repeat this request again.');
+		}
+	}
+		
+	/*
+	 * for the general credit Note management
+	 */
+		
+	public function actionCreditNote()
+	{
+		$model=new Payment('search');
+		$model->unsetAttributes();  // clear any default values
+		if (isset($_GET['Payment'])) {
+			$model->attributes=$_GET['Payment'];
+		}
+		if (isset(Yii::app()->user->id)) {
+			if (Acl::hasAccess("B:payment/approveCreditNote")) {//access,
+				if (!empty(array_keys(User::getDeparts()))) {
+					$model->dpmts= array_keys(User::getDeparts());
+				}
+			} else {
+				$model->opids=[Yii::app()->user->id];
+			}
+		}
+		$model->type=5;//5 is the credit Note;
+		$model->bank=91; //90  manual credit note
+		$this->render('credit_note_view', ['model'=>$model]);
+	}
+		
+	public function actionCreateCreditNote()
+	{
+		$model=new Payment;
+		$model->type=Payment::PAYMENT_TYPE_CREDIT_NOTE;
+		// Uncomment the following line if AJAX validation is needed
+		// $this->performAjaxValidation($model);
+		if (empty(User::groupUsers())&&!Acl::hasAccess("B:payment/approveCreditNote")) {
+			echo "<h1>Please Contact the admin to setup!</h1>";
+			return;
+		}
+
+		if (!empty($_POST['Payment']['mdata']['consol'])) {
+			$consol = Consol::model()->find('no = :no', [':no' => $_POST['Payment']['mdata']['consol']]);
+			if (empty($consol)) {
+				echo json_encode(['done' => false, 'msg' => 'Consol No. is invalid']);
+				return;
+			}
+		}
+
+		if (isset($_POST['Payment'])) {
+			$model->attributes=$_POST['Payment'];
+			$model->mdata['rate'] = $_POST['rate'];
+			$model->bank=91;
+			$model->type=5;
+			$invoiceNos = $_POST['from_invoice_id'];
+			$invoiceArr = explode(',', $invoiceNos);
+			foreach($invoiceArr as $key =>$value)
+			{
+				$invoiceArr[$key] = trim($value);
+			}
+			
+			$invCheck = [];
+			$creditNoteCheck = [];
+
+			if(empty($_POST['from_invoice_id']))
+			{
+				echo json_encode(['done'=>false,'msg'=>'From Invoice Numbers are required, invoice Numbers split by , ']);
+				return;
+			}
+
+			foreach ($invoiceArr as $key => $value) {
+				$invoice = Invoice::model()->find("no = :no",[":no"=>$value]);
+				if(empty($invoice))
+				{
+					echo json_encode(['done'=>false,'msg'=>'From Invoices are not found, invoice Numbers split by , ']);
+					return;
+				}
+				if(empty($_POST["pass"]))
+				{
+					$check = CreditNoteFromInvoice::model()->find(" invoice_id = :invId",[":invId"=>$invoice->id]);
+					if(!empty($check))
+					{
+						$invCheck[] = $invoice->no;
+						$creditNoteCheck[] = Payment::model()->findByPk($check->payment_id)->no;
+					}
+				}
+			}
+			if(!empty($invCheck))
+			{
+				echo json_encode(['done'=>false,'msg'=>'confirmGen','invoice'=>join(',',$invCheck),'credit_note'=>join(',',$creditNoteCheck)]);
+				return;
+			}
+
+			if (empty($_POST['the_total_value'])) {
+				echo json_encode(['done'=>false,'msg'=>'total amount is zero!']);
+				return;
+			}
+			if (empty($model->org_id)) {
+				echo json_encode(['done'=>false,'msg'=>'the org name need to be supplied!']);
+				return;
+			}
+			if (empty($_POST['deparment'])) {
+				echo json_encode(['done'=>false,'msg'=>'Please Select the Department!']);
+				return;
+			}
+			$allocTot=0;
+			if (!empty($_POST['alloc'])) {
+				foreach ($_POST['alloc'] as $i => $t) {
+					$allocTot+= floatval($t);
+				}
+			}
+			if ($allocTot>$_POST['the_total_value']) {
+				echo json_encode(['done'=>false,'msg'=>'Alloc value is bigger than the Credit value!']);
+				return;
+			}
+			//$model->status = empty($_POST['post'])? 1 : 6;
+			$owner=Org::model()->findByPk($model->org_id);
+			$model->status = Payment::PAYMENT_STATUS_PENDING; // set as posted status directly
+			$model->dpmt=isset($_POST['deparment'])?$_POST['deparment']:0;
+			if (in_array($model->dpmt, [10,30,40])) {
+				$model->flag=1;
+			}
+			$model->transaction_date = date('Y-m-d'); // transaction date is payment created date
+			$model->op_id= isset(Yii::app()->user->id)?Yii::app()->user->id:0;
+			$model->mdata['name'] = $owner->name;
+			$model->mdata['address'] = $owner->getAddress();
+			$model->amount=0;
+
+			if (!$model->save()) {
+				$this->ajaxResult($model);
+			} else {
+				foreach ($invoiceArr as $key => $value) {
+					$invoice = Invoice::model()->find("no = :no",[":no"=>$value]);
+					$creditFromObj = new CreditNoteFromInvoice();
+					$creditFromObj->payment_id = $model->id;
+					$creditFromObj->invoice_id = $invoice->id;
+					$creditFromObj->save();
+				}
+				$model->genNo();
+
+			}
+			$tt = 0;
+			if (is_array($_POST['CreditLine']['rate'])) {
+				$total=0;
+				foreach ($_POST['CreditLine']['rate'] as $i => $a) {
+					if (empty($a)&&empty($_POST['CreditLine']['description'][$i])) {
+						continue;
+					}
+					$il = new CreditLine();
+					$il->pid = $model->id;
+					$il->description = $_POST['CreditLine']['description'][$i];
+					$il->tax = $_POST['CreditLine']['tax'][$i];
+					$il->rate = floatval($_POST['CreditLine']['rate'][$i]);
+					$il->qty = empty($_POST['CreditLine']['qty'][$i]) ? 0 : trim($_POST['CreditLine']['qty'][$i]);
+					$il->amount =$il->rate*$il->qty;
+					//                                        if($il->amount<=0)  continue;
+					$gst = 0;
+					if ($il->tax == 'OUTPUT') {
+						$gst = $il->amount * 10 / 100;
+					}
+					$il->amount += $gst;
+					$il->gst = $gst;
+					$total+=$il->amount;
+					if (!$il->save()) {
+						var_dump($il->getErrors());
+					}
+				}
+				if ($total>0) {
+					$model->amount=$total;
+					$model->save();
+				}
+			} else {
+				$model->addError('id', 'Credit lines are empty!');
+				Payment::model()->deleteByPk($model->id);
+				$this->ajaxResult($model, ['id']);
+			}
+			if (!empty($_POST['alloc'])) {
+				foreach ($_POST['alloc'] as $i => $t) {
+					if (empty($t)) {
+						continue;
+					}
+					$inv = Invoice::model()->findByPk($i);
+					$pi = new PayInv();
+					$pi->inv_id = $i;
+					$pi->pay_id = $model->id;
+					$pi->amount = round($t / $model->mdata['rate'] * 100) / 100;
+					if (!empty($_POST['alloc_date'])) {
+						$pi->transaction_date = $_POST['alloc_date'];
+					}
+					$pi->exrate = empty($model->mdata['rate']) ? 1 : ($inv->currency == 1 ? 1 / $model->mdata['rate'] : $model->mdata['rate']);
+					$pi->save();
+					$inv->checkPaid();
+					$inv->save();
+					$tt += $t;
+				}
+			}
+			if ($tt < $model->amount) {
+				$model->ata = $model->amount - $tt;
+				$model->update(['ata']);
+			}
+			if (!empty(Yii::app()->session['uploads'][$_POST['ppupload']][2])) {
+				foreach (Yii::app()->session['uploads'][$_POST['ppupload']][2] as $fid) {
+					$fr = FileRepo::model()->findByPk($fid);
+					$fr->fid = $model->id;
+					$fr->save();
+				}
+			}
+			$this->ajaxResult($model);
+		}
+
+		$model->date = date('Y-m-d');
+
+		$this->render('create_credit_note', [
+			'model'=>$model,
+		]);
+	}
+		
+	public function actionUpdateCreditNote($id)
+	{
+		$model=$this->loadModel($id);
+
+		// Uncomment the following line if AJAX validation is needed
+		// $this->performAjaxValidation($model);
+		if (isset($_POST['Payment'])) {
+			$model->attributes=$_POST['Payment'];
+
+			// currently we set as posted status when created
+			// so comment the following line
+			// $model->status = empty($_POST['post'])? 1 : 6;
+
+			$model->save();
+			if (!empty($_POST['alloc'])) {
+				$tt = 0;
+				foreach ($_POST['alloc'] as $i => $t) {
+					if (empty($t)) {
+						continue;
+					}
+					$pi = PayInv::model()->find('pay_id = :pay_id AND inv_id = :inv_id', array(':pay_id' => $model->id, ':inv_id' => $i));
+					if (empty($pi)) {
+						$pi = new PayInv();
+						$pi->inv_id = $i;
+						$pi->pay_id = $model->id;
+						$pi->amount = 0;
+					}
+
+					// we need to check the maximum allowed payment amount
+					// should not be more than invoice balance
+					$inv = Invoice::model()->findByPk($i);
+					$balance = $inv->getBalance();
+					if ($t > $balance) {
+						$t = $balance;
+					}
+
+					$pi->amount += round($t / (empty($model->mdata['rate']) ? 1 : $model->mdata['rate']) * 100) / 100;
+					$pi->exrate = empty($model->mdata['rate']) ? 1 : ($inv->currency == 1 ? 1 / $model->mdata['rate'] : $model->mdata['rate']);
+					if (!empty($_POST['alloc_date'])) {
+						$pi->transaction_date = $_POST['alloc_date'];
+					}
+					$pi->save();
+
+					$inv->refresh();
+					$inv->checkPaid();
+					$inv->save();
+					$tt += $t;
+				}
+				$model->ata -= $tt;
+				$model->update(['ata']);
+			}
+			$model->updateAta();
+			$this->ajaxResult($model);
+		}
+
+		$this->render('update_credit', [
+			'model'=>$model,
+		]);
+	}
+		
+	// update the credit Note
+	public function actionLinesGrid()
+	{
+		// do nothing currenlty
+		if (isset($_POST['CreditLine'])) {
+			if (empty($_POST['CreditLine']['id'])) {//create
+				$model = new CreditLine();
+				$model->inv_id = $id;
+			} else {//update
+				$model= CreditLine::model()->findByPk($_POST['CreditLine']['id']);
+			}
+			$model->attributes=$_POST['CreditLine'];
+			$this->ajaxResult($model);
+		}
+	}
+		
+	public function actionPrintCreditNote($id)
+	{
+		$model = $this->loadModel($id);
+		if ($model->status!=6 && Yii::app()->user->grp != 0) {
+			if ($model->status==1) {
+				echo "<h1>The Credit Note Need to be Approved!</h1>";
+			} elseif ($model->status==9) {
+				echo  "<h1>The Credit Note already been deleted!";
+			}
+			return;
+		}
+		if (empty($_GET['type']) || $_GET['type'] == 'pdf') {
+			oPDF::renderPDF('credit_note', ['credit' => $model], 1, $model->id . '.pdf');
+		} else {
+			$model->exportExcel();
+		}
+	}
+
+	/**
+	 * Lists and search.
+	 */
+	public function actionList()
+	{
+		$model=new Payment('search');
+		$model->unsetAttributes();  // clear any default values
+		if (isset($_GET['Payment'])) {
+			$model->attributes=$_GET['Payment'];
+		}
+
+
+		$this->render('list', [
+			'model'=>$model,
+		]);
+	}
+
+	public function actionExport()
+	{
+		$xls = new oExcel;
+		$i = 1;
+		$setHdr = function () use ($xls, &$i) {
+			$xls->addRow($i++, ['Date', 'No', 'Transaction Date', 'Client', 'Agent ID', 'Status', 'Type', 'Account', 'Currency', 'Amount', 'Gst',  'Avl. Amt', 'Inv#', 'Ref']);
+			$xls->setColWidth([10,10,25,10,15,10,15,15,15,10,15,15,15,15]);
+		};
+
+		switch ($_GET['type']) {
+			case 'search':
+				$setHdr();
+				$model=new Payment('search');
+				$model->unsetAttributes();
+				if (!empty($_GET['Payment'])) {
+					$model->attributes=$_GET['Payment'];
+				}
+				$dp = $model->search(false, 0);
+				foreach ($dp->data as $r) {
+					if ($r->status == 9) {
+						continue;
+					}
+					$xls->addRow($i++, [$r->date, $r->no, $r->transaction_date, $r->cust->name, $r->org_id, $r->getStatus(), $r->getType(), $r->getBank(), $r->getCurrency(), $r->amount, $r->getInvoiceGsts(), $r->ata, $r->getInvNos(), '="'.$r->ref.'"']);
+				}
+				$xls->output('receipt_search_export_'.time().'.xlsx');
+			break;
+			case 'report':
+				$setHdr();
+				$q = 'date >= :fd AND date <= :td AND status = 6';
+				$ps = [':fd' => $_POST['fromdate'], ':td' => $_POST['todate']];
+				if(!empty($_POST['agent_id'])){
+					$q .= ' AND org_id = :agt';
+					$ps[':agt'] = $_POST['agnet_id'];
+				}
+				$rs = Payment::model()->findAll($q, $ps);
+
+				foreach ($rs as $r) {
+					$xls->addRow($i++, [$r->date, $r->transaction_date, $r->cust->name, $r->org_id, $r->getStatus(), $r->getType(), $r->getBank(), $r->getCurrency(), $r->amount, $r->getInvoiceGsts(), $r->ata, $r->getInvNos(), '="'.$r->ref.'"']);
+				}
+				$xls->output('receipt_report_'.$_POST['fromdate'].'_'.$_POST['todate'].'.xlsx');
+			break;
+		}
+		Yii::app()->end();
+	}
+
+	public function actionReport()
+	{
+		$this->render('report');
+	}
+
+	/**
+	 * Returns the data model based on the primary key given in the GET variable.
+	 * If the data model is not found, an HTTP exception will be raised.
+	 * @param integer the ID of the model to be loaded
+	 */
+	public function loadModel($id)
+	{
+		$model=Payment::model()->findByPk($id);
+		if ($model===null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		return $model;
+	}
+
+	/**
+	 * Performs the AJAX validation.
+	 * @param CModel the model to be validated
+	 */
+	protected function performAjaxValidation($model)
+	{
+		if (isset($_POST['ajax']) && $_POST['ajax']==='payment-form') {
+			echo CActiveForm::validate($model);
+			Yii::app()->end();
+		}
+	}
+}

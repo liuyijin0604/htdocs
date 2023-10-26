@@ -1,0 +1,27 @@
+#fancybox-buttons {
+	position: fixed;
+	left: 0;
+	width: 100%;
+	z-index: 8050;
+}
+
+#fancybox-buttons.top {
+	top: 10px;
+}
+
+#fancybox-buttons.bottom {
+	bottom: 10px;
+}
+
+#fancybox-buttons a#fancybox-delete-btn{
+	display: block;
+	position: absolute;
+	width: 70px;
+	height: 25px;
+	text-indent: -9999px;
+	left: 50%;
+	margin-left: -35px;
+	background-image: url('fancybox_delete.png');
+	background-repeat: no-repeat;
+	outline: none;
+}

@@ -1,0 +1,189 @@
+<?php
+$fr = new FileRepo('search');
+$fr->unsetAttributes();
+if (empty($_GET['FileRepo'])) {
+	$fr->status = 20;
+	$fr->type = [81,201,FileRepo::CONTAINER_PHOTO,FileRepo::UNKNOWN_SHIPMENT_PHOTO,FileRepo::UNPACK_CONTAINER_SEAL_PHOTO,FileRepo::UNPACK_CONTAINER_LEFT_PHOTO,FileRepo::UNPACK_CONTAINER_RIGHT_PHOTO,FileRepo::UNPACK_CONTAINER_FRONT_PHOTO,FileRepo::UNPACK_CONTAINER_BACK_PHOTO,FileRepo::UNPACK_CONTAINER_100PROCESS_PHOTO,FileRepo::UNPACK_CONTAINER_0PROCESS_PHOTO,FileRepo::UNPACK_CONTAINER_50PROCESS_PHOTO,FileRepo::UNPACK_CONTAINER_EXTRA_PHOTO];
+} else {
+	$fr->attributes=$_GET['FileRepo'];
+	if (empty($fr->type)) {
+		$fr->type = [81,201,FileRepo::CONTAINER_PHOTO,FileRepo::UNKNOWN_SHIPMENT_PHOTO,FileRepo::UNPACK_CONTAINER_SEAL_PHOTO,FileRepo::UNPACK_CONTAINER_LEFT_PHOTO,FileRepo::UNPACK_CONTAINER_RIGHT_PHOTO,FileRepo::UNPACK_CONTAINER_FRONT_PHOTO,FileRepo::UNPACK_CONTAINER_BACK_PHOTO,FileRepo::UNPACK_CONTAINER_100PROCESS_PHOTO,FileRepo::UNPACK_CONTAINER_0PROCESS_PHOTO,FileRepo::UNPACK_CONTAINER_50PROCESS_PHOTO,FileRepo::UNPACK_CONTAINER_EXTRA_PHOTO];
+	}
+}
+$fr->fid = $model->id;
+$fr->non_status=[0];
+
+echo CHtml::label('Operation', 'operations', array('style' => 'color: blue; font-weight: bold;'));
+$this->widget('zii.widgets.grid.CGridView', [
+	'id'=>$_GET['tabid'].'_imcofile-grid',
+	'cssFile' => false,
+	'summaryText'=>'',
+	'dataProvider'=> $fr->search(),
+	'filter'=>$fr,
+	'columns'=>[
+		['name' => 'name', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->baseUrl."/filerepo/".$data->hash."/".$data->name."\" target=\"_blank\">".$data->name."</a>"'],
+		[
+			'name'=>'size',
+			'value'=>'$data->formatSize()',
+			'filter' => false,
+		],
+		'date',
+		['name' => 'status123', 'type'=>'raw', 'value' => '$data->getStatus()',
+			'filter'=>CHtml::dropDownList('FileRepo[status]', $fr->status, FileRepo::$states, ['prompt'=>$this->t('All')]) ],
+		[
+			'class'=>'oButtonColumn',
+			'template'=>'{update}',
+			'buttons'=>[
+				'update' => [
+					'url'=>'Yii::app()->createUrl("imParcel/fileUpdate",array("id"=>$data->id))',
+					'imageUrl'=>false,
+					'visible'=>'true',
+					'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Update'), 'title' => '$data->name'],
+				],
+			],
+		],
+	],
+]);
+
+echo '<br />', CHtml::label($this->t('Upload Files'), 'uploader');
+$pphash = FileRepo::uploadHash($model, 201);
+$this->widget('application.extensions.plupload.PluploadWidget', [
+	'config' => [
+		'url' => $this->createUrl('filerepo/upload/'.$pphash),
+		'max_file_size' => Yii::app()->params['maxFileSize'],
+		'unique_names' => true,
+		'file_list_height' => 60,
+		'visible_header' => false,
+		'filters' => [
+			['title' => Yii::t('app', 'JPG, PDF, Word, Html, Excel files'), 'extensions' => 'pdf,doc,docx,xls,xlsx,jpg,txt,eml,htm,html'],
+		],
+		//'resize' => array('width' => 800, 'height' => 800, 'quality' => 80),
+		'language' => Yii::app()->language,
+		'max_file_number' => 2,
+		'autostart' => true,
+		'jquery_ui' => false,
+		'reset_after_upload' => true,
+	],
+	'callbacks' => [
+		'FileUploaded' => 'function(up,file,response){$("#'.$_GET["tabid"].'").trigger("reload_imcofile_grid");$("#'.$_GET["tabid"].'").trigger("check_consol_do");}',
+	],
+	'id' => $_GET['tabid'].'_imcofile_uploader',
+]);
+?>
+
+
+<?php
+$fr = new FileRepo('search');
+$fr->unsetAttributes();
+if (empty($_GET['FileRepo'])) {
+	$fr->status = 20;
+	$fr->type = [202,FileRepo::CONTAINER_PHOTO,FileRepo::UNKNOWN_SHIPMENT_PHOTO,FileRepo::UNPACK_CONTAINER_SEAL_PHOTO,FileRepo::UNPACK_CONTAINER_LEFT_PHOTO,FileRepo::UNPACK_CONTAINER_RIGHT_PHOTO,FileRepo::UNPACK_CONTAINER_FRONT_PHOTO,FileRepo::UNPACK_CONTAINER_BACK_PHOTO,FileRepo::UNPACK_CONTAINER_100PROCESS_PHOTO,FileRepo::UNPACK_CONTAINER_0PROCESS_PHOTO,FileRepo::UNPACK_CONTAINER_50PROCESS_PHOTO,FileRepo::UNPACK_CONTAINER_EXTRA_PHOTO];
+} else {
+	$fr->attributes=$_GET['FileRepo'];
+	if (empty($fr->type)) {
+		$fr->type = [202,FileRepo::CONTAINER_PHOTO,FileRepo::UNKNOWN_SHIPMENT_PHOTO,FileRepo::UNPACK_CONTAINER_SEAL_PHOTO,FileRepo::UNPACK_CONTAINER_LEFT_PHOTO,FileRepo::UNPACK_CONTAINER_RIGHT_PHOTO,FileRepo::UNPACK_CONTAINER_FRONT_PHOTO,FileRepo::UNPACK_CONTAINER_BACK_PHOTO,FileRepo::UNPACK_CONTAINER_100PROCESS_PHOTO,FileRepo::UNPACK_CONTAINER_0PROCESS_PHOTO,FileRepo::UNPACK_CONTAINER_50PROCESS_PHOTO,FileRepo::UNPACK_CONTAINER_EXTRA_PHOTO];
+	}
+}
+$fr->fid = $model->id;
+$fr->non_status=[0];
+
+echo CHtml::label('Customs clearance', 'Customs clearance', array('style' => 'color: blue; font-weight: bold;'));
+$this->widget('zii.widgets.grid.CGridView', [
+	'id'=>$_GET['tabid'].'_imcofile-grid2',
+	'cssFile' => false,
+	'summaryText'=>'',
+	'dataProvider'=> $fr->search(),
+	'filter'=>$fr,
+	'columns'=>[
+		['name' => 'name', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->baseUrl."/filerepo/".$data->hash."/".$data->name."\" target=\"_blank\">".$data->name."</a>"'],
+		[
+			'name'=>'size',
+			'value'=>'$data->formatSize()',
+			'filter' => false,
+		],
+		'date',
+		['name' => 'status123', 'type'=>'raw', 'value' => '$data->getStatus()',
+			'filter'=>CHtml::dropDownList('FileRepo[status]', $fr->status, FileRepo::$states, ['prompt'=>$this->t('All')]) ],
+		[
+			'class'=>'oButtonColumn',
+			'template'=>'{update}',
+			'buttons'=>[
+				'update' => [
+					'url'=>'Yii::app()->createUrl("imParcel/fileUpdate",array("id"=>$data->id))',
+					'imageUrl'=>false,
+					'visible'=>'true',
+					'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Update'), 'title' => '$data->name'],
+				],
+			],
+		],
+	],
+]);
+
+echo '<br />', CHtml::label($this->t('Upload Files'), 'uploader');
+$pphash = FileRepo::uploadHash($model, 202);
+$this->widget('application.extensions.plupload.PluploadWidget', [
+	'config' => [
+		'url' => $this->createUrl('filerepo/upload/'.$pphash),
+		'max_file_size' => Yii::app()->params['maxFileSize'],
+		'unique_names' => true,
+		'file_list_height' => 60,
+		'visible_header' => false,
+		'filters' => [
+			['title' => Yii::t('app', 'JPG, PDF, Word, Html, Excel files'), 'extensions' => 'pdf,doc,docx,xls,xlsx,jpg,txt,eml,htm,html'],
+		],
+		//'resize' => array('width' => 800, 'height' => 800, 'quality' => 80),
+		'language' => Yii::app()->language,
+		'max_file_number' => 2,
+		'autostart' => true,
+		'jquery_ui' => false,
+		'reset_after_upload' => true,
+	],
+	'callbacks' => [
+		'FileUploaded' => 'function(up,file,response){$("#'.$_GET["tabid"].'").trigger("reload_imcofile_grid2");$("#'.$_GET["tabid"].'").trigger("check_consol_do2");}',
+	],
+	'id' => $_GET['tabid'].'_imcofile_uploader'.'2',
+]);
+?>
+
+<script type="text/javascript">
+$(function(){
+	var tab = $('#<?=$_GET["tabid"];?>');
+	var tab2 = $('#<?=$_GET["tabid"];?>');
+	var pane = $('#<?=$_GET["tabid"];?>').data('panel');
+	tab.unbind('reload_imcofile_grid').bind('reload_imcofile_grid', function(){
+		$('#<?=$_GET["tabid"];?>_imcofile-grid', tab.data('panel')).yiiGridView('update');
+		return false;
+	});
+	tab2.unbind('reload_imcofile_grid2').bind('reload_imcofile_grid2', function(){
+		$('#<?=$_GET["tabid"];?>_imcofile-grid2', tab.data('panel')).yiiGridView('update');
+		return false;
+	});
+
+	tab.unbind('check_consol_do').bind('check_consol_do', function(){
+		$.get('<?=$this->createUrl("consolProcess/checkConsolDO",["id"=>$model->id]);?>',function(r){
+			r = JSON.parse(r);
+			if(r.done){
+					myApp.notice('Done', 5000);
+			}else{
+					myApp.alert(r, false);
+			}
+		});
+		return false;
+	});
+	tab2.unbind('check_consol_do2').bind('check_consol_do2', function(){
+		$.get('<?=$this->createUrl("consolProcess/checkConsolDO",["id"=>$model->id]);?>',function(r){
+			r = JSON.parse(r);
+			if(r.done){
+					myApp.notice('Done', 5000);
+			}else{
+					myApp.alert(r, false);
+			}
+		});
+		return false;
+	});
+
+	tab.data('panel').off('change', 'select.pfile_status').on('change', 'select.pfile_status', function(){
+		$.post('files/status', {'id': $(this).data('id'), 'status': $(this).val() });
+	});
+});
+</script>

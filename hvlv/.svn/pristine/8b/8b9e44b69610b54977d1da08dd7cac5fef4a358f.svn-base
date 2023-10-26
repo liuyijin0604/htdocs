@@ -1,0 +1,186 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="wkhtmltopdf" content="--footer-center 'Page [page] of [toPage]' --footer-font-size 10 --footer-font-name 'Verdana' --dpi 150 -T 10 -R 10 -B 10 -L 10 -O Portrait --page-size A4" />
+<?php //--disable-smart-shrinking ?>
+<title>Top Logistics Invoice</title>
+<style type="text/css">
+*{ margin: 0; padding: 0; letter-spacing: normal !important; }
+body{ font-family: Verdana, Geneva, sans-serif; font-size: 18px; text-rendering: optimize-speed; width: 1120px; }
+table.chart td, table.chart th{ border: 1px #999 solid; padding: 2px; border-right:none; border-bottom: none; }
+table.chart{ border: none; border: 1px #999 solid; border-top: none; border-left: none; }
+tr.even td, tr.even th{ background: rgba(200, 200, 200, 0.6); }
+header { padding-bottom: 15px; }
+footer { padding-top: 10px; page-break-after: always; }
+</style>
+</head>
+
+<body width="1120">
+<header>
+<?php
+$hdr = '_header_tla.php';
+if(!empty($behalf)){
+	switch($behalf){
+		case 'priority':
+			$hdr = '_header_tla.php';
+		break;
+	}
+	if(!empty($inv->mdata['suborg'])){
+		$sorg = Org::model()->findByPk($inv->mdata['suborg']);
+		$inv->mdata['name'] = $sorg->name;
+		$inv->mdata['address'] = $sorg->getAddress();
+	}
+}
+if(Yii::app()->name == 'TLA'){
+	$hdr = '_header_tla.php';
+}
+include($hdr);
+?>
+<table width="100%" cellspacing="0" cellpadding="0">
+	<tbody>
+		<tr>
+			<td style="text-align: center; font-size: 28px; font-weight: bold;padding: 10px;" colspan="2">TAX INVOICE</td>
+		</tr>
+		<tr>
+			<td colspan="2">&nbsp;</td>
+		</tr>
+		<tr>
+			<td valign="top" width="50%"><table border="0" cellspacing="0" cellpadding="0">
+				<tbody>
+					<tr>
+						<td valign="top" style="padding-bottom:3px;font-weight: bold;">Bill To:</td>
+					</tr>
+					<tr>
+						<td valign="top" style="border: 1px #999 solid;padding:10px;" height="80" width="480"><span style="font-size:20px;font-weight:bold;"><?=!empty($inv->mdata['name']) ? $inv->mdata['name'] : @$inv->cust->name;?></span>
+							<br />
+							<?=!empty($inv->mdata['address']) ? $inv->mdata['address'] : (empty($inv->cust)?"":$inv->cust->getAddress());?></td>
+					</tr>
+				</tbody>
+			</table></td>
+			<td width="50%" align="right" valign="top"><br />
+		<table cellpadding="5" width="440">
+				<tbody>
+					<tr>
+						<td style="font-weight: bold" width="180">Date:</td>
+						<td><?=($inv->type != 100 ? $inv->date : $inv->posted)?></td>
+					</tr>
+					<tr>
+						<td style="font-weight: bold">Invoice No.:</td>
+						<td><?=empty($inv->no)? $inv->id : $inv->no;?></td>
+					</tr>
+					<?php if($inv->type==Invoice::INVOICE_TYPE_WDT):?>
+					<tr>
+						<td style="font-weight: bold">WDT No.:</td>
+						<td><?=empty(!$inv->consol)? $inv->consol->no : '';?></td>
+					</tr>
+					<?php endif;?>
+<?php
+if(isset($inv->mdata['delivery_method'])&&$inv->mdata['delivery_method']==2){//for type 39
+	$mawb="B/L#";
+	if(!empty($inv->mdata['container_info'])){
+		$container_info=$inv->mdata['container_info'];
+	}
+}else{
+	$mawb="MAWB"  ;
+}
+$awb = [];
+if(in_array($inv->type, [10,39,40,31,41,33, 120, 123, 124])) {
+	if(!empty($inv->mdata['awb'])) $awb = [$inv->mdata['awb']];
+}
+if(empty($awb)&&$inv->type==40&&!empty($inv->consol_id)){
+	$consol= Consol::model()->find("id=:id",array(':id'=>$inv->consol_id));
+	if(!empty($consol)){
+		$awb=[$consol->no];
+	}
+}
+if($inv->type == 10){ //Import
+	if(!empty($inv->lines)){
+		$cno = [];
+		
+		$mans = [];
+		foreach($inv->lines as $il){
+			if($il->model == 'Consol'){
+				if(!empty($il->mdata['awb'])) $awb[] = $il->mdata['awb'];
+				if(!empty($il->mdata['cono'])) $cno[] = $il->mdata['cono'];
+			}elseif($il->model == 'Manifest'){
+				$mans[] = $il->fid;
+			}
+		}
+	}
+}elseif($inv->type == 20){ //Export
+
+}elseif($inv->type == 30){ //Direct
+
+}elseif($inv->type == 60){ //WMS
+	echo '<tr><td style="font-weight: bold" valign="top">Billing From:</td><td>', $inv->mdata['billfrom'], '</td></tr>';
+	echo '<tr><td style="font-weight: bold" valign="top">Billing To:</td><td>', $inv->mdata['billto'], '</td></tr>';
+	echo '<tr><td style="font-weight: bold" valign="top">Terms:</td>
+<td>', $inv->mdata['payterm'], '</td></tr>';
+
+}
+
+if(!empty($mans)){
+	echo '<tr><td style="font-weight: bold" valign="top">Manifest #:</td>
+<td>', implode(',', $mans), '</td></tr>';
+}
+if(!empty($cno)){
+	echo '<tr><td style="font-weight: bold" valign="top">Consol #:</td>
+<td>', implode(',', $cno), '</td></tr>';
+}
+if(!empty($awb)){
+	echo '<tr><td style="font-weight: bold" valign="top">'.$mawb.':</td>
+<td>', implode(',', $awb), '</td></tr>';
+}
+						if(!empty($container_info)){
+	echo '<tr><td style="font-weight: bold" valign="top">'.'Cotainer'.':</td>
+<td>'. $container_info.'</td></tr>';
+}
+if(!empty($inv->ref)){
+	if(preg_match('/^Original Invoice\s*:\s*(.+)$/', $inv->ref, $m)){
+		echo '<tr><td style="font-weight: bold" valign="top">In Replace:</td>
+<td>', $m[1], '</td></tr>';
+	}else{
+		echo '<tr><td style="font-weight: bold" valign="top">Ref #:</td>
+<td>', $inv->ref, '</td></tr>';
+	}
+}
+if(empty($behalf) && !empty($inv->mdata['suborg'])){
+	echo '<tr><td style="font-weight: bold" valign="top">Sub A/C:</td>
+<td>', $inv->subOrgName(2), '</td></tr>';
+}
+?>
+					<tr>
+						<?php if (!in_array($inv->to_id, Org::$displayJobRef)) { ?>
+							<td style="font-weight: bold" width="180">Due Date:</td>
+							<td><?=$inv->due?></td>
+						<?php } else { ?>
+							<td style="font-weight: bold" width="180">Create Date:</td>
+							<td><?php
+							$log = Log::model()->find('lid = :lid AND model = "Invoice" AND type = 3', [':lid' => $inv->id]); echo date('Y-m-d', strtotime($log->time));
+							?></td>
+						<?php } ?>
+					</tr>
+					<?php if (in_array($inv->to_id, Org::$displayJobRef) && !empty($inv->job->mdata['ref'])) { ?>
+					<tr>
+						<td style="font-weight: bold" width="180">Ref:</td>
+						<td><?=$inv->job->mdata['ref']?></td>
+					</tr>
+					<?php } ?>
+				</tbody>
+			</table></td>
+		</tr></table>
+</header>
+<?php
+// special for Jiacheng client we should show postcode with a separate column
+// for import invoice only
+if ( $inv->to_id == 838 && $inv->type == 10 ) {
+	include('_inv'.$inv->type.'_jiacheng.php');
+} else {
+	include('_inv'.$inv->type.'.php');
+}
+?>
+</footer>
+<?php include('_pagination.php'); ?>
+</body>
+</html>

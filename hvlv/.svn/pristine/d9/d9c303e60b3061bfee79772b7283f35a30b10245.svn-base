@@ -1,0 +1,318 @@
+<style type="text/css">
+	@media (min-width: 1200px)
+	{
+		.col-lg-3 {
+		    width: 33.3%;
+		}
+	}
+
+/* Absolute Center Spinner */
+.loading {
+  position: fixed;
+  z-index: 999;
+  height: 2em;
+  width: 2em;
+  overflow: visible;
+  margin: auto;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+}
+
+/* Transparent Overlay */
+.loading:before {
+  content: '';
+  display: block;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0,0,0,0.3);
+}
+
+/* :not(:required) hides these rules from IE9 and below */
+.loading:not(:required) {
+  /* hide "loading..." text */
+  font: 0/0 a;
+  color: transparent;
+  text-shadow: none;
+  background-color: transparent;
+  border: 0;
+}
+
+.loading:not(:required):after {
+  content: '';
+  display: block;
+  font-size: 10px;
+  width: 1em;
+  height: 1em;
+  margin-top: -0.5em;
+  -webkit-animation: spinner 1500ms infinite linear;
+  -moz-animation: spinner 1500ms infinite linear;
+  -ms-animation: spinner 1500ms infinite linear;
+  -o-animation: spinner 1500ms infinite linear;
+  animation: spinner 1500ms infinite linear;
+  border-radius: 0.5em;
+  -webkit-box-shadow: rgba(0, 0, 0, 0.75) 1.5em 0 0 0, rgba(0, 0, 0, 0.75) 1.1em 1.1em 0 0, rgba(0, 0, 0, 0.75) 0 1.5em 0 0, rgba(0, 0, 0, 0.75) -1.1em 1.1em 0 0, rgba(0, 0, 0, 0.5) -1.5em 0 0 0, rgba(0, 0, 0, 0.5) -1.1em -1.1em 0 0, rgba(0, 0, 0, 0.75) 0 -1.5em 0 0, rgba(0, 0, 0, 0.75) 1.1em -1.1em 0 0;
+  box-shadow: rgba(0, 0, 0, 0.75) 1.5em 0 0 0, rgba(0, 0, 0, 0.75) 1.1em 1.1em 0 0, rgba(0, 0, 0, 0.75) 0 1.5em 0 0, rgba(0, 0, 0, 0.75) -1.1em 1.1em 0 0, rgba(0, 0, 0, 0.75) -1.5em 0 0 0, rgba(0, 0, 0, 0.75) -1.1em -1.1em 0 0, rgba(0, 0, 0, 0.75) 0 -1.5em 0 0, rgba(0, 0, 0, 0.75) 1.1em -1.1em 0 0;
+}
+
+/* Animation */
+
+@-webkit-keyframes spinner {
+  0% {
+    -webkit-transform: rotate(0deg);
+    -moz-transform: rotate(0deg);
+    -ms-transform: rotate(0deg);
+    -o-transform: rotate(0deg);
+    transform: rotate(0deg);
+  }
+  100% {
+    -webkit-transform: rotate(360deg);
+    -moz-transform: rotate(360deg);
+    -ms-transform: rotate(360deg);
+    -o-transform: rotate(360deg);
+    transform: rotate(360deg);
+  }
+}
+@-moz-keyframes spinner {
+  0% {
+    -webkit-transform: rotate(0deg);
+    -moz-transform: rotate(0deg);
+    -ms-transform: rotate(0deg);
+    -o-transform: rotate(0deg);
+    transform: rotate(0deg);
+  }
+  100% {
+    -webkit-transform: rotate(360deg);
+    -moz-transform: rotate(360deg);
+    -ms-transform: rotate(360deg);
+    -o-transform: rotate(360deg);
+    transform: rotate(360deg);
+  }
+}
+@-o-keyframes spinner {
+  0% {
+    -webkit-transform: rotate(0deg);
+    -moz-transform: rotate(0deg);
+    -ms-transform: rotate(0deg);
+    -o-transform: rotate(0deg);
+    transform: rotate(0deg);
+  }
+  100% {
+    -webkit-transform: rotate(360deg);
+    -moz-transform: rotate(360deg);
+    -ms-transform: rotate(360deg);
+    -o-transform: rotate(360deg);
+    transform: rotate(360deg);
+  }
+}
+@keyframes spinner {
+  0% {
+    -webkit-transform: rotate(0deg);
+    -moz-transform: rotate(0deg);
+    -ms-transform: rotate(0deg);
+    -o-transform: rotate(0deg);
+    transform: rotate(0deg);
+  }
+  100% {
+    -webkit-transform: rotate(360deg);
+    -moz-transform: rotate(360deg);
+    -ms-transform: rotate(360deg);
+    -o-transform: rotate(360deg);
+    transform: rotate(360deg);
+  }
+}
+
+.loading-container {
+    position: absolute;
+    height: 100vh;
+    width: 100vw;
+    z-index: 1000;
+    display: none;
+}
+</style>
+<h1>Welcome - <?=Yii::app()->user->name;?></h1>
+
+<div class="loading-container" id="loading-container">
+    <div class="loading">Loading&#8230;</div>
+</div>
+
+<div class="row dyo_list">
+    <?php if (Acl::hasAccess('B:ims/createShipment')||!Acl::hasAccess('B:ims/accessControl')): ?>
+    <div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item dash-item-link ajax-link" href="<?=$this->createUrl('tools/index');?>"><span class="glyphicon glyphicon-plus"></span><br />Create Shipments</a></div>
+    <?php endif;?>
+
+    <?php if (Acl::hasAccess('B:ims/manageShipment')||!Acl::hasAccess('B:ims/accessControl')): ?>
+<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item dash-item-link ajax-link" id="manage-shipment" href="<?=$this->createUrl('shipment/manage');?>"><span class="glyphicon glyphicon-list"></span><br />Manage Shipments</a></div>
+ <?php endif;?>
+    
+<?php if (Acl::hasAccess('B:ims/manifest')||!Acl::hasAccess('B:ims/accessControl')): ?>    
+<?php if(in_array(Yii::app()->user->org,Org::getSpecialOrgByType(3))||Yii::app()->user->grp<=0):?>
+<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12">
+    <a class="dash-item dash-item-link ajax-link"  href="<?=$this->createUrl('manifest/list')?>"><span class="glyphicon glyphicon-open"></span><br/>Manifest</a>
+</div>
+<?php endif;?>
+<?php endif;?>
+
+<?php if (Acl::hasAccess('B:ims/heldShipment')||!Acl::hasAccess('B:ims/accessControl')): ?>
+<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12">
+    <a class="dash-item dash-item-link ajax-link"  href="<?=$this->createUrl('shipment/heldList')?>"><span class="glyphicon glyphicon-tasks"></span><br/>Held Shipments</a>
+</div>
+<?php endif?>
+
+<?php if (Acl::hasAccess('B:ims/customerService')||!Acl::hasAccess('B:ims/accessControl')): ?>
+    <div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item dash-item-link ajax-link" href="<?=$this->createUrl('customerService/index');?>"><span class="glyphicon glyphicon-search"></span><span class="glyphicon glyphicon-heart"></span><br />Customer Service</a></div>
+<?php endif?>
+
+
+<?php  $org= Org::model()->findByPk(Yii::app()->user->org);
+     if(!empty($org->extra['3pl_service_setup'])):?>
+<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item dash-item-link ajax-link" href="<?=$this->createUrl('/pcaw/site/index')?>"><span class="glyphicon glyphicon-tasks"></span><br/>3PL</a></div>
+ <?php endif;?>
+
+<?php if (Acl::hasAccess('B:ims/accounting')||!Acl::hasAccess('B:ims/accessControl')): ?>
+<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" ><span class="glyphicon glyphicon-th-list"></span><br/><div>
+ <select id="selectAccountingReport" name="selectAccountingReport" onchange="funcAccountingReport();" style="border-style: none;">
+    <?php if (Acl::hasAccess('B:ims/accountingInvoice')||!Acl::hasAccess('B:ims/accessControl')): ?>
+        <option value ="accounting">Accounting</option>
+     <?php endif;?>
+     <?php if (Acl::hasAccess('B:ims/accountingInvoice')||!Acl::hasAccess('B:ims/accessControl')): ?>
+        <option value ="invoice">Invoices</option>
+     <?php endif;?>
+     <?php if (Acl::hasAccess('B:ims/accountingDispute')||!Acl::hasAccess('B:ims/accessControl')): ?>
+        <option value ="dispute">Dispute</option>
+    <?php endif;?>
+ </select>
+ </div>
+</a>
+</div>
+<?php endif?>
+
+<?php if (Acl::hasAccess('B:ims/storageFee')||!Acl::hasAccess('B:ims/accessControl')): ?>
+<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item dash-item-link ajax-link" href="<?=$this->createUrl('shipment/getStorageFee');?>"><span class="glyphicon glyphicon-search"></span><span class="glyphicon glyphicon-usd"></span><br />Storage Fee Service </a></div>
+<?php endif?>
+
+<?php if (Acl::hasAccess('B:ims/zwStorage')||!Acl::hasAccess('B:ims/accessControl')): ?>
+<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item dash-item-link ajax-link"
+             href="<?=$this->createUrl('tools/getZWStorageList')?>"><span
+            class="glyphicon glyphicon-floppy-disk"></span><br/><?php echo'海拼登记入仓系统'?></a>
+</div>
+<?php endif?>
+<!-- <div class="col-lg-3 col-md-4 col-sm-6 col-xs-12">
+    <a class="dash-item ajax-link"  href="<?=$this->createUrl('shipment/timeReport')?>"><span class="glyphicon glyphicon-tasks"></span><br/>Time Report</a>
+</div> -->
+<?php
+$listConsolReportOrgId=[
+    Org::ORGID_CLIENT_AUSTWAY,
+    Org::ORGID_CLIENT_AOCHEN,
+    Org::ORGID_CLIENT_ZHONGWAI,
+    Org::ORGID_COURIER_UBI_CLIENT,
+    Org::ORGID_CLIENT_SF,
+    Org::ORGID_COURIER_4PX,
+    Org::ORGID_CLIENT_ZTO,
+    1,
+];
+if(Acl::hasAccess('B:ims/report')||!Acl::hasAccess('B:ims/accessControl'))
+{
+    if(in_array(Yii::app()->user->org,$listConsolReportOrgId)){
+        echo '<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" ><span class="glyphicon glyphicon-calendar"></span><br/><div>';
+        echo '<select id="selectTimeReport" name="selectTimeReport" onchange="funcTimeReport();" style="border-style: none;">';
+        echo  '<option value ="">Time Report </option>';
+        echo  '<option value ="consol">Consol</option>';
+        echo  '<option value="shipment">Shipment</option>';
+        echo '</select>';
+        echo '</div></a></div>';
+    }
+    else{
+        echo '<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link"  href="'.$this->createUrl('shipment/timeReport').'"><span class="glyphicon glyphicon-calendar"></span><br/>Time Report</a></div>';
+    }
+}
+
+?>
+
+<?php if (Acl::hasAccess('B:ims/priceEnquiry')||!Acl::hasAccess('B:ims/accessControl')): ?>
+<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item dash-item-link ajax-link" href="<?=$this->createUrl('priceEnquiry/priceEnquiry');?>"><span class="glyphicon glyphicon-usd"></span><br />Price Enquiry</a></div>
+<?php endif?>
+
+<?php if (Acl::hasAccess('B:ims/oversea')||!Acl::hasAccess('B:ims/accessControl')): ?>
+<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item dash-item-link ajax-link" href="<?=$this->createUrl('shipment/bookSchedule');?>"><span class="glyphicon glyphicon-book"></span><br />海外仓预约系统</a></div>
+ <?php endif;?>
+
+<?php if (Acl::hasAccess('B:ims/rtsProcess')||!Acl::hasAccess('B:ims/rtsProcess')): ?>
+<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item dash-item-link ajax-link" href="<?=$this->createUrl('rtsProcess/index');?>"><span class="glyphicon glyphicon-road"></span><br />退件重派</a></div>
+ <?php endif;?>
+
+
+<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item dash-item-link ajax-link" href="<?=$this->createUrl('cargoBooking/index');?>"><span class="glyphicon glyphicon-road"></span><br />Cargo Booking</a></div>
+
+
+<!-- <div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('accounts/orgList')?>"><span class="glyphicon glyphicon-cog"></span><br/>Accounts</a></div> -->
+<!-- <div class="col-lg-3 col-md-4 col-sm-6 col-xs-12">
+    <a class="dash-item ajax-link"  href="<?=$this->createUrl('customerService/index')?>"><span class="glyphicon glyphicon-heart"></span><br/>Customer Service</a>
+</div> -->
+    <!--
+<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('reports/index');?>"><span class="glyphicon glyphicon-stats"></span><br />Reports</a></div>
+-->
+<!--<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('app/settings');?>"><span class="glyphicon glyphicon-cog"></span><br />Settings</a></div>-->
+</div>
+
+    <div class="account-credit-info" style="position: absolute;top:10%;margin-top: 1px;right:10%;">
+        <b>Credit Information</b> <br>
+        --------------------------- <br>
+
+       <!-- Limits : <span class="credit-limits"><?php echo $credit['limit']; ?></span> <span class="currency"><?php echo $credit['currency']; ?> <span>  <br>-->
+        Balance : <span class="credit-balance <?php if ($credit['balance_warning']) {
+        echo 'warning' ;
+    } ?>"><?php echo $credit['percent']>0.99999?"100%":number_format($credit['percent']*100,2,'.','')."%"; ?> </span> <br>
+        <br>
+        Terms : <span class="credit-terms"><?php echo $credit['terms']; ?></span> Days <br>
+
+    </div>
+
+
+
+
+
+
+
+<script>
+function funcTimeReport(){
+    var value=$("#selectTimeReport").val();
+
+    if(value=='consol'){
+        $('#loading-container').show();
+        window.open("<?=$this->createUrl('reports/consol')?>","_self");
+    }
+    if(value=='shipment'){
+        $('#loading-container').show();
+        window.open("<?=$this->createUrl('shipment/timeReport')?>","_self");
+    }
+    
+}
+
+function funcAccountingReport(){
+    var value=$("#selectAccountingReport").val();
+
+    if(value=='invoice'){
+        $('#loading-container').show();
+        window.open("<?=$this->createUrl('accounts/index')?>","_self");
+    }
+    if(value=='dispute'){
+        $('#loading-container').show();
+        window.open("<?=$this->createUrl('accounts/dispute')?>","_self");
+    }
+    
+}
+
+// When user clicked a link, display a loading animation 
+// and prevent any click event before next page is loaded.
+$(document).ready(function() {
+    $('.dash-item-link').click(function (event) {
+        //debugger;
+        $('#loading-container').show();
+    });
+});
+</script>

@@ -1,0 +1,3177 @@
+<?php
+
+class OrgController extends Controller
+{
+	protected $nonAjax = array('exportCostRate', 'export', 'updateQuote', 'createOrgInBatch','exportSurcharge');
+
+	/**
+	 * Displays a particular model.
+	 * @param integer $id the ID of the model to be displayed
+	 */
+	public function actionView($id)
+	{
+		$this->render('view', array(
+			'model' => $this->loadModel($id),
+		));
+	}
+
+	/**
+	 *  sync all orgs to xero
+	 */
+	public function actionSyncxero()
+	{
+
+		// don't link wihth xero now
+		return;
+
+		Org::sync2Xero();
+		$model = new Org;
+		$this->ajaxResult($model, array('id', 'code'));
+	}
+
+	/**
+	 * Creates a new model.
+	 * If creation is successful, the browser will be redirected to the 'view' page.
+	 */
+	public function actionCreate()
+	{
+
+		if (!Acl::hasAccess('B:Org/Create')) {
+			die('invalid access');
+		}
+
+		$model = new Org;
+		// Uncomment the following line if AJAX validation is needed
+		// $this->performAjaxValidation($model);
+
+		if (isset($_POST['Org'])) {
+			$model->attributes = $_POST['Org'];
+			$model->extra = empty($_POST['extra']) ? array() : $_POST['extra'];
+			if (Yii::app()->name == 'PEP' && !in_array($model->type, [60, 65])) {
+				CHttpException(403, 'Access Denied!');
+			}
+
+			$model->save();
+			if($model->type==Org::CLIENTTYPE)
+			{
+				$orgRate = new OrgRate();
+				$orgRate->org_id = $model->id;
+				$orgRate->zone_id = 0;
+				$orgRate->name = "PCAE Rate";
+				$orgRate->code = "pcae_rate";
+				$orgRate->type = 40;
+				$orgRate->vfrom = "2023-09-05";
+				$orgRate->vto = "0000-00-00";
+				$orgRate->currency = 1;
+				$orgRate->meta = '{"CN":{"selected":"0","rate":"0","sea_rate":"","showdetails":"0","tracking_mode":"2","dl_mode":"1"},"HK":{"selected":"0","rate":"0","sea_rate":"","showdetails":"0","tracking_mode":"2","dl_mode":"1"},"FR":{"selected":"0","rate":"0","sea_rate":"","showdetails":"0","tracking_mode":"2","dl_mode":"1"},"AU":{"selected":"1","rate":"0","sea_rate":"","empp_fee":"0","aqis_fee":"0","prate":"0","csdcRate":"0","csdclRate":"0","csdcapRate":"0","caInvoiceServiceFee":"0","doc_rate":"0","cusdcrate":"0","crmrate":"0","airbkrate":"0","showdetails":"0","thc_rate":"0","shipment_split_rate":"0","name_validation_rate":"0","air_pickup_pmc_rate":"0","air_pickup_loose_rate":"0","air_pickup_loose_rate_ot":"0","air_pickup_ake_rate":"0","air_pickup_pmc_rate_ot":"0","air_pickup_ake_rate_ot":"0","thc_rate_minimum":"0","thc_rate_ake_pmc_minimum":"0","thc_rate_ake_pmc":"0","bb_pickup_rate":"0","bb_pickup_rate_minimum":"0","tla_service_rate":"0","lvh_rate":"0","lvc_rate":"0","ws_rate":"0","bb_cus_rate":"0","thc_rate_ot":"0","thc_rate_ake_pmc_minimum_ot":"0","thc_rate_minimum_ot":"0","thc_rate_ake_pmc_ot":"0","bb_cus_rate_ot":"0","dlv_rate":"0","sac_rate":"0","sac_prate":"0","str_rate":"0","seaStFeePS":"0","seaStFeeCR":"0","seaStFeeKR":"0","seaStBefTerm":"0","seaStAftTerm":"0","str_terms":"0","str_oth_terms":"0","rts_rate":"0","awb_diff_rate":"0","awb_diff_buffer":"0","consol_loose_rate":"0","dg_fee":"0","rts_rate_fast":"0","rts_discard_rate":"0","rts_rate_star":"0","rts_modrate":"0","rts_strrate":"0","rts_strterms":"0","tracking_mode":"2","dl_mode":"1"},"DR":{"selected":"1","eparcel_extra_rate":"0","bpa_extra_rate":"0","letters_extra_rate":"0","showdetails":"0","tracking_mode":"3","dl_mode":"1","ft_rate":"0","ft_prate":"0","st_rate":"0","st_prate":"0"}}';
+				$orgRate->updated = date("Y-m-d H:i:s");
+				$orgRate->save();
+			}
+			$this->ajaxResult($model, array('id', 'code'));
+		} else {
+			// set default value for Client or Agent organization
+			$model->extra['wthreshold'] = 5;
+			$model->extra['credit_init_date'] = date('Y-m-d');
+			$model->extra['creditlimit'] = 1;
+			$model->extra['creditterms'] = 1; // credit
+
+		}
+
+		$model->status = 1;
+		$model->country = 'Australia';
+		$this->render('create', array(
+			'model' => $model,
+			'own' => false,
+		));
+	}
+	/*
+	 * create org in a batch
+	 */
+	public function actionCreateOrgInBatch()
+	{
+		if (!Acl::hasAccess('B:Org/Create')) {
+			die('invalid access');
+		}
+		if (!empty($_POST)) {
+			$file = $_FILES['org_detail_file'];
+			if (empty($file['tmp_name'])) {
+				echo "<div style='color:red;'>No File Uploaded</div>";
+				return;
+			}
+			$xls = new oExcel();
+			$xls->supported(($file['name']));
+			$xls->load($file['tmp_name']);
+			$data = $xls->getAll();
+			unset($data[1]);
+			$os = [];
+			$hasErrors = false;
+			foreach ($data as $d) {
+				if (empty($d[5])) {
+					continue;
+				}
+
+				$os[] = $resp = $this->checkDataForCreateOrg($d);
+				if (!$resp->status) {
+					$hasErrors = true;
+				}
+			}
+			if ($hasErrors) {
+				foreach ($os as $index => $o) {
+					if (!$o->status) {
+						echo "<div style='color:red;'>Line " . ($index + 2) . ': ' . $o->msg . "</div>";
+					}
+				}
+				return;
+			}
+			$os = [];
+			foreach ($data as $d) {
+				foreach ($data as $d) {
+					if (empty($d[5])) {
+						continue;
+					}
+
+					$os[] = $this->createOrgFrom($d);
+				}
+			}
+			foreach ($os as $index => $o) {
+				echo "<div style='color:" . ($o->status ? 'green' : 'red') . "'>Line " . ($index + 2) . ": " . $o->msg . '</div>';
+			}
+			return;
+		}
+		$this->render('create_org_in_batch');
+	}
+
+	private function checkDataForCreateOrg($d)
+	{
+		$o = new stdClass();
+		$o->status = 1;
+		$o->msg = '';
+		if (Org::model()->find('name Like :name', array(':name' => '%' . $d[5] . '%'))) {
+			$o->status = 0;
+			$o->msg = '[10000]-The Org Name already Exist!';
+			return $o;
+		}
+		if (empty($d[12])) {
+			$o->status = 0;
+			$o->msg = '[10001]-Country Information required!';
+			return $o;
+		}
+		if (empty($d[13]) || empty($d[15])) {
+			$o->status = 0;
+			$o->msg = '[10002]-Phone And Email Information required!';
+			return $o;
+		}
+		if (empty($d[16]) || empty($d[17])) {
+			$o->status = 0;
+			$o->msg = '[10003]-Outturn Email And Client Billing Email Information required!';
+			return $o;
+		}
+		if (!empty($d[3]) && !Org::model()->findByPk(intval($d[3]))) {
+			$o->status = 0;
+			$o->msg = '[10004]-The Belong To Org Not found in the System';
+			return $o;
+		}
+		if (!empty($d[4]) && !User::model()->find('email=:email', array(':email' => trim($d[4])))) {
+			$o->status = 0;
+			$o->msg = '[10005]-The Account Manager Not found in the System';
+			return $o;
+		}
+		return $o;
+	}
+
+	public function createOrgFrom($d)
+	{
+		$o = new stdClass();
+		$o->status = 1;
+		$o->msg = '';
+		$model = new Org;
+		$model->name = trim($d[5]);
+		$model->abn = trim($d[6]);
+		$model->accode = trim($d[7]);
+		$model->address = trim($d[8]);
+		$model->suburb = trim($d[9]);
+		$model->state = trim($d[10]);
+		$model->postcode = trim($d[11]);
+		$model->country = trim($d[12]);
+		$model->phone = trim($d[13]);
+		$model->email = trim($d[15]);
+		$model->fax = trim($d[14]);
+		$model->status = 1;
+		$model->code = trim($d[2]);
+		$model->type = in_array(intval($d[1]), Org::$types) ? intval($d[1]) : 30;
+		if (!empty($d[3])) {
+			$model->by = $d[3];
+		}
+
+		if (!empty($d[4])) {
+			$model->manager = $model->extra['op_id'] = User::model()->find('email=:email', array(':email' => trim($d[4])))->id;
+		}
+		$model->extra['wthreshold'] = 5;
+		$model->extra['credit_init_date'] = date('Y-m-d');
+		$model->extra['creditlimit'] = 1;
+		$model->extra['creditterms'] = 1; // credit
+		$model->extra['outturn_email'] = trim($d[16]);
+		$model->extra['client_billing_email'] = trim($d[17]);
+		$model->extra['op_email'] = trim($d[18]);
+		$model->extra['delivery_label_name'] = trim($d[19]);
+		$model->extra['printer_id'] = trim($d[20]);
+		if ($model->save()) {
+			$o->msg = 'Org: ' . $model->name . '  Org Id :' . $model->id;
+		} else {
+			$o->status = 0;
+			$o->msg = implode(' ', $model->getErrors());
+		}
+		return $o;
+	}
+	/**
+	 * export searched orgs
+	 */
+	public function actionExport()
+	{
+		$xls = new oExcel;
+		$i = 1;
+		$xls->addRow($i++, array('ID', 'Type', 'Code', 'Name', 'Phone', 'Email', 'Status'));
+		switch ($_GET['type']) {
+			case 'search':
+				$model = new Org('search');
+				$model->unsetAttributes();
+				if (!empty($_GET['Org'])) {
+					$model->attributes = $_GET['Org'];
+				}
+
+				$dp = $model->search(false, 0);
+				foreach ($dp->data as $r) {
+					$xls->addRow($i++, array($r->id, $r->getType(), $r->code, $r->name, $r->phone, $r->email, $r->getStatus()));
+				}
+				$xls->output('org_search_export_' . time() . '.xlsx');
+				break;
+		}
+
+		Yii::app()->end();
+	}
+	/**
+	 * Updates a particular model.
+	 * If update is successful, the browser will be redirected to the 'view' page.
+	 * @param integer $id the ID of the model to be updated
+	 */
+	public function actionUpdate($id)
+	{
+		$model = $this->loadModel($id);
+		$own = $model->id == Yii::app()->user->org;
+		if (Yii::app()->name == 'PEP' && !in_array($model->type, [60, 65])) {
+			CHttpException(403, 'Access Denied!');
+		}
+
+		// Uncomment the following line if AJAX validation is needed
+		// $this->performAjaxValidation($model);
+		if (isset($_POST['Org'])) {
+			if ($own) {
+				unset($_POST['Org']['status']);
+				unset($_POST['Org']['type']);
+			}
+			$model->attributes = $_POST['Org'];
+			if (!empty($_POST['extra'])) {
+				$cmsg = [];
+				$clf = ['sp_id' => 'Sales Person', 'op_id' => 'Account Manager', 'credit_ext_date' => 'Extend Until','credit_action'=>'Credit Action','creditlimit' => 'Credit Limit', 'creditterms' => 'Credit Term'];
+				foreach ($_POST['extra'] as $k => $v) {
+					if (!Acl::hasAccess('B:Org/ManageCredit') && in_array($k, ['credit_action','creditlimit', 'creditterms', 'credit_payment_method', 'credit_init_date', 'credit_ext_date', 'consum_postpay', 'rural_surcharge', 'rebate_rate', 'rebate_start', 'apply_rebate', 'use_sr1', 'credit_lock', 'name_validation'])) {
+						continue;
+					}
+
+					if (isset($clf[$k]) && (!isset($model->extra[$k]) || $model->extra[$k] != $v)) {
+						if (in_array($k, ['sp_id', 'op_id'])) {
+							$name = empty($v) ? '' : User::model()->findByPk($v)->getName();
+							$cmsg[] = $clf[$k] . ':' . ($name == '' ? 'EMPTY' : $name);
+						} else {
+							$cmsg[] = $clf[$k] . ':' . ($v == '' ? 'EMPTY' : $v);
+						}
+					}
+
+					$model->extra[$k] = $v;
+				}
+
+				// fill in payterm according to creditterms
+				if (!empty($model->extra['creditterms']) && $model->extra['creditterms'] > 1 && empty($model->extra['payterm'])) {
+					$model->extra['payterm'] = $model->extra['creditterms'];
+				}
+
+				if (!empty($cmsg)) {
+					Log::add($model, 4, array('note' => implode(', ', $cmsg)));
+				}
+
+				foreach (['thermal', 'wrapper', 'tape', 'company_customer', 'carton_label', 'incl_gst', 'credit_payment_method', 'consum_postpay', '3pl_service_setup', 'rural_surcharge', 'apply_rebate', 'use_sr1', 'id_nophoto', 'wt_check', 'wt_own', 'pos_pu', 'credit_lock', 'tla', 'auspost', 'fastway', 'tnt', 'eiztoll', 'sf', 'allied','ubitoll','ubiaupost','credit_action','is_show_driver_cost', 'name_validation'] as $k) {
+					if (empty($_POST['extra'][$k])) {
+						$model->extra[$k] = 0;
+					}
+
+				}
+			}
+
+			$model->cargo_driver_type = empty($_POST['cargo_driver_type']) ? 0 : array_sum($_POST['cargo_driver_type']);
+
+			$model->save();
+			$systemSetting = SystemSetting::model()->findByAttributes(array('key' => 'word_replace_clients'));
+			
+			if (!empty($systemSetting)) {
+				if(!empty($_POST['extra']['name_validation']) && !in_array($model->id, $systemSetting->mdata['org_ids'])) {
+					array_push($systemSetting->mdata['org_ids'], $model->id);
+				} else if (empty($_POST['extra']['name_validation']) && ($key = array_search($model->id, $systemSetting->mdata['org_ids'])) != false) {
+					unset($systemSetting->mdata['org_ids'][$key]);
+				} else {
+				}
+				$systemSetting->save();
+			}
+			$this->ajaxResult($model);
+		}
+
+		if (isset($_GET['tab'])) {
+			Acl::hasAccess($this->CaName . '/' . $_GET['tab'], true);
+			$this->render('tab_' . $_GET['tab'], array('model' => $model, 'own' => $own));
+		} else {
+			$this->render('update', array('model' => $model, 'own' => $own));
+		}
+	}
+
+	/**
+	 * update WMS rates
+	 * @param $id
+	 */
+	public function actionUpdateQuote()
+	{
+		$quote = WmsOrgQuote::model()->findByPk($_GET['fid']);
+
+		if (!empty($_POST)) {
+			$quote->note = $_POST['note'];
+			$quote->vfrom = $_POST['vfrom'];
+			$quote->vto = $_POST['vto'];
+			$quote->status = $_POST['WmsOrgQuote']['status'];
+			$quote->mdata['whole_sale'] = $_POST['WmsOrgQuote']['mdata']['whole_sale'];
+
+			if (strtotime($quote->vfrom) > strtotime($quote->vto)) {
+				$quote->addError('id', 'valid to date must be on late of valid from date ');
+				$this->ajaxResult($quote);
+			}
+
+			if (WmsOrgQuote::isValidDateSpan($quote->org_id, $quote->vfrom, $quote->vto, $quote->id)) {
+				// save quote details
+				$quotes = $quote->type == 1 ? WmsOrgQuote::$newChgcodes : WmsOrgQuote::$chgcodes;
+				foreach ($quotes as $k => $v) {
+					if ($k % 1000 == 0) {
+						continue;
+					}
+
+					if (isset($_POST[$k])) {
+						$quote->mdata[$k] = $_POST[$k];
+					}
+					if ($k == WmsOrgQuote::QUOTE_PALLET_STORAGE_WEEK || $k == WmsOrgQuote::QUOTE_CBM_STORAGE_WEEK) {
+						if ($_POST['storage_type'] == 'pallet') {
+							$org = Org::model()->findByPk($quote->org_id);
+							$org->extra['storage_charge_type'] = WmsOrgQuote::QUOTE_PALLET_STORAGE_WEEK;
+							$org->sync_xero = false;
+							$org->updateMeta();
+							$quote->mdata[WmsOrgQuote::QUOTE_PALLET_STORAGE_WEEK] = $_POST['storage'];
+							$quote->mdata[WmsOrgQuote::QUOTE_CBM_STORAGE_WEEK] = '';
+						} else {
+							$org = Org::model()->findByPk($quote->org_id);
+							$org->extra['storage_charge_type'] = WmsOrgQuote::QUOTE_CBM_STORAGE_WEEK;
+							$org->sync_xero = false;
+							$org->updateMeta();
+							$quote->mdata[WmsOrgQuote::QUOTE_CBM_STORAGE_WEEK] = $_POST['storage'];
+							$quote->mdata[WmsOrgQuote::QUOTE_PALLET_STORAGE_WEEK] = '';
+						}
+					}
+					if (isset($_POST['extra_packing'])) {
+						$quote->mdata['extra_packing'] = $_POST['extra_packing'];
+					}
+				}
+
+				$quote->save();
+			} else {
+				$quote->addError('id', 'The same date span existing');
+			}
+
+			$this->ajaxResult($quote);
+		}
+
+		$this->render('update_wms_quote', array('model' => $quote));
+	}
+
+	/**
+	 * Creates a new model.
+	 * If creation is successful, the browser will be redirected to the 'view' page.
+	 */
+	public function actionCreateQuote($id)
+	{
+
+		$model = $this->loadModel($id);
+		$type = 0;
+		if (isset($_GET['type']) && $_GET['type'] == 1) {
+			$type = 1; //new wms quotes
+		}
+
+		if (!empty($_POST)) {
+			$wmsQuote = new WmsOrgQuote();
+			$wmsQuote->note = $_POST['note'];
+			$wmsQuote->vfrom = $_POST['vfrom'];
+			$wmsQuote->vto = $_POST['vto'];
+			$wmsQuote->org_id = $_POST['orgid'];
+			$wmsQuote->status = $_POST['WmsOrgQuote']['status'];
+			$_POST['type'] == 1 ? $wmsQuote->type = 1 : $wmsQuote->type = 0;
+
+			if (strtotime($wmsQuote->vfrom) > strtotime($wmsQuote->vto)) {
+				$wmsQuote->addError('id', 'valid to date must be on late of valid from date ');
+				$this->ajaxResult($wmsQuote);
+			}
+
+			if (WmsOrgQuote::isValidDateSpan($wmsQuote->org_id, $wmsQuote->vfrom, $wmsQuote->vto)) {
+				// save quote details
+				$quotes = $_POST['type'] == 1 ? WmsOrgQuote::$newChgcodes : WmsOrgQuote::$chgcodes;
+				foreach ($quotes as $k => $quote) {
+					if ($k % 1000 == 0) {
+						continue;
+					}
+
+					if (isset($_POST[$k])) {
+						$wmsQuote->mdata[$k] = $_POST[$k];
+					}
+				}
+
+				$wmsQuote->save();
+			} else {
+				$wmsQuote->addError('id', 'The same date span existing');
+			}
+
+			$this->ajaxResult($wmsQuote);
+		}
+
+		// check to see if load data from specified template
+		$quoteTemplate = array();
+		if (isset($_GET['code'])) {
+			$quoteTemplate = WmsOrgQuote::getOrgQuotesByCode($_GET['code']);
+		}
+		$this->render('create_quote', array(
+			'model' => $model, 'quote' => $quoteTemplate, 'type' => $type,
+		));
+	}
+
+	public function actionEditQuoteTemplate()
+	{
+		$model = $this->loadModel(114);
+		$this->render('wms_rates_template', array('model' => $model));
+	}
+
+	/**
+	 * create edit job template
+	 * @param $id
+	 */
+	public function actionCreateEdiJobTemplate($id)
+	{
+		$model = EdiJobTemplate::model()->findByPk($id);
+		if (empty($model)) {
+			$model = new EdiJobTemplate();
+		}
+
+		$org = null;
+		$oid = 0;
+		if (isset($_GET['oid'])) {
+			$oid = $_GET['oid'];
+			$org = Org::model()->findByPk($oid);
+		}
+		if (isset($_POST['JobLine'])) {
+			// save EDI job template
+			$errors = $this->saveEdiJobTemplate($id, $oid);
+			if (!$errors && !empty($errors)) {
+				$model->addErrors($errors);
+			}
+
+			$this->ajaxResult($model);
+		}
+
+		$this->render('edi_job_template', ['model' => $model]);
+	}
+	/**
+	 * save EDI job template
+	 */
+	private function saveEdiJobTemplate($id, $oid)
+	{
+
+		$valid_from = date('Y-m-d'); // $_POST['EdiJobTemplate']['valid_from'];
+		$valid_to = '2020-12-31'; //$_POST['EdiJobTemplate']['valid_to'];
+
+		$invoiceLines = array();
+		if (is_array($_POST['JobLine']['ccode'])) {
+			foreach ($_POST['JobLine']['ccode'] as $i => $a) {
+				$line = array(
+					'ccode' => $a,
+					'desc' => $_POST['JobLine']['desc'][$i],
+					'qty' => empty($_POST['JobLine']['qty'][$i]) ? 1 : $_POST['JobLine']['qty'][$i],
+					'rate' => empty($_POST['JobLine']['rate'][$i]) ? 0 : $_POST['JobLine']['rate'][$i],
+					'inv_gst' => empty($_POST['JobLine']['inv_gst'][$i]) ? 0 : $_POST['JobLine']['inv_gst'][$i],
+				);
+				$invoiceLines[] = $line;
+			}
+		}
+		$costLines = array();
+		if (is_array($_POST['BillingLine']['item_code'])) {
+			foreach ($_POST['BillingLine']['item_code'] as $i => $a) {
+				$line = array(
+					'item_code' => $a,
+					'desc' => $_POST['BillingLine']['desc'][$i],
+					'org_id' => empty($_POST['BillingLine']['org_id'][$i]) ? 0 : $_POST['BillingLine']['org_id'][$i],
+					'qty' => empty($_POST['BillingLine']['qty'][$i]) ? 1 : $_POST['BillingLine']['qty'][$i],
+					'price' => empty($_POST['BillingLine']['price'][$i]) ? 0 : $_POST['BillingLine']['price'][$i],
+					'gst' => empty($_POST['BillingLine']['gst'][$i]) ? 0 : $_POST['BillingLine']['gst'][$i],
+				);
+				$costLines[] = $line;
+			}
+		}
+		$jobTemplate = null;
+		if ($id > 0) {
+			$jobTemplate = EdiJobTemplate::model()->findByPk($id);
+		}
+		$existingInvoiceLines = array();
+		$existingCostLines = array();
+		if (empty($jobTemplate)) {
+			$jobTemplate = new EdiJobTemplate();
+			$jobTemplate->user_id = Yii::app()->user->id;
+			$jobTemplate->owner_id = $oid;
+			$jobTemplate->created = date('Y-m-d H:i:s');
+			$jobTemplate->status = 1;
+		} else {
+			$metaData = json_decode($jobTemplate->meta);
+			$existingInvoiceLines = $metaData->invoice;
+			// delete some one if existing
+			$dels = $_POST['invoice_dels'];
+			if (!empty($dels)) {
+				$dels = explode('-', $dels);
+				foreach ($dels as $del) {
+					unset($existingInvoiceLines[$del - 1]);
+				}
+			}
+			$existingCostLines = $metaData->cost;
+			// delete some one if existing
+			$dels = $_POST['cost_dels'];
+			if (!empty($dels)) {
+				$dels = explode('-', $dels);
+				foreach ($dels as $del) {
+					unset($existingCostLines[$del - 1]);
+				}
+			}
+		}
+
+		$jobTemplate->valid_from = $valid_from;
+		$jobTemplate->valid_to = $valid_to;
+		$jobTemplate->name = $_POST['EdiJobTemplate']['name'];
+
+		if (!empty($existingCostLines)) {
+			$costLines = array_merge($costLines, $existingCostLines);
+		}
+		if (!empty($existingInvoiceLines)) {
+			$invoiceLines = array_merge($invoiceLines, $existingInvoiceLines);
+		}
+		$jobTemplate->meta = json_encode(array('invoice' => $invoiceLines, 'cost' => $costLines));
+		$jobTemplate->save();
+
+		$errors = $jobTemplate->getErrors();
+		if (empty($errors)) {
+			return true;
+		} else {
+			return $errors;
+		}
+	}
+
+	/**
+	 * @param $id
+	 */
+	public function actionEdiInvoiceLinesGrid($id)
+	{
+
+		if (isset($_POST['JobLine'])) {
+			$id = $_POST['JobLine']['id'];
+			$orgId = floor($id / 100);
+			$lineId = $id % 100 - 1;
+
+			$ediTemplate = EdiJobTemplate::model()->find('id = :oid', [':oid' => $orgId]);
+			$newLine = array(
+				'ccode' => $_POST['JobLine']['ccode'],
+				'desc' => $_POST['JobLine']['desc'],
+				'qty' => empty($_POST['JobLine']['qty']) ? 1 : $_POST['JobLine']['qty'],
+				'rate' => empty($_POST['JobLine']['rate']) ? 0 : $_POST['JobLine']['rate'],
+				'inv_gst' => empty($_POST['JobLine']['inv_gst']) ? 0 : $_POST['JobLine']['inv_gst'],
+			);
+
+			$metaData = json_decode($ediTemplate->meta);
+			$lines = $metaData->invoice;
+			foreach ($lines as $k => $line) {
+				if ($k == $lineId) {
+					$lines[$k] = $newLine;
+					break;
+				}
+			}
+			$newMetaData['invoice'] = $lines;
+			$newMetaData['cost'] = $metaData->cost;
+			$ediTemplate->meta = json_encode($newMetaData);
+			$ediTemplate->save();
+
+			$this->ajaxResult($ediTemplate);
+		}
+	}
+
+	/**
+	 * @param $id
+	 */
+	public function actionEdiCostLinesGrid($id)
+	{
+
+		if (isset($_POST['BillingLine'])) {
+			$id = $_POST['BillingLine']['id'];
+			$orgId = floor($id / 100);
+			$lineId = $id % 100 - 1;
+
+			$ediTemplate = EdiJobTemplate::model()->find('id = :oid', [':oid' => $orgId]);
+			$newLine = array(
+				'item_code' => $_POST['BillingLine']['item_code'],
+				'desc' => $_POST['BillingLine']['desc'],
+				'qty' => empty($_POST['BillingLine']['qty']) ? 1 : $_POST['BillingLine']['qty'],
+				'price' => empty($_POST['BillingLine']['price']) ? 0 : $_POST['BillingLine']['price'],
+				'gst' => empty($_POST['BillingLine']['gst']) ? 0 : $_POST['BillingLine']['gst'],
+				'org_id' => $_POST['BillingLine']['org_id'],
+			);
+
+			$metaData = json_decode($ediTemplate->meta);
+			$lines = $metaData->cost;
+			foreach ($lines as $k => $line) {
+				if ($k == $lineId) {
+					$lines[$k] = $newLine;
+					break;
+				}
+			}
+			$newMetaData['cost'] = $lines;
+			$newMetaData['invoice'] = $metaData->invoice;
+			$ediTemplate->meta = json_encode($newMetaData);
+			$ediTemplate->save();
+
+			$this->ajaxResult($ediTemplate);
+		}
+	}
+
+	/**
+	 * get basic template list
+	 */
+	public function actionAjaxGetEdiBasicTemplate()
+	{
+		$resp = array('data' => array(), 'success' => 0);
+		$tid = $_POST['tid'];
+		$template = EdiJobBasicTemplate::model()->find('id = :oid', [':oid' => $tid]);
+		if (!empty($template) && !empty($template->meta)) {
+			$resp['data'] = json_decode($template->meta);
+			$resp['name'] = $template->name;
+			$resp['success'] = 1;
+		}
+		echo json_encode($resp);
+	}
+
+	/**
+	 * get template content
+	 */
+	public function actionAjaxGetEdiTemplate()
+	{
+		$resp = array('data' => array(), 'success' => 0);
+		$tid = $_POST['tid'];
+		$template = EdiJobTemplate::model()->find('id = :oid', [':oid' => $tid]);
+		if (!empty($template) && !empty($template->meta)) {
+			$resp['data'] = json_decode($template->meta);
+
+			// add supplier name for org id
+			foreach ($resp['data']->cost as $k => $cost) {
+				$cost->supplier_name = '';
+				$org = Org::model()->findByPk($cost->org_id);
+				if (!empty($org)) {
+					$cost->supplier_name = $org->name;
+				}
+
+				$resp['data']->cost[$k] = $cost;
+			}
+
+			$resp['name'] = $template->name;
+
+			$resp['success'] = 1;
+		}
+		echo json_encode($resp);
+	}
+
+	/**
+	 * get org related edi template title list only for operator selection
+	 */
+	public function actionAjaxGetEdiTemplateList()
+	{
+		$resp = array('data' => array(), 'success' => 0);
+		$oid = $_POST['org'];
+		$templates = EdiJobTemplate::model()->findAll('owner_id = :oid', [':oid' => $oid]);
+		$tList = array();
+		foreach ($templates as $t) {
+			$tList[] = array('id' => $t->id, 'name' => $t->name);
+		}
+		$resp['data'] = $tList;
+		$resp['success'] = 1;
+		echo json_encode($resp);
+	}
+
+	/**
+	 * save all pca price for specified charge code
+	 */
+	public function actionSavePcaZonePrice()
+	{
+		$chargeCodeId = $_POST['cid'];
+
+		$data = $_POST['data'];
+		$data = json_decode($data, true);
+
+		if (!empty($data) && !empty($chargeCodeId)) {
+			$trans = Yii::app()->db->beginTransaction();
+			try {
+				$chargeCode = ImportChargeCode::model()->findByPk($chargeCodeId);
+				TlaLog::add($chargeCode, $chargeCode->isNewRecord? 3 : 4, array_merge(['status' => $chargeCode->getStatus()], ["log"=>"Save Chargcode Zone Price"]));
+				$startDate = $_POST['start_date'];
+				$criteria = $_POST['criteria'];
+
+				// gero add for calculate from kg to CBM
+				if (isset($_POST['calculate_cbm']) && $_POST['calculate_cbm'] == 1) {
+					$chargeCode->mdata['calculate_cbm'] = true;
+					$chargeCode->mdata['calculate_plt'] = false;
+					$chargeCode->mdata['minimum_cbm'] = $_POST['minimum_cbm'];
+				} else {
+					$chargeCode->mdata['calculate_cbm'] = false;
+				}
+
+				if (isset($_POST['calculate_plt']) && $_POST['calculate_plt'] == 1) {
+					$chargeCode->mdata['calculate_plt'] = true;
+					$chargeCode->mdata['calculate_cbm'] = false;
+				} else {
+					$chargeCode->mdata['calculate_plt'] = false;
+				}
+
+				$chargeCode->mdata['criteria'] = $criteria;
+
+
+				$chargeCode->save();
+				$allZoneRateZoneRate = ZoneRate::model()->findAll('chargecode_id = :cid', array(':cid' => $chargeCodeId));
+				$vc = ZoneRateBk::model()->find(["condition"=>'chargecode_id = :cid', "params"=>[':cid' => $chargeCodeId],"order"=>"version desc"]);
+				if(!empty($vc))
+				{
+					$version = $vc->version+1;
+				}else
+				{
+					$version = 1;
+				}
+
+				foreach($allZoneRateZoneRate as $rate)
+				{
+					$zoneRateBk = new ZoneRateBk();
+					$zoneRateBk->rate_id = $rate->rate_id;
+					$zoneRateBk->chargecode_id = $rate->chargecode_id;
+					$zoneRateBk->weight_lo = $rate->weight_lo;
+					$zoneRateBk->weight_hi = $rate->weight_hi;
+					$zoneRateBk->zone = $rate->zone;
+					$zoneRateBk->zone_name = $rate->zone_name;
+
+					$zoneRateBk->item = $rate->item;
+					$zoneRateBk->base = $rate->base;
+					$zoneRateBk->perkg = $rate->perkg;
+					$zoneRateBk->nkg = $rate->nkg;
+					$zoneRateBk->minimum = $rate->minimum;
+					$zoneRateBk->min_incl = $rate->min_incl;
+					$zoneRateBk->gst = $rate->gst;
+					$zoneRateBk->levy = $rate->levy;
+					$zoneRateBk->start_date = $rate->start_date;
+					$zoneRateBk->create_user = User::currentUserID();
+					$zoneRateBk->version = $version;
+					$zoneRateBk->save();
+				}
+
+				// step 1 - clear all old zone rate data
+				ZoneRate::model()->deleteAll('chargecode_id = :cid', array(':cid' => $chargeCodeId));
+
+				// step 2 - update all with new zone rate data
+				foreach ($data as $wRates) {
+					$lo = $wRates['lo'];
+					$hi = $wRates['hi'];
+					$nkg = $wRates['nkg'];
+					if ($hi <= 0 || $nkg < 0) {
+						continue;
+					}
+					// ignore invalid one
+					foreach ($wRates['data'] as $rate) {
+						$zoneRate = new ZoneRate();
+						$zoneRate->rate_id = 0;
+						$zoneRate->chargecode_id = $chargeCodeId;
+						$zoneRate->weight_lo = $lo;
+						$zoneRate->weight_hi = $hi;
+						$zoneRate->zone = $rate['code'];
+						$zoneRate->zone_name = $rate['name'];
+
+						$zoneRate->item = $rate['ppc'];
+						$zoneRate->base = $rate['base'];
+						$zoneRate->perkg = $rate['pkg'];
+						$zoneRate->nkg = $nkg;
+						$zoneRate->minimum = $rate['minimum'];
+						$zoneRate->min_incl = $rate['min_incl'];
+						$zoneRate->gst = 1;
+						$zoneRate->levy = 0;
+						$zoneRate->start_date = $startDate;
+						$zoneRate->save();
+					}
+				}
+				$trans->commit();
+			} catch (Exception $ex) {
+				$trans->rollback();
+				throw $ex;
+			}
+		}
+
+		$resp = array('success' => 1);
+		echo json_encode($resp);
+
+	}
+
+	/**
+	 * save all pca price for specified charge code
+	 */
+	public function actionSaveOrgFlexibleRate()
+	{
+		$orgId = $_POST['oid'];
+		$startDate = $_POST['start_date'];
+		$criteria = $_POST['criteria'];
+
+		$data = $_POST['data'];
+		$data = json_decode($data, true);
+		if (!empty($data) && !empty($orgId)) {
+			$trans = Yii::app()->db->beginTransaction();
+			try {
+				$orgFlexibleRateBk= new OrgFlexibleRateBk();
+				$vc = $orgFlexibleRateBk->find(["condition"=>'org_id = :orgId and fid=0 and model=""', "params"=>[':orgId' => $orgId],"order"=>"version desc"]);
+				if(!empty($vc))
+				{
+					$version = $vc->version+1;
+				}else
+				{
+					$version = 1;
+				}
+
+				$orgFlexibleRateBks = OrgFlexibleRateBk::model()->findAll('org_id = :orgId and fid=0 and model=""', array(':orgId' => $orgId));
+				foreach ($orgFlexibleRateBks as $key => $value) {
+					$value->criteria = $criteria;
+					$value->save();
+				}
+
+				$orgFlexibleRate= new OrgFlexibleRate();
+				$orgFlexibleRateBks = $orgFlexibleRate->findAll('org_id = :orgId and fid=0 and model=""', array(':orgId' => $orgId));
+				foreach ($orgFlexibleRateBks as $key => $value) {
+					$orgFlexibleRateBk = new OrgFlexibleRateBk();
+					$orgFlexibleRateBk->item =    $value->item;
+					$orgFlexibleRateBk->amount =  $value->amount;
+					$orgFlexibleRateBk->unit =    $value->unit;
+					$orgFlexibleRateBk->minimum = $value->minimum;
+					$orgFlexibleRateBk->branch =  $value->branch;
+					$orgFlexibleRateBk->cargo =   $value->cargo;
+					$orgFlexibleRateBk->service = $value->service;
+					$orgFlexibleRateBk->org_id =  $value->org_id;
+					$orgFlexibleRateBk->user_id=  $value->user_id;
+					$orgFlexibleRateBk->create =  $value->create;
+					$orgFlexibleRateBk->rebate =  $value->rebate;
+					$orgFlexibleRateBk->version = $version;
+					$orgFlexibleRateBk->create_user = User::currentUserID();
+					$orgFlexibleRateBk->start_date = $value->start_date;
+					$orgFlexibleRateBk->criteria = $criteria;
+					$orgFlexibleRateBk->save();
+				}
+
+
+
+				OrgFlexibleRate::model()->deleteAll('org_id = :orgId and fid=0 and model=""', array(':orgId' => $orgId));
+
+				// step 2 - update all with new zone rate data
+				foreach ($data as $wRates) {
+					if(empty($wRates['item'])) continue;
+					$item = $wRates['item'];
+					$amount = $wRates['amount'];
+					$unit = $wRates['unit'];
+					$minimum = $wRates['minimum'];
+					$branch = rtrim($wRates['branch'],",");
+					$cargo = rtrim($wRates['cargo'],",");
+					$service = rtrim($wRates['service'],",");
+					$rebate = rtrim($wRates['rebate'],",");
+					
+					$orgFlexibleRate = new OrgFlexibleRate();
+					$orgFlexibleRate->item = $item;
+					$orgFlexibleRate->amount = $amount;
+					$orgFlexibleRate->unit = $unit;
+					$orgFlexibleRate->minimum = $minimum;
+					$orgFlexibleRate->branch = $branch;
+					$orgFlexibleRate->cargo = $cargo;
+					$orgFlexibleRate->service = $service;
+					$orgFlexibleRate->org_id = $orgId;
+					$orgFlexibleRate->user_id=User::currentUserId();
+					$orgFlexibleRate->create = date('Y-m-d H:i:s');
+					$orgFlexibleRate->rebate = $rebate;
+					$orgFlexibleRate->start_date = $startDate;
+					$orgFlexibleRate->criteria = $criteria;
+					$orgFlexibleRate->save();
+				}
+				$trans->commit();
+			} catch (Exception $ex) {
+				$trans->rollback();
+				throw $ex;
+			}
+		}
+
+		$resp = array('success' => 1);
+		echo json_encode($resp);
+
+	}
+
+	/**
+	 * save all pca price for specified charge code
+	 */
+	public function actionSaveOrgFlexibleRateForConsol()
+	{
+		$consolId = $_POST['cid'];
+
+		$data = $_POST['data'];
+		$data = json_decode($data, true);
+
+		if (!empty($consolId)) {
+			$trans = Yii::app()->db->beginTransaction();
+			try {
+				
+				OrgFlexibleRate::model()->deleteAll('fid = :cid and model="Consol" ', array(':cid' => $consolId));
+
+				// step 2 - update all with new zone rate data
+				foreach ($data as $wRates) {
+					$item = $wRates['item'];
+					$amount = $wRates['amount'];
+					$unit = $wRates['unit'];
+					$minimum = $wRates['minimum'];
+					$orgId = $wRates['org_id'];
+					$branch = rtrim($wRates['branch'],",");
+					$cargo = rtrim($wRates['cargo'],",");
+					$service = rtrim($wRates['service'],",");
+					$rebate = rtrim($wRates['rebate'],",");
+					
+					$orgFlexibleRate = new OrgFlexibleRate();
+					$orgFlexibleRate->item = $item;
+					$orgFlexibleRate->amount = $amount;
+					$orgFlexibleRate->unit = $unit;
+					$orgFlexibleRate->minimum = $minimum;
+					$orgFlexibleRate->branch = $branch;
+					$orgFlexibleRate->cargo = $cargo;
+					$orgFlexibleRate->service = $service;
+					$orgFlexibleRate->org_id = $orgId;
+					$orgFlexibleRate->fid = $consolId;
+					$orgFlexibleRate->model = "Consol";
+					$orgFlexibleRate->rebate = $rebate;
+
+					$orgFlexibleRate->user_id=User::currentUserId();
+					$orgFlexibleRate->create = date('Y-m-d H:i:s');
+					$orgFlexibleRate->save();
+				}
+				$trans->commit();
+			} catch (Exception $ex) {
+				$trans->rollback();
+				throw $ex;
+			}
+		}
+
+		$resp = array('success' => 1);
+		echo json_encode($resp);
+
+	}
+
+	/**
+	 * save all org related price based on zone
+	 */
+	public function actionSaveZonePrice()
+	{
+		$data = json_decode($_POST['data'], true);
+		if (!empty($data) && !empty($_POST['rid'])) {
+			$trans = Yii::app()->db->beginTransaction();
+			try {
+				$or = OrgRate::model()->findByPk($_POST['rid']);
+				$or->mdata['ddpt_id'] = $_POST['ddpt'];
+				$or->mdata['cbm_pricing'] = $_POST['cbm'];
+				$or->mdata['plt_pricing'] = 0;
+				if(!empty($_POST['plt']))
+				{
+					$or->mdata['cbm_pricing'] = 0;
+					$or->mdata['plt_pricing'] = $_POST['plt'];
+				}
+				$or->mdata['mlids'] = trim($_POST['mlids']);
+				$or->mdata['fuel'] = trim($_POST['fuel']);
+				$or->mdata['can_dg'] = trim($_POST['can_dg']);
+				$or->mdata['dimension_requiring'] = trim($_POST['dimension_requiring']);
+				$or->mdata['business_type'] = $_POST['bsstype'];
+				if($or->type==90)
+				{
+					$or->mdata['truck_delivery'] = $_POST['cbm_data']['truck_delivery'];
+					$or->mdata['minimum_cbm'] = $_POST['minimum_cbm'];
+				}
+				$or->save();
+				// step 1 - clear all old zone rate data
+				ZoneRate::model()->deleteAll('rate_id = :rid', array(':rid' => $_POST['rid']));
+
+				// step 2 - update all with new zone rate data
+				foreach ($data as $wRates) {
+					$lo = $wRates['lo'];
+					$hi = $wRates['hi'];
+					foreach ($wRates['data'] as $rate) {
+						$zoneRate = new ZoneRate();
+						$zoneRate->rate_id = $_POST['rid'];
+						$zoneRate->weight_lo = $lo;
+						$zoneRate->weight_hi = $hi;
+						$zoneRate->zone = $rate['code'];
+						$zoneRate->zone_name = $rate['name'];
+						$zoneRate->item = $rate['ppc'];
+						$zoneRate->base = $rate['base'];
+						$zoneRate->perkg = $rate['pkg'];
+						$zoneRate->nkg = $rate['nkg'];
+						$zoneRate->minimum = $rate['minimum'];
+						$zoneRate->min_incl = $rate['min_incl'];
+						$zoneRate->gst = 1;
+						$zoneRate->levy = 0;
+						$zoneRate->save();
+						// Yii::log($zoneRate->id.json_encode($zoneRate->getErrors()), 'error');
+					}
+				}
+				$trans->commit();
+			} catch (Exception $ex) {
+				$trans->rollback();
+				throw $ex;
+			}
+			Log::add($or->org, 4, ['note' => 'Updated flex rate ' . $or->name]);
+			$this->ajaxResult($or);
+		} else {
+			echo json_encode(['success' => 0, 'msg' => 'No rates supplied']);
+		}
+	}
+
+	public function actionZonerate($id)
+	{
+		$model = $this->loadModel($id);
+		$courierId = 0;
+		if (isset($_GET['cid'])) {
+			$courierId = $_GET['cid'];
+		}
+
+		$this->render('zonerate', array(
+			'model' => $model, 'cid' => $courierId,
+		));
+	}
+
+	public function actionCostzonerate($id)
+	{
+		$model = OrgRate::model()->findByPk($id);
+		$this->render('cost_zonerate', array(
+			'model' => $model,
+		));
+	}
+
+	public function actionOversize($id)
+	{
+		$model = OrgRate::model()->findByPk($id);
+		if(isset($_POST['mdata'])){
+			foreach($_POST['mdata'] as $v=>$k){
+				$model->mdata[$v]=$k;
+			}
+			$model->save();
+			$this->ajaxResult($model);
+		}
+		$this->render('oversizerange', array(
+			'model' => $model,
+		));
+	}
+
+	/**
+	 * export related org rate cost information
+	 * @param $id
+	 */
+	public function actionExportCostRate($id)
+	{
+		$xls = new oExcel;
+		$i = 1;
+
+		// show zone map title
+		$xls->addRow($i++, ['Flex Cost Rate By Zone']);
+
+		if(empty($_GET['isChargecode']))
+		{
+
+			$model = OrgRate::model()->findByPk($id);
+			$name = $model->name;
+		}else
+		{
+			$model = ImportChargeCode::model()->findByPk($id);
+			$name = $model->chargecode;
+		}
+		// show org name
+		$xls->addRow($i++, ['Cost Zone : ' . $name]);
+		// add blank row
+		$xls->addRow($i++, ['']);
+
+		// show zone and price span title
+		$zoneRate = new ZoneRate();
+		
+		if(empty($_GET['isChargecode']))
+		{
+			$zoneRateData = $zoneRate->getZoneRateWeightRangeByArray($model->id);
+			$zoneMap = ZoneMap::getOrgZoneMap($model->org_id, $model->zone_id);
+		}else
+		{
+			$zoneRateData = $zoneRate->getZoneRateWeightRangeByArray($model->id,1);
+			$zoneMap = ZoneMap::getChargecodeZoneMap($model->id);
+		}
+
+		// calculate how many weight span we have
+		$weightSpanTitles = array();
+		$weightHeaders = array();
+		$weightZonePrice = array();
+		foreach ($zoneRateData as $weight) {
+			$oneSpan = [$weight['weight_lo'] . '-' . $weight['weight_hi'], '', '', '', '',''];
+			$weightSpanTitles = array_merge($weightSpanTitles, $oneSpan);
+			$weightHeaders = array_merge($weightHeaders, ['price/piece', 'price/kg', 'base', 'minimum','min_incl', 'nkg']);
+
+			$onePriceData = array();
+			foreach ($weight['data'] as $data) {
+				$onePriceData[$data['code']] = $data;
+			}
+			$weightZonePrice[] = $onePriceData;
+		}
+
+		$xls->addRow($i++, array_merge(['', ''], $weightSpanTitles));
+		$xls->addRow($i++, array_merge(['zone code', 'name'], $weightHeaders));
+
+		// show price rate for each zone and weight range
+		foreach ($zoneMap as $zone) {
+			$rowData = array($zone['code'], $zone['name']);
+			foreach ($weightZonePrice as $zonePrice) {
+				if (isset($zonePrice[$zone['code']])) {
+					$oneData = $zonePrice[$zone['code']];
+					$rowData = array_merge($rowData, [$oneData['ppc'], $oneData['pkg'], $oneData['base'], $oneData['minimum'], $oneData['min_incl'], $oneData['nkg']]);
+				} else {
+					$rowData = array_merge($rowData, ['0.00', '0.00', '0.00', '0.00', '0.00', '0.00']);
+				}
+			}
+			$xls->addRow($i++, $rowData);
+		}
+
+		//    $xls->setFont('A'.$i.':H'.$i, array('bold' => true));
+		//    $xls->addRow($i++, array('="' . $r->no . '"', empty($r->to_id) ? "" : $r->cust->name, $r->to_id, $r->getStatus(), $r->getType(), $r->getBranch(), $r->date, $r->due, $r->getCurrency(), $r->total, $r->paid(), $r->getBalance(), $r->totWeight()));
+		// create export file name
+		$exportFileName = explode(' ', $name);
+		$exportFileName = implode('-', $exportFileName);
+		$xls->output($exportFileName . '_cost_export_' . time() . '.xlsx');
+
+	}
+
+	/**
+	 * export related org rate cost information
+	 * @param $id
+	 */
+	public function actionExportSurcharge($id)
+	{
+		$type = $_GET['type'];
+		$xls = new oExcel;
+		$i = 1;
+		if($type=="chargecode")
+		{
+			$obj = ImportChargeCode::model()->findByPk($id);
+			$oldData = ImportsFlexibleSurcharge::model()->findAll(" chargecode_id = :chargecode_id and status = :status",[":chargecode_id"=>$obj->id,":status"=>ImportsFlexibleSurcharge::ACTIVE]);
+			$exportFileName = explode(' ', $obj->chargecode);
+
+			// show zone map title
+			$xls->addRow($i++, ['Code','Type(MH,MH2,OS,RSD,fuel_surcharge)','Courier Type(TLD Surcharge,Courier Surcharge)','KG Dead Weight From','KG Dead Weight To','KG Cubic Weight From','KG Cubic Weight To','Diagonal Length From','Diagonal Length To','length','width','height','cbm','price/piece','price/shipment','price/percent']);
+			foreach ($oldData as $key => $ob) {
+				$xls->addRow($i++, [$ob->code,$ob->type,$ob->courier_type,$ob->kgdwf,$ob->kgdwt,$ob->kgcwf,$ob->kgcwt,$ob->meterf,$ob->metert,$ob->length,$ob->width,$ob->height,$ob->cbm,$ob->p_piece,$ob->p_shipment,$ob->p_percent]);
+			}
+
+			$fuel = ImportsFlexibleSurcharge::model()->count(" chargecode_id = :chargecode_id and type = 'fuel_surcharge' and courier_type = 'TLD Surcharge' and status = :status",[":chargecode_id"=>$obj->id,":status"=>ImportsFlexibleSurcharge::ACTIVE]);
+			if($fuel==0)
+			{
+				$xls->addRow($i++, ["fuel_surcharge","fuel_surcharge","TLD Surcharge",0,0,0,0,0,0,0,0,0,0,0,0,@$obj->mdata['truck_delivery']['fuel_surcharge']]);
+			}
+
+			$fuel = ImportsFlexibleSurcharge::model()->count(" chargecode_id = :chargecode_id and type = 'fuel_surcharge' and courier_type = 'Courier Surcharge' and status = :status",[":chargecode_id"=>$obj->id,":status"=>ImportsFlexibleSurcharge::ACTIVE]);
+			if($fuel==0)
+			{
+				$xls->addRow($i++, ["fuel_surcharge","fuel_surcharge","Courier Surcharge",0,0,0,0,0,0,0,0,0,0,0,0,@$obj->mdata['courier_surcharge']['fuel_surcharge']]);
+			}
+		}else
+		{
+			$obj = OrgRate::model()->findByPk($id);
+			$oldData = ImportsFlexibleSurcharge::model()->findAll(" rate_id = :rate_id and status = :status",[":rate_id"=>$obj->id,":status"=>ImportsFlexibleSurcharge::ACTIVE]);
+			$exportFileName = explode(' ', $obj->name);
+
+			// show zone map title
+			$xls->addRow($i++, ['Code','Type(MH,OS,RSD,fuel_surcharge)','Courier Type(org_rate)','KG Dead Weight From','KG Dead Weight To','KG Cubic Weight From','KG Cubic Weight To','Diagonal Length From','Diagonal Length To','length','width','height','cbm','price/piece','price/shipment','price/percent','start','end']);
+			foreach ($oldData as $key => $ob) {
+				$xls->addRow($i++, [$ob->code,$ob->type,$ob->courier_type,$ob->kgdwf,$ob->kgdwt,$ob->kgcwf,$ob->kgcwt,$ob->meterf,$ob->metert,$ob->length,$ob->width,$ob->height,$ob->cbm,$ob->p_piece,$ob->p_shipment,$ob->p_percent,date("Y-m-d",strtotime($ob->start)),date("Y-m-d",strtotime($ob->end))]);
+			}
+
+			$fuel = ImportsFlexibleSurcharge::model()->count(" rate_id = :rate_id and type = 'fuel_surcharge' and status = :status",[":rate_id"=>$obj->id,":status"=>ImportsFlexibleSurcharge::ACTIVE]);
+			if($fuel==0)
+			{
+				$xls->addRow($i++, ["fuel","fuel_surcharge","org_rate",0,0,0,0,0,0,0,0,0,0,0,0,@$obj->mdata['fuel'],"",""]);
+			}
+		}
+		
+
+		$exportFileName = implode('-', $exportFileName);
+		$xls->output($exportFileName . '_surcharge_export_' . time() . '.xlsx');
+	}
+
+	/**
+	 *
+	 */
+	public function actionAjaxImportChargecodeSurcharge()
+	{
+		$importChargecode = ImportChargeCode::model();
+		$msg = 'Import Successfully';
+		$template_file = empty($_FILES['chargecode_surcharge_rate_file']) ? array() : $_FILES['chargecode_surcharge_rate_file'];
+		if (empty($template_file['tmp_name']) || !is_uploaded_file($template_file['tmp_name'])) {
+			$orgRate->addError('error', 'Invalid template file');
+			$this->ajaxResult($importChargecode);
+		} else {
+			$xls = new oExcel;
+			$xls->load($template_file['tmp_name']);
+			$data = $xls->getAll();
+			$importChargecode = ImportChargeCode::model()->findByPk($_POST['chargecode_id']);
+			TlaLog::add($importChargecode, $importChargecode->isNewRecord? 3 : 4, array_merge(['status' => $importChargecode->getStatus()], ["log"=>"import Chargecode Surcharge"]));
+			$importChargecodeId = $_POST['chargecode_id'];
+			$name = $importChargecode->chargecode;
+			unset($data[1]);
+			$this->importChargecodeSurcharge($importChargecode, $data);
+		}
+
+		
+		$this->ajaxResult($importChargecode);
+	}
+
+	private function importChargecodeSurcharge($importChargecode,$data)
+	{
+		$index="";
+		foreach ($data as $key => $value) {
+			if(empty($value[1])) continue;
+			if($value[1]=='TLD Surcharge')
+			{
+				$index = 'truck_delivery';
+				continue;
+			}
+			if($value[1]=='Courier Surcharge')
+			{
+				$index = 'courier_surcharge';
+				continue;
+			}
+			if(!empty($index))
+			{
+				$importChargecode->mdata[$index][$value[1]] = ['kgdwf'=>$value[2],'kgdwt'=>$value[3],'kgcwf'=>$value[4],'kgcwt'=>$value[5],'meterf'=>$value[6],'metert'=>$value[7],'length'=>$value[8],'width'=>$value[9],'height'=>$value[10],'cbm'=>$value[11],'p_piece'=>$value[12],'p_shipment'=>$value[13]];
+			}
+		}
+		$importChargecode->save();
+
+	}
+
+
+
+
+	/**2022-11-03 new flexible surcharge import
+	 *
+	 */
+	public function actionAjaxImportSurchargeNew()
+	{
+		if(!empty($_POST['chargecode_id']))
+		{
+			$obj = ImportChargeCode::model()->findByPk($_POST['chargecode_id']);
+		}else
+		{
+			$obj = OrgRate::model()->findByPk($_POST['rate_id']);
+		}
+
+		$msg = 'Import Successfully';
+		$template_file = empty($_FILES['chargecode_surcharge_rate_file']) ? array() : $_FILES['chargecode_surcharge_rate_file'];
+		if (empty($template_file['tmp_name']) || !is_uploaded_file($template_file['tmp_name'])) {
+			$orgRate->addError('error', 'Invalid template file');
+			$this->ajaxResult($importChargecode);
+		} else {
+			$xls = new oExcel;
+			$xls->load($template_file['tmp_name']);
+			$data = $xls->getAll();
+			TlaLog::add($obj, $obj->isNewRecord? 3 : 4, array_merge(['status' => $obj->getStatus()], ["log"=>"import flexible Surcharge"]));
+			unset($data[1]);
+			if(!empty($_POST['chargecode_id']))
+			{
+				$this->importChargecodeSurchargeNew($obj, $data,$_POST['start_import'],$_POST['surcharge_criteria_import']);
+			}else
+			{
+				$this->importOrgRateSurchargeNew($obj,$data);
+			}
+		}
+
+		
+		$this->ajaxResult($obj);
+	}
+
+	private function importOrgRateSurchargeNew($orgRate,$data)
+	{
+		$index="";
+		$date = date("Y-m-d H:i:s");
+		$oldData = ImportsFlexibleSurcharge::model()->findAll(" rate_id = :rate_id and status = :status",[":rate_id"=>$orgRate->id,":status"=>ImportsFlexibleSurcharge::ACTIVE]);
+		foreach ($oldData as $key => $value) {
+			$value->status = ImportsFlexibleSurcharge::INACTIVE;
+			$value->update(["status"]);
+		}
+
+		foreach ($data as $key => $value) {
+			if(empty($value[1])) continue;
+			$importsFlexibleSurcharge = new ImportsFlexibleSurcharge();
+			$importsFlexibleSurcharge->rate_id = $orgRate->id;
+			$importsFlexibleSurcharge->code = $value[1];
+			$importsFlexibleSurcharge->type = $value[2];
+			$importsFlexibleSurcharge->courier_type = "org_rate";
+			$importsFlexibleSurcharge->kgdwf = $value[4];
+			$importsFlexibleSurcharge->kgdwt = $value[5];
+			$importsFlexibleSurcharge->kgcwf = $value[6];
+			$importsFlexibleSurcharge->kgcwt = $value[7];
+			$importsFlexibleSurcharge->meterf = $value[8];
+			$importsFlexibleSurcharge->metert = $value[9];
+			$importsFlexibleSurcharge->length = $value[10];
+			$importsFlexibleSurcharge->width = $value[11];
+			$importsFlexibleSurcharge->height = $value[12];
+			$importsFlexibleSurcharge->cbm = $value[13];
+			$importsFlexibleSurcharge->p_piece = $value[14];
+			$importsFlexibleSurcharge->p_shipment = $value[15];
+			$importsFlexibleSurcharge->p_percent = $value[16];
+			if(empty($value[17]))
+			{
+				$importsFlexibleSurcharge->start = "2000-01-01 00:00:00";
+			}else
+			{
+				if(preg_match("/^(\d{4})[-]*(\d{2})[-]*(\d{2})$/i",$value[17],$m))
+				{
+					$importsFlexibleSurcharge->start = $m[1]."-".$m[2]."-".$m[3]." 00:00:00";
+				}elseif(is_numeric($value[17]))
+				{
+					$importsFlexibleSurcharge->start = oExcel::toDate($value[17]);
+					$importsFlexibleSurcharge->start = explode(" ",$importsFlexibleSurcharge->start)[0]." 00:00:00";
+				}
+			}
+
+			if(empty($value[18]))
+			{
+				$importsFlexibleSurcharge->end = "2300-01-01 23:59:59";
+			}else
+			{
+				if(preg_match("/^(\d{4})[-]*(\d{2})[-]*(\d{2})$/i",$value[18],$m))
+				{
+					$importsFlexibleSurcharge->end = $m[1]."-".$m[2]."-".$m[3]."  23:59:59";
+				}elseif(is_numeric($value[18]))
+				{
+					$importsFlexibleSurcharge->end = oExcel::toDate($value[18]);
+					$importsFlexibleSurcharge->end = explode(" ",$importsFlexibleSurcharge->start)[0]." 23:59:59";
+				}
+			}
+
+			$importsFlexibleSurcharge->created = $date;
+			$importsFlexibleSurcharge->status = ImportsFlexibleSurcharge::ACTIVE;
+			$importsFlexibleSurcharge->save();
+		}
+
+	}
+
+	private function importChargecodeSurchargeNew($importChargecode,$data,$start,$criteria)
+	{
+		$importsFlexibleSurcharge= new ImportsFlexibleSurcharge();
+		$vc = $importsFlexibleSurcharge->find(["condition"=>'chargecode_id=:chargecode_id and status =:status', "params"=>[':status' => ImportsFlexibleSurcharge::INACTIVE,':chargecode_id' => $importChargecode->id],"order"=>"version desc"]);
+		if(!empty($vc))
+		{
+			$version = $vc->version+1;
+		}else
+		{
+			$version = 1;
+		}
+
+
+		$index="";
+		$date = date("Y-m-d H:i:s");
+		$oldData = ImportsFlexibleSurcharge::model()->findAll(" chargecode_id = :chargecode_id and status = :status",[":chargecode_id"=>$importChargecode->id,":status"=>ImportsFlexibleSurcharge::ACTIVE]);
+		foreach ($oldData as $key => $value) {
+			$value->status = ImportsFlexibleSurcharge::INACTIVE;
+			$value->version = $version;
+			$value->update(["status",'version']);
+		}
+		$importChargecode->mdata['surcharge_criteria'] = $criteria;
+		$importChargecode->update(['meta']);
+
+		foreach ($data as $key => $value) {
+			if(empty($value[1])) continue;
+			$importsFlexibleSurcharge = new ImportsFlexibleSurcharge();
+			$importsFlexibleSurcharge->chargecode_id = $importChargecode->id;
+			$importsFlexibleSurcharge->code = $value[1];
+			$importsFlexibleSurcharge->type = $value[2];
+			$importsFlexibleSurcharge->courier_type = $value[3];
+			$importsFlexibleSurcharge->kgdwf = $value[4];
+			$importsFlexibleSurcharge->kgdwt = $value[5];
+			$importsFlexibleSurcharge->kgcwf = $value[6];
+			$importsFlexibleSurcharge->kgcwt = $value[7];
+			$importsFlexibleSurcharge->meterf = $value[8];
+			$importsFlexibleSurcharge->metert = $value[9];
+			$importsFlexibleSurcharge->length = $value[10];
+			$importsFlexibleSurcharge->width = $value[11];
+			$importsFlexibleSurcharge->height = $value[12];
+			$importsFlexibleSurcharge->cbm = $value[13];
+			$importsFlexibleSurcharge->p_piece = $value[14];
+			$importsFlexibleSurcharge->p_shipment = $value[15];
+			$importsFlexibleSurcharge->p_percent = $value[16];
+			$importsFlexibleSurcharge->created = $date;
+			$importsFlexibleSurcharge->status = ImportsFlexibleSurcharge::ACTIVE;
+			$importsFlexibleSurcharge->start = $start;
+			$importsFlexibleSurcharge->save();
+
+			if(!empty($importsFlexibleSurcharge->p_percent))
+			{
+				$thisCType = ImportsFlexibleSurcharge::$courierTypeRe[$importsFlexibleSurcharge->courier_type];
+				$thisType = $importsFlexibleSurcharge->type;
+				$importChargecode->mdata[$thisCType][$thisType] = $importsFlexibleSurcharge->p_percent;
+			}
+		}
+		$importChargecode->save();
+
+	}
+
+
+
+
+
+	/**
+	 * @param $id
+	 */
+	public function actionZonemap($id)
+	{
+		$model = OrgRate::model()->findByPk($id);
+		$this->render('zonemap', array(
+			'model' => $model,
+		));
+	}
+
+	/**
+	 * @param $id
+	 */
+	public function actionRemoteChargeRate($id)
+	{
+		$model = OrgRate::model()->findByPk($id);
+		$this->render('remote_charge_rate', array(
+			'model' => $model,
+		));
+	}
+
+	/**
+	 * import zone map by charge code
+	 * @param $id
+	 */
+	public function actionChgsurcharge($id)
+	{
+		$modelChargeCode = ImportChargeCode::model()->findByPk($id);
+		if(!empty($_POST))
+		{
+			$modelChargeCode->mdata['surcharge_criteria'] = $_POST['surcharge_criteria'];
+			$modelChargeCode->update(['meta']);
+
+			$date = date("Y-m-d H:i:s");
+			
+			$importsFlexibleSurcharge= new ImportsFlexibleSurcharge();
+			$vc = $importsFlexibleSurcharge->find(["condition"=>'chargecode_id=:chargecode_id and status =:status', "params"=>[':status' => ImportsFlexibleSurcharge::INACTIVE,':chargecode_id' => $id],"order"=>"version desc"]);
+			if(!empty($vc))
+			{
+				$version = $vc->version+1;
+			}else
+			{
+				$version = 1;
+			}
+
+			foreach ($_POST['mdata'] as $key => $typeData) {
+				if(in_array($key,ImportsFlexibleSurcharge::$courierTypeArr))
+				{
+					foreach ($typeData as $code => $data) {
+						$importsFlexibleSurcharge = ImportsFlexibleSurcharge::model()->find("code = :code and chargecode_id=:chargecode_id and courier_type=:type and status =:status",[":code"=>$code,":chargecode_id"=>$id,":type"=>ImportsFlexibleSurcharge::$courierType[$key],":status"=>ImportsFlexibleSurcharge::ACTIVE]);
+
+						$archiveImportsFlexibleSurcharge = new ImportsFlexibleSurcharge();
+
+						if(empty($importsFlexibleSurcharge))
+						{
+							$importsFlexibleSurcharge = new ImportsFlexibleSurcharge();
+						}else
+						{
+							$archiveImportsFlexibleSurcharge->setAttributes($importsFlexibleSurcharge->getAttributes());
+							$archiveImportsFlexibleSurcharge->id = null;
+							$archiveImportsFlexibleSurcharge->status = ImportsFlexibleSurcharge::INACTIVE;
+							$archiveImportsFlexibleSurcharge->version = $version;
+							$archiveImportsFlexibleSurcharge->p_percent = $importsFlexibleSurcharge->p_percent;
+							$archiveImportsFlexibleSurcharge->start = $importsFlexibleSurcharge->start;
+							$archiveImportsFlexibleSurcharge->save();
+						}
+
+						$importsFlexibleSurcharge->type = $data['type'];
+						$importsFlexibleSurcharge->code = $code;
+						$importsFlexibleSurcharge->courier_type = ImportsFlexibleSurcharge::$courierType[$key];
+						$importsFlexibleSurcharge->created = $date;
+						$importsFlexibleSurcharge->status = ImportsFlexibleSurcharge::ACTIVE;
+						$importsFlexibleSurcharge->chargecode_id = $id;
+
+						if(!isset($data['kgdwf']))
+						{
+							$modelChargeCode->mdata[$key][$data['type']] = $data['p_percent'];
+							$importsFlexibleSurcharge->p_percent = $data['p_percent'];
+							$importsFlexibleSurcharge->start = $_POST['start'];
+						}else
+						{
+							$importsFlexibleSurcharge->kgdwf = $data['kgdwf'];
+							$importsFlexibleSurcharge->kgdwt = $data['kgdwt'];
+							$importsFlexibleSurcharge->kgcwf = $data['kgcwf'];
+							$importsFlexibleSurcharge->kgcwt = $data['kgcwt'];
+							$importsFlexibleSurcharge->meterf = $data['meterf'];
+							$importsFlexibleSurcharge->metert = $data['metert'];
+							$importsFlexibleSurcharge->length = $data['length'];
+							$importsFlexibleSurcharge->width =  $data['width'];
+							$importsFlexibleSurcharge->height =  $data['height'];
+							$importsFlexibleSurcharge->cbm =  $data['cbm'];
+							$importsFlexibleSurcharge->p_piece =  $data['p_piece'];
+							$importsFlexibleSurcharge->p_shipment =  $data['p_shipment'];
+							$importsFlexibleSurcharge->p_percent =  $data['p_percent'];
+							$importsFlexibleSurcharge->start = $_POST['start'];
+						}
+
+						$importsFlexibleSurcharge->save();
+
+					}
+					
+				}
+
+				
+			}
+			$modelChargeCode->save();
+			$this->ajaxResult($modelChargeCode);
+			return false;
+		}
+
+		$selectCount1 = ImportsFlexibleSurcharge::model()->count('courier_type ="TLD Surcharge" and status!=100 and type!="fuel_surcharge" and chargecode_id=:chargecode_id',[":chargecode_id"=>$modelChargeCode->id]);
+
+		$selectCount2 = ImportsFlexibleSurcharge::model()->count('courier_type ="Courier Surcharge" and status!=100 and type!="fuel_surcharge" and chargecode_id=:chargecode_id',[":chargecode_id"=>$modelChargeCode->id]);
+
+		$selectType = 0;
+		if($selectCount1==0&&$selectCount2>0)
+		{
+			$selectType = 1;
+		}elseif($selectCount1>0&&$selectCount2>0)
+		{
+			$selectCount3 = ImportsFlexibleSurcharge::model()->count('courier_type ="Courier Surcharge" and status!=100 and type!="fuel_surcharge" and (p_piece>0 or p_shipment>0) and chargecode_id=:chargecode_id',[":chargecode_id"=>$modelChargeCode->id]);
+			if($selectCount3>0)
+			{
+				$selectType = 1;
+			}
+		}
+
+		$versionList = [];
+		$omodel = ImportsFlexibleSurcharge::model()->find(["condition"=>'chargecode_id = :chargecodeId and status = :status', "params"=>[':chargecodeId' => $id,":status"=>ImportsFlexibleSurcharge::ACTIVE]]);
+		
+		$importsFlexibleSurcharge = new ImportsFlexibleSurcharge();
+		$historyVersin = $importsFlexibleSurcharge->findAll(["condition"=>'chargecode_id = :chargecodeId and status = :status', "params"=>[':chargecodeId' => $id,":status"=>ImportsFlexibleSurcharge::INACTIVE],"group"=>"version"]);
+		$versionList = [];
+		foreach ($historyVersin as $key => $value) {
+		 	$versionList[$value->version] = $value->version."|".$value->start."|".@ImportChargeCode::$searchCriteria[$modelChargeCode->mdata['surcharge_criteria']];
+		 }
+
+		$this->render('chargecode_surcharge', array(
+			'model' => $modelChargeCode,'surcharge'=>$modelChargeCode->surcharge,'selectType'=>$selectType,'omodel'=>$omodel,'versionList'=>$versionList
+		));
+	}
+
+	/**
+	 * import zone map by charge code
+	 * @param $id
+	 */
+	public function actionOrgSurcharge($id)
+	{
+		$modelOrgRate = OrgRate::model()->findByPk($id);
+		if(!empty($_POST))
+		{
+			$date = date("Y-m-d H:i:s");
+			foreach ($_POST['mdata'] as $key => $typeData) {
+				if(in_array($key,ImportsFlexibleSurcharge::$courierTypeArr))
+				{
+					foreach ($typeData as $code => $data) {
+						$importsFlexibleSurcharge = ImportsFlexibleSurcharge::model()->find("code = :code and rate_id = :rate_id and courier_type=:type and status =:status  and start<=NOW() and end>=NOW() ",[":code"=>$code,":rate_id"=>$id,":type"=>ImportsFlexibleSurcharge::$courierType[$key],":status"=>ImportsFlexibleSurcharge::ACTIVE]);
+						if(empty($importsFlexibleSurcharge))
+						{
+							$importsFlexibleSurcharge = new ImportsFlexibleSurcharge();
+						}
+						$importsFlexibleSurcharge->type = $data['type'];
+						$importsFlexibleSurcharge->code = $code;
+						$importsFlexibleSurcharge->courier_type = ImportsFlexibleSurcharge::$courierType[$key];
+						$importsFlexibleSurcharge->created = $date;
+						$importsFlexibleSurcharge->status = ImportsFlexibleSurcharge::ACTIVE;
+						$importsFlexibleSurcharge->rate_id = $id;
+						if($data['kgdwf']<0.0001&&$data['p_percent']>0.0001)
+						{
+							if($data['type']=="fuel_surcharge")
+							{
+								$data['type'] = "fuel";
+							}
+							$modelOrgRate->mdata[$data['type']] = $data['p_percent'];
+							$importsFlexibleSurcharge->p_percent = $data['p_percent'];
+						}else
+						{
+							$importsFlexibleSurcharge->kgdwf = $data['kgdwf'];
+							$importsFlexibleSurcharge->kgdwt = $data['kgdwt'];
+							$importsFlexibleSurcharge->kgcwf = $data['kgcwf'];
+							$importsFlexibleSurcharge->kgcwt = $data['kgcwt'];
+							$importsFlexibleSurcharge->meterf = $data['meterf'];
+							$importsFlexibleSurcharge->metert = $data['metert'];
+							$importsFlexibleSurcharge->length = $data['length'];
+							$importsFlexibleSurcharge->width =  $data['width'];
+							$importsFlexibleSurcharge->height =  $data['height'];
+							$importsFlexibleSurcharge->cbm =  $data['cbm'];
+							$importsFlexibleSurcharge->p_piece =  $data['p_piece'];
+							$importsFlexibleSurcharge->p_shipment =  $data['p_shipment'];
+							$importsFlexibleSurcharge->p_percent =  $data['p_percent'];
+						}
+
+						$importsFlexibleSurcharge->save();
+
+					}
+					
+				}
+
+				
+			}
+			$modelOrgRate->save();
+			$this->ajaxResult($modelOrgRate);
+			return false;
+		}
+
+		$this->render('orgrate_surcharge', array(
+			'model' => $modelOrgRate,'surcharge'=>$modelOrgRate->surcharge
+		));
+	}
+
+	/**
+	 * import zone map by charge code
+	 * @param $id
+	 */
+	public function actionChgcodezonemap($id)
+	{
+		$modelChargeCode = ImportChargeCode::model()->findByPk($id);
+		$this->render('chargecode_zonemap', array(
+			'model' => $modelChargeCode,
+		));
+	}
+
+	/**
+	 * import zone map by charge code
+	 * @param $id
+	 */
+	public function actionChgcodeRemoteChargeRate($id)
+	{
+		$modelChargeCode = ImportChargeCode::model()->findByPk($id);
+		$this->render('chargecode_remote_charge', array(
+			'model' => $modelChargeCode,
+		));
+	}
+
+	/**
+	 * org flexible rate
+	 * @param $id
+	 */
+	public function actionOrgFlexibleRate($id)
+	{
+		$model = Org::model()->findByPk($id);
+		$orgFlexibleRate = new OrgFlexibleRate();
+		$omodel = $orgFlexibleRate->find(["condition"=>'org_id = :orgId and fid=0 and model=""', "params"=>[':orgId' => $id]]);
+
+		$orgFlexibleRateBk = new OrgFlexibleRateBk();
+		$historyVersin = $orgFlexibleRateBk->findAll(["condition"=>'org_id = :orgId and fid=0 and model="" and version !=0', "params"=>[':orgId' => $id],"group"=>"version"]);
+		$versionList = [];
+		foreach ($historyVersin as $key => $value) {
+		 	$versionList[$value->version] = $value->version."|".$value->start_date."|".OrgFlexibleRate::$searchCriteria[$value->criteria];
+		 } 
+
+		$this->render('org_flexible_rate', array(
+			'model' => $model,
+			'orgId' =>$model->id,
+			'versionList' =>$versionList,
+			'omodel'=>$omodel
+
+		));
+	}
+
+	public function actionViewOrgFlexibleRateVersion($id)
+	{
+		$model = Org::model()->findByPk($id);
+		$orgFlexibleRate = new OrgFlexibleRateBk();
+		$omodel = $orgFlexibleRate->find(["condition"=>'org_id = :orgId and version=:version', "params"=>[':orgId' => $id,":version"=>$_GET['version']]]);
+
+		$orgFlexibleRateBk = new OrgFlexibleRateBk();
+		$historyVersin = $orgFlexibleRateBk->find(["condition"=>'org_id = :orgId and fid=0 and model="" and version =:version', "params"=>[':orgId' => $id,":version"=>$_GET['version']],"group"=>"version"]);
+		$this->render('org_flexible_rate_version', array(
+			'model' => $model,
+			'orgId' =>$model->id,
+			'version' =>$_GET['version'],
+			'user'=>User::model()->findByPk($historyVersin->create_user)->fname,
+			'omodel'=>$omodel
+		));
+	}
+
+	/**
+	 * org flexible rate for consol
+	 * @param $id
+	 */
+	public function actionOrgFlexibleRateForConsol($id)
+	{
+		$model = Consol::model()->findByPk($id);
+		$orgIds = $model->getAllAgentId();
+		$this->render('org_flexible_rate_for_consol', array(
+			'model' => $model,
+			'orgIds' =>$orgIds
+		));
+	}
+
+	/**
+	 *
+	 */
+	public function actionAjaxImportZoneCost()
+	{
+		$orgRate = OrgRate::model();
+		$msg = 'Import Successfully';
+		$template_file = empty($_FILES['zone_cost_rate_file']) ? array() : $_FILES['zone_cost_rate_file'];
+		if (empty($template_file['tmp_name']) || !is_uploaded_file($template_file['tmp_name'])) {
+			$orgRate->addError('error', 'Invalid template file');
+			$this->ajaxResult($orgRate);
+		} else {
+			$xls = new oExcel;
+			$xls->load($template_file['tmp_name']);
+			$data = $xls->getAll();
+			$startDate = @$_POST['start_date'];
+			$criteria = @$_POST['criteria'];
+
+			if(empty($_POST['chargecode_id']))
+			{
+				$orgRateId = $_POST['OrgRate']['id'];
+				$orgRate = OrgRate::model()->findByPk($orgRateId);
+				$name = $orgRate->name;
+			}else
+			{
+				$orgRate = ImportChargeCode::model()->findByPk($_POST['chargecode_id']);
+				TlaLog::add($orgRate, $orgRate->isNewRecord? 3 : 4, array_merge(['status' => $orgRate->getStatus()], ["log"=>"import Zone Cost"]));
+				$orgRateId = $_POST['chargecode_id'];
+				$name = $orgRate->chargecode;
+			}
+			$importOrgZoneMapName = $data[2][1];
+			if (stripos($importOrgZoneMapName, $name) === false&&empty($_POST['chargecode_id'])) {
+				$orgRate->addError('error', 'Import file does not match with current org zone');
+			} else {
+				// import org zone cost rate
+				// remove first three title rows
+				unset($data[1]);
+				unset($data[2]);
+				unset($data[3]);
+				$this->importOrgZoneCostRateData($orgRateId, $data,@$_POST['chargecode_id'],$startDate,$criteria);
+			}
+		}
+
+		// get all new data again
+		$zoneRate = new ZoneRate();
+		if(empty($_POST['chargecode_id']))
+		{
+			$newData = array(
+				'wranges' => $zoneRate->getZoneRateWeightRangeByArray($orgRateId),
+				'zcostrate' => ZoneMap::getOrgZoneMap($orgRate->org_id, $orgRate->zone_id),
+			);
+		}else
+		{
+			$newData = array(
+				'wranges' => $zoneRate->getZoneRateWeightRangeByArray($orgRateId,$_POST['chargecode_id']),
+				'zcostrate' => ZoneMap::getChargecodeZoneMap($orgRateId),
+			);
+		}
+
+		$this->ajaxResult($orgRate, $newData, $msg);
+	}
+
+	/**
+	 * import all org cost rate data
+	 * @param $rateId
+	 * @param $data
+	 */
+	public function importOrgZoneCostRateData($rateId, &$data,$isChargecode = false,$startDate = null,$criteria = null)
+	{
+		// step 1
+		// calculate how many weight range we have
+		$rows = count($data[4]);
+		$rows = $rows - 2; // minus zone code and name
+		$weightRangeNums = $rows / 6; // each weight range has five fields
+		$weightRanges = array();
+		for ($index = 1; $index <= $weightRangeNums; $index++) {
+			$weightRangeTitle = $data[4][3 + ($index - 1) * 6];
+			$weightRange = explode('-', $weightRangeTitle);
+			$weight_lo = floatval(trim($weightRange[0]));
+			$weight_hi = floatval(trim($weightRange[1]));
+			$weightRanges[] = array(
+				'wlo' => $weight_lo,
+				'whi' => $weight_hi,
+			);
+		}
+
+		// step 2
+		// remove row 4(weight range) and 5(header)
+		unset($data[4]);
+		unset($data[5]);
+		// step 3
+		// import all new cost rate data
+		// delete all old data
+		if(empty($isChargecode))
+		{
+			ZoneRate::model()->deleteAll('rate_id = :rateid', [':rateid' => $rateId]);
+		}else
+		{
+			$chargeCode=ImportChargeCode::model()->findByPk($rateId);
+			$chargeCode->mdata['criteria'] = $criteria;
+			$chargeCode->save();
+			$allZoneRateZoneRate = ZoneRate::model()->findAll('chargecode_id = :cid', array(':cid' => $rateId));
+			$vc = ZoneRateBk::model()->find(["condition"=>'chargecode_id = :cid', "params"=>[':cid' => $rateId],"order"=>"version desc"]);
+			if(!empty($vc))
+			{
+				$version = $vc->version+1;
+			}else
+			{
+				$version = 1;
+			}
+
+			foreach($allZoneRateZoneRate as $rate)
+			{
+				$zoneRateBk = new ZoneRateBk();
+				$zoneRateBk->rate_id = $rate->rate_id;
+				$zoneRateBk->chargecode_id = $rate->chargecode_id;
+				$zoneRateBk->weight_lo = $rate->weight_lo;
+				$zoneRateBk->weight_hi = $rate->weight_hi;
+				$zoneRateBk->zone = $rate->zone;
+				$zoneRateBk->zone_name = $rate->zone_name;
+
+				$zoneRateBk->item = $rate->item;
+				$zoneRateBk->base = $rate->base;
+				$zoneRateBk->perkg = $rate->perkg;
+				$zoneRateBk->nkg = $rate->nkg;
+				$zoneRateBk->minimum = $rate->minimum;
+				$zoneRateBk->min_incl = $rate->min_incl;
+				$zoneRateBk->gst = $rate->gst;
+				$zoneRateBk->levy = $rate->levy;
+				$zoneRateBk->start_date = $rate->start_date;
+				$zoneRateBk->create_user = User::currentUserID();
+				$zoneRateBk->version = $version;
+				$zoneRateBk->save();
+			}
+			ZoneRate::model()->deleteAll('chargecode_id = :chargecode_id', [':chargecode_id' => $rateId]);
+		}
+
+		foreach ($data as $row) {
+		    $zoneCode = $row[1];
+		    $zoneName = $row[2];
+		    if(empty($zoneCode)) continue;
+    
+		    // get weight range 1 cost rate data
+		    foreach ($weightRanges as $k => $ranges) {
+			    	$ppc = $row[3 + intval($k) * 6];
+			    	$pkg = $row[4 + intval($k) * 6];
+			    	$base = $row[5 + intval($k) * 6];
+			    	$minimum = $row[6 + intval($k) * 6];
+			    	$minIncl = $row[7 + intval($k) * 6];
+			    	$nkg = $row[8 + intval($k) * 6];
+    
+			    	// try to update or insert new zone cost rate for org
+			    	if(empty($isChargecode))
+			    	{
+			    		$zoneRate = ZoneRate::model()->find('rate_id  = :rid AND zone = :zone AND weight_lo = :wlo AND weight_hi = :whi',
+			    		[':rid' => $rateId, ':zone' => $zoneCode, ':wlo' => $ranges['wlo'], ':whi' => $ranges['whi']]);
+			    		$rateName = 'rate_id';
+			    	}else
+			    	{
+			    		$zoneRate = ZoneRate::model()->find('chargecode_id  = :rid AND zone = :zone AND weight_lo = :wlo AND weight_hi = :whi',
+			    		[':rid' => $rateId, ':zone' => $zoneCode, ':wlo' => $ranges['wlo'], ':whi' => $ranges['whi']]);
+			    		$rateName = 'chargecode_id';
+			    	}
+			    	
+			    	if (empty($zoneRate)) {
+			    		// insert new one
+			    		$zoneRate = new ZoneRate();
+			    		$zoneRate->attributes = array(
+			    			$rateName => $rateId,
+			    			'zone' => $zoneCode,
+			    			'zone_name' => $zoneName,
+			    			'weight_lo' => $ranges['wlo'],
+			    			'weight_hi' => $ranges['whi'],
+			    			'base' => number_format($base, 3, '.', ''),
+			    			'item' => number_format($ppc, 3, '.', ''),
+			    			'perkg' => number_format($pkg, 3, '.', ''),
+			    			'minimum' => number_format($minimum, 3, '.', ''),
+			    			'min_incl' => number_format($minIncl, 3, '.', ''),
+			    			'nkg' => number_format($nkg, 2, '.', ''),
+			    			'gst' => 1,
+			    			'levy' => 0
+			    		);
+			    		$zoneRate->start_date = $startDate;
+    
+			    	} else {
+			    		// just update
+			    		$zoneRate->attributes = array(
+			    			'zone_name' => $zoneName,
+			    			'weight_lo' => $ranges['wlo'],
+			    			'weight_hi' => $ranges['whi'],
+			    			'base' => number_format($base, 3, '.', ''),
+			    			'item' => number_format($ppc, 3, '.', ''),
+			    			'perkg' => number_format($pkg, 3, '.', ''),
+			    			'minimum' => number_format($minimum, 3, '.', ''),
+			    			'min_incl' => number_format($minIncl, 3, '.', ''),
+			    			'nkg' => number_format($nkg, 2, '.', '')
+			    		);
+			    		$zoneRate->start_date = $startDate;
+			    	}
+    				
+			    	$zoneRate->save();
+    
+			}
+		}
+	}
+
+	/**
+	 * save charge code
+	 */
+	public function actionAjaxSaveChargecodeZonemap()
+	{
+		$resp = array('success' => 1, 'msg' => 'import successfully');
+		$template_file = empty($_FILES['org-zonemap']) ? array() : $_FILES['org-zonemap'];
+		if (empty($template_file['tmp_name']) || !is_uploaded_file($template_file['tmp_name'])) {
+			$resp['msg'] = 'Invalid template file';
+			echo json_encode($resp);
+			return;
+		} else {
+			$xls = new oExcel;
+			$xls->load($template_file['tmp_name']);
+			$data = $xls->getAll();
+			if(isset($data[1]))
+			{
+				unset($data[1]);
+			}
+			$chargecodeId = $_POST['ImportChargeCode']['id'];
+			$importChargecode = ImportChargeCode::model()->findByPk($chargecodeId);
+			TlaLog::add($importChargecode, $importChargecode->isNewRecord? 3 : 4, array_merge(['status' => $importChargecode->getStatus()], ["log"=>"import Chargecode Zone Map"]));
+			// import org zone map data
+			$this->importChargecodeZoneMapData($chargecodeId, $data);
+
+			//save file
+			FileRepo::storeFile($template_file['tmp_name'], $template_file['name'], 55, $chargecodeId);
+
+		}
+
+		echo json_encode($resp);
+	}
+
+	/**
+	 * save org rate related zone map
+	 */
+	public function actionAjaxSaveOrgZonemap()
+	{
+		$resp = array('success' => 1, 'msg' => 'import successfully');
+		$template_file = empty($_FILES['org-zonemap']) ? array() : $_FILES['org-zonemap'];
+		if (empty($template_file['tmp_name']) || !is_uploaded_file($template_file['tmp_name'])) {
+			$resp['msg'] = 'Invalid template file';
+			echo json_encode($resp);
+			return;
+		} else {
+			$xls = new oExcel;
+			$xls->load($template_file['tmp_name']);
+			$data = $xls->getAll();
+
+			$orgRateId = $_POST['OrgRate']['id'];
+			$orgRate = OrgRate::model()->findByPk($orgRateId);
+			// import org zone map data
+			$this->importOrgZoneMapData($orgRate->org_id, $orgRate->zone_id, $data);
+
+			//save file
+			FileRepo::storeFile($template_file['tmp_name'], $template_file['name'], 55, $orgRateId);
+
+		}
+
+		echo json_encode($resp);
+	}
+
+	/**
+	 * save org rate remote cost rate
+	 */
+	public function actionAjaxSaveOrgRemoteChargeRate()
+	{
+		$resp = array('success' => 1, 'msg' => 'import successfully');
+		$template_file = empty($_FILES['org-zonemap']) ? array() : $_FILES['org-zonemap'];
+		if (empty($template_file['tmp_name']) || !is_uploaded_file($template_file['tmp_name'])) {
+			$resp['msg'] = 'Invalid template file';
+			echo json_encode($resp);
+			return;
+		} else {
+			$xls = new oExcel;
+			$xls->load($template_file['tmp_name']);
+			$data = $xls->getAll();
+
+			$orgRateId = $_POST['OrgRate']['id'];
+			$orgRate = OrgRate::model()->findByPk($orgRateId);
+			// import org zone map data
+			$this->importOrgRemoteCostRateData($orgRate, $data);
+
+			//save file
+			FileRepo::storeFile($template_file['tmp_name'], $template_file['name'], 61, $orgRateId);
+
+		}
+
+		echo json_encode($resp);
+	}
+
+	/**
+	 * save chargecode remote charge rate
+	 */
+	public function actionAjaxSaveChargecodeRemoteCharge()
+	{
+		$resp = array('success' => 1, 'msg' => 'import successfully');
+		$template_file = empty($_FILES['org-zonemap']) ? array() : $_FILES['org-zonemap'];
+		if (empty($template_file['tmp_name']) || !is_uploaded_file($template_file['tmp_name'])) {
+			$resp['msg'] = 'Invalid template file';
+			echo json_encode($resp);
+			return;
+		} else {
+			$xls = new oExcel;
+			$xls->load($template_file['tmp_name']);
+			$data = $xls->getAll();
+
+			$chargecodeId = $_POST['ImportChargeCode']['id'];
+
+			$chargeCode = ImportChargeCode::model()->findByPk($chargecodeId);
+			TlaLog::add($chargeCode, $chargeCode->isNewRecord? 3 : 4, array_merge(['status' => $chargeCode->getStatus()], ["log"=>"Import Chargcode Remote Charge"]));
+			// import charge code remote charge data
+			$errors = $this->importOrgRemoteChargeRateData($chargeCode, $data);
+			if(!empty($errors))
+			{
+				$resp = array('success' => false, 'msg' => join(',',$errors));
+			}
+			//save file
+			FileRepo::storeFile($template_file['tmp_name'], $template_file['name'], 62, $chargecodeId);
+
+		}
+
+		echo json_encode($resp);
+	}
+
+	private function importChargecodeZoneMapData($chargecodeId, &$data)
+	{
+		$index = 0;
+
+		foreach ($data as $row) {
+			if ($index < 1) {
+				$index++;
+				continue;
+			}
+			if (empty($row[1])) {
+				continue;
+			}
+
+			if (preg_match('/([0-9|\,|\-|\s]*)/', $row[3], $matches)) {
+				if ($matches[1] != $row[3]) {
+					echo json_encode(['done' => false, 'msg' => 'Contains character other than<br>numbers or - or , or space']);
+					Yii::app()->end();
+				}
+			} else {
+				echo json_encode(['done' => false, 'msg' => 'Contains character other than<br>numbers or - or , or space']);
+				Yii::app()->end();
+			}
+		}
+
+		// clear old data
+		ZoneMap::model()->deleteAll('chargecode_id = :cid', [':cid' => $chargecodeId]);
+		FileRepo::model()->deleteAll('type = 55 and fid = :cid', [':cid' => $chargecodeId]);
+
+		$trans = Yii::app()->db->beginTransaction();
+		try {
+				foreach ($data as $row) {
+					if ($index < 1) {
+						$index++;
+						continue;
+					}
+					if (empty($row[1])) {
+						continue;
+					}
+
+					$code = $row[1];
+					$name = $row[2];
+					$postcodes = explode(',', $row[3]);
+					foreach ($postcodes as $postcode) {
+
+						// try to find -
+						$postCodesSpan = explode('-', $postcode);
+						if (count($postCodesSpan) == 2) {
+							$start = intval($postCodesSpan[0]);
+							$end = intval($postCodesSpan[1]);
+
+						} else {
+							// only one post code
+							$start = $end = intval($postCodesSpan[0]);
+						}
+
+						// if existing , do nothing
+						//$zoneMap = ZoneMap::model()->find('org_id = :oid and z1 = :code and pc_lo = :pclo and pc_hi = :pchi',[':oid' => $orgId,':code' => $code,':pclo' => $start,':pchi' => $end]);
+						//if ( empty($zoneMap) )
+						{
+							$zoneMap = new ZoneMap();
+							$zoneMap->setAttributes(array(
+								'org_id' => 0,
+								'zone_id' => 1,
+								'chargecode_id' => $chargecodeId,
+								'z1' => $code,
+								'zone_name' => $name,
+								'pc_lo' => $start,
+								'pc_hi' => $end,
+							));
+							$zoneMap->save();
+						}
+					}
+				}
+
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+	}
+
+
+	/**
+	 * @param $orgId
+	 * @param $data
+	 */
+	private function importOrgRemoteCostRateData($orgRate, &$data)
+	{
+		$index = 0;
+		// clear old data
+		RemoteChargeRate::model()->deleteAll('rate_id = :rateId', [':rateId' => $orgRate->id]);
+
+		$index = 1;
+		unset($data[1]);
+		$finalData = [];
+
+		foreach ($data as $key => $row) {
+			$postcode = $row[1];
+			$suburb = $row[2];
+			$type = $row[3];
+			$value = $row[4];
+			$myKey = $postcode.$suburb;
+			$postcodeTo = $row[5];
+			if(empty($finalData[$myKey]))
+			{
+				if($type =='perkg')
+				{
+					$finalData[$myKey] = [0,$postcode,$suburb,$value,0,0,$postcodeTo];
+				}elseif($type=='base')
+				{
+					$finalData[$myKey] = [0,$postcode,$suburb,0,$value,0,$postcodeTo];
+				}elseif($type=='levy')
+				{
+					$finalData[$myKey] = [0,$postcode,$suburb,0,0,$value,$postcodeTo];
+				}
+			}else
+			{
+				if($type =='perkg')
+				{
+					$finalData[$myKey][3] = $value;
+				}elseif($type=='base')
+				{
+					$finalData[$myKey][4] = $value;
+				}elseif($type=='levy')
+				{
+					$finalData[$myKey][5] = $value;
+				}
+			}
+		}
+
+		$trans = Yii::app()->db->beginTransaction();
+		try {
+				foreach ($finalData as $row)
+				{
+					if (empty($row[1])) {
+						continue;
+					}
+					$postcode = $row[1];
+					$suburb = $row[2];
+					$perkg = $row[3];
+					$base = $row[4];
+					$levy = $row[5];
+					$postcodeTo = $row[6];
+
+					$remoteChargeRate = new RemoteChargeRate();
+					$remoteChargeRate->rate_id = $orgRate->id;
+					$remoteChargeRate->postcode = $postcode;
+					$remoteChargeRate->suburb = $suburb;
+					$remoteChargeRate->perkg = $perkg;
+					$remoteChargeRate->base = $base;
+					$remoteChargeRate->levy = $levy;
+					$remoteChargeRate->postcode_to = $postcodeTo;
+					$remoteChargeRate->save();
+				}
+				$trans->commit();
+			} catch (Exception $ex) {
+				$trans->rollback();
+				throw $ex;
+			}
+	}
+
+	/**
+	 * @param $orgId
+	 * @param $data
+	 */
+	private function importOrgRemoteChargeRateData($chargecode, &$data)
+	{
+		$errors = [];
+		$index = 0;
+		// clear old data
+		RemoteChargeRate::model()->deleteAll('chargecode_id = :chargecodeId', [':chargecodeId' => $chargecode->id]);
+
+		$index = 1;
+		unset($data[1]);
+		$combineData = [];
+		foreach ($data as $key => $row) {
+			if(empty($row[1])) continue;
+			if(empty($combineData[0]))
+			{
+				$combineData[0] = [['',$row[1],$row[2],$row[3],$row[4]]];
+			}else
+			{
+				$combineData[0][] = ['',$row[1],$row[2],$row[3],$row[4]];
+			}
+		}
+
+		foreach ($combineData as $k => $data)
+		{
+			$orgRate = OrgRate::model()->find("name = :name",[":name"=>$k]);
+			if(empty($orgRate))
+			{
+				$errors[] = $k." rate is not existed";
+				continue;
+			}
+
+			$finalData = [];
+
+			foreach ($data as $key => $row) {
+				if(empty($row[1])) continue;
+				$postcode = $row[1];
+				$suburb = $row[2];
+				$type = $row[3];
+				$value = $row[4];
+				$myKey = $postcode.$suburb;
+				if(empty($finalData[$myKey]))
+				{
+					if($type =='perkg')
+					{
+						$finalData[$myKey] = [0,$postcode,$suburb,$value,0,0];
+					}elseif($type=='base')
+					{
+						$finalData[$myKey] = [0,$postcode,$suburb,0,$value,0];
+					}elseif($type=='levy')
+					{
+						$finalData[$myKey] = [0,$postcode,$suburb,0,0,$value];
+					}
+				}else
+				{
+					if($type =='perkg')
+					{
+						$finalData[$myKey][3] = $value;
+					}elseif($type=='base')
+					{
+						$finalData[$myKey][4] = $value;
+					}elseif($type=='levy')
+					{
+						$finalData[$myKey][5] = $value;
+					}
+				}
+			}
+
+			$trans = Yii::app()->db->beginTransaction();
+			try {
+					foreach ($finalData as $row)
+					{
+						if (empty($row[1])) {
+							continue;
+						}
+						$postcode = $row[1];
+						$suburb = $row[2];
+						$perkg = $row[3];
+						$base = $row[4];
+						$levy = $row[5];
+
+						$remoteChargeRate = new RemoteChargeRate();
+						$remoteChargeRate->chargecode_rate_id = 0;
+						$remoteChargeRate->chargecode_id = $chargecode->id;
+						$remoteChargeRate->postcode = $postcode;
+						$remoteChargeRate->suburb = $suburb;
+						$remoteChargeRate->perkg = $perkg;
+						$remoteChargeRate->base = $base;
+						$remoteChargeRate->levy = $levy;
+						$remoteChargeRate->save();
+					}
+					$trans->commit();
+				} catch (Exception $ex) {
+					$trans->rollback();
+					throw $ex;
+				}
+		}
+		return $errors;
+	}
+
+
+
+	/**
+	 * @param $orgId
+	 * @param $data
+	 */
+	private function importOrgZoneMapData($orgId, $zoneId, &$data)
+	{
+		$index = 0;
+
+		// clear old data
+		ZoneMap::model()->deleteAll('org_id = :oid AND zone_id = :zoneid', [':oid' => $orgId, ':zoneid' => $zoneId]);
+
+		foreach ($data as $row) {
+			if ($index < 1) {
+				$index++;
+				continue;
+			}
+			if (empty($row[1])) {
+				continue;
+			}
+
+			$code = $row[1];
+			$name = $row[2];
+			$postcodes = explode(',', $row[3]);
+			if(!empty($row[4])&&!empty($row[5]))
+			{
+				$zoneMap = new ZoneMap();
+				$zoneMap->org_id = $orgId;
+				$zoneMap->zone_id = intval($zoneId);
+				$zoneMap->z1 = $code;
+				$zoneMap->zone_name = $name;
+				$zoneMap->pc_lo = $row[3];
+				$zoneMap->pc_hi = $row[3];
+				$zoneMap->suburb = $row[4];
+				$zoneMap->state = $row[5];
+				$zoneMap->save();
+				continue;
+			}
+
+			foreach ($postcodes as $postcode) {
+
+				// try to find -
+				$postCodesSpan = explode('-', $postcode);
+				if (count($postCodesSpan) == 2) {
+					$start = intval($postCodesSpan[0]);
+					$end = intval($postCodesSpan[1]);
+
+				} else {
+					// only one post code
+					$start = $end = intval($postCodesSpan[0]);
+				}
+
+				// if existing , do nothing
+				//$zoneMap = ZoneMap::model()->find('org_id = :oid and z1 = :code and pc_lo = :pclo and pc_hi = :pchi',[':oid' => $orgId,':code' => $code,':pclo' => $start,':pchi' => $end]);
+				//if ( empty($zoneMap) )
+				{
+					$zoneMap = new ZoneMap();
+					$zoneMap->setAttributes(array(
+						'org_id' => $orgId,
+						'zone_id' => intval($zoneId),
+						'z1' => $code,
+						'zone_name' => $name,
+						'pc_lo' => $start,
+						'pc_hi' => $end,
+					));
+					$zoneMap->save();
+				}
+			}
+		}
+	}
+
+	public function actionApproval($id)
+	{
+		$model = $this->loadModel($id);
+		if ($model && !empty($_POST['status'])) {
+			if (!empty($_POST['reason'])) {
+				$model->logExtra['reason'] = $_POST['reason'];
+			}
+			$model->status = $_POST['status'];
+			$model->save();
+			$this->ajaxResult($model);
+		} else {
+			throw new CHttpException(400, 'Invalid request. Please do not repeat this request again.');
+		}
+	}
+
+	public function actionMy()
+	{
+		$this->actionUpdate(Yii::app()->user->org);
+	}
+
+	/**
+	 * Lists and search.
+	 */
+	public function actionList()
+	{
+		$model = new Org('search');
+		$model->unsetAttributes(); // clear any default values
+		if (isset($_GET['Org'])) {
+			$model->attributes = $_GET['Org'];
+		}
+
+		$this->render('list', array('model' => $model));
+	}
+
+	public function actionListDueOrg()
+	{
+		$filtersForm = new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters = $_GET['FiltersForm'];
+		}
+
+		$provide = [];
+		$sql = 'SELECT to_id FROM `invoice` WHERE status in (2,3,7) AND date>"2018-01-29" and dpmt in (10,30,40) and dpt_id=106 GROUP by to_id';
+		$db = Yii::app()->db;
+		$rs = $db->createCommand($sql)->queryAll();
+		$oids = [];
+		foreach ($rs as $r) {
+			$org = Org::model()->findByPk($r['to_id']);
+			$term_credit = $org->getCurrentCreditTerm();
+			$credit_percent = $org->getCurrentCreditOfLimit();
+			$credit_ammount = (isset($org->extra['creditlimit']) ? floatval($org->extra['creditlimit']) : 0);
+			$credit_left = (1 - $credit_percent) * $credit_ammount;
+			if (empty($term_credit[3])) {
+				continue;
+			}
+
+			if ($term_credit[3] > 0) {
+				continue;
+			}
+			$provide[] = array('key' => $r['to_id'], 'id' => $r['to_id'], 'name' => $org->name, 'invoice' => $term_credit[1], 'left_term' => $term_credit[0], 'invoice_date' => $term_credit[2], 'code' => $org->code, 'credit_left' => $credit_left, 'credit' => $credit_ammount, 'percent' => $credit_percent * 100);
+		}
+		$filteredData = $filtersForm->filter($provide);
+		$dataprovider = new CArrayDataProvider($filteredData);
+		$dataprovider->pagination = array('pageSize' => 30);
+		$sort = new CSort();
+		$sort->attributes = array(
+			'name' => array(
+				'asc' => 'name ASC',
+				'desc' => 'name DESC',
+			),
+			'left_term' => array(
+				'asc' => 'left_term ASC',
+				'desc' => 'left_term DESC',
+			),
+			'invoice_date' => array(
+				'asc' => 'invoice_date ASC',
+				'desc' => 'invoice_date DESC',
+			),
+			'percent' => array(
+				'asc' => 'percent ASC',
+				'desc' => 'percent DESC',
+			),
+			'credit_left' => array(
+				'asc' => 'credit_left ASC',
+				'desc' => 'credit_left DESC',
+			),
+			'credit' => array(
+				'asc' => 'credit ASC',
+				'desc' => 'credit DESC',
+			),
+		);
+		$sort->defaultOrder = "left_term ASC";
+		$dataprovider->sort = $sort;
+		$this->render('list_due_org', array('dataProvider' => [$dataprovider, $filtersForm]));
+	}
+
+	public function actionContactSuggest()
+	{
+		$rs = OrgContact::model()->with('org')->findAll(array(
+			'condition' => 'org.status = 1 AND (org.name LIKE :n OR t.name LIKE :n)',
+			'params' => array(':n' => '%' . $_GET['term'] . '%'),
+			'limit' => 20, 'together' => true,
+		));
+		$a = array();
+		foreach ($rs as $r) {
+			$a[] = array(
+				'value' => $r->id,
+				'label' => $r->org->name . ': ' . $r->name,
+			);
+		}
+		echo json_encode($a);
+	}
+
+	public function actionExRatesGrid($id)
+	{
+		if (isset($_POST['SellRate'])) {
+
+			$isUpdate = false;
+			if (empty($_POST['SellRate']['id'])) { //create
+				$model = new SellRate;
+				$model->org_id = $id;
+				$model->type = 20;
+				$model->currency = 1;
+			} else { //update
+				$isUpdate = true;
+				$model = SellRate::model()->findByPk($_POST['SellRate']['id']);
+			}
+
+			// add log to trace who change the rates
+			$org = Org::model()->findByPk($id);
+			$data = $_POST['SellRate'];
+
+			if ($isUpdate) {
+				$msg = 'code:' . $model->code . '->' . $data['code'] . ' perkg:' . $model->perkg . '->' . $data['perkg'] . ' item:' . $model->item . '->' . $data['item'] . ' from:' . $model->vfrom . '->' . $data['vfrom'] . ' to:' . $model->vto . '->' . $data['vto'];
+				$notes = ['update rate' => $msg];
+			} else {
+				$msg = 'code:' . $data['code'] . ' perkg:' . $data['perkg'] . ' item:' . $data['item'] . ' from:' . $data['vfrom'] . ' to:' . $data['vto'];
+				$notes = ['create new rate' => $msg];
+			}
+			Log::add($org, Log::LOG_TYPE_MISC, $notes);
+			$model->attributes = $_POST['SellRate'];
+			$model->by_id = Yii::app()->user->id;
+			$model->save();
+			$this->ajaxResult($model);
+		}
+	}
+
+	public function actionExDiscountGrid($id)
+	{
+		if (isset($_POST['SellRate'])) {
+
+			$isUpdate = false;
+			if (empty($_POST['SellRate']['id'])) { //create
+				$model = new SellRate;
+				$model->org_id = $id;
+				$model->code = 'D';
+				$model->type = 25;
+				$model->currency = 1;
+			} else { //update
+				$isUpdate = true;
+				$model = SellRate::model()->findByPk($_POST['SellRate']['id']);
+			}
+
+			// add log to trace who change the rates
+			$org = Org::model()->findByPk($id);
+			$data = $_POST['SellRate'];
+
+			if ($isUpdate) {
+				$msg = 'Discount: ' . $model->item . '->' . $data['item'] . ' from:' . $model->vfrom . '->' . $data['vfrom'] . ' to:' . $model->vto . '->' . $data['vto'];
+				$notes = ['update discount' => $msg];
+			} else {
+				$msg = 'Discount:' . $data['item'] . ' from:' . $data['vfrom'] . ' to:' . $data['vto'];
+				$notes = ['create discount' => $msg];
+			}
+			Log::add($org, Log::LOG_TYPE_MISC, $notes);
+			$model->attributes = $_POST['SellRate'];
+			$model->by_id = Yii::app()->user->id;
+			$model->save();
+			$this->ajaxResult($model);
+		}
+	}
+
+	public function actionImDiscountGrid($id)
+	{
+		if (isset($_POST['SellRate'])) {
+			
+			$isUpdate = false;
+			if (empty($_POST['SellRate']['id'])) { //create
+				$model = new SellRate;
+				$model->org_id = $id;
+				$model->type = 10;
+				$model->currency = 1;
+			} else { //update
+				$isUpdate = true;
+				$model = SellRate::model()->findByPk($_POST['SellRate']['id']);
+			}
+
+			// add log to trace who change the rates
+			$org = Org::model()->findByPk($id);
+			$data = $_POST['SellRate'];
+
+			if ($isUpdate) {
+				$msg = 'Discount: ' . $model->item . '->' . $data['item'] . ' from:' . $model->vfrom . '->' . $data['vfrom'] . ' to:' . $model->vto . '->' . $data['vto'];
+				$notes = ['update discount' => $msg];
+			} else {
+				$msg = 'Discount:' . $data['item'] . ' from:' . $data['vfrom'] . ' to:' . $data['vto'];
+				$notes = ['create discount' => $msg];
+			}
+			Log::add($org, Log::LOG_TYPE_MISC, $notes);
+			$model->attributes = $_POST['SellRate'];
+			$model->by_id = Yii::app()->user->id;
+			$model->save();
+			$this->ajaxResult($model);
+		}
+	}
+
+	public function exportsList()
+	{
+		$rs = Org::model()->findAll('status = 1 AND type = 10');
+		$a = array();
+		foreach ($rs as $r) {
+			$a[$r->id] = $r->name;
+		}
+		return $a;
+	}
+
+	public function actionUserSuggest()
+	{
+		$this->suggest();
+	}
+
+	public function actionOpSuggest()
+	{
+		$this->opSuggest();
+	}
+	/**
+	 * auto suggest ACR address information
+	 */
+	public function actionACRSuggest()
+	{
+		$this->suggestACR(array(15, 30, 50, 60, 65));
+	}
+
+	public function actionOwnerSuggest()
+	{
+		$this->suggest(array(15, 30, 50, 60, 65, 70));
+	}
+
+	public function actionAgentSuggest()
+	{
+		$this->suggest(array(30, 50));
+	}
+
+	public function actionClientSuggest()
+	{
+		$this->suggest(array(30, 50, 60, 65));
+	}
+
+	public function actionSupplierSuggest()
+	{
+		$this->suggest(array(10, 15, 70, 72));
+	}
+
+	public function actionExAgentSuggest()
+	{
+		$this->suggest(array(30, 60, 65));
+	}
+
+	private function suggestACR($grp = '')
+	{
+		if (empty($grp)) {
+			$rs = Org::model()->findAll(array(
+				'condition' => 'status = 1 AND (name LIKE :n OR code LIKE :n OR id = :tn)',
+				'params' => array(':n' => '%' . $_GET['term'] . '%', ':tn' => $_GET['term']),
+				'order' => 'name',
+				'limit' => 20,
+			));
+		} elseif (is_array($grp)) {
+			$rs = Org::model()->findAll(array(
+				'condition' => 'status = 1 AND type IN (' . implode(',', $grp) . ') AND (name LIKE :n OR code LIKE :n OR id = :tn)',
+				'params' => array(':n' => '%' . $_GET['term'] . '%', ':tn' => $_GET['term']),
+				'order' => 'name',
+				'limit' => 20,
+			));
+		} else {
+			$rs = Org::model()->findAll(array(
+				'condition' => 'status = 1 AND type = :grp AND (name LIKE :n OR code LIKE :n OR id = :tn)',
+				'params' => array(':n' => '%' . $_GET['term'] . '%', ':grp' => $grp, ':tn' => $_GET['term']),
+				'order' => 'name',
+				'limit' => 20,
+			));
+		}
+
+		foreach ($rs as $r) {
+			$cnor_name = $cnor_add = $cnee_name = $cnee_add = '';
+			if (!empty($r->contacts)) {
+				foreach ($r->contacts as $contact) {
+					if ($contact['func'] == 4) {
+						$cnor_name = $contact->name;
+						$cnor_add = $contact->address;
+					}
+					if ($contact['func'] == 2) {
+						$cnee_name = $contact->name;
+						$cnee_add = $contact->address;
+					}
+				}
+			}
+
+			$a[] = array(
+				'value' => $r->id,
+				'label' => $r->code . ':' . $r->name,
+				'cnee_name' => $cnee_name,
+				'cnee_add' => $cnee_add,
+				'cnor_name' => $cnor_name,
+				'cnor_add' => $cnor_add,
+			);
+		}
+		echo json_encode($a);
+	}
+
+	private function suggest($grp = '')
+	{
+		if (empty($grp)) {
+			$rs = Org::model()->findAll(array(
+				'condition' => 'status = 1 AND (name LIKE :n OR code LIKE :n OR id = :tn)',
+				'params' => array(':n' => '%' . $_GET['term'] . '%', ':tn' => $_GET['term']),
+				'order' => 'name',
+				'limit' => 20,
+			));
+		} elseif (is_array($grp)) {
+			$rs = Org::model()->findAll(array(
+				'condition' => 'status = 1 AND type IN (' . implode(',', $grp) . ') AND (name LIKE :n OR code LIKE :n OR id = :tn)',
+				'params' => array(':n' => '%' . $_GET['term'] . '%', ':tn' => $_GET['term']),
+				'order' => 'name',
+				'limit' => 20,
+			));
+		} else {
+			$rs = Org::model()->findAll(array(
+				'condition' => 'status = 1 AND type = :grp AND (name LIKE :n OR code LIKE :n OR id = :tn)',
+				'params' => array(':n' => '%' . $_GET['term'] . '%', ':grp' => $grp, ':tn' => $_GET['term']),
+				'order' => 'name',
+				'limit' => 20,
+			));
+		}
+		$a = array();
+
+		foreach ($rs as $r) {
+			$a[] = array(
+				'value' => $r->id,
+				'label' => $r->code . ':' . $r->name,
+			);
+		}
+		echo json_encode($a);
+	}
+
+	private function opSuggest($grp = '')
+	{
+		if (empty($grp)) {
+			$rs = User::model()->findAll(array(
+				'condition' => 'active = 1  AND (fname LIKE :n OR lname LIKE :n OR id = :tn)',
+				'params' => array(':n' => '%' . $_GET['term'] . '%', ':tn' => $_GET['term']),
+				'order' => 'fname',
+				'limit' => 20,
+			));
+		} elseif (is_array($grp)) {
+			$rs = User::model()->findAll(array(
+				'condition' => 'active = 1 AND type IN (' . implode(',', $grp) . ') AND (fname LIKE :n OR lname LIKE :n OR id = :tn)',
+				'params' => array(':n' => '%' . $_GET['term'] . '%', ':tn' => $_GET['term']),
+				'order' => 'fname',
+				'limit' => 20,
+			));
+		} else {
+			$rs = User::model()->findAll(array(
+				'condition' => 'active = 1 AND type = :grp AND (fname LIKE :n OR lname LIKE :n OR id = :tn)',
+				'params' => array(':n' => '%' . $_GET['term'] . '%', ':grp' => $grp, ':tn' => $_GET['term']),
+				'order' => 'fname',
+				'limit' => 20,
+			));
+		}
+		$a = array();
+
+		foreach ($rs as $r) {
+			$a[] = array(
+				'value' => $r->id,
+				'label' => $r->id.":".$r->fname . ' ' . $r->lname,
+			);
+		}
+		echo json_encode($a);
+	}
+
+	/**
+	 * Returns the data model based on the primary key given in the GET variable.
+	 * If the data model is not found, an HTTP exception will be raised.
+	 * @param integer the ID of the model to be loaded
+	 */
+	public function loadModel($id)
+	{
+		$model = Org::model()->findByPk($id);
+		if ($model === null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+
+		return $model;
+	}
+
+	/**
+	 * Performs the AJAX validation.
+	 * @param CModel the model to be validated
+	 */
+	protected function performAjaxValidation($model)
+	{
+		if (isset($_POST['ajax']) && $_POST['ajax'] === 'org-form') {
+			echo CActiveForm::validate($model);
+			Yii::app()->end();
+		}
+	}
+
+	/**
+	 * save selected service
+	 */
+	public function actionAjaxSaveService()
+	{
+
+		$orgId = $_POST['oid'];
+		$currency = $_POST['currency'];
+		$selectedServices = $_POST['services'];
+		$valid_from_date = $_POST['vfrom'];
+		$valid_to_date = $_POST['vto'];
+		if (empty($valid_to_date)) {
+			$valid_to_date = '0000-00-00';
+		}
+
+		$org_rate_id = 0;
+		if (isset($_POST['orid'])) {
+			$org_rate_id = intval($_POST['orid']);
+		}
+
+		$model_org_rate = OrgRate::model()->findByPk($org_rate_id);
+		if (empty($model_org_rate)) {
+			$model_org_rate = new OrgRate();
+			$model_org_rate->setAttributes(array(
+				'org_id' => $orgId,
+				'type' => 40, // PCAE rate
+				'name' => 'PCAE Rate',
+				'code' => 'pcae_rate',
+			));
+		}
+
+		$model_org_rate->setAttributes(array(
+			'vfrom' => $valid_from_date,
+			'vto' => $valid_to_date,
+			'currency' => $currency,
+			'updated' => date('Y-m-d H:i:s'),
+		));
+		$model_org_rate->mdata = $selectedServices;
+
+		$model_org_rate->save();
+
+		echo json_encode(array('success' => 1));
+
+	}
+
+	/**
+	 * update org price template data
+	 */
+	public function actionAjaxUpdatePriceTemplate()
+	{
+
+		// in case there is a validate price template B , you can't save this one
+		$tpl = new SellRate();
+		$tpl->org_id = $_POST['oid'];
+		$tplb = $tpl->getValidPriceTpl(50);
+		if (!empty($tplb)) {
+			echo json_encode(array('success' => 0, 'err' => "There is a valid price template by weight only, you can't save this again"));
+			return;
+		}
+
+		$type = $_POST['type'];
+		$currency = $_POST['currency'];
+		$orgId = $_POST['oid'];
+		$weightPrice = $_POST['wp'];
+		$piecePrice = $_POST['pp'];
+		$vfrom = $_POST['vf'];
+		$vto = $_POST['vt'];
+		$tpl_id = $_POST['tid'];
+
+		// for calculate by weight and piece
+		// we use base field to save weight price
+		// item field to save piece price
+		$sellRate = SellRate::model()->findByPk($tpl_id);
+		if (empty($sellRate)) {
+			$sellRate = new SellRate();
+		}
+		$sellRate->setAttributes(array(
+			'org_id' => $orgId,
+			'code' => 'XX', // actually we don't need this for price template just padding
+			'currency' => $currency,
+			'type' => $type,
+			'vfrom' => $vfrom,
+			'vto' => $vto,
+			'base' => $weightPrice,
+			'item' => $piecePrice,
+		));
+		$sellRate->save();
+
+		echo json_encode(array('success' => 1));
+
+	}
+
+	/**
+	 * update org price template B data
+	 */
+	public function actionAjaxUpdatePriceTemplateB()
+	{
+
+		// in case there is a validate price template B , you can't save this one
+		$tpl = new SellRate();
+		$tpl->org_id = $_POST['oid'];
+		$tpla = $tpl->getValidPriceTpl(40);
+		if (!empty($tpla)) {
+			echo json_encode(array('success' => 0, 'err' => "There is a valid price template by weight and piece, you can't save this again"));
+			return;
+		}
+
+		$type = $_POST['type'];
+		$currency = $_POST['currency'];
+		$orgId = $_POST['oid'];
+		$baseUnit = $_POST['bu'];
+		$basePrice = $_POST['bp'];
+		$fixedPrice = $_POST['fp'];
+		$stepUnit = $_POST['su'];
+		$priceRate = $_POST['sp'];
+		$vfrom = $_POST['vf'];
+		$vto = $_POST['vt'];
+		$tpl_id = $_POST['tid'];
+
+		// for calculate by weight only
+		// we use min field to save base unit
+		// item field to save step unit
+		// base field to save base price
+		// nkg field to save price rate
+		$sellRate = SellRate::model()->findByPk($tpl_id);
+		if (empty($sellRate)) {
+			$sellRate = new SellRate();
+		}
+		$sellRate->setAttributes(array(
+			'org_id' => $orgId,
+			'code' => 'XX', // actually we don't need this for price template just padding
+			'currency' => $currency,
+			'type' => $type,
+			'vfrom' => $vfrom,
+			'vto' => $vto,
+			'base' => $basePrice,
+			'perkg' => $fixedPrice,
+			'item' => $stepUnit,
+			'min' => $baseUnit,
+			'nkg' => $priceRate,
+		));
+		$sellRate->save();
+
+		echo json_encode(array('success' => 1));
+
+	}
+
+	public function actionImportRateTemplate($id)
+	{
+		$model = Org::model()->findByPk($id);
+
+		// excel
+		// $xls = new oExcel;
+		// $xls->setColWidth([20,20,30,20,30]);
+		// $i = 1;
+		// $xls->addRow($i++, ['Code', 'Section', 'Name', 'Value', 'Note']);
+
+		// $xls->addRow($i++, ['', 'Default']);
+		// $xls->addRow($i++, ['note', '', 'Note']);
+		// $xls->addRow($i++, ['vfrom', '', 'From']);
+		// $xls->addRow($i++, ['vto', '', 'To']);
+		// $xls->addRow($i++, ['status', '', 'Status', '', '0 - Disable 1 - Active']);
+
+		// foreach (WmsOrgQuote::$chgcodes as $k => $item) {
+		//     if ($k % 1000 == 0) {
+		//         $xls->addRow($i++, ['']);
+		//         $xls->addRow($i++, ['', $item]);
+		//     } else if ($item == 'sep') {
+		//         $xls->addRow($i++, ['']);
+		//     } else {
+		//         if ($k == WmsOrgQuote::QUOTE_PALLET_STORAGE_WEEK || $k == WmsOrgQuote::QUOTE_CBM_STORAGE_WEEK) {
+		//         if ($k == WmsOrgQuote::QUOTE_PALLET_STORAGE_WEEK) {
+		//                 $xls->addRow($i++, ['storage', '', 'Storage / Week', '', isset($item[1]) ? $item[1] : '']);
+		//                 $xls->addRow($i++, ['storage_type', '', 'Storage Type', '', '0 - Pallet 1 - CBM']);
+		//             }
+		//         } else if ($k == WmsOrgQuote::QUOTE_PACKING_ORDER_STATUS) {
+		//             $xls->addRow($i++, [$k, '', $item[0], '', '0 - Disable 1 - Active']);
+		//         } else if ($k == WmsOrgQuote::QUOTE_PACKING_ORDER_EXTRA) {
+		//             $xls->addRow($i++, ['box', '', 'Box', '', '0 - Disable 1 - Active']);
+		//             $xls->addRow($i++, ['wrapper', '', 'Wrapper', '', '0 - Disable 1 - Active']);
+		//         } else {
+		//             $xls->addRow($i++, [$k, '', $item[0], '', isset($item[1]) ? $item[1] : '']);
+		//         }
+		//     }
+		// }
+
+		// $xls->goSheet(0)->getColumnDimension(PHPExcel_Cell::stringFromColumnIndex(0))->setVisible(false);
+		// $xls->output('template/rate_template.xlsx', null, false);
+
+		$this->render('import_rate', array(
+			'model' => $model,
+		));
+	}
+
+	public function actionImportRate()
+	{
+		$model = Org::model()->findByPk($_POST['Org']['id']);
+		if (!empty($_FILES['rate_excel'])) {
+			$xls = new oExcel;
+			$err = [];
+			if (!$xls->supported($_FILES['rate_excel']['name'])) {
+				foreach ($xls->getError() as $e) {
+					$err[] = $e;
+				}
+			} else {
+				$xls->load($_FILES['rate_excel']['tmp_name']);
+				$data = $xls->getAll();
+				if (implode('', $data[1]) != "TypeProductbarcodeskuCartonsQtyschedule timeexpirenotebatch") {
+					$err[] = "template wrong";
+				}
+
+				unset($data[1]);
+
+				$quote = new WmsOrgQuote();
+				$quote->org_id = $model->id;
+				$quote->type = 0;
+				foreach ($data as $item) {
+					$code = $item[1];
+					$value = $item[4];
+					if ($code == 'status') {
+						$quote->status = $value;
+					} else if ($code == 'vfrom' || $code == 'vto') {
+						if (!is_numeric($value)) {
+							echo json_encode(array('done' => false, 'msg' => 'Date ' . $value . ' is wrong'));
+							Yii::app()->end();
+						}
+						$quote->$code = date('Y-m-d', ($value - 25569) * 24 * 60 * 60);
+					} else {
+						if ($code == 'storage') {
+							$storage = $value;
+							continue;
+						} else if ($code == 'storage_type') {
+							if ($value) {
+								$model->extra['storage_charge_type'] = WmsOrgQuote::QUOTE_CBM_STORAGE_WEEK;
+								$model->sync_xero = false;
+								$model->save();
+								$quote->mdata[WmsOrgQuote::QUOTE_PALLET_STORAGE_WEEK] = '';
+								$quote->mdata[WmsOrgQuote::QUOTE_CBM_STORAGE_WEEK] = $storage;
+							} else {
+								$model->extra['storage_charge_type'] = WmsOrgQuote::QUOTE_PALLET_STORAGE_WEEK;
+								$model->sync_xero = false;
+								$model->save();
+								$quote->mdata[WmsOrgQuote::QUOTE_PALLET_STORAGE_WEEK] = $storage;
+								$quote->mdata[WmsOrgQuote::QUOTE_CBM_STORAGE_WEEK] = '';
+							}
+						} else if ($code == 'box' && $value) {
+							$quote->mdata['extra_packing'][] = 'box';
+						} else if ($code == 'wrapper' && $value) {
+							$quote->mdata['extra_packing'][] = 'wrapper';
+						} else if ($code) {
+							$quote->mdata[$code] = $value;
+						}
+					}
+				}
+				if (WmsOrgQuote::isValidDateSpan($quote->org_id, $quote->vfrom, $quote->vto)) {
+					$quote->save();
+					echo json_encode(array('done' => true, 'msg' => 'Import successfully'));
+					Yii::app()->end();
+				} else {
+					echo json_encode(array('done' => false, 'msg' => 'The same date span existing'));
+					Yii::app()->end();
+				}
+			}
+		} else {
+			echo json_encode(array('done' => false, 'msg' => 'No file is submitted'));
+			Yii::app()->end();
+		}
+	}
+
+	public function actionGetDueDay()
+	{
+		if (!empty($_GET['org_id']) && !empty($org = Org::model()->findByPk($_GET['org_id']))) {
+			if (!empty($term = $org->extra['payterm'])) {
+				echo date('Y-m-d', strtotime('+' . $term . ' day', strtotime(date('Y-m-d'))));
+				return;
+			}
+		}
+		echo date('Y-m-d');
+		return;
+	}
+
+	public function actionChangePassword($id)
+	{
+		$model = Org::model()->findByPk($id);
+		if (!empty($_GET['confirm'])) {
+			$model->extra['password'] = '';
+			$model->sync_xero = false;
+			$model->save();
+			$this->ajaxResult($model);
+		} else {
+			$this->render('change_password', array('model' => $model));
+		}
+	}
+
+	public function actionGetFuelSurcharge($id)
+	{
+		$model = Org::model()->findByPk($id);
+		$this->render('fuel_surcharge', ['model' => $model]);
+	}
+
+	public function actionSetFuelSurcharge()
+	{
+		if (empty($_POST['FiltersForm']['month']) || empty($_POST['FiltersForm']['rate'])) {
+			echo json_encode(['done' => false, 'msg' => 'Save failed, month or rate is empty']);
+		} else if (!preg_match('/\d{4}-\d{2}/', $_POST['FiltersForm']['month'])) {
+			echo json_encode(['done' => false, 'msg' => 'Save failed, month is invalid']);
+		} else if ($_POST['FiltersForm']['rate'] <= 0 || $_POST['FiltersForm']['rate'] >= 100) {
+			echo json_encode(['done' => false, 'msg' => 'Save failed, rate is invalid']);
+		} else {
+			SystemSetting::setAupostFuelChargeSetting($_POST['FiltersForm']);
+			echo json_encode(['done' => true, 'msg' => 'Save successfully']);
+		}
+	}
+
+	public function actionDeleteFuelSurcharge($month)
+	{
+		SystemSetting::deleteAupostFuelChargeSetting($month);
+	}
+
+	public function actionEditNote()
+	{
+		$id = empty($_GET['id'])?0:$_GET['id'];
+		if(!empty($id))
+		{
+			$model = GeneralNote::model()->findByPk($id);
+			$orgId= $model->fid;
+		}else
+		{
+			$model = new GeneralNote();
+			$orgId= $_GET['orgId'];
+		}
+
+		if(isset($_POST['GeneralNote'])){
+			$model->model="Org";
+			$model->attributes=$_POST['GeneralNote'];
+			$model->fid = $orgId;
+			$model->save();
+			$this->ajaxResult($model);
+		}
+		$this->render('edit_note', ['model' => $model,'id'=>$id,'orgId'=>$orgId]);
+	}
+
+	public function actionPendingDriverList()
+	{
+		$org = new Org('search');
+		$org->unsetAttributes();
+		$org->type = Org::TYPE_SUPPLIER;
+		$this->render('pending_driver_list', array('model' => $org));
+	}
+}

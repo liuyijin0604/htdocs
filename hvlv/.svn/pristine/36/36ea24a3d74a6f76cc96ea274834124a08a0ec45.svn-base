@@ -1,0 +1,1829 @@
+<?php
+
+class ChooseShipment {
+
+	public static function newShipmentWithChargeCode($d, $testOnly = false, $fids = null,$noAddrVeri = false,$noDimRequired = false){
+		Log::log2file(json_encode($d), "shipment_upload", "manishipment");
+		if(isset($d->cref))
+		{
+			$d->cust_ref = $d->cref;
+		}
+		$o = new stdClass;
+		$o->success = false;
+		$o->error = [];
+		$o->msg = '';
+
+		$p = new ImParcel;
+		$p->weight =empty($d->weight)? 0 : max(number_format(floatval($d->weight), 4, '.', ''), 0.01);
+		$p->pkg = empty($d->packs)? 1 : $d->packs;
+		$p->agent_id = $d->agent_id;
+		$p->cbm = empty($d->cbm)? 0 : number_format($d->cbm,6,'.','');
+
+		if(!empty($d->plt))
+		{
+			$p->mdata['amzon_pallet'] = $d->plt;
+		}
+		if(!empty($d->pe_number))
+		{
+			$p->mdata['pe_number'] = $d->pe_number;
+		}
+		//check account limit
+		// $agt = Org::model()->findByPk($d->agent_id);
+		// if($agt->overCreditLimit() && !in_array($agt->type, [60, 65])){
+		// 	$o->error[] = 'Account over limit, please contact customer support';
+		// 	return $o;
+		// }
+		$chargeCodeInfo = ImportChargeCode::model()->find('chargecode = :ccode and status = 1', [':ccode' => $d->chargecode]);
+		//check number
+		if(!empty($d->no)){
+			if(strlen($d->no) < 6){
+				$o->error[] = '[20000] - Shipment ' . $d->no . ' Connote No. at least 6 characters';
+			}
+			if(ImParcel::model()->count('hbn = :hbn AND agent_id=:agt AND status < 100', array(':hbn' =>$d->no, ':agt' => $d->agent_id)) > 0){
+				$o->error[] = '[20000] - Shipment ' . $d->no . ' already exist!';
+				return $o;
+			}
+			$p->hbn = $d->no;
+			switch(ConnoteRange::checkReserved($d->agent_id, $d->no)){
+				case 1:
+					if(ImParcel::model()->count('ref = :ref', [':ref' =>$d->no]) > 0){
+						$o->error[] = '[20000] - Shipment ' . $d->no . ' already exist!';
+						return $o;
+					}else{
+						$p->ref = $d->no;
+					}
+				break;
+				case -9:
+					$o->error[] = '[20000] - Shipment ' . $d->no . ' out of allowed number range!';
+					return $o;
+				break;
+			}
+		}
+		//multipacks
+		if(!empty($d->packages)){
+			if(sizeof($d->packages) != $d->packs){//the packages infor must match the pkg
+				$o->error[] = '[90007] - Shipment '.$d->cust_ref.'  numbers of packages not match the packs';
+			}
+
+			$totalWeight=0;
+			$cbm=0;
+			$calculateCbm=0;
+			foreach ($d->packages as $index=>$pack){
+				if(empty($pack->weight)){
+					$o->error[] = '[90006] - Shipment '.$d->cust_ref.' weight of package No.'.($index+1).' are mandatory';
+				} else {
+					$length = 0;
+					if(isset($pack->depth))
+					{
+						$length= $pack->depth;
+					}elseif(isset($pack->length))
+					{
+						$length= $pack->length;
+					}
+
+					if(empty($pack->height)||empty($pack->width)||empty($length))
+                   {
+                   	$o->error[] = '[90006] - Shipment '.$p->cref.' length(depth), width and height of package No.'.($index+1).' are mandatory';
+                   	continue;
+                   }
+
+                   if(!is_numeric($pack->height)||!is_numeric($pack->width)||!is_numeric($length))
+                   {
+                   	$o->error[] = '[90006] - Shipment '.$p->cref.' length(depth), width and height of package No.'.($index+1).' can only be numbers';
+                   	continue;
+                   }
+
+                    if($pack->height<1||$pack->width<1||$length<1)
+                   {
+                   	$o->error[] = '[90006] - Shipment '.$p->cref.' length(depth), width and height of package No.'.($index+1).' is invalid';
+                   	continue;
+                   }
+
+
+
+					$p->packs[$index]=['weight'=>$pack->weight,'length'=>$length,
+						'height'=>isset($pack->height)?$pack->height:0,'width'=>isset($pack->width)?$pack->width:0,
+						'reference'=>isset($pack->reference)?$pack->reference:0];
+					if(!empty($pack->cbm)){
+						$p->packs[$index]['cbm'] = $pack->cbm;//M3
+					} elseif($p->packs[$index]['length']*$p->packs[$index]['width']*$p->packs[$index]['height']>0){
+						$p->packs[$index]['cbm']= number_format($p->packs[$index]['length']*$p->packs[$index]['width']*$p->packs[$index]['height']/1000000, 6, '.', '');
+					} else {
+						$p->packs[$index]['cbm']=0;
+					}
+				}
+				$totalWeight += $pack->weight;
+				$cbm += $p->packs[$index]['cbm'];
+				$calculateCbm += number_format($p->packs[$index]['length']*$p->packs[$index]['width']*$p->packs[$index]['height']/1000000, 6, '.', '');
+
+				if($p->packs[$index]['cbm']>0&&($p->packs[$index]['weight']/$p->packs[$index]['cbm'])>19320)
+                {
+                	$o->error[] = '[90006] - Shipment '.$p->cref.' invalid length(depth), width and height of package No.'.($index+1);
+                	continue;
+                }
+
+			}
+			$cbm=number_format(max($cbm, $calculateCbm)/$p->pkg, 6, '.', '');
+			$p->cbm = max($p->cbm, $cbm);
+			if(!empty($p->weight)&&!empty($totalWeight))
+			{
+				if(number_format($totalWeight,0,'.','')!=number_format($p->weight,0,'.',''))
+				{
+					$o->error[] = '[90007] - Shipment '.$d->cust_ref.' total '.number_format($totalWeight,0,'.','').' KG of packages not match the weight '.number_format($p->weight,0,'.','').' KG of this parcel';
+				}
+
+			}else
+			{
+				$p->weight= max($p->weight, round($totalWeight*100)/100, 0.01);
+			}
+		}
+
+		if($p->weight < 0.01){
+			$o->error[] = '[90006] - Shipment '.$d->cust_ref.' weight are mandatory';
+		}
+
+		if(empty($d->shipper))
+		{
+			$o->error[] = '[90006] - Shipment\'s shipper info are mandatory';
+		}
+
+
+		//check address
+		if(empty($d->consignee->suburb) && !empty($d->consignee->city)) $d->consignee->suburb = $d->consignee->city;
+		$d->consignee->state = Addr::checkAuState($d->consignee->state);
+		foreach(['consignee' => true, 'receiver' => false, 'shipper' => false] as $k=>$req){
+			if(!$req && empty($d->{$k})) continue;
+			${$k} = new Addr;
+			foreach ($d->{$k} as $k2 => $v){
+				if(is_object($v))
+				{
+					$o->error[] = '[20016] - Shipment ' . $d->cust_ref . ' '.$k.' '.$k2.' is not valid';
+					continue;
+				}
+				if($k2 == 'phone') $k2 = 'tel';
+				if($k2 == 'email' && !empty($v)){
+					$vs = explode(';', $v);
+					foreach ($vs as $vk => $vemail) {
+						$vemail = filter_var(trim($vemail), FILTER_VALIDATE_EMAIL);
+						if($vemail === false) $o->error[] = '[20006] - Shipment ' . $d->cust_ref . ' '.$k.' email is not valid';
+					}
+				}
+				${$k}->{$k2} = AppHelper::semiAngle(trim($v));
+			}
+			if($k == 'shipper'){
+				foreach(['name', 'address'] as $i => $k2){
+					if(!isset(${$k}->{$k2})) ${$k}->{$k2} = '';
+					if(empty(${$k}->{$k2})){
+						$o->error[] = '[2000'.($i+1).'] - Shipment '.$k.'.'.$k2.' is empty';
+					}else
+					{
+						if(AppHelper::hasUniChinese(${$k}->{$k2})){
+							$o->error[] = '[2000'.($i+1).'] - Shipment '.$k.'.'.$k2.' contains non-english character';
+						}
+
+						if(!preg_match('/[A-z]+/', ${$k}->{$k2})){
+							$o->error[] = '[2000'.($i+1).'] - Shipment '.$k.'.'.$k2.' is not valid';
+						}
+					}
+				}
+
+				foreach(['suburb', 'state', 'postcode','company'] as $i => $k2){
+					if(!isset(${$k}->{$k2})) ${$k}->{$k2} = '';
+					if(empty(${$k}->{$k2})){
+						
+					}else
+					{
+						if(AppHelper::hasUniChinese(${$k}->{$k2})){
+							$o->error[] = '[2000'.($i+1).'] - Shipment '.$k.'.'.$k2.' contains non-english character';
+						}
+					}
+				}
+
+				continue;
+			}
+
+			foreach(['name', 'address', 'suburb', 'state', 'postcode','company'] as $i => $k2){
+				if(!isset(${$k}->{$k2})) ${$k}->{$k2} = '';
+				if(empty(${$k}->{$k2})){
+					if($k2!="company")
+					{
+						$o->error[] = '[2000'.($i+1).'] - Shipment '.$k.'.'.$k2.' is empty';
+					}
+				}elseif(AppHelper::hasUniChinese(${$k}->{$k2})){
+					$o->error[] = '[2000'.($i+1).'] - Shipment '.$k.'.'.$k2.' contains non-english character';
+				}
+
+			}
+			if($k == 'consignee'){
+				if(empty($chargeCodeInfo->mdata['cm_address']))
+				{
+					if(empty(${$k}->auTel())&&!$noAddrVeri){
+						$o->error[] = '[20006] - Shipment ' . $d->cust_ref . ' consignee telephone is not valid';
+					}
+				}
+				if(!preg_match('/[A-z]+/', ${$k}->name)){
+					$o->error[] = '[20001] - Shipment ' . $d->cust_ref . ' consignee name is not valid';
+				}
+
+				if(empty(${$k}->country)&&!empty($d->is3PL)){
+					$o->error[] = '[20002] - Shipment ' . $d->cust_ref . ' country is not valid';
+				}
+			}
+		}
+
+		if(empty($d->consignee->email)&&empty($d->consignee->phone)&&!$noAddrVeri)
+		{
+			$o->error[] = '[20333] - Shipment ' . $d->cust_ref . ' email or phone number is required';
+		}
+
+		if(!empty($o->error)){
+			$o->success = false;
+			return $o;
+		}
+
+		$country = 'AU';
+		$hasCountry = 0;
+		if(isset($consignee->country)){
+			$hasCountry = 1;
+			foreach (['AU' => '/^australia$|^Au$|^AUS$/i', 'NZ' => '/New Zealand|^NZ$|^New/i'] as $key => $reg){
+				if(preg_match($reg, $consignee->country)){
+					$country = $key;
+					$hasCountry = 2;
+					break;
+				}
+			}
+
+			if($hasCountry==1)
+			{
+				$country = $consignee->country;
+			}
+
+			if(!in_array(strtoupper($consignee->country),SystemSetting::getCountrys()))
+			{
+				$o->error[] = '[20006] - Shipment ' . $d->cust_ref .' country '.$consignee->country.' is not supported. Please contact TLA';
+			}
+		}
+
+		$result = self::modifyAddress($consignee,$o,$country,$d->chargecode,$noAddrVeri);
+
+		if($result->isModified==1)
+		{
+			$o->data = new stdClass();
+			if(!empty($result->newAddress))
+			{
+				$o->old_address = $result->oldAddress;
+				$o->new_address = $result->newAddress;
+				$p->mdata['newAddress'] = $result->newAddress;
+				$p->mdata['oldAddress'] = $result->oldAddress;
+				$p->mdata['editStreetCode'] = $result->editCode;
+			}
+			$p->cbwf = $p->cbwf | 16;
+		}else if($result->isModified==2)
+		{
+			$p->cbwf = $p->cbwf | 16;
+			if(!empty($result->tempAddress))
+			{
+				$p->mdata['tempAddress'] = $result->tempAddress;
+			}
+			$p->mdata['oldAddress'] = $result->oldAddress;
+			$p->mdata['editStreetCode'] = $result->editCode;
+		}
+
+		if(!empty($d->is3PL))
+		{
+			$p->cbwf = $p->cbwf | ImParcel::CBWF_FOR_3PL;
+		}
+
+		// for filtering space in suburb
+		$suburbArr = explode(" ",$consignee->suburb);
+		$thisSubArr=[];
+		foreach ($suburbArr as $key => $value) {
+			if($value!="")
+			{
+				$thisSubArr[] = $value;
+			}
+		}
+
+		$consignee->suburb = join(" ",$thisSubArr);
+
+		//if(empty($chargeCodeInfo->mdata['cm_address'])||$p->weight>=5)
+		//{
+			if($country == 'AU' && !Postcode::validateAddress($consignee->suburb, $consignee->state, $consignee->postcode, $country)&&$noAddrVeri==false){
+				$o->error[] = '[90001] - Shipment suburb, state, postcode combination wrong';
+			}
+		//}
+
+		if(empty($consignee->country)){
+			$consignee->country = $country;
+		}
+
+		if(empty($d->chargecode) && $d->agent_id == 1206){ //ck1
+		 	$d->chargecode = '5813';
+		}
+
+		$p->cnor = $shipper;
+		$p->cnee = $consignee;
+		$p->status = 10;
+		$p->cref = isset($d->cust_ref)?$d->cust_ref:'';
+		if (!empty($d->dim)) {
+			$p->mdata['dim'] = json_decode(strtolower(json_encode($d->dim)), true);
+		}
+		$p->insurance = isset($d->insurance)?floatval($d->insurance):0;
+		$p->note = '';
+		$p->currency = 2;
+
+		if(!empty($p->cnee->company)&&mb_strlen($p->cnee->company,"utf-8")>5)//is B2B
+		{
+			$p->mdata['is_b2b'] = 1;
+		}else
+		{
+			$p->mdata['is_b2b'] = '';
+			unset($p->mdata['is_b2b']);
+		}
+
+		if(TntAPI::isMatchAmazon($p->cnee->postcode,$p->cnee->suburb,$p->cnee->address))
+		{
+			if(empty($p->cnee->company)||mb_strlen($p->cnee->company,"utf-8")<5)
+			{
+				$p->cnee->company="Amazon";
+			}
+			$p->mdata['is_b2b'] = 1;
+			$p->mdata['is_fba'] = 1;
+		}
+
+		if(!empty($receiver)) $p->receiver = $receiver;
+		if(!empty($fids['consol_id'])) $p->consol_id = $fids['consol_id'];
+		if(!empty($fids['man_id'])) $p->man_id = $fids['man_id'];
+		if(!empty($fids['man_id'])) $p->mdata['was_man_id'] = $fids['man_id'];
+
+		if(!empty($d->cust_invoice_ref)) $p->mdata['cust_invoice_ref'] = $d->cust_invoice_ref;
+		if(!empty($d->amazon_sid)) $p->mdata['amazon_shipment_ids'] = $d->amazon_sid;
+		if(!empty($d->importer_abn)) $p->mdata['importer_abn'] = $d->importer_abn;
+		if(!empty($d->vendor_id))    $p->mdata['vendor_id'] = $d->vendor_id;	
+		if(!empty($d->marks_and_numbers))    $p->mdata['sea_mark_number'] = $d->marks_and_numbers;	
+		if(!empty($d->chargecode)) $p->mdata['chargecode'] = $d->chargecode;
+		if(!empty($d->cust_ref1)) $p->mdata['cust_ref1']=$d->cust_ref1;
+		if(!empty($d->show_sku)) $p->mdata['show_sku']=1;
+		if(!empty($d->cust_ref2)){
+			if(is_array($d->cust_ref2)){
+				$p->mdata['cust_ref2'] = implode(" ", $d->cust_ref2);
+			} else {
+				$p->mdata['cust_ref2']=$d->cust_ref2;
+			}
+		}
+		if(!empty($d->amazon_shipment_ids))
+		{
+			$p->mdata['amazon_shipment_ids']=rtrim($d->amazon_shipment_ids,',');
+			$p->mdata['amazon_shipment_ids']=rtrim($d->amazon_shipment_ids,';');
+		}
+		if(!empty($d->amazon_po)){
+			// if(strlen($d->amazon_po) > 100){
+			// 	$o->error[] = '[90008] - Shipment '.$d->cust_ref.' amazon PO must be less than 100 characters';
+			// }
+			$p->mdata['amazon_po'] = rtrim($d->amazon_po, ',');
+			$p->mdata['amazon_po'] = rtrim($d->amazon_po, ';');
+		}
+
+		$o = self::checkAmazonPo($p,$o);
+
+		if(!empty($d->consignor_tin)){
+			if(strlen($d->consignor_tin) > 50){
+				$o->error[] = '[90008] - Shipment '.$d->cust_ref.' consignor TIN must be less than 50 characters';
+			}
+			$p->mdata['consignor_tin'] = $d->consignor_tin;
+		}
+
+		if(!empty($d->currency)){
+			if(!in_array($d->currency, ['USD','AUD'])){
+				$o->error[] = '[90016] - Shipment '.$d->cust_ref.' must use USD or AUD as currency';
+			}else{
+				$p->currency = $d->currency == 'AUD'? 1 : 2;
+			}
+		}
+		
+		if(!empty($d->clear)){
+			if(preg_match('/DDP/i', $d->clear)){
+				$p->bwf = $p->bwf | 64;
+				$p->bwf = $p->bwf & ~128;
+			} elseif(preg_match('/DDU/i', $d->clear)){
+				$p->bwf = $p->bwf | 128;
+				$p->bwf = $p->bwf & ~64;
+			}
+		}
+
+		if($p->agent_id == Org::ORGID_CLIENT_JIACHENG){ //JCEX dim hack
+			if($p->cbm == 0){
+				$p->cbm = 0.001350;
+				$p->mdata['dim']['w'] = 30;
+				$p->mdata['dim']['h'] = 15;
+				$p->mdata['dim']['d'] = 3;
+			}
+		}
+
+		//check item
+		if(!empty($d->items)){
+			foreach ($d->items as $i => $itm){
+				if(is_array($itm)){
+					$itm = (object) [
+						'type' => $itm[0],
+						'name' => $itm[1],
+						'name_zh' => $itm[2],
+						'brand' => $itm[3],
+						'model' => $itm[4],
+						'qty' => $itm[5],
+						'price' => sprintf('%0.2f', $itm[6]),
+						'hs' => empty($itm[7])? '' : $itm[7],
+						'sku' => empty($itm[8])? '' : $itm[8], 
+					];
+				}
+				$p->eitems['type'][$i] = "O";
+				$p->eitems['g'][$i] = (!empty($itm->name)) ? $itm->name : '';
+				$p->eitems['q'][$i] = $itm->qty;
+				if(!empty($itm->name_zh)) $p->eitems['g_zh'][$i] = $itm->name_zh;
+				if(!empty($itm->hs)) $p->eitems['hs'][$i] = $itm->hs;
+				$p->eitems['v'][$i] = !empty($itm->price) ? sprintf('%0.2f', $itm->price) : 0;
+				if(!empty($itm->sku)) $p->eitems['sku'][$i] = $itm->sku;
+				if ((!empty($itm->name) && AppHelper::hasUniChinese($itm->name)&&($p->cbwf & ImParcel::CBWF_FOR_3PL)==0)||preg_match('/[’]/', $itm->name)) {
+					$o->error[] = '[90003] - item name should only contain english characters';
+				}
+
+				// for import parcel , items : name , quantity and value are mandatory
+				if(empty($p->eitems['g'][$i]) || empty( $itm->qty) || empty($itm->price) || $itm->price == 0){
+					$o->error[] = '[90003] - Shipment items(name, quantity, value) are mandatory';
+				}
+			}
+			$p->mdata['client_entry'] = ['items' => $p->eitems];
+		}else{
+			$o->error[] = '[90002] - Shipment items are mandatory';
+		}
+		if (isset($d->dg)) {
+			$p->mdata['is_dg'] = $d->dg;
+		}
+
+		$rt = self::selectServiceByChargeCode($d->chargecode, $p, $country, $testOnly,$noDimRequired);
+		if($rt){
+			$o->error = array_merge($o->error, $rt->error);
+			$o->success = $rt->status;
+			$o->msg = $rt->msg;
+
+			if(empty($rt->no_courier) && empty($rt->courier) && $country === "AU"){
+				$o->error[] = $p->cref.' no any courier found';
+			}
+
+			if(!empty($rt->courier)){
+				//dangerous goods
+				if (isset($d->dg)) {
+					if(!empty($d->dg)){
+						if(!in_array($rt->courier->org_id,Org::$dg_org))
+						{
+							$o->error[] = '[90010] - ' . $d->cust_ref . ' only '.join(',',Org::$dg_org_name).' provide DG service';
+						}
+					}
+				}
+
+				if($rt->courier->org_id==Org::ORGID_COURIER_TLA)
+				{
+					if(empty($p->cnee->auPhone()))
+					{
+						$o->error[] = '[20006] - Shipment ' . $p->cref . ' consignee phone number is not valid';
+					}
+				}elseif($rt->courier->org_id!=Org::ORGID_COURIER_PICKUP)
+				{
+					if(strlen($p->cnee->name)>40)$o->error[] = '[20006] - Shipment ' . $p->cref . ' consignee name should be shorter than 40 characters';
+					if(strlen($p->cnee->company)>40)$o->error[] = '[20006] - Shipment ' . $p->cref . ' consignee company should be shorter than 40 characters';
+				}
+
+				//2021-08-25 Gero;Check can use pe_number
+				if(!empty($p->mdata['pe_number']))
+				{
+					$peo = PriceEnquiryService::checkPENumberCanUse($p,$rt->courier);
+					if(empty($peo->code))
+					{
+						$o->error[] = '[90400] - '.$peo->msg;
+					}
+				}
+
+			}
+		}else{
+			$o->error[] = '[30001] - ' . $d->cust_ref . ' unknown chargecode error';
+		}
+
+		if(empty($o->error)){
+			$o->success = true;
+			if(!$testOnly){
+				$p->cnor->save();
+				$p->cnee->save();
+				$p->cnor_id = $p->cnor->id;
+				$p->cnee_id = $p->cnee->id;
+				if(!empty($p->receiver)){
+					$p->receiver->save();
+					$p->receiver_id = $p->receiver->id;
+				}
+				$p->ddpt_id = empty($rt->courier->mdata['ddpt_id'])? 0 : $rt->courier->mdata['ddpt_id'];
+				if(empty($p->hbn))	$p->hbn = $p->genHbn();
+				if(!empty($d->direct) && in_array($d->direct, [1,3]))
+				{
+					$p->directCourier($d->direct);
+				}
+
+				if($p->save()){
+					if(ImParcel::model()->count('hbn = :hbn and status !=100', [':hbn' =>$p->hbn]) > 1){
+						$o->error[] = '[20000] - Shipment ' . $p->hbn . ' already exist!';
+						$p->status = 100;
+						$p->save();
+						$o->success = false;
+						return $o;
+					}
+
+					if(!empty($rt->courier)){
+						if(!$p->createCourierLabel($rt->courier, $country)){
+							if($p->agent_id == 3113 && $rt->courier->org_id == 115){ //saicheng fastway hack
+								$rt->courier = OrgRate::model()->findByPk(101);
+								$p->createAuPostLabel('AMQ', 101);
+								$o->msg = 'Success';
+								file_put_contents(Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR . 'shipmentapi' . DIRECTORY_SEPARATOR .'shipment_api_'  . date('Y-m-d') . '.log', date('Y-m-d H:i:s').' fastway fallback to amq, '.$p->hbn."\n", FILE_APPEND);
+							}else{
+								$o->error[] = '[60002] - ' . $p->hbn . '- Failed to create Label for: '. $rt->courier->org_id;
+								$p->status = 100;
+								$p->save();
+								$o->success = false;
+							}
+						}else{
+							$surcharge=$p->getChargeByChargecode(SystemSetting::getTLDChargecode('checkNormalChargecode'),false,null,true,false,true);
+							if(!empty($surcharge['OSCharge']))
+							{
+								$p->mdata['is_oversize'] = 1;
+							}else
+							{
+								$p->mdata['is_oversize'] = 0;
+							}
+							$p->updateMeta();
+							$o->msg = 'Success';
+						}
+					}
+					$o->connote = $p->hbn;
+					if (!empty($d->mkv)) {
+						$p->_mkv = (array) $d->mkv;
+						Meta::saveAll($p);
+					}
+					if(!empty($p->cref)) $o->custref = $p->cref;
+					if(!empty($p->ref)) $o->ref = $p->ref;
+					if(!empty($p->note)) $o->lref = $p->note;
+					$longRef = $p->getParcelLongRef($rt->courier->org_id);
+					if(!empty($longRef)) $o->longref= $longRef;
+
+					$barcode = $p->getParcelBarcode($rt->courier->org_id);
+					if(!empty($barcode)&&!empty($d->barcode)) $o->barcode= $barcode;
+				}else{
+					$o->success = false;
+					$msg = '';
+					foreach ($p->getErrors() as $e){
+						$msg .= implode('; ', $e);
+					}
+					$o->error[] = '[50001] - Failed to save parcel : '.$msg;
+				}
+			}
+		}else{
+			$o->success = false;
+		}
+
+		return $o;
+	}
+
+	public static function checkShipment(&$p,$packagesInfo=[])
+	{
+		$o = new stdClass;
+		$o->success = true;
+		$o->error = [];
+		$o->msg = '';
+		$courier = 0;
+		$consignee = $p->cnee;
+		
+		if(!empty($p->cnee->company)&&mb_strlen($p->cnee->company,"utf-8")>5)//is B2B
+		{
+			$p->mdata['is_b2b'] = 1;
+		}else
+		{
+			$p->mdata['is_b2b'] = '';
+			unset($p->mdata['is_b2b']);
+		}
+
+
+		foreach(['consignee' => true] as $k=>$req)
+		{
+			foreach(['name', 'address', 'suburb', 'state', 'postcode'] as $i => $k2)
+			{
+				if(!isset(${$k}->{$k2})) ${$k}->{$k2} = '';
+				if(empty(${$k}->{$k2})){
+					$o->error[] = '[2000'.($i+1).'] - Shipment '.$k.'.'.$k2.' is empty';
+				}elseif(AppHelper::hasUniChinese(${$k}->{$k2})){
+					$o->error[] = '[2000'.($i+1).'] - Shipment '.$k.'.'.$k2.' contains non-english character';
+				}
+			}
+
+			if($k == 'consignee'){
+				if(empty(${$k}->auTel())){
+					$o->error[] = '[20006] - Shipment ' . $p->cref . ' consignee telephone is not valid';
+				}
+				// if(!preg_match('/[A-z]+/', ${$k}->name)){
+				// 	$o->error[] = '[20001] - Shipment ' . $p->cref . ' consignee name is not valid';
+				// }
+
+				if(empty(${$k}->country)){
+					$o->error[] = '[20002] - Shipment ' . $p->cref . ' country is not valid';
+				}
+			}
+		}
+
+		$country = 'AU';
+		$hasCountry = 0;
+		if(isset($consignee->country)){
+			$hasCountry = 1;
+			foreach (['AU' => '/^australia$|^Au$|^AUS$/i', 'NZ' => '/New Zealand|^NZ$|^New/i'] as $key => $reg){
+				if(preg_match($reg, $consignee->country)){
+					$country = $key;
+					$hasCountry = 2;
+					break;
+				}
+			}
+
+			if($hasCountry==1)
+			{
+				$country = $consignee->country;
+			}
+		}
+		if($country == 'AU' && !Postcode::validateAddress($consignee->suburb, $consignee->state, $consignee->postcode, $country)){
+				$o->error[] = '[90001] - Shipment suburb, state, postcode combination wrong';
+		}
+
+		$o = self::checkAmazonPo($p,$o);
+
+        if(empty($p->packs))
+        {
+        	$d = new stdClass();
+        	if(!empty($packagesInfo[$p->cref]))
+       		{
+            	$d->packages = $packagesInfo[$p->cref];
+        	}else
+        	{
+	            $sp = ShipmentPackage::model()->find('cref =:cref',[":cref"=>$p->cref]);
+	            if(!empty($sp))
+	            {
+	            	$thisPackages = json_decode($sp->packages);
+	                $d->packages = $thisPackages;
+	            }
+        	}
+
+            //multipacks
+            if(!empty($d->packages)){
+                if(sizeof($d->packages) != $p->pkg){//the packages infor must match the pkg
+                    $o->error[] = '[90007] - Shipment '.$p->cref.'  numbers of packages not match the packs';
+                }
+
+                $totalWeight=0;
+                $cbm=0;
+                $calculateCbm=0;
+                foreach ($d->packages as $index=>$pack){
+                    if(empty($pack->weight)){
+                        $o->error[] = '[90006] - Shipment '.$p->cref.' weight of package No.'.($index+1).' are mandatory';
+                    } else {
+                        $length = 0;
+                        if(isset($pack->depth))
+                        {
+                            $length= $pack->depth;
+                        }elseif(isset($pack->length))
+                        {
+                            $length= $pack->length;
+                        }
+                        if(empty($pack->height)||empty($pack->width)||empty($length))
+                        {
+                        	$o->error[] = '[90006] - Shipment '.$p->cref.' length(depth), width and height of package No.'.($index+1).' are mandatory';
+                        	continue;
+                        }
+
+                        if(!is_numeric($pack->height)||!is_numeric($pack->width)||!is_numeric($length))
+                        {
+                        	$o->error[] = '[90006] - Shipment '.$p->cref.' length(depth), width and height of package No.'.($index+1).' can only be numbers';
+                        	continue;
+                        }
+
+                        if($pack->height<1||$pack->width<1||$length<1)
+	                    {
+	                   		$o->error[] = '[90006] - Shipment '.$p->cref.' length(depth), width and height of package No.'.($index+1).' is invalid';
+	                   		continue;
+	                    }
+
+                       $p->packs[$index]=['weight'=>$pack->weight,'length'=>$length,
+                            'height'=>isset($pack->height)?$pack->height:0,'width'=>isset($pack->width)?$pack->width:0,
+                            'reference'=>isset($pack->reference)?$pack->reference:0];
+                        if(!empty($pack->cbm)){
+                            $p->packs[$index]['cbm'] = $pack->cbm;//M3
+                        } elseif($p->packs[$index]['length']*$p->packs[$index]['width']*$p->packs[$index]['height']>0){
+                           $p->packs[$index]['cbm']= number_format($p->packs[$index]['length']*$p->packs[$index]['width']*$p->packs[$index]['height']/1000000, 6, '.', '');
+                        } else {
+                            $p->packs[$index]['cbm']=0;
+                        }
+                    }
+                    $totalWeight += $pack->weight;
+                    $cbm += $p->packs[$index]['cbm'];
+                    $calculateCbm += number_format($p->packs[$index]['length']*$p->packs[$index]['width']*$p->packs[$index]['height']/1000000, 6, '.', '');
+                }
+                $cbm=number_format(max($cbm, $calculateCbm)/$p->pkg, 6, '.', '');
+                $p->cbm = max($p->cbm, $cbm);
+               	if(!empty($p->weight)&&!empty($totalWeight))
+				{
+					if(number_format($totalWeight,0,'.','')!=number_format($p->weight,0,'.',''))
+					{
+						$o->error[] = '[90007] - Shipment '.$d->cust_ref.' total '.number_format($totalWeight,0,'.','').' KG of packages not match the weight '.number_format($p->weight,0,'.','').' KG of this parcel';
+					}
+
+				}else
+				{
+					$p->weight= max($p->weight, round($totalWeight*100)/100, 0.01);
+				}
+
+            }
+        }
+
+
+
+		if(!empty($o->error))
+		{
+			$o->success = false;
+		}
+
+		return $o;
+
+	}
+
+	public static function checkAmazonPo($p,$o)
+	{
+			if (!empty($p->mdata['amazon_po']))
+			{
+				if(preg_match('/\s/', $p->mdata['amazon_po']))
+				{
+					$o->error[] = '[90005] - Amazon PO can not be with space';
+					return $o;
+				}
+			}
+			if (!empty($p->mdata['amazon_shipment_ids']))
+			{
+				if(preg_match('/\s/', $p->mdata['amazon_shipment_ids']))
+				{
+					$o->error[] = '[90005] - FBA ID can not be with space';
+					return $o;
+				}
+			}
+
+
+		if (!empty($p->mdata['amazon_po']))
+		{
+			$amazonMsg = '[90005] - Number of amazon po must equals the number of amazon shipment id';
+			if (!empty($p->mdata['amazon_shipment_ids'])) {
+				$amazonPoSperateNumber = preg_match_all('/[.,;]/', trim($p->mdata['amazon_po']));
+				$amazonIdsSperateNumber = preg_match_all('/[.,;]/', trim($p->mdata['amazon_shipment_ids']));
+				$amazonPoArr = preg_split('/[.,;]/', trim($p->mdata['amazon_po']));
+				$amazonShipmentIds = preg_split('/[.,;]/', trim($p->mdata['amazon_shipment_ids']));
+				if(count($amazonPoArr)!=count($amazonShipmentIds))
+				{
+					$o->error[] = $amazonMsg;
+				}
+
+				foreach ($amazonPoArr as $key => $amazonPo)
+				{
+					if(!preg_match('/^[A-Zaa-z\d]{8,9}$/', $amazonPo)&&!preg_match('/^WI[\d]{8}$/', $amazonPo)&&!preg_match('/^OC[\d]{12}$/', $amazonPo)&&!preg_match('/^RVG|SZ|SH/', $amazonPo))
+					{
+						$o->error[] = '[90005] - Amazon PO format is wrong: '.$amazonPo;
+					}
+				}
+				$checkSize = array_unique($amazonPoArr);
+				if(count($checkSize)!=count($amazonPoArr))
+				{
+					$o->error[] = '[90005] - Amazon POs are repeated';
+				}
+
+				foreach ($amazonShipmentIds as $key => $amazonShipmentId)
+				{
+					if(!preg_match('/FBA/', $amazonShipmentId)&&!preg_match('/^WI[\d]{8}$/', $amazonPo)&&!preg_match('/^OC[\d]{12}$/', $amazonPo)&&!preg_match('/^RVG|SZ|SH/', $amazonPo))
+					{
+						$o->error[] = '[90005] - FBA ID format is wrong: '.$amazonShipmentId;
+					}
+				}
+
+				$checkSize = array_unique($amazonShipmentIds);
+				if(count($checkSize)!=count($amazonShipmentIds))
+				{
+					$o->error[] = '[90005] - FBA IDs are repeated';
+				}
+			}else
+			{
+				$o->error[] = $amazonMsg;
+			}
+		}else if(empty($p->mdata['amazon_po'])&&!empty($p->mdata['amazon_shipment_ids']))
+		{
+			$o->error[] = '[90005] - Number of amazon po must equals the number of amazon shipment id';
+		}
+		return $o;
+	}
+	public static function funcAfterSelectServiceByChargeCode($o,$p,$rt,$d=false,$testOnly = false)
+	{
+		$country = $p->cnee->country;
+		if($rt){
+			$o->error = array_merge($o->error, $rt->error);
+			$o->success = $rt->status;
+			$o->msg = $rt->msg;
+			if(empty($rt->no_courier) && empty($rt->courier) && $country === "AU"){
+				$o->error[] = $p->cref.' no any courier found';
+			}
+
+			if(!empty($rt->courier)){
+				//dangerous goods
+				if (!empty($d)&&isset($d->dg)) {
+					if(!empty($d->dg)){
+						if(!in_array($rt->courier->org_id,Org::$dg_org))
+						{
+							$o->error[] = '[90010] - ' . $d->cust_ref . ' only '.join(',',Org::$dg_org_name).' provide DG service';
+						}
+					}
+				}
+
+				if($rt->courier->org_id==Org::ORGID_COURIER_TLA)
+				{
+					if(empty($p->cnee->auPhone()))
+					{
+						$o->error[] = '[20006] - Shipment ' . $p->cref . ' consignee phone number is not valid';
+					}
+				}elseif($rt->courier->org_id!=Org::ORGID_COURIER_PICKUP)
+				{
+					if(!in_array($rt->courier->code,ImportChargeCode::AUPOST_CODES))
+					{
+						if(strlen($p->cnee->address)>60)$o->error[] = '[20006] - Shipment ' . $p->cref . ' consignee address should be shorter than 60 characters';
+					}
+
+					if(strlen($p->cnee->name)>40)$o->error[] = '[20006] - Shipment ' . $p->cref . ' consignee name should be shorter than 40 characters';
+					if(strlen($p->cnee->company)>40)$o->error[] = '[20006] - Shipment ' . $p->cref . ' consignee name should be shorter than 40 characters';
+				}
+
+				if (!empty($d)&&empty($p->packs)) {
+					if(!empty($rt->courier->mdata['dimension_requiring']))//&&$p->agent_id!=Org::ORGID_CLIENT_AOCHEN)
+					{
+						$o->error[] = '[90010] - ' . $d->cust_ref . ' courier '.$rt->courier->org_id." is dimension requiring";
+					}
+				}
+
+				//2022-07-15 Gero;Check can use pe_number
+				if(!empty($p->mdata['pe_number']))
+				{
+					$peo = PriceEnquiryService::checkPENumberCanUse($p,$rt->courier);
+					if(empty($peo->code))
+					{
+						$o->error[] = '[90400] - '.$peo->msg;
+					}
+				}
+
+			}
+		}else{
+			$o->error[] = '[30001] - ' . $p->cref . ' unknown chargecode error';
+		}
+
+		if(empty($o->error)){
+			$o->success = true;
+			if(!$testOnly){
+				$p->cnor->save();
+				$p->cnee->save();
+				$p->cnor_id = $p->cnor->id;
+				$p->cnee_id = $p->cnee->id;
+				if(!empty($p->receiver)){
+					$p->receiver->save();
+					$p->receiver_id = $p->receiver->id;
+				}
+				$p->ddpt_id = empty($rt->courier->mdata['ddpt_id'])? 0 : $rt->courier->mdata['ddpt_id'];
+				if(empty($p->hbn))	$p->hbn = $p->genHbn();
+				if(!empty($d)&&!empty($d->direct) && in_array($d->direct, [1,3]))
+				{
+					$p->directCourier($d->direct);
+				}
+
+				if($p->save()){
+					if(!empty($rt->courier)){
+						if(!$p->createCourierLabel($rt->courier, $country)){
+							if($p->agent_id == 3113 && $rt->courier->org_id == 115){ //saicheng fastway hack
+								$rt->courier = OrgRate::model()->findByPk(101);
+								$p->createAuPostLabel('AMQ', 101);
+								$o->msg = 'Success';
+								file_put_contents(Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR . 'shipmentapi' . DIRECTORY_SEPARATOR .'shipment_api_'  . date('Y-m-d') . '.log', date('Y-m-d H:i:s').' fastway fallback to amq, '.$p->hbn."\n", FILE_APPEND);
+							}else{
+								$o->error[] = '[60002] - ' . $p->hbn . '- Failed to create Label for: '. $rt->courier->org_id;
+								$p->status = 100;
+								$p->save();
+								$o->success = false;
+							}
+						}else{
+							$surcharge=$p->getChargeByChargecode(SystemSetting::getTLDChargecode('checkNormalChargecode'),false,null,true,false,true);
+							if(!empty($surcharge['OSCharge']))
+							{
+								$p->mdata['is_oversize'] = 1;
+							}else
+							{
+								$p->mdata['is_oversize'] = 0;
+							}
+							$p->updateMeta();
+							$o->msg = 'Success';
+						}
+					}
+					$o->connote = $p->hbn;
+					if (!empty($d)&&!empty($d->mkv)) {
+						$p->_mkv = (array) $d->mkv;
+						Meta::saveAll($p);
+					}
+					if(!empty($p->cref)) $o->custref = $p->cref;
+					if(!empty($p->ref)) $o->ref = $p->ref;
+					if(!empty($p->note)) $o->lref = $p->note;
+					$longRef = $p->getParcelLongRef($rt->courier->org_id);
+					if(!empty($longRef)) $o->longref= $longRef;
+
+					$barcode = $p->getParcelBarcode($rt->courier->org_id);
+					if(!empty($d)&&!empty($barcode)&&!empty($d->barcode)) $o->barcode= $barcode;
+				}else{
+					$o->success = false;
+					$msg = '';
+					foreach ($p->getErrors() as $e){
+						$msg .= implode('; ', $e);
+					}
+					$o->error[] = '[50001] - Failed to save parcel : '.$msg;
+				}
+			}
+		}else{
+			$o->success = false;
+		}
+
+		return $o;
+	}
+
+	public static function selectServiceByChargeCode($chargeCode, &$shipment, $country='AU', $testOnly=false,$noDimRequired=false){ //NZ means new zealand service
+		$o = new stdClass;
+		$o->status = false;
+		$o->error = [];
+		$o->msg = '';
+		$courier = 0;
+
+		$valid_dim_weight = function($dim, $org_rate, $weight){
+			$temp = array_values($dim);
+			sort($temp);
+			return $org_rate->zone_id == 2? ($temp[0] <= 0.5 && $temp[1] <= 13 && $temp[2] <= 24 && $weight <= 0.25) : ($temp[0] <= 2 && $temp[1] <= 26 && $temp[2] <= 36 && $weight <= 0.50);
+		};
+
+		$chargeCodeInfo = ImportChargeCode::model()->find('chargecode = :ccode', [':ccode' => $chargeCode]);
+
+		if(empty($chargeCodeInfo)){
+			$o->error[] = '[60005] - ' . 'Invalid charge code : ' . $chargeCode;
+			return $o;
+		}
+
+		if($chargeCodeInfo->status != 1){
+			$o->error[] = '[40001] - Chargecode : ' . $chargeCode . ' has been disabled';
+			return $o;
+		}
+		//adding dvalue check for eslink,chargecode 3600;
+		if (in_array($chargeCode, [3600])) {
+			if (($shipment->currency == 1 && $shipment->dvalue >= 1000)||($shipment->currency !=1 && $shipment->dvalue >= 1000 * Currency::getExrate()[0])) {
+				$o->error[] = '[90005] - Shipment '.$d->cust_ref.' value is Over AUS $1000';
+			}
+		}
+
+		$chargeCodeSetUp = $chargeCodeInfo->hasChargeSetUp($shipment);
+		if(!$chargeCodeSetUp['status']){
+			$o->error[] = '[90010] - Shipment '.$chargeCodeSetUp['msg'];
+			return $o;
+		}
+
+		if(!empty($chargeCodeInfo->mdata['no_courier']) && empty($chargeCodeInfo->couriersObj)) {
+			$o->no_courier = true;
+			if(empty($shipment->hbn)){
+				$o->error[] = '[90009] - Please supply the connote no for this custom only service';
+			}else{
+				$shipment->ref = $shipment->hbn;
+				$shipment->cbwf = $shipment->cbwf|4096;
+				if(empty($o->error)){
+					$o->status = true;
+				}
+			}
+			return $o;
+		}
+
+		$poboxerror = false;
+		if(Addr::checkIsPoBox($shipment->cnee->address)){
+			foreach ($chargeCodeInfo->couriersObj as $key => $courier){
+				$thisCourier = OrgRate::model()->findByPk($courier);
+				if(!in_array($thisCourier->code, ImportChargeCode::AUPOST_CODES)){ // , ImportChargeCode::STARTRACK_SYDNEY, ImportChargeCode::STARTRACK_MEL		
+					unset($chargeCodeInfo->couriersObj[$key]);
+					$poboxerror = true;
+				}
+			}
+		}
+		if(empty($chargeCodeInfo->couriersObj)){
+			$o->error[] = $poboxerror? '[60001] - Po Box not supported' : '[60004] - ' . 'Charge code : ' . $chargeCode . ' has no courier set';
+			return $o;
+		}
+
+		// 2022-09-27 check oversize and FBA after 10.1
+		if(date('Y-m-d')>=SystemSetting::getTLDChargecode('startDate')&&date('Y-m-d')<=SystemSetting::getTLDChargecode('endDate'))
+		{
+			if(in_array($chargeCodeInfo->chargecode,SystemSetting::getTLDChargecode('FBA'))&&!in_array($shipment->agent_id,SystemSetting::getTLDChargecode('FBAIgnoreAgentIds')))
+			{
+				$o->error[] = '[99999] - TLD Service doesn\'t accept FBA parcels after '.SystemSetting::getTLDChargecode('startDate');
+				return $o;
+			}else if(in_array($chargeCodeInfo->chargecode,SystemSetting::getTLDChargecode('Normal'))&&!in_array($shipment->agent_id,SystemSetting::getTLDChargecode('NormalIgnoreAgentIds'))&&empty($shipment->mdata['pe_number']))
+			{
+				$surcharge=$shipment->getChargeByChargecode(SystemSetting::getTLDChargecode('checkNormalChargecode'),false,null,true,false,true,true);
+				if(!empty($surcharge['OSCharge']))
+				{
+					$o->error[] = '[99999] - TLD Service doesn\'t accept oversize parcels after '.SystemSetting::getTLDChargecode('startDate');
+					return $o;
+				}
+			}
+		}
+		//
+
+
+		$selectedOrgRates = [];
+		$selectedOrg = [];
+		$isFoundTLD = false;
+		$isFoundCourier = false;
+		$otherCourierDelivery = false;
+		$isMixTLDCourier = false;
+		$weightCheckMsg = [];
+		$pe = null;
+		$peDepotId = 0;
+		if(!empty($shipment->mdata['pe_number']))
+		{
+			$pe = PriceEnquiry::model()->find("code = :code",[':code'=>$shipment->mdata['pe_number']]);
+			if(empty($pe))
+			{
+				$o->error[] = '[90400] - PE number is not existed in our system.';
+				return $o;
+			}else
+			{
+				$peDepotId = PriceEnquiry::listDepotId[$pe->depot];
+			}
+		}
+		
+		foreach ($chargeCodeInfo->couriersObj as $courier){
+			$orgRate = OrgRate::model()->findByPk($courier);
+			if(empty($orgRate) || empty($orgRate->org_id)) continue;
+			$selectedOrg[$orgRate->org_id] = $orgRate->org_id;//save for checking whether it is mix TLD and courier
+
+
+			if(!empty($shipment->mdata['is_dg'])&&empty($orgRate->mdata['can_dg']))
+			{
+				$weightCheckMsg[] = $shipment->cref . '- can not be DG';
+				continue;
+			}
+
+			if(!empty($chargeCodeInfo->mdata['eparcel_single']) && $shipment->pkg > 1 && in_array($courier, [101, 110, 111]))
+			{
+				$weightCheckMsg[] = $shipment->cref . '- eparcel single only';
+				continue;
+			}
+
+			if($shipment->pkg > 1 && in_array($courier, [684,686,687,688,10285,10288,10291,10294,10801]))
+			{
+				$weightCheckMsg[] = $shipment->cref . '- eparcel single only';
+				continue;
+			}
+
+			if(!empty($orgRate->mdata['business_type']))//B2B or B2C
+			{
+				if($orgRate->mdata['business_type']==OrgRate::B2C_TYPE&&!empty($shipment->mdata['is_b2b']))
+				{
+					$weightCheckMsg[] = $shipment->cref . '- shipment is B2B ';
+					continue;
+				}else if($orgRate->mdata['business_type']==OrgRate::B2B_TYPE&&empty($shipment->mdata['is_b2b']))
+				{
+					$weightCheckMsg[] = $shipment->cref . '- shipment is B2C ';
+					continue;
+				}
+			}
+			
+			$maxWeight = isset($orgRate->org->extra['maxwt'])? $orgRate->org->extra['maxwt'] : 0;
+			$maxDim = isset($orgRate->org->extra['maxdim'])? $orgRate->org->extra['maxdim'] : 0; // by CM for any maximum of D, H , W
+			$maxDim = !empty($orgRate->mdata['maxdim'])? $orgRate->mdata['maxdim'] : $maxDim; // by CM for any maximum of D, H , W
+			$maxWeight = !empty($orgRate->mdata['maxwt'])? $orgRate->mdata['maxwt'] : $maxWeight;
+			$limitCBM = isset($orgRate->org->extra['limit_cbm'])? $orgRate->org->extra['limit_cbm'] : 0;
+			$limitCBM = !empty($orgRate->mdata['limit_cbm'])? $orgRate->mdata['limit_cbm'] : $limitCBM;
+
+			$limitPCS = isset($orgRate->mdata['limit_pcs'])? $orgRate->mdata['limit_pcs'] : 0;
+
+
+			$units = $shipment->pkg <= 0 ? 1 : $shipment->pkg;
+			$chargeWeight = $shipment->courierWeight();
+
+			if(!empty($orgRate->mdata['plt_pricing']))
+			{
+				$chargeWeight = empty($shipment->mdata['amzon_pallet'])?0:$shipment->mdata['amzon_pallet'];
+			}
+
+			if(!empty($limitPCS)&&$units>$limitPCS)
+			{
+				$weightCheckMsg[] = $shipment->cref . '- max pieces over limit';
+				continue;
+			}
+
+			if(empty($shipment->packs))//if empty packages data, just compare the whole shipment with limit
+			{
+				if(!empty($limitCBM))
+				{
+					if(!empty($maxWeight)&&$shipment->weight>=$maxWeight)
+					{
+						$weightCheckMsg[] = $shipment->cref . '- max weight over limit';
+						continue;
+					}
+
+					if($shipment->getTotalCBM()>$limitCBM)
+					{
+						$weightCheckMsg[] = $shipment->cref.' with '.$shipment->getTotalCBM().' CBM is over '.$limitCBM.' CBM';
+						continue;
+					}
+				}
+			}else
+			{
+				if(!empty($shipment->packs) && $maxWeight > 0)
+				{
+					foreach ($shipment->packs as $i=>$pack){
+						$cbm = $pack['length']*$pack['width']*$pack['height']/1000000;
+						if($cbm>$limitCBM)
+						{
+							$weightCheckMsg[] = $shipment->hbn.'- packs index:'.($i+1). ' volume '.number_format($cbm,4,'.','').' cbm over '.$limitCBM.' CBM limit';
+							continue 2;
+						}
+
+						if($pack['weight']>$maxWeight){
+							$isWeightValid=false;
+							$weightCheckMsg[] = $shipment->hbn.'- packs index:'.($i+1). ' weight '.$pack['weight'].'Kg over limit';
+							continue 2;
+						}
+
+					}
+				}
+			}
+
+
+			if($shipment->insurance>0)
+			{
+				if(!in_array($orgRate->code, [ImportChargeCode::SYDNEY_AUPOST_ID_CODE,ImportChargeCode::AUPOST_EXPRESS_CODE,ImportChargeCode::MELBOUNE_AUPOST_ID_CODE, ImportChargeCode::BRISBANE_AUPOST_ID_CODE, ImportChargeCode::PERTH_AUPOST_ID_CODE]))
+				{
+					$weightCheckMsg[] = $shipment->cref.'can\'t have insurance for courier '.$orgRate->org_id;
+					continue;
+				}
+			}
+
+			//check letter
+			if($orgRate->org_id == Org::ORGID_COURIER_AUSLETTER){
+				if($shipment->pkg > 1){
+					$weightCheckMsg[] = $shipment->hbn . '- letter only support 1 Pack !';
+					continue;
+				}
+
+				if(!empty($shipment->mdata['dim']['w']) && !empty($shipment->mdata['dim']['h']) && !empty($shipment->mdata['dim']['d'])){
+					$letter_dim=[
+						$shipment->mdata['dim']['w'], 
+						$shipment->mdata['dim']['h'],
+						$shipment->mdata['dim']['d'],
+					];
+				} elseif(isset($shipment->packs[0])){
+					//we can check the packs[0] for width, length,height;
+					$letter_dim = [
+						$shipment->packs[0]['width'],
+						$shipment->packs[0]['length'],
+						$shipment->packs[0]['height'],
+					];
+				} else {
+					$weightCheckMsg[] = 'Letter Service Require h d w';
+					continue;
+				}
+
+				if(!$valid_dim_weight($letter_dim, $orgRate, $shipment->weight)){
+					$weightCheckMsg[] = $shipment->hbn.'-letter dim over size';
+					continue;
+				}
+			}
+			if($maxDim > 0){
+				foreach(['w', 'h', 'd'] as $k){
+					${$k} = isset($shipment->mdata['dim'][$k])? $shipment->mdata['dim'][$k] : 0;
+				}
+				$sMaxDim = max($w, $h, $d);
+				if($sMaxDim > $maxDim){
+					$weightCheckMsg[] = '[60001] - ' . $shipment->hbn . '- max dimension over  ' . $orgRate->org->name . ' limit';
+					continue;
+				}
+			}
+			if(!empty($shipment->packs) && $maxDim > 0){
+			
+				foreach ($shipment->packs as $pack){
+					if(max($pack['width'], $pack['height'], $pack['length']) > $maxDim){
+						$weightCheckMsg[] = $shipment->hbn.'-dim over '. $orgRate->org_id . '(' . $orgRate->org->name . ')' . ' max Requirement:'.$maxDim.'cm | ';
+						continue 2;
+					}
+				}
+			}
+
+			if((!empty($p->mdata['is_fba'])||TntAPI::isMatchAmazon($shipment->cnee->postcode,$shipment->cnee->suburb,$shipment->cnee->address))&&(preg_match('/tnt|toll|allied|hunter/i', $orgRate->code)||(in_array($orgRate->org_id, [Org::ORGID_COURIER_AUPOST,Org::ORGID_COURIER_FASTWAY])&&$shipment->agent_id==Org::ORGID_CLIENT_AUSTWAY)))
+			{
+				$weightCheckMsg[] = '[60001] - ' . $orgRate->org_id . ' can\'t service for FBA parcels';
+				continue;
+			}
+
+
+			// 2022-09-27 check oversize and overweight for Toll
+			if(date('Y-m-d')>=SystemSetting::getTLDChargecode('startDate')&&date('Y-m-d')<=SystemSetting::getTLDChargecode('endDate'))
+			{
+				if(preg_match('/'.SystemSetting::getTLDChargecode('courier_oversize_overweight_code').'/i',$orgRate->code)&&!in_array($shipment->agent_id,SystemSetting::getTLDChargecode('courierIgnoreAgentIds')))
+				{
+					$surcharge=$shipment->getChargeByChargecode(SystemSetting::getTLDChargecode('checkNormalChargecode'),false,null,true,false,true);
+					if(!empty($surcharge['MHCharge']))
+					{
+						$weightCheckMsg[] = '[99999] - ' . $orgRate->org_id . 'oversize/overweight no courier found';
+						continue;
+					}
+				}
+			}
+
+
+			if (empty($shipment->packs)) {
+				if(!empty($orgRate->mdata['dimension_requiring'])&&!$noDimRequired)
+				{
+					$weightCheckMsg[] = '[90010] - ' . $orgRate->org_id . '  is dimension requiring';
+					continue;
+				}
+			}
+
+
+
+			$selectedOrgRates[] = $orgRate;
+		}
+
+
+		if(count($selectedOrg)>1)
+		{
+			$isFoundNotToll = false;
+			foreach ($selectedOrg as $key => $value) {
+				if($value==Org::ORGID_COURIER_TLA) $isFoundTLD = true;
+				if($value!=Org::ORGID_COURIER_TLA) $isFoundCourier = true;
+			}
+
+			if($isFoundTLD&&$isFoundCourier)
+			{
+				$isMixTLDCourier = true;
+			}
+
+			$tolls = [];
+			foreach ($selectedOrgRates as $key => $orgRate) {
+				if(preg_match('/TOLL/i', $orgRate->code))
+				{
+					$tolls[] = $orgRate;
+					unset($selectedOrgRates[$key]);
+				}else
+				{
+					//$isFoundNotToll = true;//2022-11-23 when WA MIX chargecode, don't use TOLL
+				}
+			}
+
+			if($isFoundNotToll&&preg_match('/6\d{3}/',$shipment->cnee->postcode))
+			{
+
+			}else
+			{
+				if(!empty($tolls))
+				{
+					$selectedOrgRates = array_merge($selectedOrgRates,$tolls);
+				}
+			}
+		}
+
+		if(empty($selectedOrgRates)){
+			$o->error[] = '[60001] - ' . $shipment->hbn . ' failed : ' . implode(', ', $weightCheckMsg);
+			return $o;
+		}
+		$cheapOrgRate = null;
+		//cost check
+
+		$minCost = 999999999; // in order to get minimum one
+		$minDistance = 999999;// in order to get the solution with shortest distance
+		$cheapOrgRate = 0;
+		$getCheapOrgRateError = '';
+		$rateSize = count($selectedOrgRates);
+		foreach ($selectedOrgRates as $orgrate){
+			if(!in_array($orgrate->org_id, [Org::ORGID_COURIER_AUPOST,Org::ORGID_COURIER_FASTWAY]))
+			{
+				$orgrate->priority = 2;
+
+				if(in_array($orgrate->org_id, [Org::ORGID_COURIER_TNT,Org::ORGID_COURIER_TNT_TOP]))
+				{
+					$orgrate->priority = 1;
+				}
+			}
+			//if pe is not empty, filter all orgrates are not in the same pedepotid or that are not the TLD service
+			if(!empty($pe))
+			{
+				if($orgrate->org_id!=Org::ORGID_COURIER_TLA&&$orgrate->org_id!=Org::ORGID_COURIER_TOLL_IPEC)
+				{
+					continue;
+				}
+
+				if(!empty($orgrate->mdata['ddpt_id']))
+				{
+					if($orgrate->mdata['ddpt_id']!=$peDepotId)
+					{
+						continue;
+					}
+				}
+
+				// now this orgrate can be used directly
+				$cheapOrgRate = $orgrate;
+				break;
+			}
+
+
+			if($country!='AU'&&$orgrate->code!=ImportChargeCode::AUPOST_INTERNATIONAL_CODE) continue;// the international country only use auspost
+			if($orgrate->org_id == Org::ORGID_COURIER_PICKUP){ //pickup override
+				$cheapOrgRate = $orgrate;
+				break;
+			}
+			// if(empty($chargeCodeInfo->mdata['cm_address'])||$p->weight>=5||(!empty($chargeCodeInfo->mdata['cm_address'])&&$orgrate->org_id!=Org::ORGID_COURIER_AUPOST&&count($selectedOrgRates)>1))// this is for the chargecode with mixed couriers
+			// {
+
+
+			/*****************Once there is remote, not allow all courier in this mix chargecode *************************/
+			$rt = self::courierCanDelivery($orgrate->org_id, $shipment,true,$orgrate->id,$chargeCodeInfo->id);
+			$allError = $getCheapOrgRateError.implode(', ', $rt->error);
+			if(preg_match('/remote/i',$allError)&&$rateSize>1)
+			{
+				if(!$rt->success)
+				{
+					$getCheapOrgRateError .= implode(', ', $rt->error);
+				}
+				$o->error[] = '[60003] - ' . $shipment->hbn . ' failed : ' . $getCheapOrgRateError;
+				$cheapOrgRate = null;
+				break;
+			}
+			/******************************************/
+
+			if(!$rt->success){
+				$getCheapOrgRateError .= implode(', ', $rt->error);
+				continue;
+			}
+			// }
+			$cost = ImcoConsol::getCourierCostPrice($orgrate, $shipment->cnee->postcode, $chargeWeight, $units, true, $shipment->cnee->suburb,false,$country,$shipment,true);
+			/* aupost metro ratio hack
+			if($orgrate->org_id == 115 && $cost > 0 && in_array($shipment->agent_id, [3113])){
+				$z = Yii::app()->db->createCommand("SELECT id FROM `zone_map` WHERE org_id = 101 AND chargecode_id = 0 AND zone_id = 3 AND pc_lo <= :pc AND pc_hi >= :pc AND z1 REGEXP '[A-Z]{1}(0|1)' LIMIT 1")->bindValues([':pc' => $shipment->cnee->postcode])->queryScalar();
+				if(!empty($z)) $cost += 1;
+			}*/
+			// only for austway
+
+			if(!empty($cheapOrgRate)&&$cost>0&&$cost!=99999&&$cost!=88888)
+			{
+				if($shipment->agent_id==Org::ORGID_CLIENT_AUSTWAY)
+				{
+					if(in_array($cheapOrgRate->code,ImportChargeCode::EIZ_ALLIED_CODES)&&in_array($orgrate->code,ImportChargeCode::EIZ_TOLL_CODES)&&$cheapOrgRate->mdata['ddpt_id']==$orgrate->mdata['ddpt_id'])
+					{
+						if($shipment->getSingleCubeWeight()<30||$shipment->pkg>3)
+						{
+							$cheapOrgRate = $orgrate;
+						}
+						continue;
+					}
+
+					if(in_array($cheapOrgRate->code,ImportChargeCode::EIZ_TOLL_CODES)&&in_array($orgrate->code,ImportChargeCode::EIZ_ALLIED_CODES)&&$cheapOrgRate->mdata['ddpt_id']==$orgrate->mdata['ddpt_id'])
+					{
+						if($shipment->getSingleCubeWeight()>=30&&$shipment->pkg<=3)
+						{
+							$cheapOrgRate = $orgrate;
+						}
+						continue;
+					}
+
+				}
+
+				//for priority selecting
+				if($cheapOrgRate->priority==2&&$orgrate->priority==1)
+				{
+					$cheapOrgRate = $orgrate;
+					continue;
+				}
+				if($cheapOrgRate->priority==1&&$orgrate->priority==2)
+				{
+					continue;
+				}
+
+
+
+			}
+
+			if($cost <= 0||$cost==99999){
+				$getCheapOrgRateError .= $orgrate->org_id . ' cost not set for postcode : ' . $shipment->cnee->postcode . ' weight :' . $chargeWeight.";";
+			}elseif($cost==88888){
+				$getCheapOrgRateError .= $orgrate->org_id . ' cost remote checking error, please try again';
+			}elseif($cost < $minCost){
+				if(!empty($cheapOrgRate)&&$cheapOrgRate->isOrgRateMyToll()&&$orgrate->isOrgRateUbiToll())// for checking my toll and ubi toll compare when mytoll cost is lower than ubitoll cost
+				{
+					$calCost = $minCost-$cost;
+					if(($calCost/$minCost)>0.20)
+					{
+						$minCost = $cost;
+						$cheapOrgRate = $orgrate;
+						$distance = GoogleMapAPI::getDistance($shipment,@$orgrate->mdata['ddpt_id']);
+						if(!empty($distance)&&($distance < $minDistance))
+						{
+							$minDistance = $distance;
+						}
+					}
+				}else
+				{
+					$minCost = $cost;
+					$cheapOrgRate = $orgrate;
+					$distance = GoogleMapAPI::getDistance($shipment,@$orgrate->mdata['ddpt_id']);
+					if(!empty($distance)&&($distance < $minDistance))
+					{
+						$minDistance = $distance;
+					}
+				}
+
+			}elseif($cost == $minCost){
+				if(!empty($cheapOrgRate)&&$orgrate->isOrgRateMyToll()&&$cheapOrgRate->isOrgRateUbiToll())// for checking my toll and ubi toll compare
+				{
+					$minCost = $cost;
+					$cheapOrgRate = $orgrate;
+					$distance = GoogleMapAPI::getDistance($shipment,@$orgrate->mdata['ddpt_id']);
+					if(!empty($distance)&&($distance < $minDistance))
+					{
+						$minDistance = $distance;
+					}
+				}else
+				{
+					$distance = GoogleMapAPI::getDistance($shipment,@$orgrate->mdata['ddpt_id']);
+					if(!empty($distance)&&($distance < $minDistance))
+					{
+						$minCost = $cost;
+						$minDistance = $distance;
+						$cheapOrgRate = $orgrate;
+					}
+				}
+			}
+
+			if($cost>$minCost&&$cost!=99999&&$cost!=88888)
+			{
+				if($orgrate->org_id!=Org::ORGID_COURIER_TLA)
+				{
+					$otherCourierDelivery =true;
+				}
+
+				if(!empty($cheapOrgRate)&&$orgrate->isOrgRateMyToll()&&$cheapOrgRate->isOrgRateUbiToll())// for checking my toll and ubi toll compare when mytoll cost is larger than ubitoll cost
+				{
+					$calCost = $cost-$minCost;
+					if(($calCost/$minCost)<0.20)
+					{
+						$minCost = $cost;
+						$cheapOrgRate = $orgrate;
+						$distance = GoogleMapAPI::getDistance($shipment,@$orgrate->mdata['ddpt_id']);
+						if(!empty($distance)&&($distance < $minDistance))
+						{
+							$minDistance = $distance;
+						}
+					}
+				}
+			}
+
+		}
+
+		if(!empty($cheapOrgRate)){
+			if(Org::ORGID_COURIER_TOLL == $cheapOrgRate->org_id && empty($shipment->cnee->company)){
+				$o->error[] = '[60001] - ' . $shipment->hbn . '- Please set consignee company name for Toll';
+			}
+
+			if(in_array($cheapOrgRate->org_id, [Org::ORGID_COURIER_TOLL, Org::ORGID_COURIER_STARTRACK]) && floatval($shipment->cbm) <= 0){ //dim/cubic check
+				if(isset($shipment->mdata['dim'])){
+					$shipment->cbm = floatval($shipment->mdata['dim']['w']) * floatval($shipment->mdata['dim']['h']) * floatval($shipment->mdata['dim']['d']);
+				}
+
+				if($shipment->cbm <= 0){
+					$o->error[] = '[60006] - Dimensions or cubic is missing';
+				}
+			}
+
+			if($isMixTLDCourier)
+			{
+				if($cheapOrgRate->org_id==Org::ORGID_COURIER_TLA&&!$otherCourierDelivery)
+				{
+					$o->error[] = '[60003] - ' . $shipment->hbn . ' failed : shipment is not in TLD delivery area';
+				}
+			}
+
+		}else{
+			$o->error[] = '[60003] - ' . $shipment->hbn . ' failed : ' . $getCheapOrgRateError;
+		}
+
+		if(empty($o->error)){
+			$o->status = true;
+			$o->courier = $cheapOrgRate;
+			if(!empty($chargeCodeInfo->mdata['direct_courier']) && $chargeCodeInfo->mdata['direct_courier'] == 2){// all direct
+				$shipment->directCourier();
+			}
+		}
+		return $o;
+	}
+
+	public static function courierCanDelivery($courierid, &$shipment, $verbose = true,$orgRateId = false,$chargecodeId = false){
+		$r = new stdClass();
+		$r->success = true;
+		$r->error = [];
+		switch ($courierid){
+			case Org::ORGID_COURIER_AUPOST:
+				$r->success = true;
+			break;
+			case Org::ORGID_COURIER_FASTWAY:
+				if($shipment->pkg > 1){
+					$r->success = false;
+					$r->error[] = 'Fastway does not support multiple packages';
+				}
+
+				$fw = new FastwayAPI();
+				if(!$fw->weCanDelivery($shipment)){
+					$r->success = false;
+					$r->error[] = 'shipment is not in Fastway delivery area';
+				}
+			break;
+			case Org::ORGID_COURIER_TOLL : // for toll
+				if(TollAPI::inLimitPostcode($shipment->cnee->postcode)){
+					$r->success = false;
+					$r->error[] = 'shipment is not in Toll delivery area';
+				}
+			break;
+			case Org::ORGID_COURIER_TNT:
+			case Org::ORGID_COURIER_TNT_TOP:
+				$courier = OrgRate::model()->findByPk($orgRateId);
+				if(!empty($courier->mdata['business_type']))//B2B or B2C
+				{
+					$code = $courier->code;
+					if(!preg_match("/amazon/i", $code))
+					{
+						if($courier->mdata['business_type']==OrgRate::B2B_TYPE&&empty($shipment->mdata['is_b2b']))
+						{
+							$r->success = false;
+					   		$r->error[] = 'shipment is not for TNT B2B';
+					   		return $verbose? $r : $r->success;
+						}
+					}
+				}
+
+			   $tnt= TntAPI::getTntInterface('syd');
+			   if(!$tnt->checkIfDelivery($shipment->cnee->suburb, $shipment->cnee->postcode,$shipment->cnee->address,$orgRateId)){
+				   $r->success = false;
+				   $r->error[] = 'shipment is not in TNT delivery area';  
+			   }
+
+			   	if(!empty($chargecodeId))
+				{
+					$cRemote = self::checkCanBeDeliveryForRemote($shipment,$orgRateId,$chargecodeId);
+					if($cRemote===2)
+					{
+						$r->success = false;
+						$r->error[] = 'chargecode do not allow remote area';
+					}elseif($cRemote===3)
+					{
+						$r->success = false;
+						$r->error[] = 'chargecode do not set TNT remote area';
+					}
+				}
+
+
+			break;  
+			case Org::ORGID_COURIER_D2Z:
+				if( $shipment->pkg > 1 ){
+					$r->success = false;
+					$r->error[] = ' Courier Not support multiple packages';
+				}
+				if($shipment->weight>=22){
+					$r->success = false;
+					$r->error[] = 'Weight Over courier requirement:25Kg';
+				}
+			break;
+			case Org::ORGID_COURIER_UBI:
+				$da = new EtowerAPI();
+				if(!$da->canDeliver($shipment,$orgRateId)){
+					$r->success = false;
+					$r->error[] = 'shipment is not in '.Org::ORGID_COURIER_UBI.' Courier delivery area';
+				}
+				
+				if(!empty($chargecodeId))
+				{
+					$cRemote = self::checkCanBeDeliveryForRemote($shipment,$orgRateId,$chargecodeId);
+					if($cRemote===2)
+					{
+						$r->success = false;
+						$r->error[] = 'chargecode do not allow remote area';
+					}elseif($cRemote===3)
+					{
+						$r->success = false;
+						$r->error[] = 'chargecode do not set '.Org::ORGID_COURIER_UBI.' remote area';
+					}
+				}
+				
+			break;
+			case Org::ORGID_COURIER_DFE:
+				$da = new DFEAPI();
+				if(!$da->canDeliver($shipment,$orgRateId)){
+					$r->success = false;
+					$r->error[] = 'shipment is not in DFE delivery area';
+				}
+			break;
+			case Org::ORGID_COURIER_DFE_TOP:
+				$da = new DFEAPI();
+				if(!$da->canDeliver($shipment,$orgRateId)){
+					$r->success = false;
+					$r->error[] = 'shipment is not in DFE delivery area';
+				}
+			break;
+			case Org::ORGID_COURIER_EIZ_TOLL:
+				$da = new EizAPI();
+				if(!$da->canDeliver($shipment,$orgRateId)){
+					$r->success = false;
+					$r->error[] = 'shipment is not in '.Org::ORGID_COURIER_EIZ_TOLL.' Courier delivery area';
+				}
+				if(!empty($chargecodeId))
+				{
+					$cRemote = self::checkCanBeDeliveryForRemote($shipment,$orgRateId,$chargecodeId);
+					if($cRemote===2)
+					{
+						$r->success = false;
+						$r->error[] = 'chargecode do not allow remote area';
+					}elseif($cRemote===3)
+					{
+						$r->success = false;
+						$r->error[] = 'chargecode do not set '.Org::ORGID_COURIER_EIZ_TOLL.' remote area';
+					}
+				}
+
+
+			break;
+			case Org::ORGID_COURIER_TOLL_IPEC:
+				if(!MyTollAPI::canDeliver($shipment,$orgRateId)){
+					$r->success = false;
+					$r->error[] = 'shipment is not in '.Org::ORGID_COURIER_TOLL_IPEC.' Courier delivery area';
+				}
+				if(!empty($chargecodeId))
+				{
+					$cRemote = self::checkCanBeDeliveryForRemote($shipment,$orgRateId,$chargecodeId);
+					if($cRemote===2)
+					{
+						$r->success = false;
+						$r->error[] = 'chargecode do not allow remote area';
+					}elseif($cRemote===3)
+					{
+						$r->success = false;
+						$r->error[] = 'chargecode do not set '.Org::ORGID_COURIER_TOLL_IPEC.' remote area';
+					}
+				}
+			break;
+			case Org::ORGID_COURIER_AUK:
+				if(!AukAPI::canDeliver($shipment,$orgRateId)){
+					$r->success = false;
+					$r->error[] = 'shipment is not in '.Org::ORGID_COURIER_AUK.' Courier delivery area';
+				}
+			break;
+			case Org::ORGID_COURIER_BORDER:
+				if(!BorderAPI::canDeliver($shipment,$orgRateId)){
+					$r->success = false;
+					$r->error[] = 'shipment is not in '.Org::ORGID_COURIER_BORDER.' Courier delivery area';
+				}
+			break;
+
+			case Org::ORGID_COURIER_TLA:
+				$result = TlaAPI::canDeliver($shipment,$orgRateId);
+				if(!$result->code)
+				{
+					$r->success = false;
+					$r->error[] = $result->msg;
+				}
+			break;
+
+			case Org::ORGID_COURIER_FL:
+				if(!FLHunterFTP::canDeliver($shipment,$orgRateId))
+				{
+					$r->success = false;
+					$r->error[] = 'shipment is not in '.Org::ORGID_COURIER_FL.' Courier delivery area';
+				}
+			break;
+
+			default:
+				$result = HvlvJavaAPI::canDeliver($shipment,$orgRateId);
+				if(!$result)
+				{
+					$r->success = false;
+					$r->error[] = 'shipment is not in '.$courierid.' Courier delivery area';
+				}
+			break;
+		}
+
+		return $verbose? $r : $r->success;
+	}
+
+	public static function checkCanBeDeliveryForRemote($shipment,$orgRateId,$chargecodeId)
+	{
+		$chargecode = ImportChargeCode::model()->findByPk($chargecodeId);
+		$remoteCostRate = RemoteChargeRate::model()->find("rate_id = :rateId and (postcode =:postcode or CONCAT('0',postcode)=:postcode) and upper(suburb) = :suburb and (perkg+base) >0",[":rateId"=>$orgRateId,":postcode"=>$shipment->cnee->postcode,":suburb"=>strtoupper($shipment->cnee->suburb)]);
+		if(empty($remoteCostRate))
+		{
+			return 1;//not remote, can be delivery
+		}
+		//now this is remote, need to check chargecode
+
+		if(empty($chargecode->mdata['can_remote']))// chargecode not allow
+		{
+			return 2;
+		}
+
+		$remoteChargeRate = RemoteChargeRate::model()->find("chargecode_id =:chargecodeId and (postcode =:postcode or CONCAT('0',postcode)=:postcode) and upper(suburb) = :suburb and (perkg+base) >0",[":chargecodeId"=>$chargecodeId,":postcode"=>$shipment->cnee->postcode,":suburb"=>strtoupper($shipment->cnee->suburb)]);
+
+		if(empty($remoteChargeRate))
+		{
+			return 3;//not remote, can be delivery
+		}
+
+		return 1;
+	}
+
+	public static function modifyAddress(&$consignee,&$o,$country,$chargecode,$noAddrVeri = false)// for automatically modify address
+	{
+		$result = new stdClass();
+		$result->isModified = 0;
+		$result->editCode = 0;
+		$status = false;
+		$result->oldAddress=['address'=>$consignee->address,'suburb'=>$consignee->suburb,'state'=>$consignee->state,'postcode'=>$consignee->postcode,'country'=>$country];
+		$chargeCodeInfo = ImportChargeCode::model()->find('chargecode = :ccode and status = 1 and json_value(t.meta,"$.cm_address")=1', [':ccode' => $chargecode]);
+
+		if(empty($chargeCodeInfo)){
+			return $result;
+		}
+		$checkType = $consignee->checkPostcode(false,true);
+		if($checkType==0)//check fair
+		{
+			// $status = false;
+			// $result->isModified = 0;
+			// $result->editCode = 0;
+		}elseif($checkType==99)//check success
+		{
+			return $result;
+		}else//modified success
+		{
+			$result->newAddress=['address'=>$consignee->address,'suburb'=>$consignee->suburb,'state'=>$consignee->state,'postcode'=>$consignee->postcode,'country'=>$country];
+			$result->editCode = $checkType;
+			$status = true;
+			$result->isModified = 1;
+			return $result;
+		}
+
+		$newAddress = GoogleMapAPI::getAddress($consignee,$country);
+		if(!empty($newAddress)&&Postcode::validateAddress($newAddress->suburb, $newAddress->state, $newAddress->postcode, $country)&&$noAddrVeri==false)
+		{
+			if(!empty($newAddress->suburb)&&(strtoupper($newAddress->suburb)!=strtoupper($consignee->suburb)))
+			{
+				$consignee->suburb = $newAddress->suburb;
+				$result->editCode = $result->editCode|Addr::GEOCODE_CORRECT_SUBURB;
+				$status = true;
+			}
+			if(!empty($newAddress->state)&&(strtoupper($newAddress->state)!=strtoupper($consignee->state)))
+			{
+				$consignee->state = $newAddress->state;
+				$result->editCode = $result->editCode|Addr::GEOCODE_CORRECT_STATE;
+				$status = true;
+			}
+			if(!empty($newAddress->postcode)&&(strtoupper($newAddress->postcode)!=strtoupper($consignee->postcode)))
+			{
+				$consignee->postcode = $newAddress->postcode;
+				$result->editCode = $result->editCode|Addr::GEOCODE_CORRECT_POSTCODE;
+				$status = true;
+			}
+
+			if(!empty($status))
+			{
+				$result->newAddress=['address'=>$consignee->address,'suburb'=>$consignee->suburb,'state'=>$consignee->state,'postcode'=>$consignee->postcode,'country'=>$country];
+				$result->isModified = 1;
+			}
+		}else
+		{
+			$l = json_encode($consignee)." GoogleMapAPI ".json_encode($newAddress)." is not validated in our postcode database";
+			$tmp = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR . 'shipmentapi' . DIRECTORY_SEPARATOR ;
+			file_put_contents($tmp.'shipment_api_'  . date('Y-m-d') . '.log', date('Y-m-d H:i:s').' '.$l."\n", FILE_APPEND);
+			$result->isModified = 2;
+			if($newAddress!=null)
+			{
+				$result->tempAddress=['address'=>$consignee->address,'suburb'=>$newAddress->suburb,'state'=>$newAddress->state,'postcode'=>$newAddress->postcode,'country'=>$country];
+			}
+			$result->editCode =$result->editCode|Addr::INCORRECTABLE_STATE;
+		}
+
+		return $result;
+	}
+
+}

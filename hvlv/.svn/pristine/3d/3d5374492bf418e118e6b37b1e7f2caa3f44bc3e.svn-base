@@ -1,0 +1,30 @@
+body {
+  padding-top: 120px; 
+}
+
+#allparameters, #allheaders, #authentication {
+  display: none;
+}
+
+#ajaxspinner {
+  display: none;
+}
+
+#urlvalue {
+	width: 400px;
+}
+
+#outputpre {
+  min-height: 250px;
+  font-size: 100%;
+  white-space: pre;
+  color: green;
+}
+#headerpre {
+  min-height: 100px;
+  font-size: 85%;  
+}
+
+#web {
+  width: 280px;
+}

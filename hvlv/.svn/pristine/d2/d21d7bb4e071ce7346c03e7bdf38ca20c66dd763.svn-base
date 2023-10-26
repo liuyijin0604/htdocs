@@ -1,0 +1,4702 @@
+<?php
+
+class flCommand extends CConsoleCommand {
+	private $db, $args, $tmp;
+	private $debug = false;
+
+	public function run($args) {
+		$this->db = Yii::app()->getDb();
+		$this->args = $args;
+		$this->tmp = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR;
+
+		foreach($this->args as $ag){
+			if($ag == '-d') $this->debug = true;
+		}
+		if(!empty($args[0]) && method_exists($this, $args[0])){
+			$this->{$args[0]}();
+		}
+	}
+
+	public function _loadXlsData($f){
+		if(!is_file($f)) die($f." not exist\n");
+		return oExcel::getAllData($f, false, true);
+	}
+
+	public function diffInvDetail(){
+		$inv = Invoice::model()->findByPk($this->args[1]);
+		foreach($inv->lines as $il){
+			if(preg_match('/^EX([^\/ ]+)\/([^ ]+) \- ([^ ]+) /', $il->det, $m)){
+				$ol = InvLine::model()->find('inv_id = '.$m[1]);
+				$p = ExParcel::model()->find('hbn = :h', [':h' => $m[3]]);
+				$rate = $r->getAgentRate();
+				foreach($il->mdata['items'] as $i=>$v){
+					if($v[0] == $m[3]){
+						echo implode("\t", $v);
+						echo $p->chargeWeight(), "\t", $rate[1], "\t", $rate[2], "\t", $il->amount, PHP_EOL;
+					}
+				}
+			}
+		}
+	}
+
+	public function loadChina(){
+		spl_autoload_unregister(array('YiiBase','autoload'));
+		include_once(Yii::app()->basePath.DIRECTORY_SEPARATOR.'vendor/autoload.php');
+		spl_autoload_register(array('YiiBase','autoload'));
+
+		$pinyin = new Overtrue\Pinyin\Pinyin();
+		$rs = file('China.csv');
+		$n = 0;
+		$c = 0;
+		$sxq = [];
+		unset($rs[0]);
+
+		$addSxq = function($sxq){
+			//if(empty($sxq[2])) return;
+			$city = CnCity::model()->findByPk($sxq[0]);
+			$area = new CnArea;
+			$area->id = $city->id;
+			$area->name = '市辖区';
+			$area->city_id = $city->id;
+			$area->init = 'SX';
+			$area->zip = $sxq[2];
+			$area->code = $sxq[1];
+			$area->save();
+			echo $city->name, PHP_EOL;
+		};
+
+		foreach($rs as $r){
+			$r = explode(",", trim($r));
+			if(empty($r[2])){ //province
+				if(!empty($sxq)){
+					$addSxq($sxq);
+					$sxq = false;
+				}
+				$prov = CnProvince::model()->find('name = :n', [':n' => $r[1]]);
+				if(empty($prov)) die('Province '.$r[1].' not found');
+			}elseif(empty($r[3])){ //city
+				if(!empty($sxq)){
+					$addSxq($sxq);
+					$sxq = false;
+				}
+				$city = new CnCity;
+				$city->id = $r[0];
+				$city->name = $r[2];
+				$city->pid = $prov->id;
+				$city->init = strtoupper($pinyin->abbr(mb_substr(preg_replace('/自治(区|州|县|市)/', '\\1', $r[2]), 0, -1)));
+				$city->weight = 0;
+				$city->save();
+				$sxq = [$city->id, $r[4], $r[5]];
+				$c++;
+			}else{ //area
+				if($r[2] != $city->name && $city->name != '直辖县' && preg_match('/直辖县级/', $r[2])){
+					$city = new CnCity;
+					$city->id = floor($r[0] / 100) * 100;
+					$city->name = '直辖县';
+					$city->pid = $prov->id;
+					$city->init = 'ZXX';
+					$city->weight = 0;
+					$city->save();
+					$sxq = false;
+				}
+				$area = new CnArea;
+				$area->id = $r[0];
+				$area->name = $r[3];
+				$area->city_id = $city->id;
+				$area->init = strtoupper($pinyin->abbr(mb_substr(preg_replace('/自治(区|州|县|市)/', '\\1', $r[3]), 0, -1)));
+				$area->zip = $r[5];
+				$area->code = $r[4];
+				$area->save();
+				$sxq = false;
+				$n++;
+			}
+		}
+
+		echo $n,' area, ',$c,' city', PHP_EOL;
+	}
+
+	public function loadTw(){
+		$rs = file('tw_area.tsv');
+		$n = 1;
+		$c = 1;
+		foreach($rs as $r){
+			$r = explode("\t", trim($r));
+			$city = CnCity::model()->find('pid = 710000 AND name = :n', [':n' => $r[0]]);
+			if(empty($city)){
+				$city = new CnCity;
+				$city->id = 710000 + ($c * 100);
+				$city->name = $r[0];
+				$city->pid = 710000;
+				$city->init = '';
+				$city->weight = 0;
+				$city->save();
+				$c++;
+				$n=1;
+			}
+			$area = new CnArea;
+			$area->id = $city->id + $n;
+			$area->name = $r[1];
+			$area->city_id = $city->id;
+			$area->init = '';
+			$area->zip = '';
+			$area->code = '';
+			$area->save();
+			$n++;
+		}
+		echo 'Done',PHP_EOL;
+	}
+
+	public function cleanupStarTrack(){
+		$ppg = 100;
+		$ss = new StarTrackAPI('syd', true);
+		$r = $ss->getShipments(null, 0, 1);
+		if(empty($r)) return;
+		$tt = $r->pagination->total_number_of_records;
+		$pgs = ceil($tt / $ppg) - 1;
+		$c = 0;
+		$ids = [];
+		echo 'Total ', $tt, ' shipments', PHP_EOL;
+		while($pgs > 0){
+			$rs = $ss->getShipments(null, $pgs*$ppg, $ppg);
+			if(empty($rs->shipments)) break;
+
+			foreach($rs->shipments as $r){
+				//var_dump($r->shipment_id);
+				//var_dump($r->shipment_creation_date);
+				if(!empty($r->order_id)){
+					// echo $r->order_id, PHP_EOL;
+					// echo $r->shipment_id, PHP_EOL;
+					// echo $r->shipment_creation_date, PHP_EOL;
+					// echo $r->shipment_reference, PHP_EOL;
+					// var_dump($r);
+					// break 2;
+					continue;
+				}
+				$p = ImParcel::model()->find('hbn = :n', [':n' => $r->shipment_reference]);
+				if(!empty($p) && $p->status != 100){
+					if($p->status < 40 && strtotime($r->shipment_creation_date) > strtotime('-30 days')){
+						continue;
+					}elseif(strtotime($r->shipment_creation_date) > strtotime('-60 days')){
+						continue;
+					}
+				}
+				$ids[] = $r->shipment_id;
+				$c++;
+			}
+			$pgs--;
+			echo 'Page:', $pgs, '  Mark Deletion:', $c, PHP_EOL;
+			if($c > 1000) break;
+		}
+
+		return;
+
+		$pp = 10;
+		$tt = ceil(count($ids) / $pp);
+		$i = 0;
+		while($i < $tt){
+			$ss->deleteShipment(implode(',',array_splice($ids, 0, $pp)));
+			$i++;
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function msgLdgRjt(){
+		$rs = Edimsg::model()->findAll('type IN ("AIRCRR")  AND dt > "2018-09-01"');
+
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+		foreach($rs as $r){
+			preg_match('/RFF\+ABO:([^:\+]+)::(\d+)/', $r->msg, $m);
+			if (isset($m[1])) {
+				$oref = $m[1].':'.ltrim($m[2],0);
+				if (preg_match('/^(.+)\-(\d{1,2})$/', $m[1], $nm)) {
+					$hbn = $nm[1];
+				} else {
+					$hbn = $m[1];
+				}
+
+				$omt = substr($r->type, 0, -1);
+
+				$c = Consol::model()->find('no = :n', [':n' => $hbn]);
+				if (empty($c)) {
+					// $r->fid = $p->id;
+					$omt .= '-S';
+				} else {
+					// $r->fid = $c->id;
+					$omt .= '-C';
+				}
+				//update ACR/SCR status
+				$om = Edimsg::model()->find('fid = :fid AND status IN (30, 40) AND type = :t AND msg LIKE :ref', [':fid' => $r->fid, ':t' => $omt, ':ref' => '%+'.$oref.'+%']);
+				if($om){
+					$om->status = preg_match('/THIS TRANSACTION WAS REJECTED/', $r->msg)? 60 : 50;
+					//echo $om->id.':'.$om->status, PHP_EOL;
+					$om->save();
+				}
+			}
+		}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function fixEmptyPlainBody(){
+		include_once(Yii::app()->basePath.DIRECTORY_SEPARATOR.'vendor/autoload.php');
+
+		$rs = ImportsMail::model()->findAll('plain_body = ""');
+		foreach($rs as $r){
+			$eml = $this->tmp.'importsmail'.DIRECTORY_SEPARATOR.$r->no.'.eml';
+			if(is_file($eml)){
+				$parser = new PhpMimeMailParser\Parser();
+				$parser->setText(file_get_contents($eml));
+				$html= preg_replace('/charset=[^"^\']*/', 'charset=utf8', $parser->getMessageBody('html'));
+				$r->plain_body = Html2Text\Html2Text::convert($html, true);
+				$r->save();
+			}
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function exconsolStatus(){
+		$rs = ExcoConsol::model()->findAll('created >= "2018-07-01" AND status IN (10, 75, 80)');
+		foreach($rs as $r){
+			if($r->status == 80 && !preg_match('/顺丰/', $r->awb)){
+				$sql = 'SELECT COUNT(id) AS t FROM shipment WHERE consol_id = '.$r->id.' AND status > 80';
+				$c = Yii::app()->db->createCommand($sql)->queryScalar();
+				if($c == 0){
+					$r->status = 75;
+					$r->save();
+					echo $r->no,' still in clearance', PHP_EOL;
+				}
+			}elseif($r->status == 10){
+				if($r->totShipments() == 0){ //cancel
+					$r->status = 90;
+					$r->save();
+					echo $r->no,' cancelled', PHP_EOL;
+				}
+			}elseif($r->status < 80 && preg_match('/顺丰/', $r->awb)){
+				$r->status = 80;
+				$r->save();
+				echo $r->no,' completed', PHP_EOL;
+			}
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function outturnStatus(){
+		$rs = Edimsg::model()->findAll('status = 19 AND type IN ("AIROUTR", "SEAOUTR") AND dt > "2018-01-01"');
+		$trans = Yii::app()->db->beginTransaction();
+		$c = 0;
+		try{
+			foreach($rs as $r){
+				preg_match('/RFF\+ABO:([^:\+]+)::(\d+)/', $r->msg, $m);
+				$oref = $m[1].':'.ltrim($m[2],0);
+				$omt = substr($r->type, 0, -1);
+				//update AIROUT/SEAOUT status
+				$om = Edimsg::model()->find('fid = :fid AND status IN (30,40,60) AND type = :t AND msg LIKE :ref', [':fid' => $r->fid, ':t' => $omt, ':ref' => '%+'.$oref.'+%']);
+				if($om){
+					$om->status = preg_match('/THIS TRANSACTION WAS REJECTED/', $r->msg)? 60 : 50;
+					$om->save();
+					$c++;
+				}
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+
+		echo $c.' msg updated', PHP_EOL;
+	}
+
+	public function errorAck(){
+		$rs = Edimsg::model()->findAll('status = 19 AND type = "CONTRL" AND dt > "2018-09-01"');
+		$trans = Yii::app()->db->beginTransaction();
+		$c = 0;
+		try{
+			foreach($rs as $r){
+				if(preg_match_all('/UCM\+(\d+)\+CUSCAR:D:99B\:UN\+(4|7)[+\']+/', $r->msg, $m) > 0 || preg_match_all('/UCI\+0*(\d+)\+.+\+(4|7)[+\']+/', $r->msg, $m) > 0){
+					foreach($m[1] as $i=>$mid){
+						if($m[2][$i] == 7) continue;
+
+						$rm = Edimsg::model()->find('mid = :mid AND dt > DATE_SUB(:dt, INTERVAL 10 DAY) AND dt < :dt', [':mid' => substr($mid, -6), ':dt' => $r->dt]);
+						if ($rm) {
+							if($rm->status <= 40){
+								$rm->status = 44;
+								$rm->save();
+								$c++;
+							}
+						}
+					}
+				}
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+
+		echo $c.' msg updated', PHP_EOL;
+	}
+
+	public function yystatement(){
+		$xls = new oExcel;
+		$xls->load('yy_statement.xlsx', true);
+		$sheetsArray = $xls->xls->getAllSheets();
+		foreach($sheetsArray as $n=>$sheet){
+			$xls->goSheet($n);
+			$title = $sheet->getTitle();
+			$bill_to = "Top Logistics\nU12/1801 Botany Road,\nBanksmeadow NSW 2019";
+			if(preg_match('/^\d+ \- Invoice$/', $title)){//invoice
+				$xls->setCell('F5', '');
+				$xls->setCell('G5', $bill_to);
+				$xls->setCell('AP5', "PCAEXPSYD");
+			}elseif(preg_match('/^\d+ \- Statement of Account$/', $title)){//statement
+				$xls->setCell('E5', '');
+				$xls->setCell('F5', $bill_to);
+				$xls->setCell('U5', "PCAEXPSYD");
+			}
+			
+			//$dd = array_merge($dd, $xls->getAll());
+		}
+		$xls->output('yy_'.time().'.xlsx', null, false);
+	}
+
+	public function checkHeld(){
+		$tt = ImParcel::model()->count('status >= 58 AND created > "2018-07-01"');
+		$ppg = 10000;
+		$pgs = ceil($tt / $ppg);
+
+		for($i = 0; $i < $pgs; $i++){
+			$rs = ImParcel::model()->count(['condition' => 'status >= 58 AND created > "2018-07-01"', 'limit' => $ppg, 'offset' => $i * $ppg]);
+			foreach($rs as $r){
+				$em = Edimsg::model()->find(['condition' => 'fid = :id AND type = "CARST"', 'order' => 'dt DESC']);
+				if(!$em || preg_match('/CONSOLIDATED STATUS:HELD/', $em->msg)){
+					echo $r->hbn, PHP_EOL;
+				}
+			}
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function scanReport(){
+		$sql = 'select user_id, u.fname, count(pid) as c, sum(weight) as w, date(scan_time) as d FROM `shipment_scan` s inner join user u on s.user_id = u.id group by user_id, d having c > 10';
+		$us = $this->db->createCommand($sql)->queryAll();
+		echo 'Name	Pks	Wt	Date	Time', PHP_EOL;
+		foreach($us as $r){
+			$rs = ShipmentScan::model()->findAll('user_id = :uid AND scan_time >= :st AND scan_time < DATE_ADD(:st, INTERVAL 1 DAY) ORDER BY scan_time ASC', [':uid' => $r['user_id'], ':st' => $r['d']]);
+			$gap=300;
+			$time=0;
+			$start=$rs[0]->scan_time;
+			foreach ($rs as $l) {
+				if (abs(strtotime($start)-strtotime($l->scan_time))<$gap) {
+					$time+=abs(strtotime($start)-strtotime($l->scan_time));
+				} else {
+					$time+=1;//if gap>10 min, we just add 1 second.
+				}
+				$start=$l->scan_time;
+			}
+			echo $r['fname'].'	'.$r['c'].'	'.$r['w'].'	'.$r['d'].'	'.round($time / 3600, 2), PHP_EOL;
+		}
+	}
+
+	public function tinyEmailSubject(){
+		$rs = ImportsMail::model()->findAll('subject LIKE :s', [':s' => '%{EM00%}%']);
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			foreach($rs as $r){
+				$a = $r->subject;
+				if(preg_match_all('/\{EM\d+\}/', $a, $ms)){
+					$a = str_replace($ms[0], '', $a).' '.implode(' ',$ms[0]);
+				}
+				$a = preg_replace('/Re:\s*Re:(\s*Re:)?(\s*Re:)?(\s*Re:)?/i', 'Re:', $a);
+				if($a != $r->subject){
+					$r->subject = $a;
+					$r->save();
+				}
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function popularProds(){
+		$c = ExParcel::model()->count('status >= 60 AND status < 100 AND created > DATE_SUB(NOW(), INTERVAL 6 MONTH)');
+		$pgs = ceil($c / 1000);
+		$sts = [];
+		for($i; $i < $pgs; $i++){
+			$rs = ExParcel::model()->findAll(['condition' => 'status >= 60 AND status < 100 AND created > DATE_SUB(NOW(), INTERVAL 6 MONTH)', 'limit' => 1000, 'offset' => $i * 1000]);
+			foreach($rs as $r){
+				if(empty($r->eitems['pid'])) continue;
+				foreach($r->eitems['pid'] as $g){
+					if(!isset($sts[$g])) $sts[$g] = 0;
+					$sts[$g]++;
+				}
+			}
+		}
+		rsort($sts);
+		foreach($sts as $gid => $t){
+			$prod = ExProdb::model()->findByPk($gid);
+			echo $prod->name, "\t", $prod->brand, "\t", $prod->model, "\t", $t, PHP_EOL;
+		}
+	}
+
+	public function cnCtn(){
+		$ctn = include('ctn.php');
+
+		$rs = CnlOrder::model()->findAll('transportMode = 10 AND status IN (20, 90)');
+
+		foreach($rs as $odr){
+			$bl = $odr->mdata['bk']['bln'];
+
+			if(!isset($ctn[$bl])){
+				echo $bl.' container info needed', PHP_EOL;
+				continue;
+			}
+
+			$cgo = $odr->bCargos[0];
+			$cc = [];
+			foreach($ctn[$bl] as $n => $t){
+				$cc[] = ['size' => substr($t, 0, 2), 'type' => substr($t,2), 'no' => $n];
+			}
+			
+			if(json_encode($cgo->containers) != json_encode($cc)){
+				$cgo->containers = $cc;
+				$cgo->save();
+				echo $bl.' updated', PHP_EOL;
+				CnlMsg::createMsg($odr, 'GFP_INTL_LINEHAUL_CARGO_UPDATE_CALLBACK');
+			}
+			unset($ctn[$bl]);
+		}
+
+		foreach($ctn as $bl => $cs) {
+			echo $bl.' not found', PHP_EOL;
+		}
+
+		echo 'Done', PHP_EOL;
+	}
+
+	public function WinitTest(){
+		$w = new WinitAPI();
+		$p = ImParcel::model()->findByPk(1006643);
+		$w->createShipment($p);
+	}
+
+	public function entry2file(){
+		$rs = FileRepo::model()->findAll("type = 28 AND name LIKE '%entryprint%'");
+		$c = 0;
+		foreach($rs as $r){
+			$pdf = new modiPDF($r->getFile());
+			if(preg_match('/REF : PCA ([^\s]+)/i', $pdf->rawText(), $m)){
+				$p = ImParcel::model()->find('hbn = :n', [':n' => $m[1]]);
+				if($p){
+					if(FileRepo::model()->count('fid = :fid AND type = :t AND hash = :h', [':fid' => $p->id, ':t' => 19, ':h' => $r->hash]) == 0){
+						$r->isNewRecord = true;
+						$r->id = null;
+						$r->type = 19;
+						$r->fid = $p->id;
+						$r->save();
+						echo $p->hbn.PHP_EOL;
+						$c++;
+					}
+				}
+			}
+		}
+		echo $c.' Done', PHP_EOL;
+	}
+
+	public function wwArabic(){
+		$ls = file('ww_arabic.txt');
+		$id = 0;
+		$ds = [];
+		foreach($ls as $l){
+			if(preg_match('/^(\d{6})$/', trim($l), $m)){
+				$id = $m[1];
+				continue;
+			}
+			$ds[$id][] = trim($l);
+		}
+
+		foreach($ds as $id => &$d){
+			$u = true;
+			foreach($d as $k => $v){
+				if($k == 0){
+					$t = $d[0];
+					continue;
+				}elseif($u){
+					unset($d[$k]);
+					if($k > 0 && $v == $t) $u = false;
+					continue;
+				}
+
+				if(preg_match('/^[\w\- ]+$/', $v) && !preg_match('/^propose/i', $v)){
+					// echo $id, ':'.$k.' ', $v, PHP_EOL;
+					unset($d[$k]);
+				}
+			}
+			$d = array_values($d);
+			$d = array_merge(array_slice($d, 0, 3), [implode(' ', array_slice($d, 3, -1))], array_slice($d, -1));
+			echo '<div style="width: 30%"><p><b>'.$id.'</b><br />'.implode("<br />\n", $d).'</p></div>',PHP_EOL;
+		}
+	}
+
+	public function starTrackPriceDAT(){
+		$ls = file($this->args[1]);
+		$cps = [[0,8], [8,3], [11,3], [14,3], [17,1], [21, 3], [24,6], [30,1], [31,6], [37,5], [42,1], [45,7]];
+		$c = 0;
+		foreach($ls as $l){
+			$l = trim($l);
+			$r = [];
+			foreach($cps as $i => $p){
+				$r[] = substr($l, $p[0], $p[1]);
+				if(in_array($i, [5,9])){
+					$r[$i] = intval($r[$i]);
+				}elseif(in_array($i, [6,8,11])){
+					$r[$i] = floatval($r[$i]);
+				}
+			}
+			if($r[1] != 'EXP' || !in_array($r[2], ['SYD'])) continue;
+			var_dump($r);
+			$c++;
+		}
+		echo $c.' Done', PHP_EOL;
+	}
+
+	public function regetAupostCost(){
+		$orderId = 'AP04957632';
+		$aupostApi = new AusPostAPI('syd', true);
+		$orderInfo = $aupostApi->getOrder($orderId);
+		if ( !empty($orderInfo->order) ) {
+			foreach ($orderInfo->order->shipments as $aushipment) {
+				$ims = ImParcel::model()->find('hbn = :hbn', [':hbn' => $aushipment->shipment_reference]);
+				if (!empty($ims)) {
+					$ts = Tranship::model()->find('org_id = 101 AND pid = :pid', [':pid' => $ims->id]);
+					if (empty($ts)) {
+						$ts = new Tranship;
+						$ts->pid = $ims->id;
+						$ts->org_id = 101;  // for Australia post office
+						$ts->man_id = $ims->man_id;
+						$ts->type = 80;  // shipment transfer to a different delivery courier
+						$ts->status = 19; // in finally moving status
+						$ts->connote = $ims->ref;
+						$ts->time = date('Y-m-d H:i:s');
+						$ims->mdata['direct_courier']=1;
+						$ims->cbwf=($ims->cbwf^32)&$ims->cbwf;
+						$ims->cbwf=$ims->cbwf|64;
+						$ims->updateMeta();
+						$ims->update(['cbwf']);
+					}
+
+					$ts->mdata['oid'] = $orderId;
+					$ts->mdata['sid'] = $aushipment->shipment_id;
+					$costValue = floatval($aushipment->shipment_summary->total_cost - $aushipment->shipment_summary->total_gst);
+					$ts->cost = round($costValue, 2);
+					$ts->save();
+				}
+				echo 'done for shipment : ' . $ims->ref . PHP_EOL;
+			}
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function AupostcodesFromPDF(){
+		//lat lon from geonames.org
+		$tf = '_au_postcode.zip';
+		$df = file_put_contents($tf, file_get_contents('https://download.geonames.org/export/zip/AU.zip'));
+		$zip = new ZipArchive;
+		$cords = [];
+		if ($zip->open($tf) === TRUE) {
+			$rs = explode("\n", $zip->getFromName('AU.txt'));
+			foreach($rs as $r){
+				$d = explode("\t", trim($r));
+				if(empty($d[1])) continue;
+				$cords[strtoupper($d[2]).strtoupper($d[4]).$d[1]] = [$d[9], $d[10]];
+			}
+			ksort($cords);
+			$zip->close();
+		} else {
+			echo 'failed reading zip file';
+		}
+		unlink($tf);
+
+		$tf = '_au_postcodes.pdf';
+
+		//remove pdf security;
+		exec('C:\Progra~2\PDFtk\bin\qpdf.exe --decrypt '.$this->args[1].' '.$tf);
+		include_once(Yii::app()->basePath.DIRECTORY_SEPARATOR.'vendor/autoload.php');
+		$parser = new \Smalot\PdfParser\Parser;
+		$pdf = $parser->parseFile($tf);
+		$d = $pdf->getText();
+		$d = preg_replace('/^[A-Z]{1}[\n\r]+/m', '\n', $d);
+		$d = preg_replace('/[\’]+/', "'", $d);
+		$d = preg_replace('/\s*'.chr(194).chr(173).'\s*/', '-', $d);
+		$d = preg_replace('/(\d+)\s+(\d+)\s*/', '$1$2', $d);
+		//Care PO
+		$d = preg_replace('/Care PO/', "", $d);
+		// file_put_contents('_postcode_au.txt', $d);
+		// $d = file_get_contents('_postcode_au.txt');
+		preg_match_all('/((?:NO[\.\s]+\d+)?[A-Z\'\s\(\)\-]+)(N\s*S\s*W|V\s*I\s*C|S\s*A|W\s*A|N\s*T|T\s*A\s*S|Q\s*L\s*D|A\s*C\s*T)[\s]+(\d{4})/sm', $d, $m);
+		//var_dump($m);
+
+		$xls = new oExcel;
+		$xls->setColWidth([15,10,10,10,10]);
+		$i = 1;
+		$xls->addRow($i++, ['Suburb', 'State', 'Postcode', 'Lat', 'Lon']);
+		$pcs = [];
+		foreach($m[1] as $k => $v){
+			$suburb = preg_replace(['/\t/', '/[\s]+/'], ['', ' '], trim($v));
+			$state = preg_replace('/\s+/', '', $m[2][$k]);
+			$postcode = trim($m[3][$k]);
+			$pcs[$suburb.$state.$postcode] = [strtoupper($suburb), $state, '="'.$postcode.'"'];
+			if(!empty($cords[$suburb.$state.$postcode])){
+				$pcs[$suburb.$state.$postcode][3] = $cords[$suburb.$state.$postcode][0];
+				$pcs[$suburb.$state.$postcode][4] = $cords[$suburb.$state.$postcode][1];
+			}
+		}
+		ksort($pcs);
+		foreach($pcs as $r){
+			$xls->addRow($i++, $r);
+		}
+		$xls->output('postcode_au.xlsx', null, false);
+		unlink($tf);
+		//report difference
+		$rs = Postcode::model()->findAll('country = "AU"');
+		foreach($rs as $r){
+			if(!isset($pcs[$r->suburb.$r->state.$r->postcode])){
+				echo '- ',$r->suburb, "\t", $r->state, "\t", $r->postcode, PHP_EOL;
+			}else{
+				$pcs[$r->suburb.$r->state.$r->postcode][5] = 1;
+			}
+		}
+		foreach($pcs as $k => $r){
+			if(empty($r[5])) echo '+ ',$r[0], "\t", $r[1], "\t", preg_replace('/[^\d]+/', '', $r[2]), PHP_EOL;
+		}
+		echo 'Done', PHP_EOL;
+		return $pcs;
+	}
+
+	public function NZpostcodes(){
+		$tf = '_nz_postcode.zip';
+		$df = file_put_contents($tf, file_get_contents('https://download.geonames.org/export/zip/NZ.zip'));
+		$zip = new ZipArchive;
+		$xls = new oExcel;
+		$xls->setColWidth([15,10,10,10,10]);
+		$i = 1;
+		$xls->addRow($i++, ['Suburb', 'State', 'Postcode', 'Lat', 'Lon']);
+		$pcs = [];
+		if ($zip->open($tf) === TRUE) {
+			$rs = explode("\n", $zip->getFromName('NZ.txt'));
+			foreach($rs as $r){
+				$d = explode("\t", trim($r));
+				if(empty($d[1])) continue;
+				$pcs[$d[2].$d[3].$d[1]] = [$d[2], $d[3], '="'.$d[1].'"', $d[9], $d[10]];
+			}
+			ksort($pcs);
+			$zip->close();
+		} else {
+			echo 'failed reading zip file';
+		}
+		foreach($pcs as $r){
+			$xls->addRow($i++, $r);
+		}
+		$xls->output('postcode_nz.xlsx', null, false);
+		unlink($tf);
+		echo 'Done', PHP_EOL;
+		return $pcs;
+	}
+
+	public function upPostCode(){
+		$this->db->createCommand('TRUNCATE TABLE postcode')->execute();
+		
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			foreach(['AU' => 'postcode_au.xlsx', 'NZ' => 'postcode_nz.xlsx'] as $c => $f){
+				$data = $this->_loadXlsData($f);
+				unset($data[0]);
+				foreach($data as $i=>$d){
+					$a = new Postcode;
+					$a->country = $c;
+					$a->suburb = $d[1];
+					$a->state = $d[2];
+					$a->postcode = $d[3];
+					$a->lat = $d[4];
+					$a->lon = $d[5];
+					$a->save();
+				}
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function winitZoneCost(){
+		$xls = new oExcel;
+		$xls->supported($this->args[1]);
+		$xls->load($this->args[1]);
+		ini_set('precision', 12);
+		foreach($xls->xls->getAllSheets() as $n => $sheet){
+			$rid = $sheet->getTitle();
+			$rs = $xls->getAll($sheet);
+			//echo $t, PHP_EOL;
+			$wbs = [];
+			foreach($rs as $i => $r){
+				if(empty($r[1])) continue;
+				if($i == 1){ //header
+					foreach($r as $c => $d){
+						if(preg_match('/^([\d\.]+)(?:kg)?\-([\d\.]+)kg$/i', trim($d), $m)){
+							$wbs[$c] = [$m[1], $m[2]];
+						}
+					}
+					// var_dump($wbs);
+				}else{
+					foreach($wbs as $c => $wb){
+						$zr = ZoneRate::model()->find('rate_id = :rid AND zone = :z AND weight_lo = :wl AND weight_hi = :wh', [':rid' => $rid, ':z' => $r[2], ':wl' => $wb[0], ':wh' => $wb[1]]);
+						if(empty($zr)){
+							$zr = new ZoneRate;
+							$zr->rate_id = $rid;
+							$zr->zone = $r[2];
+							$zr->zone_name = $r[1];
+							$zr->weight_lo = $wb[0];
+							$zr->weight_hi = $wb[1];
+						}
+						$zr->item = round($r[$c]*1000)/1000;
+						$zr->save();
+						$errs = $zr->getErrors();
+						if(!empty($errs)){ var_dump($zr->item); var_dump($errs); }
+					}
+				}
+			}
+		}
+		echo "Done", PHP_EOL;
+	}
+
+	public function fixDupMailuser(){
+		$sql = 'SELECT count(id) as c, mail_id, user_id FROM `mail_user` group by mail_id, user_id having c > 1';
+		$rs = $this->db->createCommand($sql)->queryAll();
+		foreach($rs as $r){
+			$mu = MailUser::model()->findAll(['condition' => 'mail_id = :mid AND user_id = :uid', 'params' => [':mid' => $r['mail_id'], ':uid' => $r['user_id']], 'order' => 't.id']);
+			foreach($mu as $i => $m){
+				if($i > 0) $m->delete();
+			}
+		}
+		echo "Done", PHP_EOL;
+	}
+
+	public function upSCdetails(){
+		$data = $this->_loadXlsData($this->args[1]);
+		$c = 0;
+		ini_set('precision', 12);
+		
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			foreach($data as $i => $r){
+				if($i < 2 || empty($r[1])) continue;
+				$p = ImParcel::model()->find('hbn = :h', [':h' => $r[1]]);
+				if(empty($p)){
+					echo $r[1]." not found \n";
+					continue;
+				}
+				$p->weight = round($r[3]*100)/100;
+				$p->cbm = round($r[17]*1000)/1000;
+				$p->pkg = $r[12];
+				$p->eitems['g'][0] = $r[13];
+				$p->eitems['q'][0] = $r[14];
+				$p->eitems['v'][0] = round($r[16] / $r[14], 2);
+				$p->save();
+
+				$p->cnee->name = $r[4];
+				$p->cnee->tel = $r[6];
+				$p->cnee->address = $r[7];
+				$p->cnee->suburb = $r[8];
+				$p->cnee->state = $r[9];
+				$p->cnee->postcode = $r[10];
+				$p->cnee->save();
+				$p->cnor->name = $r[18];
+				$p->cnor->address = $r[19];
+				$p->cnor->city = $r[20];
+				$p->cnor->state = $r[21];
+				$p->cnor->save();
+				$c++;
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+		echo $c." updated\n";
+	}
+
+	public function scupdateacr(){
+		$resendACR = function($id){
+		$resp = ['success' => 0];
+
+		$p = ImParcel::model()->findByPk($id);
+		if ($p->status == 50 || $p->status == 55) {
+			$cn = $p->consol;
+			if (in_array($p->agent_id, SystemSetting::getNameValidationCustomers())) {
+				$goods = WordReplace::replace($p->getGoods(), $p->agent_id, $p)[0];
+			} else {
+				$goods = $p->getGoods();
+			}
+			
+			$err = [];
+			if (empty($p->weight)) {
+				$err[] = 'Shipment ' . $p->hbn . ' has no weight.';
+			}
+			if (empty($p->dvalue)) {
+				$err[] = 'Shipment ' . $p->hbn . ' has no value.';
+			}
+			if (empty($p->pkg)) {
+				$err[] = 'Shipment ' . $p->hbn . ' has number of packs.';
+			}
+			if (empty($goods)) {
+				$err[] = 'Shipment has no goods description.';
+			}
+
+			$cnor_name = $p->cnor->name;
+			if (!preg_match('/\w/', $cnor_name)) $cnor_name = $p->agent->name;
+			$cnor_name = Edimsg::strEscape($cnor_name);
+							
+			if(empty($cnor_name)){
+				$err[] = 'Shipment '.$p->hbn.' cnor name problem';
+			}
+
+			$cnor_addr = $p->cnor->fullAddress(['suburb', 'city', 'state', 'postcode']);
+			if (!preg_match('/\w/', $cnor_addr)) {
+				$cnor_addr = $p->agent->getAddress(true, false, false);
+			}
+			$cnor_addr = trim($cnor_addr, " .,");
+			$cnor_addr = Edimsg::strEscape($cnor_addr);
+							
+			if(empty($cnor_addr)){
+				$err[] = 'Shipment '.$p->hbn.' cnor address problem';
+			}
+
+			if (!empty($p->receiver)&&!empty($p->receiver->address)&&!empty($p->receiver->name)&&!empty($p->receiver->postcode)) {
+				$cnee_name=$p->receiver->name;
+				$cnee_addr=$p->receiver->fullAddress(['suburb', 'state', 'postcode']);
+			} else {
+				$cnee_name=$p->cnee->name;
+				$cnee_addr=$p->cnee->fullAddress(['suburb', 'state', 'postcode']);
+			}
+
+			$cnee_name = Edimsg::strEscape($cnee_name);
+			$cnee_addr = Edimsg::strEscape($cnee_addr);
+
+			if(empty($cnee_name) || !preg_match('/[A-z]+/', $cnee_name)){
+				$err[] = 'Shipment '.$p->hbn.' cnee name problem';
+			}
+			if(empty($cnee_addr) || !preg_match('/[A-z]+/', $cnee_addr)){
+				$err[] = 'Shipment '.$p->hbn.' cnee address problem';
+			}
+
+			if(!empty($err)){
+				$resp['msg'] = implode('<br />', $err);
+				echo json_encode($resp);
+				return;
+			}
+
+			if ($cn->service == 20) {//sea cargo
+
+				$os = Edimsg::model()->findAll(['condition' => "status = 50 AND type = 'SEACR-S' AND fid = :id", 'params' => [':id' => $p->id], 'order' => 't.id DESC']);
+				$omid = null;
+				if (!empty($os)) {
+					foreach ($os as $o) {
+						if (preg_match('/BGM\+933:::SEACR\+([^\+:]+):\d+\+9\'/', $o->msg, $m)) {
+							$omid = $m[1];
+							break;
+						}
+					}
+				}
+				
+				if(Edimsg::model()->count('fid = :id AND type ="SEACR-S" AND status IN (20, 30, 40)', [':id' => $p->id]) > 0){
+					$resp['msg']='There is an SCR message waiting for response from ICS, please try again later.';
+					echo json_encode($resp);
+					return;
+				}
+
+				$canSac = $p->canSAC();
+				$obl=$cn->awb;// /required ocean bill landing
+				$hbl=$cn->mdata['house_bill'];//house bill landing;// parent house bill landing
+			//A document signed and delivered by the Master of a Ship to the consignor. A document of title and a receipt for goods.
+				$voyage_number=$cn->flight ;// like 023s
+				$vessel=$cn->airline; //IMO  like 9235103
+				$container_number=$cn->mdata['container_no'];//container no  like OOLU9551594
+				$container_size= DmawbConsol::getContainerCode($cn->mdata['sea_type']);
+				$cargo_type=$cn->mdata['cargo_type'];
+				if (empty($cargo_type)) $cargo_type="LCL";
+				$volume=$p->cbm>0?$p->cbm*$p->pkg:$p->weight/250;
+				if ($volume<0.01) $volume=0.01;
+
+				$em = new Edimsg;
+				$em->dt = date('Y-m-d H:i:s');
+				$em->type = 'SEACR-S';
+				$em->sender = Yii::app()->params['ics']['testing']? Yii::app()->params['ics']['test_site'] : Yii::app()->params['ics']['prod_site'];
+				$em->receiver = Yii::app()->params['ics']['customs_id'];
+				$em->status = 19;
+				$em->fid = $p->id;
+				$em->save();
+				$em->mid = sprintf('%06s', substr($em->id, -6));
+				$vn = Edimsg::model()->count('type = :t AND fid = :fid', [':t' => 'SEACR-S', ':fid' => $p->id]) + 1;
+				$msg = "UNH+".$em->mid."+CUSCAR:D:99B:UN'
+BGM+933:::SEACR+" . (empty($omid)?  $p->hbn.'-'.$vn : $omid). ":" . $vn . "+".(empty($omid)? 9 : 4)."'
+RFF+PQ:PO'\n";
+				if(!empty($hbl)) $msg .= "RFF+BM:".$hbl."'\n";
+				//use word replace service;
+				$msg .= "RFF+BH:".$p->hbn."'
+RFF+MB:".$obl."'
+NAD+AH+".Yii::app()->params['ics']['abn']."::95'
+NAD+VW+".Yii::app()->params['ics']['abn']."::95'
+NAD+CN++".Edimsg::strSegment($cnee_name, 35, 2).":".Edimsg::strSegment($cnee_addr, 35, 3)."'
+NAD+CZ++".Edimsg::strSegment($cnor_name, 35, 2).":".Edimsg::strSegment($cnor_addr, 35, 3)."'
+TDT+20+".$voyage_number."++11++++".$vessel."::11'
+LOC+8+".$cn->pod."::6'
+LOC+12+".$cn->pod."::6'
+LOC+27+".substr($cn->pol, 0, 2)."::5'
+LOC+76+".$cn->pol."::6'
+LOC+73+".$cn->pol."::6'
+CNI++:::".(empty($omid)? 'I' : 'A')."'
+RFF+AAQ:".$container_number."'
+GID+1'
+RFF+ACC:".$container_size."'
+GID+1'
+RFF+ZZZ:1'
+".($canSac ? "GIS+SAC:109:95'\n" : "")."GID+1'
+PAC+".$p->pkg."'
+PAC+++".$cargo_type.":67:95'
+PAC+++GENN:121:95'
+PAC+++PK:185:95'
+FTX+AAA+++".Edimsg::strSegment(str_replace('/', ',', trim($goods, '/')), 512, 5)."'
+MEA+AAE+AAL+KG:".sprintf("%.2f", $p->weight)."'
+MEA+AAE+ABJ+CU:".sprintf("%.2f", $volume)."'
+MEA+AAE+G+KG:".sprintf("%.2f", $p->weight)."'
+";
+				$mc = substr_count($msg, "\n")+1;
+				$msg .= "UNT+".$mc."+".$em->mid."'";
+				$em->msg = $msg;
+				if (Yii::app()->params['ics']['testing']) {
+					$em->mdata['test'] = 1;
+				}
+			}else{
+
+			// get related console information
+			$cn = $p->consol;
+			$hwb = empty($cn->mdata['house_bill'])? $cn->no : $cn->mdata['house_bill'];
+			$airline = substr(trim($cn->airline), 0, 2);
+			$flight = substr(trim($cn->flight), 2);
+			//$flight = preg_replace('/[^\d]+/', '', $cn->flight);
+			$awb = preg_replace('/[^\d]+/', '', $cn->awb);
+
+
+			// only value < 750USD can SAC
+			// or 1000 AUD can be SAC (Self Assessed Clearance) only
+			if (!empty($_GET['config_check'])) {
+				if (!empty($_GET['can_sac'])) {
+					$canSac=true;
+				} else {
+					$canSac=false;
+				}
+			} else {
+				$canSac = $p->canSAC();
+			}
+			$os = Edimsg::model()->findAll(['condition' => "status = 50 AND type = 'AIRCR-S' AND fid = :id", 'params' => [':id' => $p->id], 'order' => 't.id DESC']);
+			$omid = null;
+			if (!empty($os)) {
+				foreach ($os as $o) {
+					if (preg_match('/MWB:'.$awb.'/', $o->msg) && preg_match('/BGM\+933:::AIRCR\+([^\+:]+):\d+\+9\'/', $o->msg, $m)) {
+						$omid = $m[1];
+						break;
+					}
+				}
+			}
+			
+			if(Edimsg::model()->count('fid = :id AND type ="AIRCR-S" AND status IN (20, 30, 40)', [':id' => $p->id]) > 0){
+				$resp['msg']='There is an ACR message waiting for response from ICS, please try again later.';
+				echo json_encode($resp);
+				return;
+			}
+
+			/*if (empty($omid)) {
+				$resp['msg']='Original MSG not found for '.$p->hbn;
+				echo json_encode($resp);
+				return;
+			}*/
+
+			$em = new Edimsg;
+			$em->dt = date('Y-m-d H:i:s');
+			$em->type = 'AIRCR-S';
+			$em->sender = Yii::app()->params['ics']['testing'] ? Yii::app()->params['ics']['test_site'] : Yii::app()->params['ics']['prod_site'];
+			$em->receiver = Yii::app()->params['ics']['customs_id'];
+			$em->status = 19;
+			$em->fid = $p->id;
+			$em->save();
+			$em->mid = sprintf('%06s', substr($em->id, -6));
+			$vn = Edimsg::model()->count('type = :t AND fid = :fid', [':t' => 'AIRCR-S', ':fid' => $p->id]) + 1;
+			$msg = "UNH+" . $em->mid . "+CUSCAR:D:99B:UN'
+BGM+933:::AIRCR+" . (empty($omid)?  $p->hbn.'-'.$vn : $omid). ":" . $vn . "+".(empty($omid)? 9 : 4)."'
+RFF+PQ:PO'
+RFF+AWB:" . $hwb . "'\n";
+			$msg .= "RFF+HWB:" . $p->hbn . "'
+RFF+MWB:" . $awb . "'
+NAD+CN++" . Edimsg::strSegment($cnee_name, 35, 2) . ":" . Edimsg::strSegment($cnee_addr, 35, 3) . "'
+NAD+CZ++" . Edimsg::strSegment($cnor_name, 35, 2) . ":" . Edimsg::strSegment($cnor_addr, 35, 3) . "'
+NAD+VW+" . Yii::app()->params['ics']['abn'] . "::95'
+TDT+20+" . $flight . "++6+" . $airline . "::3'
+LOC+8+" . $cn->pod . "::6'
+LOC+76+" . $cn->pol . "::6'
+LOC+12+" . $cn->pod . "::6'
+LOC+91+" . $cn->pol . "::6'
+DTM+178:" . date("Ymd", strtotime($cn->eta)) . ":102'
+CNI+1'
+RFF+UCN:" . $p->hbn . "'
+MOA+44:" . sprintf("%.2f", $p->getDvalue()) . ":USD'
+" . ($canSac ? "GIS+SAC:109:95'\n" : "") . "GID+1'
+PAC+" . $p->pkg . "'
+FTX+AAA+++" . Edimsg::strSegment(str_replace('/', ',', trim($goods, '/')), 512, 5) . "'
+MEA+AAE+G+KG:" . sprintf("%.2f", $p->weight) . "'
+";
+			$mc = substr_count($msg, "\n") + 1;
+			$msg .= "UNT+" . $mc . "+" . $em->mid . "'";
+			$em->msg = $msg;
+			if (Yii::app()->params['ics']['testing']) {
+				$em->mdata['test'] = 1;
+			}
+		}
+			//echo $msg;
+			$em->status = 20;
+			$em->save();
+			$p->save();
+
+			$resp['success'] = 1;
+		} else {
+			$resp['success']   = 0;
+			$resp['msg'] = 'The shipment status is wrong : only for HELD and REPORTED status';
+		}
+		return $resp;
+	};
+		$c = DmawbConsol::model()->findByPk(25026);
+		foreach($c->shipments as $s){
+			$r = $resendACR($s->id);
+			if($r['success'] != 1){
+				echo $s->hbn,'/',$s->ref,PHP_EOL;
+				var_dump($r);
+			}
+		}
+
+		echo 'Done',PHP_EOL;
+	}
+
+	public function tntmel(){
+		$tnt = TntAPI::getTntInterface('mel');
+		$p = ImParcel::model()->find('hbn = :hbn', [':hbn' => $this->prompt("HBN: ")]);
+		$ss_mel = [$p];
+		if(!$tnt->preEt12File($ss_mel)){
+			echo "Melbourne TNT manifest Failed";
+		}
+		echo 'Done',PHP_EOL;
+	}
+
+	public function fixddpcainv(){
+		$rs = Invoice::model()->findAll('date > "2017-06-30" AND type = 41 AND to_id != 1228 AND status IN (2,3)');
+		foreach($rs as $r){
+			if($r->mdata['name'] != $r->cust->name){
+				$r->mdata['name'] = $r->cust->name;
+				$r->mdata['address'] = $r->cust->getAddress();
+				$r->save();
+				echo $r->no, ' updated', PHP_EOL;
+			}
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function badDebt(){
+		$rs = Payment::model()->findAll('ref LIKE :r AND date = :d AND ata > 0', [':r' => '%bad debt%', ':d' => '2018-12-31']);
+		foreach($rs as $r){
+			$invs = Invoice::model()->findAll('to_id = :id AND status IN (2,3,6,7)', [':id' => $r->org_id]);
+			$tt = 0;
+			foreach($invs as $inv){
+				$tt += $inv->getBalance();
+			}
+			if($tt != $r->ata){
+				echo $r->org_id,' Balance incorrect!', PHP_EOL;
+			}else{
+				foreach ($invs as $inv) {
+					$pi = new PayInv();
+					$pi->inv_id = $inv->id;
+					$pi->pay_id = $r->id;
+					$pi->amount = $inv->getBalance();
+					$pi->exrate = 1;
+					$pi->save();
+					$inv->checkPaid();
+					$inv->save();
+				}
+				$r->updateAta();
+			}
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function testWmsApi(){
+		$method = 'POST';
+		$url = 'https://s1.pcaex.com/api/wms/order?data_translator=ufl';
+		$data = ["orders" => [
+		[
+			"no" => "TEST001",
+			"type" => 10,
+			"confirmed" => true, 
+			"items" => [
+			   ["ean" => "9900112233", "qty" => 2],
+			   ["ean" => "9900112234", "qty" => 1],
+			],
+			"to" => [
+				"name" => "John Citizen",
+				"state" => "NSW",
+				"suburb" => "Sydney",
+				"address" => "1 King Street",
+				"postcode" => "2000",
+				"phone" => "0412356789",
+				"email" => "test@example.com",
+			], 
+		]]];
+		// $data = ['no' => ['123', '124']];
+		$hdr = ['Content-Type: application/json'];
+		$ds = '';
+		$c = new curl($url);
+
+		if (!empty($data)) {
+			$ds = AppHelper::safeJsonEncode($data);
+			$ds = '{"customer":"HKG042088","orders":[{"orderNo":"ESHK12876376","orderDate":"2019-03-26 18:26:06","warehouseCode":"ULAUS","courierName":"SF Express - Local E-fufillment","courierBillNo":"254511419098","orderShipperCountry":"HK","orderConsigneeName":"EMERYLIN","orderConsigneePhone":"1342112314","orderConsigneeCountry":"HK","orderConsigneeCity":"KH","orderConsigneeAddr1":"MIDUNDAO","orderConsigneePostalCode":"0","orderTotalAmt":"10.0","orderCurrency":"HKD","courierFRT":"32.0","courierFRTCurrency":"HKD","taxCurrency":"HKD","taxPrepaid":"N","payCurrency":"HKD","orderGrossWeight":"0.1","vendorCode":"HKG042069","parts":[{"partNo":"PN001","partQty":"1","vendorCode":"HKG042069","partUnitPrice":"10.0","partUnitPriceCur":"HKD","partNetWt":"0.1","partGrossWt":"0.1"}],"orderFiles":[{"usage":"ShippingLabel","format":"pdf","baseContent":"base64Str"}]}]}';
+			if(in_array($method, ['POST', 'PUT'])){
+				$c->setopt(CURLOPT_POSTFIELDS, $ds);
+				$hdr[] = 'Content-Length: ' . strlen($ds);
+			}else{
+				ksort($data);
+				$c->setopt(CURLOPT_URL, $url.'?'.$c->asPostString($data));
+			}
+		}
+
+		$hdr[] = 'Authorization: Basic ' . base64_encode('ufl_test:'.md5($ds.'|'.'06254a2801b43f39e45f0c7d6cabdbc942be2b8c'));
+		$c->setopt(CURLOPT_CUSTOMREQUEST, strtoupper($method));
+		$c->setopt(CURLOPT_RETURNTRANSFER, true);
+		$c->setopt(CURLOPT_SSL_VERIFYPEER, false);
+		$c->setopt(CURLOPT_TIMEOUT, 600);
+		$c->setopt(CURLOPT_HTTPHEADER, $hdr);
+		if (!$c->exec()) {
+			throw new Exception('cUrl Error: '.$c->err);
+		}
+		var_dump($c->result);
+	}
+
+	public function relodgeSSdeletedShipmentsByConsol(){
+		$c = Consol::model()->findByPk($this->args[1]);
+		$rs = [];
+		foreach($c->shipments as $shipment){
+			if(!in_array($shipment->status, [42, 58, 60]) || !preg_match('/^(7RFZ|4XHZ)\d{8}/i', $shipment->ref) || $shipment->scan_no == $shipment->pkg) continue;
+			if (!empty($shipment->trans) && count($shipment->trans) == 1 && !empty($shipment->trans[0]->mdata['oid'])) {
+				continue;
+			}
+			unset($shipment->mdata['ss_shipment_items']);
+			$rs[] = $shipment;
+		}
+
+		if(empty($rs)) die('No shipment to manifest'.PHP_EOL);
+
+		$ss =new StarTrackAPI('syd', true);
+
+		$r = $ss->createOrderIncludingShipments($rs, $c->no.'-DEL');
+
+		if(!empty($r->order)){
+			$oid = $r->order->order_id;
+
+			$ssShipments = array();
+			foreach  ( $r->order->shipments as $aushipment ) {
+				$ssShipments[$aushipment->shipment_reference] = $aushipment;
+			}
+
+			foreach($rs as $i => $s){
+				$ts = Tranship::model()->find('pid = :pid AND connote = :c', [':pid' => $s->id, ':c' => $s->ref]);
+				if(empty($ts)){
+					$ts = new Tranship;
+					$ts->pid = $s->id;
+					$ts->org_id = 858;
+					$ts->type = 80;
+					$ts->connote = $s->ref;
+					$ts->time = date('Y-m-d H:i:s');
+					$ts->status = 19;
+				}
+				$ts->mdata['oid'] = $oid;
+				$ts->mdata['sid'] = $ssShipments[$s->hbn]->shipment_id;
+				$ts->save();
+				$s->mdata['ss_shipment_id'] = $result->shipment_id;
+				$s->updateMeta();
+			}
+		}else{
+			foreach($ss->err as $e){
+				if(!empty($e->field) && preg_match('/shipments\[(\d+)\]/', $e->field, $m)){
+					echo $rs[$m[1]]->hbn.': '.$e->message."\n";
+				}
+			}
+		}
+
+		echo 'Done', PHP_EOL;
+	}
+
+	public function recreateSSShipment(){
+		$shipment = ImParcel::model()->find('hbn = :h OR ref = :h', [':h' => $this->args[1]]);
+		if(empty($shipment)) die('Shipment not found'.PHP_EOL);
+		unset($shipment->mdata['ss_shipment_items']);
+
+		$ss =new StarTrackAPI('syd', true);
+		$result = $ss->createShipments($shipment);
+		if ($result && isset($result->shipments) && is_array($result->shipments)) {
+			$result = $result->shipments[0];
+			$result_item=[];
+			foreach ($result->items as $item) {
+				if (!empty($item->tracking_details->article_id)) {
+					if (preg_match('/(?<=^7RFZ|^4XHZ)\d{8}EXP(\d{5})/i', $item->tracking_details->article_id, $match)) {
+						$result_item[intval($match[1] - 1)] = $item->item_id;
+					}
+				}
+			}
+			ksort($result_item);
+			$shipment->mdata['ss_shipment_id'] = $result->shipment_id;
+			$shipment->mdata['ss_shipment_items'] = $result_item;
+			$shipment->updateMeta();
+			
+			$ts = Tranship::model()->find('pid = :pid AND connote = :c', [':pid' => $shipment->id, ':c' => $shipment->ref]);
+			// save tranship information for startrack courier
+			if(empty($ts)){
+				$ts = new Tranship;
+				$ts->pid = $shipment->id;
+				$ts->org_id = 858;
+				$ts->type = 80;
+				$ts->connote = $shipment->ref;
+				$ts->time = date('Y-m-d H:i:s');
+				$ts->status = 19;
+			}
+			$ts->time = date('Y-m-d H:i:s');
+			$ts->mdata['ss_shipment_id'] = $result->shipment_id;
+			$ts->cost = number_format(round($result->shipment_summary->total_cost, 2), 2, '.', '');
+			$ts->save();
+			echo 'Done', PHP_EOL;
+		}else{
+			echo 'Create Shipment Failed', PHP_EOL;
+		}
+	}
+
+	public function sfTest(){
+		$file = 'sf_test.txt';
+		try {
+			$ftp = ftp_connect("218.17.224.77", 21, 60);
+			if ($ftp && ftp_login($ftp, "AUSTI", "L17tT4PJ")) {
+				ftp_set_option($ftp, FTP_USEPASVADDRESS, false);
+				ftp_pasv($ftp, true);
+				// $uploaded = ftp_fput($ftp, '/DEP_TURTLE/sf_test.txt', fopen($file, 'r'), FTP_BINARY);
+				$file_list = ftp_nlist($ftp, "/DEP_TURTLE");
+				var_dump($file_list);
+			}
+		} catch (Exception $ex) {
+			var_dump($ex);
+		} finally {
+			if($ftp){
+				ftp_close($ftp);
+			}
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function fixaco(){
+		$cn = Consol::model()->findByPk(26337);
+		$trans = Yii::app()->db->beginTransaction();
+		$c = 0;
+		try{
+			foreach($cn->shipments as $p){
+				if(empty($p->mdata['aco'])) continue;
+				unset($p->mdata['aco']);
+				$p->updateMeta();
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function rackingCodes(){
+		//(106,20,1,'A1-01-L1','203A101L1'),
+		$rs = ['C2','D1','D2','E1','E2','E3','E4','F1','F2','F3','G1'];
+		foreach($rs as $r){
+			for($c=1; $c<17; $c++){
+				foreach(['L','R'] as $d){
+					for($l=4; $l<5; $l++){
+						echo "(106,20,1,'".$r.'-'.sprintf('%02d', $c).'-'.$d.$l."', '203".$r.sprintf('%02d', $c).$d.$l."'),\n";
+					}
+				}
+			}
+		}
+	
+	}
+
+	public function imInvoiceAddZone(){
+		$inv = Invoice::model()->findByPk($this->args[1]);
+		$cidmap = [];
+		foreach($inv->lines as $l){
+			$up = false;
+			foreach($l->mdata['items'] as $i => $itm){
+				$p = ImParcel::model()->find('ref = :r', [':r' => $itm[0]]);
+				if(empty($p)) continue;
+				if(empty($p->mdata['chargecode'])){
+					echo $p->ref, ' has no charge code', PHP_EOL;
+				}
+				if(empty($cidmap[$p->mdata['chargecode']])){
+					$cc = ImportChargeCode::model()->find('chargecode = :c', [':c' => $p->mdata['chargecode']]);
+					$cidmap[$p->mdata['chargecode']] = $cc->id;
+				}
+				
+				$z = ZoneMap::model()->find('chargecode_id = :cid AND pc_lo <= :p AND pc_hi >= :p', [':cid' => $cidmap[$p->mdata['chargecode']], ':p' => ltrim($itm[6], '0')]);
+				if(empty($z)){
+					echo $p->ref, ' has no zone', PHP_EOL;
+				}elseif(!preg_match('/'.$z['zone_name'].'$/', $l->mdata['items'][$i][1])){
+					$l->mdata['items'][$i][1] .= ' '.$z['zone_name'];
+					$up = true;
+				}
+			}
+			if($up) $l->save();
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function testAPI(){
+		$d = json_decode('{"api_id":"sume","data":"{\"shipments\":[{\"no\":\"\",\"cust_ref\":\"SUMAU9110300126YQ\",\"cust_ref1\":\"A000091911030Q5N\",\"show_sku\":1,\"type\":\"10\",\"packs\":1,\"weight\":0.176,\"cbm\":0.0,\"dim\":{\"w\":0.0,\"h\":0.0,\"d\":0.0},\"currency\":\"USD\",\"shipper\":{\"name\":\"Funeng Liu\",\"address\":\"No.2 warehouse,Jinfa logistics center,Dalang village,Baiyunhu street,Baiyun District,GuangzhouBaiyun\",\"state\":\"GD\",\"city\":\"shenzhen\",\"suburb\":\"shenzhen\",\"postcode\":\"518000\"},\"consignee\":{\"name\":\"Andrew Keuning\",\"address\":\"46 Union St\",\"state\":\"NSW\",\"city\":\"TEMPE\",\"suburb\":\"TEMPE\",\"postcode\":\"2044\",\"phone\":\"438470582\"},\"items\":[[\"O\",\"vehicle  charger\",\"vehicle  charger\",null,null,\"2\",\"1.235\",\"8504401990\",\"SKU821409\"]],\"chargecode\":\"6124\",\"direct\":0}]}","method":"create","sign":"0D485AECBAA0C9616D288BA9A709E2AF"}', true);
+		$d = [
+'api_id' => 'saichenglogistics',
+'method' => 'create',
+'data' => '{"no":null,"cref":"892001711228010","type":10,"packs":1,"weight":0.01,"cbm":0.00175,"dim":{"w":25.0,"h":35.0,"d":2.0},"currency":"USD","insurance":null,"shipper":{"name":"Perry Wan","company":null,"address":"GuangdongShenzhenBao\'an DistrictLonghua ChangYongLu JinXing DaSha 1402 BPerry Wan","suburb":"Shenzhen","city":null,"state":"Guangdong","postcode":"518000","phone":"13316889039","email":null,"cnid":null},"consignee":{"name":"David & Jacalyn Preston","company":null,"address":"ebay:eqksgcz , 62 Hillside Drive","suburb":"Albion Park","city":null,"state":"NSW","postcode":"2527","phone":"0402368879","email":null,"cnid":null},"receiver":null,"items":[{"type":"O","name":"Home Appliance","name_zh":"Home tools","qty":1,"price":2.0,"hs":null,"sku":"HG0962 X20"}],"note":null,"packages":null,"chargecode":"2240","direct":null,"clear":null,"sign":null,"label_type":null,"amazon_po":null,"amazon_shipment_ids":null,"importer_abn":null,"vendor_id":null,"consignor_tin":null}',
+		];
+
+		$key = '6366b2bb8b8d7407a3d46f6fa79a9af3472e1381442b49e637dfc96a0b0d6808';
+
+		$key = '7f240520d15859ee13f8cdd55b9a396e1305dd4a185a52eb9fed671ccec89698';
+		unset($d['sign']);
+		$s = $key;
+		ksort($d);
+		foreach($d as $k=>$v){
+			if(empty($v)) continue;
+			$s.=$k.$v;
+		}
+		$s .= $key;
+		var_dump($s);
+		$d['sign'] = strtoupper(md5($s));
+		
+		$c = new curl('https://api.pcaex.com/shipment');
+		// $c = new curl('http://hvlv.test/api/shipment');
+		$data_string = $c->asPostString($d);
+		echo "Request:\n";
+		var_dump($d);
+		$c->setopt(CURLOPT_CUSTOMREQUEST, "POST");
+		$c->setopt(CURLOPT_POSTFIELDS, $data_string);
+		$c->setopt(CURLOPT_RETURNTRANSFER, true);
+		//$c->setopt(CURLOPT_SSL_VERIFYPEER, false);
+		//$c->setopt(CURLOPT_SSL_VERIFYHOST, false);
+		$c->exec();
+		echo "Response:\n".$c->result."\n";
+		// file_put_contents('a.txt', $c->result);
+		// file_put_contents('a.pdf', base64_decode($c->result));
+		var_dump($c->err);
+	}
+
+
+	public function fixDoubleClear(){
+		$rs = $this->db->createCommand("SELECT pid, id, count(id) as c FROM `tracking` WHERE type = 60 and dt > '2018-07-01' GROUP BY pid HAVING c > 1")->queryAll();
+		$c = 0;
+
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			foreach($rs as $r){
+				$lt = Tracking::model()->find(['condition' => 'pid = :pid AND type = 60', 'params' => [':pid' => $r['pid']], 'order' => 't.id DESC']);
+
+				$pt = Tracking::model()->find(['condition' => 'pid = :pid AND id < :id AND type IN (55,60)', 'params' => [':id' => $lt->id, ':pid' => $r['pid']], 'order' => 't.id DESC']);
+				if(empty($pt)) continue;
+				if($pt->type == 60){
+					echo 'Delete '.$lt->pid.':'.$lt->id, PHP_EOL;
+					$lt->delete();
+					$c++;
+				}else{
+					echo 'Held again '.$lt->pid.':'.$lt->id, PHP_EOL;
+				}
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+
+		echo $c.' removed';
+	}
+
+	public function fixRtsManifest(){
+		$rts = RtsList::model()->findAll('created > :d', [':d' => '2019-01-15']);
+		$rts_eParcel = [];
+		foreach($rts as $rt){
+			foreach ($rt->lines as $line) {
+				$p = $line->mm();
+				if(empty($p)) continue;
+				if(empty($p->trans) && preg_match('/^AMQ\d{7}$/i', $p->ref)) {
+					$rts_eParcel[]=$p;
+				}
+			}
+		}
+		var_dump(count($rts_eParcel));
+		if (!empty($rts_eParcel)) {
+			$apa = new AusPostAPI('syd'); //TMA
+			$r = $apa->createOrderIncludingShipments($rts_eParcel, 'rtsmani'.date('Ymd'), AusPostAPI::CHARGE_CODE_POD);
+			if (!empty($r->order)) {
+				$oid = $r->order->order_id;
+				$transaction=Yii::app()->db->beginTransaction();
+				try {
+					foreach ($rts_eParcel as $i => $s) {
+						$ts = new Tranship;
+						$ts->pid = $s->id;
+						$ts->org_id = 101;  // for Australia post office
+						$ts->man_id = $rtsListId;
+						$ts->type = 80;  // shipment transfer to a different delivery courier
+						$ts->status = 19; // in finally moving status
+						$ts->connote = $s->ref;
+						$ts->time = date('Y-m-d H:i:s');
+						$ts->mdata['oid'] = $oid;
+						$ts->mdata['sid'] = $r->order->shipments[$i]->shipment_id;
+						$ts->save();
+					}
+					$transaction->commit();
+				} catch (Exception $ex) {
+					$transaction->rollback();
+					throw $ex;
+				}
+			} else {
+				$resp['msg'] = '';
+				foreach ($apa->err as $e) {
+					$msg = $e->message;
+					if (!empty($e->field) && preg_match('/shipments\[(\d+)\]/', $e->field, $m)) {
+						$msg .= ': '.$rtsShipments[$m[1]]->hbn;
+					}
+					$resp['msg'] .= $msg . '<br/>';
+				}
+				var_dump($resp);
+			}
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function wallaby2desv(){
+		$rs = Invoice::model()->findAll('to_id = 2169');
+		$c = 0;
+		foreach($rs as $inv){
+			$inv->to_id = 1478;
+			$inv->mdata['name'] = 'SHENZHEN DESV EXPRESS WORLDWIDE CO.LTD';
+			$inv->mdata['address'] = 'CHINA';
+			foreach($inv->lines as $l){
+				if($l->gst > 0){
+					$l->tax = 'EXEMPTOUTPUT';
+					if($l->qty == 0) $l->qty = 1;
+					$l->amount = $l->amount - $l->gst;
+					$l->gst = 0;
+					$l->save();
+				}
+			}
+			$inv->getTotal();
+			$inv->save();
+			echo $inv->no, ' updated', PHP_EOL;
+			$c++;
+		}
+		echo $c, ' invoices updated', PHP_EOL;
+	}
+
+	public function testXero(){
+		ini_set('display_errors', 1);
+		$xero = new XeroAPI;
+		$ts = $xero->get('Accounting\Payment', ['ModifiedAfter' => '2019-05-18']);
+		foreach($ts as $t){
+			if($t->IsReconciled == 'false') continue;
+			// var_dump($t->PaymentID);
+			// var_dump($t->Amount);
+			// var_dump($t->IsReconciled);
+			var_dump($t->Invoice->InvoiceNumber);
+		}
+		return;
+
+		// include FromDate
+		$pg = 1;
+		while($pg < 99){
+			var_dump($pg);
+			$ts = $xero->get('Accounting\BankTransaction', ['ModifiedAfter' => '2019-05-01'], $pg);
+			if(count($ts) == 0) break;
+			foreach($ts as $t){
+				var_dump($t['BankAccount']['AccountID']);
+			}
+			
+			$pg++;
+		}
+	}
+
+	public function testIcsApi(){
+		$url = 'http://hvlv.test/api/ics';
+		$data = file_get_contents('ics.eml');
+		$c = new curl($url);
+		$c->setopt(CURLOPT_POSTFIELDS, $data);
+
+		$hdr = ['Content-Type: message/rfc822', 'Content-Length: ' . strlen($data), 'Authorization: Basic ' . base64_encode('ics:'.md5($data.'|'.'80add605974139c76e4932fde1efc76338f2a888'))];
+		$c->setopt(CURLOPT_CUSTOMREQUEST, 'POST');
+		$c->setopt(CURLOPT_RETURNTRANSFER, true);
+		$c->setopt(CURLOPT_SSL_VERIFYPEER, false);
+		$c->setopt(CURLOPT_TIMEOUT, 20);
+		$c->setopt(CURLOPT_HTTPHEADER, $hdr);
+		if (!$c->exec()) {
+			throw new Exception('cUrl Error: '.$c->err);
+		}
+		var_dump($c->result);
+	}
+
+	public function compareZoneRateTable(){
+		$compTbl = function($sql, $ts=['zone_rate', 'zone_rate_20190520']){
+			$rs = [];
+			foreach($ts as $t){
+				$rs[] = Yii::app()->db->createCommand(str_replace(':tbl', $t, $sql))->queryAll();
+			}
+			return $rs;
+		};
+		
+		$rs = $compTbl('select distinct(rate_id) as r from :tbl order by rate_id');
+		foreach($rs[0] as $k => $v){
+			if($rs[0][$k]['r'] != $rs[1][$k]['r']){
+				echo 'different rate ID: ', $rs[0][$k]['r'], PHP_EOL;
+			}else{
+				//check rate counts
+				$ds = $compTbl('select count(*) as c from :tbl where rate_id  = '. $v['r']);
+				if(json_encode($ds[0]) != json_encode($ds[1])){
+					echo 'different rates count: ', $v['r'], PHP_EOL;
+				}
+
+				//check weight breaks
+				$ds = $compTbl('select weight_lo, weight_hi, count(id) as c from :tbl where rate_id  = '. $v['r'].' group by weight_lo, weight_hi order by weight_lo');
+				if(json_encode($ds[0]) != json_encode($ds[1])){
+					echo 'different rates setup: ', $v['r'], PHP_EOL;
+				}
+			}
+		}
+
+		echo 'Done', PHP_EOL;
+	}
+
+	public function testAupostAPI(){
+		$apa = new AusPostAPI('ecof', true);
+		// echo json_encode($apa->getAccounts());
+		$p = ImParcel::model()->findByPk(empty($this->args[1])? $this->prompt('Shipment ID:') : $this->args[1]);
+		$r2 = $apa->createLabels('OL8K0ExA_zwAAAFrwCMfzzBw');
+		foreach($r2->labels as $lbl){
+			$t = 0;
+			while($t < 5){
+				sleep(2);
+				$r3 = $apa->getLabel($lbl->request_id);
+				foreach($r3->labels as $l){
+					if(empty($l->url)) continue;
+					$cmd = 'wget --no-check-certificate "'.$l->url.'" -O '.$p->ref.'.pdf';
+					echo $cmd.PHP_EOL;
+					exec($cmd);
+					break 2;
+				}
+				$t++;
+			}
+		}
+		return;
+
+		//$result = $apa->createShipments($p);
+		if ($result && isset($result->shipments) && is_array($result->shipments)) {
+			$sid = $result->shipments[0]->shipment_id;
+			$r2 = $apa->createLabels($sid);
+			$p->ref = $result->shipments[0]->items[0]->tracking_details->consignment_id;
+			$p->mdata['apsid'] = $sid;
+			// $p->save();
+			echo $sid, PHP_EOL;
+			echo $p->ref, PHP_EOL;
+			echo $result->shipments[0]->items[0]->tracking_details->article_id, PHP_EOL;
+
+			foreach($r2->labels as $lbl){
+				$t = 0;
+				while($t < 5){
+					sleep(2);
+					$r3 = $apa->getLabel($lbl->request_id);
+					foreach($r3->labels as $l){
+						if(empty($l->url)) continue;
+						$cmd = 'wget --no-check-certificate "'.$l->url.'" -O '.$p->ref.'.pdf';
+						echo $cmd.PHP_EOL;
+						exec($cmd);
+						break 2;
+					}
+					$t++;
+				}
+			}
+			//lodge manifest
+			// $apa->createOrderFromShipments([$sid]);
+			echo 'Done', PHP_EOL;
+		}else{
+			echo 'Create Shipment Failed', PHP_EOL;
+		}
+	}
+
+	public function shipment2json(){
+		ini_set('serialize_precision', 14);
+		$sql = 'SELECT COUNT(*) FROM `shipment` WHERE `meta` LIKE "a:%" OR `items` LIKE "a:%" OR `scan` LIKE "a:%"';
+		$tc = $this->db->createCommand($sql)->queryScalar();
+		$c = 0;
+		if(strtoupper($this->prompt('Update '.$tc.' shipments?', 'n')) == 'Y'){
+			$ppg = 2000;
+			$pgs = ceil($tc / $ppg);
+			for($i = 0; $i<$pgs; $i++){
+				if($c > 0) echo $c, ' rows updated', PHP_EOL;
+				$sql = 'SELECT id,`meta`,`items`,`scan` FROM `shipment` WHERE `meta` LIKE "a:%" OR `items` LIKE "a:%" OR `scan` LIKE "a:%" LIMIT '.$ppg;
+				$rs = $this->db->createCommand($sql)->queryAll();
+				$trans = Yii::app()->db->beginTransaction();
+				try{
+					foreach($rs as $r){
+						$up = [];
+						$valid = true;
+						// file_put_contents('before.log', json_encode($r).PHP_EOL, FILE_APPEND);
+						foreach(['items', 'scan', 'meta'] as $fld){
+							if(preg_match('/^a:\d+/', $r[$fld])){
+								$meta = unserialize($r[$fld]);
+								if(!is_array($meta)){
+									echo $r['id'],':',$fld,PHP_EOL;
+									var_dump($r[$fld]);
+									$valid = false;
+									continue;
+								}
+								if(is_string($meta['client_entry']) && preg_match('/^a:\d+/', $meta['client_entry'])){
+									$meta['client_entry'] = unserialize($meta['client_entry']);
+									if(!is_array($meta['client_entry']) || empty($meta['client_entry'])){
+										echo $fld.':'.$r['id'].' client_entry problem', PHP_EOL;
+										$valid = false;
+										continue;
+									}
+								}
+								$cc = count($meta);
+								$meta = json_encode($meta);
+								if(empty($meta)){
+									echo $fld.':'.$r['id'].' encode problem', PHP_EOL;
+									$valid = false;
+									continue;
+								}
+								if($cc != count(json_decode($meta, true))){
+									echo $fld.':'.$r['id'].' decode problem', PHP_EOL;
+									$valid = false;
+									continue;
+								}
+								$up[$fld] = $meta;
+							}
+						}
+						if($valid && !empty($up)){
+							$bv = [':id' => $r['id']];
+							$ups = [];
+							foreach($up as $k => $m){
+								$ups[] = '`'.$k.'` = :'.$k;
+								$bv[':'.$k] = $m;
+							}
+							$this->db->createCommand('UPDATE `shipment` SET '.implode(', ', $ups).' WHERE id = :id')->bindValues($bv)->execute();
+							$c++;
+						}
+					}
+					$trans->commit();				} catch (Exception $ex) {
+					$trans->rollback();
+					throw $ex;
+				}
+			}
+			// foreach(file('before.log') as $l){
+			// 	$r = json_decode(trim($l), true);
+			// 	$s = Shipment::model()->findByPk($r['id']);
+			// 	if($s->items != json_encode(unserialize($r['items']))){
+			// 		echo $r['id'],' item not equal', PHP_EOL;
+			// 	}
+			// 	if(!empty($r['scan']) && $s->scan != json_encode(unserialize($r['scan']))){
+			// 		echo $r['id'],' scan not equal', PHP_EOL;
+			// 	}
+			// 	$meta = unserialize($r['meta']);
+			// 	if(!empty($meta['client_entry'])){
+			// 		$meta['client_entry'] = unserialize($meta['client_entry']);
+			// 	}
+			// 	if($s->meta != json_encode($meta)){
+			// 		echo $r['id'],' meta not equal', PHP_EOL;
+			// 	}
+			// }
+
+			echo 'Total '.$c.' shipment updated', PHP_EOL;
+		}
+	}
+
+	public function meta2json(){
+		ini_set('serialize_precision', 14);
+		$tbl = $this->prompt('Table Name: ');
+		$fld = $this->prompt('Filed Name: ', 'meta');
+		$sql = 'SELECT COUNT(*) FROM `'.$tbl.'` WHERE `'.$fld.'` LIKE "a:%"';
+		$tc = $this->db->createCommand($sql)->queryScalar();
+		$c = 0;
+		if(strtoupper($this->prompt('Update '.$tc.' rows in '.$tbl.'?', 'n')) == 'Y'){
+			$ppg = 1000;
+			$pgs = ceil($tc / $ppg);
+			for($i = 0; $i<$pgs; $i++){
+				if($c > 0) echo $c, ' rows updated', PHP_EOL;
+				$sql = 'SELECT id,`'.$fld.'` FROM `'.$tbl.'` WHERE `'.$fld.'` LIKE "a:%" LIMIT '.$ppg;
+				$rs = $this->db->createCommand($sql)->queryAll();
+				$trans = Yii::app()->db->beginTransaction();
+				try{
+					foreach($rs as $r){
+						if(!empty($r[$fld])){
+							$meta = @unserialize($r[$fld]);
+							if(!is_array($meta)){
+								var_dump($r[$fld]);
+								continue;
+							}
+							$cc = count($meta);
+							$meta = json_encode($meta);
+							if(empty($meta)){
+								echo $tbl.':'.$r['id'].' encode problem', PHP_EOL;
+								continue;
+							}
+							if($cc != count(json_decode($meta, true))){
+								echo $tbl.':'.$r['id'].' decode problem', PHP_EOL;
+								continue;
+							}
+							$this->db->createCommand('UPDATE `'.$tbl.'` SET `'.$fld.'` = :m WHERE id = :id')->bindValues([':m' => $meta, ':id' => $r['id']])->execute();
+							$c++;
+						}
+					}
+					$trans->commit();
+				} catch (Exception $ex) {
+					$trans->rollback();
+					throw $ex;
+				}
+			}
+			echo 'Total '.$c.' rows updated', PHP_EOL;
+		}
+	}
+
+	public function compressEml(){
+		$tmp = Yii::app()->basePath . DIRECTORY_SEPARATOR . 'runtime' . DIRECTORY_SEPARATOR . 'importsmail' . DIRECTORY_SEPARATOR;
+		$c = 0;
+		foreach(glob($tmp.'*.eml') as $f){
+			$d = gzencode(file_get_contents($f));
+			if(!empty($d)){
+				file_put_contents(substr($f, 0,-1).'z', $d);
+				unlink($f);
+				$c++;
+			}
+		}
+		echo 'Total '.$c.' email compressed', PHP_EOL;
+	}
+
+	public function wwsTranslation(){
+		if(empty($this->args[1]) || !file_exists($this->args[1])) die('Please specify translation word file'.PHP_EOL);
+		
+		$contents = [];
+		$zip = zip_open($this->args[1]);
+		if (!$zip || is_numeric($zip)) return false;
+
+		while ($zip_entry = zip_read($zip)) {
+			if (zip_entry_open($zip, $zip_entry) == false || zip_entry_name($zip_entry) != "word/document.xml") continue;
+			$contents[] = strip_tags(str_replace(['</w:r></w:p></w:tc><w:tc>', '</w:r></w:p>'], [" ", "\r\n"], zip_entry_read($zip_entry, zip_entry_filesize($zip_entry))));
+			zip_entry_close($zip_entry);
+		}
+		zip_close($zip);
+
+		$ts = [];
+		foreach($contents as $r){
+			$ls = preg_split('/[\r\n]+/', $r);
+			$ns = [];
+			foreach($ls as $j => $l){
+				$l = trim($l, "  \n\r\t");
+				if(empty($l)) continue;
+				if(preg_match('/^(.+)\s+(\d{6})$/', $l, $m)){
+					$ns[] = $m[1];
+					$ns[] = $m[2];
+					continue;
+				}
+				$ns[] = $l;
+			}
+			$t = null;
+			foreach($ns as $l){
+				if(empty($l)) continue;
+				if(preg_match('/^\d{6}$/', $l)){
+					$t = trim($t);
+					if(!isset($ts[$l])){
+						$ts[$l] = ['en' => '', 'ab' => ''];
+					}
+					if(!empty($ts[$l]['en'])){
+						$t = &$ts[$l]['ab'];
+					}else{
+						$t = &$ts[$l]['en'];
+					}
+				}else{
+					$t .= $l."\n";
+				}
+			}
+		}
+		$t = trim($t);
+		unset($t);
+		ksort($ts);
+		foreach($ts as $k => $p){
+			$en = preg_split('/[\r\n]+/', $p['en']);
+			$ab = preg_split('/[\r\n]+/', $p['ab']);
+			if($en[0] != $ab[0] && $en[0] != $ab[1]){
+				echo $k, ': ', $en[0], PHP_EOL;
+			}
+			if(abs(count($en) - count($ab)) > 3){
+				echo $k, ': lines diff too big', PHP_EOL;
+			}
+		}
+		// var_dump(array_keys($ts));
+		file_put_contents('wws_translation_'.date('Ymd').'.json', json_encode($ts, JSON_UNESCAPED_UNICODE));
+		echo 'Done', PHP_EOL;
+	}
+
+	public function cl838_33mbq(){
+		$rs = ImParcel::model()->findAll('agent_id = 838 AND ref LIKE "33MBQ%"');
+		$c = 0;
+		foreach($rs as $r){
+			$l = new ChangeShipmentLabel;
+			$l->pid = $r->id;
+			$l->pref = $r->ref;
+			$l->phbn = $r->hbn;
+			$d2z = new D2zShipAPI('local');
+			$result = $d2z->createConsignments($r);
+			if (is_array($result) && !empty($result[0]['barcodeLabelNumber'])) {
+				$r->ref = preg_match('/(\]d2019931265099999891)?([A-Z0-9]{3,5}\d{7})\d{2}000\d{4}0\d{1}(\d{23})?$/', $result[0]['barcodeLabelNumber'], $m)? $m[2] : $result[0]['barcodeLabelNumber'];
+				$r->mdata['d2ztype'] = 'local';
+				$r->nolog = true;
+				$r->update('ref', 'meta');
+				$r->nolog = false;
+
+				$ts = new Tranship;
+				$ts->pid = $r->id;
+				$ts->org_id = Org::ORGID_COURIER_D2Z;
+				$ts->type = 80;
+				$ts->status = 19;
+				$ts->connote = $r->ref;
+				$ts->time = date('Y-m-d H:i:s');
+				$ts->mdata['d2z_barcodeLabelNumber'] = $result[0]['barcodeLabelNumber'];
+				$ts->cost = 0;
+				$ts->save();
+				$l->newref = $r->ref;
+				$l->save();
+				echo $l->pref.' => '.$r->ref, PHP_EOL;
+				$c++;
+			} else {
+				var_dump($result['errorDetails']);
+			}
+		}
+		echo $c,' changed', PHP_EOL;
+	}
+	
+	public function fcinvreport(){
+		$lastUser = function($inv){
+			$l = Log::model()->find(['condition' => 'lid = :id AND model = :inv', 'order' => 't.time DESC', 'params' => [':id' => $inv->id, ':inv' => 'Invoice']]);
+			return empty($l)? 'unknown' : $l->user->name;
+		};
+		$rs = Invoice::model()->findAll('status = 8 and date > DATE_SUB(NOW(), INTERVAL 6 MONTH)');
+		echo implode("\t", ['Inv #', 'Date', 'Total', 'Dpmt', 'Type', 'User', 'New Inv#', 'New Date', 'New Total', 'Total Diff', 'Date Diff', 'User', 'Change Times']), PHP_EOL;
+		foreach($rs as $r){
+			if(preg_match('/-/', $r->no)) continue;
+			$t = [$r->no, $r->date, $r->total, $r->getDpmt(), $r->getType(), $lastUser($r)];
+			$lt = Invoice::model()->find(['condition' => 't.no LIKE :n', 'order' => 't.date DESC', 'params' => [':n' => $r->no.'-%']]);
+			if(!empty($lt)){
+				$t[] = $lt->no;
+				$t[] = $lt->date;
+				$t[] = $lt->total;
+				$t[] = $r->total - $lt->total;
+				$t[] = (strtotime($lt->date) - strtotime($r->date)) / 86400;
+				$t[] = $lastUser($lt);
+				$t[] = Invoice::model()->count(['condition' => 't.no LIKE :n', 'params' => [':n' => $r->no.'-%']]);
+			}
+			echo implode("\t", $t), PHP_EOL;
+		}
+	}
+
+	public function fix33mbqScan(){
+		$rs = ImParcel::model()->findAll('consol_id IN (35269,35425,35239,35218,35230) AND scan_no != 0');
+		$c = 0;
+		foreach($rs as $r){
+			if(empty($r->scan_data[50])) continue;
+			foreach($r->scan_data[50] as $k=>$t){
+				if($k != $r->ref){
+					$r->scan_data[50][$r->ref] = $t;
+					unset($r->scan_data[50][$k]);
+				}
+				$r->nolog = true;
+				$r->save();
+				$c++;
+			}
+		}
+		echo $c, ' fixed', PHP_EOL;
+	}
+
+	public function testUFLapi(){
+		$method = 'PUT';
+		$url = 'https://wos.ufreight.com/wosedi/ws/outboundUpdate/status';
+		$data = [
+			"customer" => "HKG042069",
+			"orderNo" => "ESAU15536241",
+			"warehouseCode" => "PCASY",
+			"status" => "C",
+		];
+
+		$hdr = ['Content-Type: application/json', 'Accept: application/json', 'Authorization: Basic cGNhZXhwcmVzczpwd2Q0cGNhZXhwcmVzcw=='];
+		$ds = '';
+		$c = new curl($url);
+
+		if (!empty($data)) {
+			$ds = AppHelper::safeJsonEncode($data);
+			if(in_array($method, ['POST', 'PUT'])){
+				$c->setopt(CURLOPT_POSTFIELDS, $ds);
+				$hdr[] = 'Content-Length: ' . strlen($ds);
+			}else{
+				ksort($data);
+				$c->setopt(CURLOPT_URL, $url.'?'.$c->asPostString($data));
+			}
+		}
+
+		$c->setopt(CURLOPT_CUSTOMREQUEST, strtoupper($method));
+		$c->setopt(CURLOPT_RETURNTRANSFER, true);
+		$c->setopt(CURLOPT_SSL_VERIFYPEER, false);
+		$c->setopt(CURLOPT_TIMEOUT, 600);
+		$c->setopt(CURLOPT_HTTPHEADER, $hdr);
+		if (!$c->exec()) {
+			throw new Exception('cUrl Error: '.$c->err);
+		}
+		var_dump($c->result);
+	}
+
+	public function d2zShipments(){
+		foreach(glob('runtime/d2z/d2z_2019-08*.log') as $f){
+			$ls = file($f);
+			for($i = 0; $i < count($ls); $i++){
+				if(preg_match('/^Response: \{"status":"BAD_REQUEST/', trim($ls[$i]))){
+					$d = json_decode(substr(trim($ls[$i]), 10), true);
+					if(empty($d['errorDetails'])) continue;
+					$transaction=Yii::app()->db->beginTransaction();
+					try {
+						foreach($d['errorDetails'] as $s){
+							if(preg_match('/(ECN\d+) : Shippment is already allocated/', $s, $m)){ //allocated
+								$p = ImParcel::model()->find('hbn = :h', [':h' => $m[1]]);
+								if(!empty($p)){
+									if(($p->cbwf & 32) > 0){
+										$p->cbwf = $p->cbwf - 32;
+										$p->mdata['direct_courier'] = 1;
+										$p->nolog = true;
+										$p->save();
+									}
+									if(empty($p->trans[0]->mdata['oid'])){
+										$p->trans[0]->mdata['oid'] = '1426';
+										$p->trans[0]->save();
+										echo $p->ref, ' allocated', PHP_EOL;
+									}
+								}
+							}
+						}
+						$transaction->commit();
+					} catch (Exception $ex) {
+						$transaction->rollback();
+						throw $ex;
+					}
+				}
+			}
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function d2zAllocationReport(){
+		$csv = ['HBN,Ref,Allocation Ref.,Allocation Time,1st Tracking Time'];
+		foreach(glob('runtime/d2z/d2z_2019-*.log') as $f){
+			if(filectime($f) < strtotime(date('Y-m-d', strtotime('-7 days'))) || filectime($f) > strtotime(date('Y-m-d'))) continue;
+			$ls = file($f);
+			for($i = 0; $i < count($ls); $i++){
+				if(preg_match('/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) PUT: https:\/\/www.d2z.com.au\/v1\/d2z\/api\/consignments\/shipment\/(.+)$/', $ls[$i], $m) && preg_match('/allocated success/i', $ls[$i+3])){
+					$ns = explode(',', substr($ls[$i+2], 5));
+					foreach($ns as $n){
+						$n = trim($n);
+						$p = ImParcel::model()->find('hbn = :n', [':n' => $n]);
+						if(empty($p)){
+							echo 'Problem find '.$n,PHP_EOL;
+							continue;
+						}
+						$t1 = '';
+						foreach($p->tracks as $t){
+							if(stripos($t->activity, 'dispatch information received') > 0){
+								$t1 = $t->dt;
+								break;
+							}
+						}
+						$csv[] = $n.','.$p->ref.','.$m[2].','.$m[1].','.$t1;
+					}
+					$i+=3;
+				}
+			}
+		}
+
+		include_once('PHPMailer/class.phpmailer.php');
+		$mail = new PHPMailer();
+		$mail->CharSet = 'UTF-8';
+		$mail->IsHTML(false);
+		$mail->From	 = 'gero@toplogistics.com.au';
+		$mail->FromName = 'Frank Liu';
+		$mail->Subject  = 'Shipment allocation report '.date('Ymd H:i');
+		$mail->Body = 'Please check attached allocation report';
+		$mail->AddAddress('gero@toplogistics.com.au');
+		$mail->AddStringAttachment(implode("\n", $csv), 'allocation_report_'.date('Ymd H:i').'.csv', 'base64', 'text/csv');
+		$mail->Send();
+		echo 'Done', PHP_EOL;
+	}
+
+	public function loadPostcodeDistance(){
+		$sydney = Org::PCAE_DEPARTMENT_SYDNEY;
+		$melbourne = Org::PCAE_DEPARTMENT_MELBOURNE;
+		$sydneyArr = Postcode::model()->findAll(" postcode like '2%'  and country = 'AU' ");
+		$melbourneArr = Postcode::model()->findAll(" postcode like '3%'  and country = 'AU' ");
+		foreach ($sydneyArr as $key => $value) {
+			$distance = GoogleMapAPI::getDistanceBetweenPostcode($sydney,$value["suburb"]." ".$value["state"]." ".$value["country"]." ".$value['postcode']);
+			if($distance==null)
+			{
+				$distance = 0;
+			}
+			$sql = "INSERT into postcode_distance (origin,destination,distance,suburb,state,country) values ({$sydney},\"{$value['postcode']}\",{$distance},\"{$value['suburb']}\",\"{$value['state']}\",'{$value['country']}')";
+			echo $sql."\n";
+			$this->db->createCommand($sql)->execute();
+		}
+
+		foreach ($melbourneArr as $key => $value) {
+			$distance = GoogleMapAPI::getDistanceBetweenPostcode($melbourne,$value["suburb"]." ".$value["state"]." ".$value["country"]." ".$value['postcode']);
+			if($distance==null)
+			{
+				$distance = 0;
+			}
+			$sql = "INSERT into postcode_distance (origin,destination,distance,suburb,state,country) values ({$melbourne},\"{$value['postcode']}\",{$distance},\"{$value['suburb']}\",\"{$value['state']}\",'{$value['country']}')";
+			echo $sql."\n";
+			 $this->db->createCommand($sql)->execute();
+		}
+
+		echo "done";
+	}
+
+	public function d2z33g7k(){
+		$service = '1PS5';
+		$rs = Tranship::model()->findAll('status = 10 AND connote LIKE "33G7K%"');
+		$xls = new oExcel;
+		$i = 1;
+		$xls->addRow($i++, ['referenceNumber', 'consigneeCompany', 'consigneeName', 'consigneeAddr1', 'consigneeAddr2', 'consigneeSuburb', 'consigneeState', 'consigneePostcode', 'consigneePhone', 'productDescription', 'value', 'currency', 'weight', 'shippedQuantity', 'dimensionsLength', 'dimensionsHeight', 'dimensionsWidth', 'serviceType', 'barcodeLabelNumber', 'datamatrix', 'created', 'allocate']);
+		$prepAddrLines = function ($addr){
+				$addr = str_ireplace(['&#xd', '&#xa', '&#39', ' ', '–'], ["\n", "\n", "'", ' ', '-'], $addr);
+				$ls = preg_split('/[\n\r;]+/', trim($addr));
+				if (sizeof($ls) == 1 && mb_strlen($addr) > 50) {
+					$ls = AppHelper::mbstr_split($addr, 50);
+				}
+				$ls = array_slice($ls, 0, 2);
+				$ls[0] = mb_substr($ls[0], 0, 50);
+				if (!empty($ls[1])) {
+					$ls[1] = mb_substr($ls[1], 0, 50);
+				}
+
+				return $ls;
+		};
+		
+		foreach($rs as $t){
+			$r = $t->shipment;
+			$addrs = $prepAddrLines($r->cnee->address);
+			$aid = $r->ref.sprintf('%02s', 1).'00093'.'51'.'0';
+			$aid .= AusPostAPI::aidChkDgt($aid);
+
+			$xls->addRow($i++, [$r->hbn, $r->cnee->company, $r->cnee->name, $addrs[0], empty($addrs[1])? '' : $addrs[1], $r->cnee->suburb, $r->cnee->state, '="'.$r->cnee->postcode.'"', '="'.$r->cnee->tel.'"', @$r->eitems['g'][0], max(@$r->eitems['v'][0], 1), 'AUD', round($r->weight * 100) / 100, $r->pkg, max(floatval(@$r->mdata['dim']['d']), 1), max(floatval(@$r->mdata['dim']['h']), 1), max(floatval(@$r->mdata['dim']['w']), 1), $service, '019931265009991891'.$aid, '[01]99312650099918[91]'.$aid.'[420]'.$r->postcode.'[8008]'.date('Ymd', strtotime($r->created)).'120000', $r->created, ($r->cbwf & 32) > 0? 'Y' : 'N']);
+		}
+		$xls->output('d2z_1PS5_'.date('Ymd').'.xlsx', null, false);
+		
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			foreach($rs as $t){
+				$t->status = 11;
+				if(($t->shipment->cbwf & 32) > 0){
+					$t->shipment->mdata['direct_courier'] = 1;
+					$t->shipment->cbwf = ($s->cbwf ^ 32) & $s->cbwf;
+					$t->shipment->update(['meta', 'cbwf']);
+					$t->mdata['oid'] = 1426;
+				}
+				$t->save();
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function d2zManifest(){
+		$rs = [];
+		foreach(glob('runtime/d2z/d2z_2019-0*.log') as $f){
+			if(filectime($f) < strtotime(empty($this->args[1])? '-1 day' : $this->args[1])) continue;
+			$ls = file($f);
+			for($i = 0; $i < count($ls); $i++){
+				if(preg_match('/Data: (ECN.+)$/', trim($ls[$i]), $m)){
+					$rs = array_merge($rs, explode(',', $m[1]));
+				}
+			}
+		}
+		$rs = array_unique($rs);
+		$csv = [];
+		foreach($rs as $n){
+			$p = ImParcel::model()->find('hbn = :h', [':h' => $n]);
+			$aid = $p->ref.sprintf('%02s', 1).'00093'.'51'.'0';
+			$aid .= AusPostAPI::aidChkDgt($aid);
+			$csv[] = $n.','.$p->ref.','.$aid;
+		}
+
+		include_once('PHPMailer/class.phpmailer.php');
+		$mail = new PHPMailer();
+		$mail->CharSet = 'UTF-8';
+		$mail->IsHTML(false);
+		$mail->From	 = 'gero@toplogistics.com.au';
+		$mail->FromName = 'Frank Liu';
+		$mail->Subject  = 'Shipment allocation check '.date('Ymd H:i');
+		$mail->Body = 'Please check attached shipment for allocation';
+		$mail->AddAddress('gero@toplogistics.com.au');
+		$mail->AddStringAttachment(implode("\n", $csv), 'allocation_check_'.date('Ymd H:i').'.csv', 'base64', 'text/csv');
+		$mail->Send();
+		echo 'Done', PHP_EOL;
+	}
+	
+	public function fastwayArea(){
+		$ls = file('D:\handleData\AU TSS - delivery RF Sub depot CF code.csv');
+		$ls = file('D:\handleData\AU TSS - delivery RF Sub depot CF code.csv');
+
+
+		$area = [];
+		$c = $err = 0;
+		$csv = ['Suburb,Postcode,DeliveryRF,SubDepotCode,DeliveryCF'];
+		foreach($ls as $l){
+			$r = explode(',', trim($l));
+			foreach($r as $k => $v){
+				$r[$k] = trim($v);
+			}
+			if(empty($r[2])) continue;
+			$r[1] = str_pad($r[1], 4, 0, STR_PAD_LEFT);
+			if(preg_match('/^(\d+)$/', $r[1], $m)){
+				$pc = Postcode::model()->find('postcode = :pc AND suburb = :s', [':pc' => $r[1], ':s' => $r[0]]);
+				$zoneMap = ZoneMap::model()->find('(pc_hi = :pc or pc_lo = :pc) AND upper(suburb) = :s AND org_id=115 AND zone_id=1', [':pc' => $r[1], ':s' => strtoupper($r[0])]);
+				if(empty($zoneMap)){
+					echo $r[0].' '.$r[1].' rate not found', PHP_EOL;
+					$err++;
+					continue;
+				}
+				if(empty($pc)){
+					$pc = Postcode::model()->find('postcode = :pc', [':pc' => $r[1]]);
+				}
+				if(empty($pc)){
+					echo $r[0].' '.$r[1].' not found', PHP_EOL;
+					$err++;
+					continue;
+				}
+				// if(!Postcode::validateAddress($r[0], $pc->state, $r[1])){
+				// 	echo $r[0].' '.$r[1].' not valid', PHP_EOL;
+				// 	$err++;
+				// 	continue;
+				// }
+				if(preg_match('/([^-]+)/', $r[4], $m)){
+					$r[4] = $m[1];
+				}else{
+					$r[4] = '';
+				}
+				$area[$r[1]][$r[0]] = [$r[2], $r[3], $r[4]];
+				$csv[] = implode(',', $r);
+				$c++;
+			}
+		}
+		file_put_contents('D:/handleData/fastway_area.json', json_encode($area));
+		file_put_contents('D:/handleData/fastway_delivery_area.csv', implode("\n", $csv));
+		echo $err,' Error, ', $c, ' Done', PHP_EOL;
+	}
+
+	public function fastwayArea2Zone(){
+		$ds = json_decode(file_get_contents('data/fastway_area.json'), true);
+		$zone = ['SYD'=>[],'NON-SYD'=>[],'MEL'=>[],'NON-MEL'=>[]];
+		foreach($ds as $p => $d){
+			switch(end($d)[0]){
+				case 'SYD':
+					$zone['SYD'][] = $p;
+					$zone['NON-MEL'][] = $p;
+				break;
+				case 'MEL':
+					$zone['MEL'][] = $p;
+					$zone['NON-SYD'][] = $p;
+				break;
+				default:
+					$zone['NON-SYD'][] = $p;
+					$zone['NON-MEL'][] = $p;
+				break;
+			}
+		}
+		foreach($zone as $zid => $zs){
+			sort($zs);
+			$pz = 0;
+			$oz = 0;
+			$la = '';
+			foreach($zs as $i=>$z){
+				if($z != $pz+1){
+					if($pz != $oz && $pz > 0){
+						$la .= '-'.$pz;
+					}
+					$la .= ','.$z;
+					$oz = $z;
+				}
+				$pz = $z;
+			}
+			if($pz != $oz && $pz > 0){
+				$la .= '-'.$pz;
+			}
+
+			$zone[$zid] = ltrim($la,',');
+		}
+		print_r($zone);
+	}
+
+	public function mixcostcomp(){
+		$rs = ImportChargeCode::model()->findAll('org_id IN (2198, 2719, 1222, 1478, 1303, 1474, 1900, 838)');
+
+		$ttl = ['fastway' => 0, 'fw_new' => 0, 'd2z' => 0, 'amq_new' => 0, 'pkg_total' => 0, 'pkg_fw' => 0, 'pkg_fw_new' => 0, 'pkg_ap' => 0, 'amq_old' => 0];
+		$or52 = OrgRate::model()->findByPk(52);
+		$or522 = OrgRate::model()->findByPk(522);
+		$or101 = OrgRate::model()->findByPk(101);
+		$fwa = new FastwayAPI();
+		foreach($rs as $r){
+			if(in_array(52, $r->couriersObj) && (in_array(522, $r->couriersObj) || in_array(101, $r->couriersObj))){
+				$ps = ImParcel::model()->findAll('agent_id = :aid AND created >= :d AND created < :d2 AND json_value(meta, "$.chargecode") = :c', [':aid' => $r->org_id, ':c' => $r->chargecode, ':d' => '2019-05-01', ':d2' => '2019-07-01']);
+				echo $r->org_id.' '.$r->chargecode.' '.count($ps), PHP_EOL;
+				$ttl['pkg_total'] += count($ps);
+				foreach($ps as $p){
+					if(empty($p->trans)) continue;
+					$chargeWeight = empty($r->charge_wt)? $p->chargeWeight() : $p->weight;
+					$units = $p->pkg <= 0 ? 1 : $p->pkg;
+					$fcw = $fwa->roundWeight($chargeWeight);
+					if($p->trans[0]->org_id == 115){ //fastway
+						$fc = ImcoConsol::getCourierCostPrice($or52, $p->cnee->postcode, $fcw, $units, true, $p->cnee->suburb);
+						if($fc == 3.95){
+							$fc = 4.09;
+						}
+						$ttl['fastway'] += $fc;
+						if($fc > 4.5 && $fcw <=2){
+							$fc = 4.5;
+						}
+						$ttl['fw_new'] += $fc;
+						$ttl['pkg_fw']++;
+					}elseif(in_array($p->trans[0]->org_id, [101,1426])){
+						if($units == 1 && !empty($p->trans[0]->cost)){
+							$ttl['amq_old'] += $p->trans[0]->cost;
+						}
+						// $ac1 = ImcoConsol::getCourierCostPrice($or522, $p->cnee->postcode, $chargeWeight, $units, true, $p->cnee->suburb);
+						if($units == 1 && FastwayAPI::isInDeliveryArea($p->cnee->postcode, $p->cnee->suburb)){
+							$fc = ImcoConsol::getCourierCostPrice($or52, $p->cnee->postcode, $fcw, $units, true, $p->cnee->suburb);
+							if($fc > 4.5 && $fcw <= 2){
+								$fc = 4.5;
+							}
+							if($fc > 13.5){
+								echo 'Too high: '.$p->ref.' '.$fc,PHP_EOL;
+							}
+							$ttl['fw_new'] += $fc;
+							$ttl['pkg_fw_new']++;
+						}elseif($units == 1){
+						// if($fc > 0 && $fc > $ac1){
+						// 	echo $p->hbn,' ',$p->postcode,' ',($fc - $ac1), PHP_EOL;
+						// }
+						$ttl['amq_new'] += ImcoConsol::getCourierCostPrice($or101, $p->cnee->postcode, $chargeWeight, $units, true, $p->cnee->suburb);
+						//$ttl['d2z'] += $ac1;
+						$ttl['pkg_ap']++;
+						}
+					}
+				}
+				//var_dump($ttl);
+			}
+		}
+		var_dump($ttl);
+	}
+
+	public function ssreport(){
+		$criteria->addCondition("t.eta >= '2019-07-01'");
+		$criteria->addCondition("t.eta <= '2019-07-31'");
+		$criteria->addCondition("t.status < 100");
+		$criteria->addInCondition('type', [15]);
+		$consols = Consol::model()->findAll($criteria);
+		echo 'connote,weight,postcode,courier',PHP_EOL;
+		foreach ($consols as $con) {
+			if ($con->totShipments() == 0) {
+				continue;
+			}
+
+			foreach ($this->shipments as $p) {
+				if(empty($p->trans[0])) continue;
+				$cc = 'other';
+				if($p->trans[0]->org_id == 115){
+					$cc = 'fw';
+				}elseif(in_array($p->trans[0]->org_id, [101, 1426])){
+					$cc = 'ap';
+				}
+				echo $p->ref,',', $p->weight,',', $p->postcode,',', $cc,PHP_EOL;
+			}
+		}
+	}
+
+	public function aupost(){
+		$c = new cUrl('https://auspostbusiness.force.com/bsp/BSPConsignmentSearch');
+		$c->setopt(CURLOPT_FOLLOWLOCATION, true);
+		$c->setopt(CURLOPT_TIMEOUT, 5);
+		$c->setopt(CURLOPT_REFERER, 'https://auspostbusiness.force.com/bsp/BSPConsignmentSearch');
+		$c->setopt(CURLOPT_SSL_VERIFYPEER, false);
+		$c->setopt(CURLOPT_HTTPHEADER, array('User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/76.0.3809.100 Safari/537.36', 'Cache-Control: no-cache', 'Origin: auspostbusiness.force.com'));
+		$c->setopt(CURLOPT_POST, true);
+		$postr = array(
+			'page:conSearch_form' => 'page:conSearch_form',
+			'page:conSearch_form:consignmentNumber_id' => 'AMQ5296745',
+		);
+
+		$c->setopt(CURLOPT_POSTFIELDS, $c->asPostString($postr));
+		$c->exec();
+
+
+		var_dump($c->result);
+	}
+
+	public function reclineaddshipmentid(){
+		$c = 0;
+		while(ReconciliationLine::model()->count(['condition' => 'shipment_id = 0 AND shipment_no !=""']) > 0){
+			$rs = ReconciliationLine::model()->findAll(['condition' => 'shipment_id = 0 AND shipment_no !=""', 'limit' => '5000']);
+			$trans = Yii::app()->db->beginTransaction();
+			try{
+				foreach($rs as $r){
+					$r->save();
+					if(empty($r->shipment_id)){
+						$sql = 'select id from shipment_archive WHERE hbn = :n OR ref = :n';
+						$sid = $this->db->createCommand($sql)->bindValues([':n' => $r->shipment_no])->queryScalar();
+						$r->shipment_id = empty($sid)? 1 : $sid;
+						$r->save();
+					}
+					$c++;
+				}
+				$trans->commit();
+			} catch (Exception $ex) {
+				$trans->rollback();
+				throw $ex;
+			}
+			echo $c.' records done', PHP_EOL;
+		}
+	}
+
+	public function checkImInvoice(){
+		$cid = $this->prompt('Client ID: ');
+		$rs = Invoice::model()->findAll('status < 4 AND type = 10 AND to_id = :id', [':id' => $cid]);
+		$orgRate = OrgRate::model()->find('type=40 and org_id=:oid', [':oid' => $cid]);
+		$owner = Org::model()->findByPk($cid);
+
+		foreach($rs as $r){
+			$ok = true;
+			foreach($r->lines as $l){
+				$tt = 0;
+				foreach($l->mdata['items'] as $i => $itm){
+					$p = ImParcel::model()->find('(hbn = :n OR ref = :n) AND agent_id = :cid', [':n' => $itm[0], ':cid' => $cid]);
+					if(empty($p)){
+						echo $itm[0].' not found', PHP_EOL;
+					}else{
+						$amt = $p->getChargePro($owner, $orgRate);
+						if($amt[0] != $itm[5]){
+							//echo $itm[0].': '.$itm[5].' != '.$amt[0], PHP_EOL;
+							$l->mdata['items'][$i][5] = $amt[0];
+							$ok = false;
+						}
+						$tt += $amt[0];
+					}
+				}
+				if($tt != $l->amount){
+					//echo $r->no.' line total '.$l->amount.' => '.$tt,PHP_EOL;
+					$l->amount = $tt;
+					$l->qty = 1;
+					$l->save();
+				}
+			}
+			if($ok){
+				echo $r->no.' OK', PHP_EOL;
+			}else{
+				$oamt = $r->total;
+				$r->getTotal();
+				$r->save();
+				echo $r->id.' '.$r->no.' '.$oamt.' => '.$r->total.' updated', PHP_EOL;
+			}
+		}
+	}
+
+	public function addClearTrack(){
+		$rs = ImParcel::model()->findAll('consol_id = 38899');
+		foreach($rs as $shipment){
+			$dts = [];
+			foreach($shipment->tracks as $t){
+				if($t->type == 40){
+					$dts[0] = strtotime($t->dt);
+					echo '40: '.$t->dt;
+				}elseif($t->type == 70){
+					$dts[1] = strtotime($t->dt);
+					echo '70: '.$t->dt;
+					break;
+				}elseif($t->type == 60){
+					continue 2;
+				}
+			}
+
+			if(!empty($dts[1])){
+				$dt = $dts[1] - (empty($dts[0])? rand(3600 * 2, 3600 * 8) : ceil(($dts[1] - $dts[0]) * rand(200, 600) / 1000));
+			}else{
+				$dt = $dts[0] + rand(3600 * 2, 3600 * 6);
+			}
+			echo 'add 60: '.date('Y-m-d H:i:s', $dt);
+			// $shipment->addTracking(60, 'Clearance processing complete', 'Kingsgrove', date('Y-m-d H:i:s', $dt));
+		}
+	}
+
+	public function bfeInvoice(){
+		//invoice
+		$consol = ImcoConsol::model()->findByPk($this->prompt('Consol ID:'));
+		$owner = Org::model()->findByPk(1206);
+		// in case invoice existing , we just update
+		$inv = Invoice::model()->find('consol_id = :cid', [':cid' => $consol->id]);
+
+		// in case invoice has been frozen, we can't change it again
+		$invoiceNo = '';
+		$oldPaymentLines = '';
+		if (!empty($inv)) {
+			if ($inv->isInvoiceClosed()) {
+				$inv->createCreditForMe();
+				$oldPaymentLines = $inv->payments;
+				$invoiceNo = $inv->no;
+				$inv = null;
+			}
+		}
+		if (empty($inv)) {
+			$inv = new Invoice;
+			$inv->type = 10;
+			$inv->dpmt = Invoice::DPMT_IMPORT;
+			$inv->to_id = 2791;
+			$inv->mdata['suborg'] = 1206;
+			$inv->dpt_id = Org::PCAE_DEPARTMENT_SYDNEY; // default set Sydney as warehouse
+			$inv->ref = 'ck1-ep' . date('Ymd', strtotime($consol->created));
+			$inv->currency = 1;
+			if (!empty($invoiceNo)) {
+				$inv->no = Invoice::genNewInvoiceNo($invoiceNo);
+			}               // $invoiceNo . '-1';
+			$inv->consol_id = $consol->id;
+			$inv->status = Invoice::INVOICE_STATUS_PENDING;
+		}
+		$inv->date = date('Y-m-d', strtotime($consol->created));
+		$inv->due = $inv->date;
+		$inv->save();
+		$items = [];
+		$tot = 0;
+		$transaction = Yii::app()->db->beginTransaction();
+		try {
+			foreach($consol->shipments as $k=>$p){
+				$pc = trim($p->cnee->postcode);
+			
+				// currently we hardcode here , we always use charge code 5813
+				// so we create invoice by charge code now
+				$amt = $p->getChargeByChargecode(5813, true);
+				$p->mdata['charge_client_amount']= number_format($amt, 4, '.', '');
+				$p->mdata['charge_client_weight']= number_format($p->weight, 2, '.', '');
+				$p->updateMeta();
+				$zoneMap = ZoneMap::model()->find('chargecode_id = 15 AND zone_id = 1 AND pc_lo <= :p AND pc_hi >= :p', [':p' => $pc]);
+				$zoneCode = 'N1';
+				if (!empty($zoneMap) && !empty($zoneMap['z1'])) {
+					$zoneCode = $zoneMap['z1'];
+				}
+				if (!empty($p->tempChargeweight)) {
+					$p->weight=$p->tempChargeweight;
+				}  //to record the break weight
+				$items[] = [$p->ref, $p->getDesc().'    ' . $zoneCode, $p->pkg, $p->weight, $p->cbm, $amt,$p->cnee->postcode];
+				$tot += $amt;
+
+				// in case parcel with insurance
+				// we add insurance value to total value
+				if ($p->insurance > 0) {
+					$insuranceRatio = 1;
+					if (isset($owner->extra['insurance_invoice_ratio'])) {
+						$insuranceRatio = floatval($owner->extra['insurance_invoice_ratio']);
+					}
+					$invInsurance = round($p->insurance * ($insuranceRatio / 100), 2);
+					$p->mdata['insurance_charge_client']=$invInsurance;
+					$p->updateMeta();
+					$items[] = [$p->ref, 'Insurance Fee',0, 0, 0, $invInsurance];
+					$tot += $invInsurance;
+				}
+			}
+			$transaction->commit();
+		} catch (Exception $ex) {
+			$transaction->rollback();
+			Log::log2file("Manifest(1206) create Invoice".$consol->no."=>".$ex->getMessage(), "transaction_err_log", "transaction");
+			throw $ex;
+		}
+
+		$inv->refresh();
+		$il = new InvLine;
+		$il->inv_id = $inv->id;
+		$il->ccode = 'EPA';
+		$il->mdata['items'] = $items;
+		$il->det = $consol->no;
+		$il->fid = $consol->id;
+		$il->model = 'ImcoConsol'; // invoice connected with console directly
+		$il->amount = round($tot * 1000) / 1000;
+		$il->qty = 1;
+		$il->save();
+		$inv->getTotal();
+		$inv->consol_id = $consol->id;
+
+		$inv->mdata['name'] = $owner->name;
+		$inv->mdata['address'] = $owner->getAddress();
+		$inv->mdata['payterm'] = empty($owner->extra['payterm'])? 'COD' : $owner->extra['payterm'].' days';
+
+		if (!empty($oldPaymentList)) {
+			$inv->applyPayments($oldPaymentList);
+			$inv->getTotal();
+			$inv->checkPaid();
+		}
+
+		$inv->save();
+
+		// update console related aupost courier cost
+		ImcoConsol::updateImportConsoleBilling([$consol->id]);
+
+		// check to see if something wrong when create invoice or invoice line
+		$errorsInv = $inv->getErrors();
+		$errorsInvLine = $il->getErrors();
+		$error = implode('<br/>', array_merge($errorsInv, $errorsInvLine));
+		if (!empty($error)) {
+			echo 'Failed to create invoice : ' . $error . ' <br/>';
+		} else {
+			echo 'Invoice ' . $inv->no . " issued<br />";
+		}
+	}
+
+	public function xeroLogBillingDate(){
+		$c = 0;
+		foreach(glob('runtime/xero/xero_api_2019*.log') as $f){
+			$cont = file_get_contents($f);
+			preg_match_all('/Xero Server Response data : (\{.+?[\n\r]+\})[\n\r$]+/ms', $cont, $m);
+			$transaction=Yii::app()->db->beginTransaction();
+			try {
+				foreach($m[1] as $j){
+					$data = json_decode($j);
+					if(empty($data->Invoices)) continue;
+					foreach($data->Invoices as $inv){
+						if(empty($inv) || $inv->Type != 'ACCPAY') continue;
+						$oid = preg_replace('/^PORG-/', '', $inv->Contact->AccountNumber);
+						$inv_date = substr($inv->DateString, 0, 10);
+						if(strtotime($inv_date) < strtotime('2018-07-01')) continue;
+
+						$bill = Billing::model()->find('org_id = :oid AND billing_cref = :ref AND total > 0', [':oid' => $oid, ':ref' => $inv->InvoiceNumber]);
+						if(empty($bill) && preg_match('/^(.+)-\d+$/', $inv->InvoiceNumber, $mn)){ // try removing -1
+							$bill = Billing::model()->find('org_id = :oid AND billing_cref = :ref AND total > 0', [':oid' => $oid, ':ref' => $mn[1]]);
+						}
+						if(empty($bill)){
+							$ls = BillingLine::model()->findAll('org_id = :oid AND billing_cref = :ref', [':oid' => $oid, ':ref' => $inv->InvoiceNumber]);
+							if(empty($ls)){
+								echo $oid.' '.$inv->InvoiceNumber.' not found', PHP_EOL; 
+							}else{
+								$bill = new Billing;
+								$bill->org_id = $ls[0]->org_id;
+								$bill->billing_cref = $inv->InvoiceNumber;
+								$bill->created = $ls[0]->created;
+								$bill->date = $inv_date;
+								$bill->currency = $ls[0]->currency;
+								$bill->status = 3;
+								$bill->type = $ls[0]->type;
+								$bill->dpmt = $ls[0]->dpmt;
+								$bill->dpt_id = 106;
+								$bill->sync_xero = 1;
+								$bill->save();
+								$tt = 0;
+								$gst = 0;
+								foreach($ls as $l){
+									$l->billing_id = $bill->id;
+									$l->update('billing_id');
+									$tt+=$l->actual_amount;
+									$gst+=$l->gst_amount;
+								}
+								$bill->total = $tt;
+								$bill->gst = $gst;
+								$bill->save();
+								echo $oid.' '.$inv->InvoiceNumber.' line only '.$bill->id, PHP_EOL;
+							}
+						}elseif($bill->date != $inv_date){
+							echo $oid.' '.$inv->InvoiceNumber.' '.$bill->date.' => '.$inv_date, PHP_EOL;
+							$bill->date = $inv_date;
+							$bill->save();
+							$c++;
+						}
+						
+					}
+				}
+				$transaction->commit();
+			} catch (Exception $ex) {
+				$transaction->rollback();
+				throw $ex;
+			}
+		}
+		echo $c.' updated', PHP_EOL;
+	}
+
+	public function testAmp(){
+		include_once(Yii::app()->basePath.DIRECTORY_SEPARATOR.'vendor/autoload.php');
+		Amp\Loop::run(function () {
+			$tns = [
+				'33G7K9265371',
+				'33G7K9265369',
+				'33G7K9265368',
+				// '33G7K9265367',
+				// '33G7K9265366',
+				// '33G7K9265365',
+				// '33G7K9265364',
+				// '33G7K9265363',
+				// '33G7K9265362',
+				// '33G7K9265361',
+				// '33G7K9265360',
+				// '33G7K9265359',
+				// '33G7K9265358',
+				// '33G7K9265357',
+				// '33G7K9265356',
+				// '33G7K9265355',
+				// '33G7K9265354',
+				// '33G7K9265353',
+				// '33G7K9265352',
+			];
+
+			$client = new Amp\Artax\DefaultClient;
+			// $client->setOption(Amp\Artax\Client::OP_DISCARD_BODY, true);
+
+			try {
+				foreach ($tns as $tn) {
+					$uri = 'http://localhost:8081/aupost?tn='.$tn;
+					$promises[$uri] = $client->request($uri);
+				}
+
+				$responses = yield $promises;
+
+				foreach ($responses as $uri => $response) {
+					$json = yield $response->getBody();
+					print $uri . " - " . $response->getStatus() . ' ' .$json. PHP_EOL;
+				}
+			} catch (Amp\Artax\HttpException $error) {
+				// If something goes wrong Amp will throw the exception where the promise was yielded.
+				// The Client::request() method itself will never throw directly, but returns a promise.
+				print $error->getMessage() . PHP_EOL;
+			}
+		});
+	}
+
+	public function testGvapi(){
+		$p = ImParcel::model()->findByPk(6989484);
+		$gva = new GlobavendAPI;
+		// $res = $gva->createOrder($p);
+		$p->ref = '019931265099999891UWQ885696601000930303';
+		$res = $gva->getLabel($p);
+		// $res = file_get_contents('http://47.75.48.99:81/ParcelPrintAction?snos=ba26a39e-b89d-4c1f-bde6-f8afa218d94e');
+		var_dump($res);
+	}
+
+	public function completeTask(){
+		$rs = WmsTask::model()->with('job')->findAll('job.org_id = :oid AND t.link_id = 0 AND t.status = 30', [':oid' => $this->prompt('Org ID: ')]);
+		foreach($rs as $r){
+			$wiplog = Log::model()->find(['condition' => 'model = "WmsTask" AND lid = :lid AND json_value(meta, "$.status") = "WIP"', 'params' => [':lid' => $r->id], 'order' => 'time DESC']);
+			if(empty($wiplog)) continue;
+			if(strtotime($wiplog->time) > time() - 86400) continue;
+			$r->status = 99;
+			$r->compl_time = date('Y-m-d H:i:s', strtotime($wiplog->time) + 3600);
+			$r->save();
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function fastwayBD(){
+		$rs = ZoneRate::model()->findAll('zone = "NON-SYD" AND rate_id = 52 AND item > 0');
+		$rates = [];
+		foreach($rs as $r){
+			$rates[] = [$r->weight_lo, $r->weight_hi, $r->item];
+		}
+		$getCost = function($w) use ($rates){
+			foreach($rates as $r){
+				if($r[0] <= $w && $r[1] > $w){
+					return $r[2];
+				}
+			}
+			return 0;
+		};
+		$sql = "SELECT p.id, p.agent_id, p.hbn, p.ref, p.agent_id, p.postcode, p.weight FROM `shipment` p INNER JOIN tranship t ON t.pid = p.id left join zone_map z on (z.zone_id = 1 AND z.org_id = 115 AND z.z1 = 'SYD' AND z.pc_lo <= p.postcode AND z.pc_hi >= p.postcode)where p.type = 10 and p.status < 60 and p.created > '2019-07-01' and t.org_id = 115 and t.connote NOT LIKE 'BD%' AND z.zone_id IS NOT NULL and p.scan_no > 0";
+		$rs = $this->db->createCommand($sql)->queryAll();
+		foreach($rs as $p){
+			echo implode(',', $p),',',$getCost($p['weight']);
+		}
+	}
+
+	public function addRTSscan(){
+		return;
+		$sql = 'SELECT id,hbn,weight,pkg,ref,cref,agent_id,meta FROM shipment WHERE type = 10 AND status >= 80  AND status <= 86 UNION SELECT id,hbn,weight,pkg,ref,cref,agent_id,meta FROM shipment_archive WHERE type = 10 AND status >= 80  AND status <= 86';
+		$rs = $this->db->createCommand($sql)->queryAll();
+		$tt = [];
+
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			foreach($rs as $r){
+				$mdata = json_decode($r['meta'], true);
+				if(!empty($mdata['rts_scan_date'])){
+					// echo $r['hbn'], ' at ', $mdata['rts_scan_date'], PHP_EOL;
+					$shipment_scan = ShipmentScan::model()->find('pid = :id AND user_id = 0 AND type = 4', [':id' => $r['id']]);
+					if(empty($shipment_scan)){
+						$shipment_scan=new ShipmentScan;
+						$shipment_scan->pid=$r['id'];
+						$shipment_scan->user_id=0;
+						$shipment_scan->type=4;
+						$shipment_scan->weight=round($r['weight']/$r['pkg'], 2);
+						$shipment_scan->pno=1;
+						$shipment_scan->warehouse=106;
+						$shipment_scan->pkg=1;
+						$shipment_scan->scan_time=$mdata['rts_scan_date'].' 12:34:56';
+						$shipment_scan->save();
+						echo 'RTS '.$r['hbn'].' added scan record', PHP_EOL;
+					}
+				}
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function stLabelID(){
+		$date = empty($this->args[1])? date('Y-m-d') : $this->args[1];
+		$ls = file('runtime/startrack/startrack_api_'.$date.'.log');
+		foreach($ls as $l){
+			if(!preg_match('/^Response: {"message":"Your label printing/', $l)) continue;
+			$d = json_decode(substr(trim($l), 9));
+			if(empty($d->labels)) continue;
+			$p = ImParcel::model()->find('created > ref LIKE :ref AND created > DATE_SUB(:d, INTERVAL 2 DAY) AND json_value(meta, "$.ss_shipment_id") = :ssid', [':ref' => '7RFZ%', ':d' => $date, ':ssid' => $d->labels[0]->shipment_ids[0]]);
+			if(empty($p) || !empty($p->mdata['ss_lbl_request_id'])) continue;
+			$p->mdata['ss_lbl_request_id'] = $d->labels[0]->request_id;
+			$p->updateMeta();
+			echo $p->ref.' update: '.$d->labels[0]->request_id.' '.$d->labels[0]->shipment_ids[0], PHP_EOL;
+		}
+	}
+
+	public function fixAPbldate(){
+		$rs = Billing::model()->findAll('org_id = 101');
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			foreach($rs as $r){
+				$sql = 'UPDATE billing_line SET date = :d WHERE billing_id = :bid';
+				$this->db->createCommand($sql)->bindValues([':d' => $r->date, ':bid' => $r->id])->execute();
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function fixAPbldate2(){
+		$rs = Reconciliation::model()->findAll('client_type = 1');
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+		foreach($rs as $r){
+			$bl = BillingLine::model()->find('org_id = 101 AND billing_ref = :r AND actual_amount = :a', [':r' => $r->invoice_no, ':a' => $r->invoice_total]);
+			if(empty($bl)){
+				echo $r->invoice_no,' ',$r->invoice_total,' not found', PHP_EOL;
+			}elseif($bl->date != $r->invoice_date){
+				echo $r->invoice_no,' diff: ',$r->invoice_date,' <> ', $bl->date, PHP_EOL;
+				$bl->date = $r->invoice_date;
+				$bl->save();
+				if (empty($bl->billing)) {
+					Billing::linkLine($bl);
+					$bl->refresh();
+				}
+				$bl->billing->date = $r->invoice_date;
+				$bl->billing->save();
+			}
+		}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function fixScanMeta(){
+		$rs = ImParcel::model()->findAll('consol_id = :c and scan_no > 0', [':c' => $this->prompt("Consol ID:")]);
+		foreach($rs as $r){
+			$s = ShipmentScan::model()->find('pid = :pid AND type IN (0,2)', [':pid' => $r->id]);
+			if(!empty($s)){
+				$r->scan_data[50][$r->hbn] = $s->scan_time;
+				$r->save();
+				echo $r->hbn,' updated', PHP_EOL;
+			}
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function restoreMeta(){
+		$rs = $this->db->createCommand('SELECT id, meta FROM shipment_restore')->queryAll();
+		foreach($rs as $r){
+			$p = Shipment::model()->findByPk($r['id']);
+			$om = json_decode($r['meta'], true);
+			foreach($p->mdata as $k => $v){
+				$om[$k] = $v;
+			}
+			if(!empty($om)){
+				$p->mdata = $om;
+				$p->updateMeta();
+			}
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function resetACR(){
+		$cid = $this->prompt('Consol ID: ');
+		$cn = Consol::model()->findByPk($cid);
+		if(empty($cn)) die('Consol not found');
+		$cn->mdata['acr_stat'] = 0;
+		$cn->save();
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			$this->db->createCommand('UPDATE shipment SET status = 50 WHERE consol_id = '.$cid)->execute();
+			foreach($cn->shipments as $s){
+				$sql = 'UPDATE edimsg SET status = 90 WHERE fid = '.$s->id.' AND type = "AIRCR-S"';
+				$this->db->createCommand($sql)->execute();
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function combpick(){
+		$oid = $this->prompt('Org ID: ');
+		$ts = WmsTask::model()->with('job')->findAll('job.org_id = :oid AND t.status < 99 AND t.link_id = 0', [':oid' => $oid]);
+
+		$xls = new oExcel;
+		$xls->setColWidth([10,10,10,10,10]);
+		$i = 1;
+		$xls->addRow($i++, ['Task ID', 'Order Ref', 'Item', 'Item SKU', 'Qty', 'Customer', 'Address', 'Suburb', 'State', 'Postcode', 'Tel']);
+		$labels = [];
+		foreach($ts as $t){
+			$dt = $t->deliveryTask();
+
+			foreach($t->items as $itm){
+				$stk = WmsStock::model()->findByPk($itm->mdata['si']);
+				$xls->addRow($i++, [$t->id, $t->ref, $itm->mdata['sn'], $stk->prod->ean, $itm->mdata['uq'], $dt->mdata['cnee']['name'], $dt->mdata['cnee']['address'], $dt->mdata['cnee']['suburb'], $dt->mdata['cnee']['state'], $dt->mdata['cnee']['postcode'], $dt->mdata['cnee']['tel']]);
+				//label
+				if($itm->mdata['uq'] < 5 && !empty($itm->mdata['si'])){
+					$o = ['agent_id' => $oid, 'pkg' => $itm->mdata['uq'], 'ref' => $t->getNo(), 'cref' => $t->ref, 'hbn' => $t->getNo(), 'cnee' => $dt->mdata['cnee']];
+					$o = json_decode(json_encode($o));
+					$o->mdata = ['show_sku' => true, ''];
+					$o->eitems = ['sku' => ['<span style="font-size:1.2em">'.$itm->mdata['sn'].' '.$stk->prod->ean.' x 1</span>']];
+					$labels[$stk->prod->ean][] = $o;
+				}
+			}
+		}
+		$xls->output('combined_pick.xlsx', null, false);
+		ksort($labels);
+		$lbls = [];
+		foreach($labels as $ls){
+			$lbls = array_merge($lbls, $ls);
+		}
+		oPDF::renderPDF('label_A6', ['rs' => $lbls, 'tpl' => '_label_letter'], 2, 'letter_labels.pdf');
+		
+		echo 'Done', PHP_EOL;
+	}
+
+	public function oneStopSchedule(){
+		$URLBase = 'http://gateway.1-stop.biz/';
+		$trace = [];
+		$cookie_file = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR.'1stop_cookie.txt';
+
+		//login
+		$c = new curl($URLBase.'Account/LogOn');
+		$c->setopt(CURLOPT_REFERER, $URLBase);
+		$c->setopt(CURLOPT_FOLLOWLOCATION, true);
+		$c->setopt(CURLOPT_SSL_VERIFYHOST, 0);
+		$c->setopt(CURLOPT_SSL_VERIFYPEER, 0);
+		$c->setopt(CURLOPT_POST, true);
+		$c->setopt(CURLOPT_COOKIEJAR, $cookie_file);
+		$c->setopt(CURLOPT_COOKIEFILE, $cookie_file);
+		$postr = $c->asPostString([
+			'username' => 'syddoc',
+			'password' => 'MFWF5rW9d8',
+			'logOnSubmitBtn' => 'Log On',
+		]);
+		$c->setopt(CURLOPT_POSTFIELDS, $postr);
+		if (!$c->exec()) {
+			die("Problem logging in");
+		}
+		$trace[] = "Done login";
+		
+		$c->setopt(CURLOPT_URL, $URLBase.'VesselSchedule/SearchAdvanced?searchAction=search&PortOfCall=AUSYD&Terminals=&VesselName=&LineOperator=&LloydsNumber=&SubmitSearchCriteria=Search');
+		$c->exec();
+		libxml_use_internal_errors(true);
+		$doc = new DOMDocument;
+		$doc->loadHTML($c->result);
+		$tbl = $doc->getElementById('searchResult');
+		$rs = [];
+		foreach($tbl->getElementsByTagName('tr') as $i=>$tr){
+			$d = [];
+			foreach($tr->getElementsByTagName('td') as $j=>$td){
+				$d[] = $td->nodeValue;
+			}
+			$rs[] = $d;
+		}
+		var_dump($rs);
+		$c->setopt(CURLOPT_URL, $URLBase.'https://gateway.1-stop.biz/Account/AutoLogOff');
+		$c->exec();
+	}
+
+	public function checkRtsRate(){
+		function getStartrackInvAmount($p){
+			$il = InvLine::model()->with('invoice')->find('invoice.type = :it AND t.meta LIKE :t', [':it' => 10, ':t' => '%'.$p->ref.'%']);
+			if(empty($il)){
+				return 999;
+			}else{
+				foreach($il->mdata['items'] as $itm){
+					if($itm[0] == $p->ref){
+						return $itm[5];
+					}
+				}
+			}
+			return 999;
+		}
+
+		function getRtsRate($orgId, $p = null)
+		{
+
+			$courier = getCourier($p);
+
+			// get organizaton price rate
+			$orgRate = OrgRate::model()->find('org_id = :oid AND type = 40', [':oid' => $orgId]);
+			if (empty($orgRate)) {
+				return 0;
+			}
+
+			// get org rate details
+			$rateInfo = json_decode($orgRate['meta']);
+			$code = 'AU'; // RTS fee belongs to Australia local
+			$rtsFee = 0;
+			if ($courier == 'fastway') {
+				if (isset($rateInfo->$code->rts_rate_fast)) {
+					$rtsFee = floatval($rateInfo->$code->rts_rate_fast);
+				}
+			} elseif (in_array($courier, ['startrack', 'tnt'])) {
+				if (isset($rateInfo->$code->rts_rate_star)) {
+					$rtsFee = floatval($rateInfo->$code->rts_rate_star) * getStartrackInvAmount($p) / 100;
+				}
+			} elseif ($courier == 'letter') {
+				$rtsFee = 0;
+			} elseif (isset($rateInfo->$code->rts_rate)) {
+				$rtsFee = floatval($rateInfo->$code->rts_rate);
+			}
+			return $rtsFee;
+		};
+
+		function getCourier($p){
+			$courier = 'aus';
+
+			if (preg_match('/LET\d{7}/i', $p->ref)) {
+				$courier = 'letter';
+			}else{
+				$sql = 'SELECT org_id FROM `tranship` WHERE pid = '.$p->id.' AND connote = "'.$p->ref.'" ORDER BY id DESC LIMIT 1';
+				$t = Yii::app()->getDb()->createCommand($sql)->queryScalar();
+				if(!empty($t)){
+					switch($t){
+						case Org::ORGID_COURIER_FASTWAY:
+							$courier = 'fastway';
+						break;
+						case Org::ORGID_COURIER_STARTRACK:
+							$courier = 'startrack';
+						break;
+						case Org::ORGID_COURIER_TNT:
+							$courier = 'tnt';
+						break;
+					}
+				}
+			}
+			return $courier;
+		}
+		$p = ImParcel::model()->findByPk($this->prompt('Shipment ID:'));
+
+		var_dump(getRtsRate($p->agent_id, $p));
+	}
+
+	public function fixUbiAID(){
+		$ts = Tranship::model()->findAll('org_id = 3079');
+
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			foreach($ts as $t){
+				if(empty($t->shipment->mdata['article_id'])){
+					$aid = $t->shipment->ref.sprintf('%02s', 1).'00093'.'51'.'0';
+					$aid .= AusPostAPI::aidChkDgt($aid);
+					$t->shipment->mdata['article_id'] = $aid;
+					if(!empty($t->shipment->mdata['etower_shipment_orderid'])){
+					unset($t->shipment->mdata['etower_shipment_orderid']);
+						$t->shipment->hbn = $t->shipment->hbn . 'A';
+					}
+					$t->shipment->nolog = true;
+					$t->shipment->update('hbn', 'meta');
+					$t->shipment->nolog = false;
+					$t->status = 10;
+					$t->update('status');
+				}
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+
+		echo 'Done', PHP_EOL;
+	}
+
+	public function updateAid(){
+		$p = ImParcel::model()->find('ref = :r', [':r' => '']);
+		$ubi=new UbiAPI(false, false);
+		$r = $ubi->updateShipment([$p]);
+		var_dump($r);
+	}
+
+	public function repushubiaid(){
+		$ps = file('wrong_ubi_aid.csv');
+		if(empty($ps)) return;
+
+		$max_ppg = 300;
+		$pgs = ceil(count($ps) / $max_ppg);
+		$ubi=new UbiAPI(false,false,0);
+		for($pg = 0; $pg < $pgs; $pg++){
+			$ds = array_slice($ps, $pg * $max_ppg, $max_ppg);
+			$ss = [];
+			$transaction=Yii::app()->db->beginTransaction();
+			try {
+				foreach($ds as $d){
+					$d = trim($d);
+					if(empty($d)) continue;
+					$p = ImParcel::model()->find('ref = :r', [':r' => substr($d, 0, 12)]);
+					if(empty($p)) continue;
+					$p->hbn = $p->hbn.'A';
+					$p->mdata['article_id'] = $d;
+					$p->mdata['etower_shipment_orderid'] = '';
+					$p->nolog = true;
+					$p->update('hbn', 'meta');
+					$p->nolog = false;
+					$ss[] = $p;
+				}
+				$transaction->commit();
+			} catch (Exception $ex) {
+				$transaction->rollback();
+				throw $ex;
+			}
+			if(empty($ss)) continue;
+			$rs=$ubi->createShipment($ss);
+			if(is_object($rs)){
+				if($rs->status=="Failure"){
+					continue;
+				}else{
+					$transaction=Yii::app()->db->beginTransaction();
+					try {
+						foreach($rs->data as $result){
+							if($result->status=="Success"){
+								if(!empty($result->referenceNo)){
+									$s = ImParcel::model()->find('hbn = :n', [':n' => $result->referenceNo]);
+									if(!empty($s)){
+										$s->nolog = true;
+										$s->mdata['etower_shipment_orderid'] = $result->orderId;
+										$s->update('meta');
+										$s->nolog = false;
+										$s->trans[0]->mdata['oid'] = '';
+										$s->trans[0]->save();
+									}
+								}
+							}
+						}
+						$transaction->commit();
+					} catch (Exception $ex) {
+						$transaction->rollback();
+						throw $ex;
+					}
+				}
+			}
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function gvNoTrans(){
+		$sql = 'select s.* from shipment s left join tranship t on s.id = t.pid where s.created > "2020-03-01" and s.agent_id IN (2716,2800) and t.id is null and s.ref LIKE "33G7%"';
+		$rs = $this->db->createCommand($sql)->queryAll();
+		$transaction=Yii::app()->db->beginTransaction();
+		try {
+			foreach($rs as $r){
+				$ts = new Tranship;
+				$ts->pid = $r['id'];
+				$ts->org_id = Org::ORGID_COURIER_UBI;
+				$ts->type = 80;
+				$ts->status = 10;
+				$ts->connote = $r['ref'];
+				$ts->time = date('Y-m-d H:i:s');
+				$ts->cost = 0;
+				$ts->save();
+			}
+			$transaction->commit();
+		} catch (Exception $ex) {
+			$transaction->rollback();
+			throw $ex;
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function gvWrongAidManifest(){
+		$awbs = ['160-20197133', '160-20197122', '160-20783431', '160-20783490', '160-20783475', '160-20783453'];
+		$ss = [];
+		foreach($awbs as $awb){
+			$co = Consol::model()->find('awb = :r', [':r' => $awb]);
+			if(empty($co)){
+				echo $awb.' not found', PHP_EOL;
+				continue;
+			}
+			foreach($co->shipments as $p){
+				if(strpos($p->mdata['article_id'], '0100093030') > 0){
+					$ss[] = $p;
+					if(!empty($p->trans[0]->mdata['oid'])){
+						echo $p->ref, PHP_EOL;
+					}
+				}
+			}
+		}
+		// $imConsolService = new ImConsolService();
+		// $err = $imConsolService->doUbiManifest($ss);
+
+		echo 'Done', PHP_EOL;
+	}
+
+	public function fixgv333uf(){
+		$rs = ImParcel::model()->findAll('ref LIKE "333UF%" AND agent_id = 2716');
+		$transaction=Yii::app()->db->beginTransaction();
+		try {
+			foreach($rs as $r){
+				unset($r->mdata['facility']);
+				unset($r->mdata['org_rate_id']);
+				unset($r->mdata['sort_code']);
+				unset($r->mdata['isUbiCN2AU']);
+				unset($r->mdata['article_id']);
+				$r->mdata['test_aupost_2017']=1;
+				$r->mdata['chargecode']=3184;
+				$aid = $r->ref.sprintf('%02s', 1).'00093'.'50'.'0';
+				$aid .= AusPostAPI::aidChkDgt($aid);
+				$r->note = $aid;
+				$r->update(['meta', 'note']);
+			}
+			$transaction->commit();
+		} catch (Exception $ex) {
+			$transaction->rollback();
+			throw $ex;
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function withdrawACR(){
+		$cn = Consol::model()->findByPk($this->prompt('Consol ID: '));
+		$senderSite = Yii::app()->params['ics']['testing']? Yii::app()->params['ics']['test_site'] : Yii::app()->params['ics']['prod_site'];
+		if(empty($cn)){
+			die("Consol not found\n");
+		}else{
+			echo "AWB: ", $cn->awb, "\n";
+		}
+		$oawb = preg_replace('/[^\d]+/', '', $this->prompt('Wrong AWB: '));
+		$hwb = empty($cn->mdata['house_bill'])? $cn->no : $cn->mdata['house_bill'];
+		$airline = substr(trim($cn->airline), 0, 2);
+		$flight = substr(trim($cn->flight), 2);
+		$transaction=Yii::app()->db->beginTransaction();
+		try {
+			$os = Edimsg::model()->findAll("status = 50 AND type = 'AIRCR-C' AND fid = :id AND sender =:sender", [':id' => $cn->id,':sender'=>$senderSite]);
+			$omid = null;
+			if(!empty($os)){
+				foreach($os as $o){
+					if(preg_match('/MWB:'.$oawb.'/', $o->msg) && preg_match('/BGM\+933:::AIRCR\+([^\+:]+):\d+\+9\'/', $o->msg, $m)){
+						$omid = $m[1];
+						break;
+					}
+				}
+			}
+		if(empty($omid)){
+			echo 'Original MSG not found for ', $cn->no, "\n";
+		}else{
+			$em = new Edimsg;
+			$em->dt = date('Y-m-d H:i:s');
+			$em->type = 'AIRCR-C';
+			$em->sender =$senderSite;
+			$em->receiver = Yii::app()->params['ics']['customs_id'];
+			$em->status = 19;
+			$em->fid = $cn->id;
+			$em->save();
+			$em->mid = sprintf('%06s', substr($em->id, -6));
+			$vn = Edimsg::model()->count('type = :t AND fid = :fid AND sender = :sender', [':t' => 'AIRCR-C', ':fid' => $cn->id,':sender'=>$senderSite]) + 1;
+			$msg = "UNH+".$em->mid."+CUSCAR:D:99B:UN'
+BGM+933:::AIRCR+".$omid.":".$vn."+50'
+RFF+HWB:".$cn->no."'
+RFF+MWB:".$oawb."'
+TDT+20+".$flight."++6+".$airline."::3'
+DTM+178:".date("Ymd", strtotime($cn->eta)).":102'
+";
+			$mc = substr_count($msg, "\n")+1;
+			$msg .= "UNT+".$mc."+".$em->mid."'";
+			$em->msg = $msg;
+			$em->status = 20;
+			$em->save();
+		}
+		foreach($cn->shipments as $i=>$p){
+//                    if(($p->bwf&4)<=0)                        continue;
+			echo $p->ref."\n";
+			$p->mdata['heldEta'] = [];
+			$p->updateMeta();
+			$os = Edimsg::model()->findAll("status = 50 AND type = 'AIRCR-S' AND fid = :id AND sender =:sender", [':id' => $p->id,':sender'=>$senderSite]);
+			$omid = null;
+			if(!empty($os)){
+				foreach($os as $o){
+					if(preg_match('/MWB:'.$oawb.'/', $o->msg) && preg_match('/BGM\+933:::AIRCR\+([^\+:]+):\d+\+9\'/', $o->msg, $m)){
+						$omid = $m[1];
+						break;
+					}
+				}
+			}
+			if(empty($omid)){
+				echo 'Original MSG not found for ', $p->hbn, "\n";
+				continue;
+			}
+			$em = new Edimsg;
+			$em->dt = date('Y-m-d H:i:s');
+			$em->type = 'AIRCR-S';
+			$em->sender = $senderSite;
+			$em->receiver = Yii::app()->params['ics']['customs_id'];
+			$em->status = 19;
+			$em->fid = $p->id;
+			$em->save();
+			$em->mid = sprintf('%06s', substr($em->id, -6));
+			$vn = Edimsg::model()->count('type = :t AND fid = :fid AND sender =:sender', [':t' => 'AIRCR-S', ':fid' => $p->id,':sender'=>$senderSite]) + 1;
+			$msg = "UNH+".$em->mid."+CUSCAR:D:99B:UN'
+BGM+933:::AIRCR+".$omid.":".$vn."+50'
+RFF+HWB:".$p->hbn."'
+RFF+MWB:".$oawb."'
+TDT+20+".$flight."++6+".$airline."::3'
+DTM+178:".date("Ymd", strtotime($cn->eta)).":102'
+";
+			$mc = substr_count($msg, "\n")+1;
+			$msg .= "UNT+".$mc."+".$em->mid."'";
+			$em->msg = $msg;
+			$em->status = 20;
+			$em->save();
+		}
+			$transaction->commit();
+		} catch (Exception $ex) {
+			$transaction->rollback();
+			throw $ex;
+		}
+		echo "Done\n";
+	}
+
+	public function withdrawSCR(){
+		$cn = Consol::model()->findByPk($this->prompt('Consol ID: '));
+		$senderSite = Yii::app()->params['ics']['testing']? Yii::app()->params['ics']['test_site'] : Yii::app()->params['ics']['prod_site'];
+		if(empty($cn)){
+			die("Consol not found\n");
+		}
+
+		$oawb = $this->prompt('Original B/L: ', $cn->awb);
+		$dawb = $this->prompt('Derived B/L: ', $cn->awb);
+		$hbl = $this->prompt('House Bill: ', @$cn->mdata['house_bill']);
+		$vessel = $this->prompt('Vessel: ', $cn->airline);
+		$voyage = $this->prompt('Voyage: ', $cn->flight);
+
+		$transaction=Yii::app()->db->beginTransaction();
+		try {
+		foreach($cn->shipments as $i=>$p){
+//                    if(($p->bwf&4)<=0)                        continue;
+			// echo $p->ref."\n";
+			$p->mdata['heldEta'] = [];
+			$p->updateMeta();
+			$os = Edimsg::model()->findAll("status = 50 AND type = 'SEACR-S' AND fid = :id AND sender = :sender", [':id' => $p->id,':sender'=>$senderSite]);
+			$omid = null;
+			if(!empty($os)){
+				foreach($os as $o){
+					if(preg_match('/MB:'.$oawb.'/', $o->msg) && preg_match('/BGM\+933:::SEACR\+([^\+:]+):\d+\+9\'/', $o->msg, $m) && preg_match('/TDT\+20\+'.$voyage.'\+\+11\+\+\+\+'.$vessel.'::11/', $o->msg)){
+						$omid = $m[1];
+						break;
+					}
+				}
+			}
+			if(empty($omid)){
+				echo 'Original MSG not found for ', $p->hbn, "\n";
+				continue;
+			}
+			$em = new Edimsg;
+			$em->dt = date('Y-m-d H:i:s');
+			$em->type = 'SEACR-S';
+			$em->sender = Yii::app()->params['ics']['testing']? Yii::app()->params['ics']['test_site'] : Yii::app()->params['ics']['prod_site'];
+			$em->receiver = Yii::app()->params['ics']['customs_id'];
+			$em->status = 19;
+			$em->fid = $p->id;
+			$em->save();
+			$em->mid = sprintf('%06s', substr($em->id, -6));
+			$vn = Edimsg::model()->count('type = :t AND fid = :fid AND sender = :sender', [':t' => 'SEACR-S', ':fid' => $p->id,':sender'=>$senderSite]) + 1;
+			$msg = "UNH+".$em->mid."+CUSCAR:D:99B:UN'
+BGM+933:::SEACR+".$omid.":".$vn."+50'
+RFF+BH:".$p->hbn."'
+";
+// if(!empty($hbl)) $msg.="RFF+BM:".$hbl."'\n";
+$msg .= "RFF+MB:".$dawb."'
+TDT+20+".$voyage."++11++++".$vessel."::11'
+LOC+12+".$cn->pod."::6'
+";
+			$mc = substr_count($msg, "\n")+1;
+			$msg .= "UNT+".$mc."+".$em->mid."'";
+			$em->msg = $msg;
+			$em->status = 20;
+			$em->save();
+			echo 'Withdrawn ', $p->hbn, PHP_EOL;
+		}
+			$transaction->commit();
+		} catch (Exception $ex) {
+			$transaction->rollback();
+			throw $ex;
+		}
+		echo "Done\n";
+	}
+
+	public function withdrawSCRSingle(){
+		$data = ["33XJM628049601000931507","33XHE488923901000935107","33XHE488989001000935100","33XHE488994001000935102","33XJM628185801000931502","33XHE489070601000935100","33XHE489069701000935101","33XHE489004301000935106","33XHE489074601000935106","33XHE489074801000935100","33XHE489074101000935101","33XHE489074201000935108","33XJM628007701000931508","33XHE488884001000935106","33XJM628006301000931501","33XHE488883601000935109","33XHE488881801000935105","33XHE488880901000935103","33XHE488881601000935101","33XHE488879701000935103","33XHE488879901000935107","33XHE489061001000935100","33XJM628128001000931501","33XJM628131901000931508","33XJM628128501000931506","33XHE489011301000935106","33XHE489016201000935104","33XJM628127101000931509","33XHE489013801000935109","33XHE488903801000935106","33XHE488902701000935100","33XHE488904001000935109","33XHE489058001000935106","33XHE488887801000935109","33XHE489071401000935105","33XJM628184201000931501","33XHE489072201000935100","33XHE489065501000935101","33XJM628166101000931508","33XHE489066601000935107","33XHE489071201000935101","33XHE489068001000935103","33XHE489073401000935103","33XJM628184401000931505","33XHE489109101000935106","33XHE489123201000935103","33XHE489121201000935105","33XHE489123701000935108","33XHE489102401000935104","33XHE489111701000935103","33XJM628248801000931500","33XJM628019001000931504","33XJM628040601000931506","33XHE488647101000935104","33XJM628243701000931508","33XJM628243401000931507","33XJM628200601000931506","33XHE489124801000935104","33XHE489128001000935104","33XHE489124701000935107","33XHE489051801000935109","33XJM628150601000931502","33XHE489046101000935108","33XHE489038801000935108","33XHE489038101000935109","33XHE489035001000935105","33XJM627993701000931509","33XJM628170601000931506"];
+				$transaction=Yii::app()->db->beginTransaction();
+		try {
+		foreach ($data as $key => $d)
+		{
+		$p = Shipment::model()->find("hbn=:hbn and status !=100",[":hbn"=>$d]);
+		$cn = $p->consol;
+		$senderSite = Yii::app()->params['ics']['testing']? Yii::app()->params['ics']['test_site'] : Yii::app()->params['ics']['prod_site'];
+		if(empty($cn)){
+			die("Consol not found\n");
+		}
+
+		$oawb = $cn->awb;
+		$dawb = $cn->awb;
+		$hbl = @$cn->mdata['house_bill'];
+		$vessel = $cn->airline;
+		$voyage = $cn->flight;
+
+
+			$os = Edimsg::model()->findAll("status = 50 AND type = 'SEACR-S' AND fid = :id AND sender = :sender", [':id' => $p->id,':sender'=>$senderSite]);
+			$omid = null;
+			if(!empty($os)){
+				foreach($os as $o){
+					if(preg_match('/MB:'.$oawb.'/', $o->msg) && preg_match('/BGM\+933:::SEACR\+([^\+:]+):\d+\+9\'/', $o->msg, $m) && preg_match('/TDT\+20\+'.$voyage.'\+\+11\+\+\+\+'.$vessel.'::11/', $o->msg)){
+						$omid = $m[1];
+						break;
+					}
+				}
+			}
+			if(empty($omid)){
+				echo 'Original MSG not found for ', $p->hbn, "\n";
+				continue;
+			}
+			$em = new Edimsg;
+			$em->dt = date('Y-m-d H:i:s');
+			$em->type = 'SEACR-S';
+			$em->sender = Yii::app()->params['ics']['testing']? Yii::app()->params['ics']['test_site'] : Yii::app()->params['ics']['prod_site'];
+			$em->receiver = Yii::app()->params['ics']['customs_id'];
+			$em->status = 19;
+			$em->fid = $p->id;
+			$em->save();
+			$em->mid = sprintf('%06s', substr($em->id, -6));
+			$vn = Edimsg::model()->count('type = :t AND fid = :fid AND sender = :sender', [':t' => 'SEACR-S', ':fid' => $p->id,':sender'=>$senderSite]) + 1;
+			$msg = "UNH+".$em->mid."+CUSCAR:D:99B:UN'
+BGM+933:::SEACR+".$omid.":".$vn."+50'
+RFF+BH:".$p->hbn."'
+";
+// if(!empty($hbl)) $msg.="RFF+BM:".$hbl."'\n";
+$msg .= "RFF+MB:".$dawb."'
+TDT+20+".$voyage."++11++++".$vessel."::11'
+LOC+12+".$cn->pod."::6'
+";
+			$mc = substr_count($msg, "\n")+1;
+			$msg .= "UNT+".$mc."+".$em->mid."'";
+			$em->msg = $msg;
+			$em->status = 20;
+			$em->save();
+			echo 'Withdrawn ', $p->hbn, PHP_EOL;
+		
+		}
+					$transaction->commit();
+		} catch (Exception $ex) {
+			$transaction->rollback();
+			throw $ex;
+		}
+		echo "Done\n";
+		
+	}
+
+	public function withdrawOutturn(){
+		$cn = Consol::model()->find('no = :n', [':n' => $this->args[1]]);
+		if(empty($cn)){
+			die("Consol not found\n");
+		}
+		
+		$isair = $cn->service == 10;
+
+		$em = new Edimsg;
+		$em->dt = date('Y-m-d H:i:s');
+		$em->type = $isair? 'AIROUT' : 'SEAOUT';
+		$em->sender = Yii::app()->params['ics']['testing']? Yii::app()->params['ics']['test_site'] : Yii::app()->params['ics']['prod_site'];
+		$em->receiver = Yii::app()->params['ics']['customs_id'];
+		$em->status = 19;
+		$em->fid = $cn->id;
+		$em->save();
+
+		$em->mid = sprintf('%06s', substr($em->id, -6));
+		$os = Edimsg::model()->findAll("status = 50 AND type = :t AND fid = :id ORDER BY t.id DESC", [':id' => $cn->id, ':t' => $em->type]);
+		$omid = null;
+		$ymd = null;
+		$hi = null;
+		if(!empty($os)){
+			foreach($os as $o){
+				if(preg_match('/BGM\+263:::'.$em->type.'\+([^\+:]+):\d+\+(9|4)/', $o->msg, $m)){
+					$omid = $m[1];
+					if(preg_match('/DTM\+570:(\d+):102/', $o->msg, $m)){
+						$ymd = $m[1];
+					}
+					if(preg_match('/DTM\+570:(\d+):401/', $o->msg, $m)){
+						$hi = $m[1];
+					}
+					break;
+				}
+			}
+		}
+		if(empty($omid)){
+			echo 'Original MSG not found for ', $cn->no, PHP_EOL;
+			return;
+		}
+
+		$vn = Edimsg::model()->count('type = :t AND fid = :fid', [':t' => $em->type, ':fid' => $cn->id]) + 1;
+		if($isair){//air
+			$airline = substr(trim($cn->airline), 0, 2);
+			$flight = substr(trim($cn->flight), 2);
+			$msg = "UNH+".$em->mid."+CUSCAR:D:99B:UN'
+BGM+263:::AIROUT+".$omid.":".$vn."+50'
+DTM+570:".$ymd.":102'
+DTM+570:".$hi.":401'
+NAD+VW+".Yii::app()->params['ics']['abn']."::95'
+TDT+20+".$flight."++6+".$airline."::3'
+LOC+59+".$cn->getEstID()."::95'
+DTM+132:".date("Ymd", strtotime($cn->eta)).":102'
+";
+		}else{
+			$voyage_number = trim($cn->flight);// like 023s
+			$vessel = trim($cn->airline); //IMO  like 9235103
+			$cargo_type = $cn->mdata['cargo_type'];
+			$msg = "UNH+".$em->mid."+CUSCAR:D:99B:UN'
+BGM+263:::SEAOUT+".$omid.":".$vn."+50'
+TDT+20+".$voyage_number."++11++++".$vessel."::11'
+LOC+4+".$cn->getEstID()."::95'
+";
+		}
+
+		$mc = substr_count($msg, "\n")+1;
+		$msg .= "UNT+".$mc."+".$em->mid."'";
+		$em->msg = $msg;
+		$em->status = 20;
+		$em->dt = date('Y-m-d H:i:s', time() + (200 * $i));
+		$em->save();
+		echo 'Withdrawn ', $cn->no, PHP_EOL;
+	}
+
+	public function manfiestChargecode(){
+		$sql = 'SELECT man_id, id FROM shipment WHERE type = 10 AND created > "2019-07-01" AND man_id > 0 GROUP BY man_id';
+		$rs = $this->db->createCommand($sql)->queryAll();
+		$transaction=Yii::app()->db->beginTransaction();
+		try {
+			foreach($rs as $r){
+				$p = ImParcel::model()->findByPk($r['id']);
+				if(!empty($p->mdata['chargecode'])){
+					$m = Manifest::model()->findByPk($r['man_id']);
+					$m->mdata['chargecode'] = $p->mdata['chargecode'];
+					$m->save();
+				}
+			}
+			$transaction->commit();
+		} catch (Exception $ex) {
+			$transaction->rollback();
+			throw $ex;
+		}
+		
+		echo "done", PHP_EOL;
+	}
+
+	public function testChooseShipment()
+	{
+		//chargecodes:
+		// TNT only 7076
+		// tnt and st: 7218
+		// ap and fw: 5186
+		// all mix: 8917
+		
+		//test PO Box
+		$data = '{"agent_id":3113,"cust_ref": "test-12345", "type": "10", "packs": "1", "weight": 35.4, "cbm": 0.125, "currency": "AUD", "chargecode": "8917", "shipper": {"name": "Daniel Altran", "address": "7\\/13 Westminster ave", "state": "NSW", "suburb": "DEE WHY","postcode":"2099" ,"phone":"+610426993235"},  "items": [ {"type": "O", "name": "Asics", "name_zh": "Asics", "brand": "ASICS", "qty": "1", "price": "2", "sku": "9344108019214" } ], "consignee": {"name": "Daniel Altran", "address": "PO BOX 123", "state": "WA", "suburb": "Perth","postcode":"6001","phone":"+610426993235" }}';
+		
+		$d = json_decode($data);
+		$result = ChooseShipment::newShipmentWithChargeCode($d,true);
+		print_r($result);
+	}
+
+	public function rerunAddressValidation(){// for incorrectables
+		$o = new stdClass;
+		$country = 'AU';
+
+		$rs = ImParcel::model()->findAll('cbwf & 16 > 0 AND json_value(meta, "$.editStreetCode") = 512');
+
+		foreach($rs as $p){
+			$result = ChooseShipment::modifyAddress($p->cnee,$o,$country,$p->mdata['chargecode']);
+			if($result->isModified==1)
+			{
+				if(!empty($result->newAddress))
+				{
+					$p->mdata['newAddress'] = $result->newAddress;
+					$p->mdata['oldAddress'] = $result->oldAddress;
+					$p->mdata['editStreetCode'] = $result->editCode;
+				}
+				unset($p->mdata['is_diff']);
+				$p->cbwf = $p->cbwf | 16;
+				$p->cnee->save();
+				$p->save();
+				echo $p->hbn, ' local corrected', PHP_EOL;
+			}else if($result->isModified==2)
+			{
+				$p->cbwf = $p->cbwf | 16;
+				if(!empty($result->tempAddress))
+				{
+					$p->mdata['tempAddress'] = $result->tempAddress;
+					var_dump($result->tempAddress);
+				}
+				$p->mdata['oldAddress'] = $result->oldAddress;
+				$p->mdata['editStreetCode'] = $result->editCode;
+				if(($result->editCode & 512) > 0){
+					echo $p->hbn, ' INCORRECTABLE', PHP_EOL;
+				}else{
+					unset($p->mdata['is_diff']);
+					$p->save();
+					$p->cnee->save();
+					echo $p->hbn, ' geocode corrected', PHP_EOL;
+				}
+			}
+		}
+		echo 'Done';
+	}
+
+	public function apordersfromlog(){
+		$log_dir = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR.'auspost'.DIRECTORY_SEPARATOR;
+		$detail = !empty($this->args[1]) && $this->args[1] == 'detail';
+		
+		if($detail){
+			echo "HBN\tRef\tConsol\tAgent\tCreated\tWeight\tCost\tAP#\tDate", PHP_EOL;
+		}else{
+			echo "AP#\tDate\tCost\tShipments\tItems", PHP_EOL;
+		}
+		$t = [0,0,0];
+		foreach(glob($log_dir.'auspost_api_2020-04*.log') as $f){
+			$ls = file($f);
+			foreach($ls as $l){
+				if(preg_match('/^Response: \{"order":\{"order_id":"AP/', $l)){ //order response
+					$r = json_decode(trim(substr($l, 10)), true);
+					if($detail){
+						foreach($r['order']['shipments'] as $s){
+							$p = ImParcel::model()->find('hbn = :n', [':n' => $s['shipment_reference']]);
+							if(empty($p)) echo $s['shipment_reference'], ' not found!', PHP_EOL;
+							$tc = 0;
+							foreach($s['items'] as $itm){
+								$tc += $itm['item_summary']['total_cost'];
+							}
+							echo $p->hbn, "\t", $p->ref, "\t", $p->agent_id, "\t", $p->consol_id, "\t", $p->created, "\t", $p->weight, "\t", $tc, "\t", $r['order']['order_id'], "\t", $r['order']['order_creation_date'], PHP_EOL;
+						}
+						continue;
+					}
+					echo $r['order']['order_id'], "\t", $r['order']['order_creation_date'], "\t", $r['order']['order_summary']['total_cost'], "\t", $r['order']['order_summary']['number_of_shipments'], "\t", $r['order']['order_summary']['number_of_items'], PHP_EOL;
+					$t[0] += $r['order']['order_summary']['total_cost'];
+					$t[1] += $r['order']['order_summary']['number_of_shipments'];
+					$t[2] += $r['order']['order_summary']['number_of_items'];
+				}
+			}
+		}
+		if(!$detail) echo "\t\t",implode("\t", $t), PHP_EOL;
+	}
+
+	public function scanlog(){
+		$ls = file('runtime/batch_scan.log');
+		$ns = [];
+		$tns = [];
+		$transaction=Yii::app()->db->beginTransaction();
+		$tempWareHouse=106;
+		if (!empty(Yii::app()->session['scan_warehouse']) && Yii::app()->session['scan_warehouse']=='melbourne') {
+			$tempWareHouse=218;
+		}
+		$type = 0;
+		try {
+			foreach($ls as $l){
+				$time = substr($l, 0, 19);
+				$ds = json_decode(trim(substr($l, 21)));
+				foreach($ds as $d){
+					if(in_array($d, $ns)) continue;
+					$ns[] = $d;
+					$tns[$time][] = $d;
+					$isHbn = $sn == 0;
+					$courier_id = 0;
+					if(preg_match('/^(33EVH|333UF|AMQ)\d{10,}/', $d)) $d = '019931265099999891'.$d;
+					$p = ShipmentScan::getShipmentByBarcode($d, $sn, $courier_id);
+					if(empty($p)) {
+						if (preg_match('/-\d+$/', $d)) {
+							list($hbn, $sn) = explode('-', $d);
+						} else {
+							$hbn = $d;
+							$sn = 0;
+						}
+						$p = ImParcel::fromBarcode($hbn, $isHbn);
+					}
+					if(empty($p)){
+						echo $d.' not found', PHP_EOL;
+						continue;
+					}
+					if($p->scanCount() > 0) continue;
+					echo $p->ref.' no scan record', PHP_EOL;
+					ShipmentScan::genShipmentScan($p, $type, $sn, $tempWareHouse, 3600);
+					GatepassShipment::gatepassScan($p, $courier_id, $sn, $tempWareHouse);
+					if (!$isHbn || $p->pkg == 1) {
+						$p->scan_data[50][strtoupper($d)] = date('Y-m-d H:i:s');
+					}
+					$p->scan_no = $p->pkg - $p->scanCount();
+					$p->mdata['scan_time'] = date('Y-m-d H:i:s');
+					$p->pushToHeldProcess(true);
+					$p->update(['scan_no', 'scan', 'meta', 'bwf']);
+					$p->updateDeconsolidationTime();
+					echo 'Updated '.$p->ref, PHP_EOL;
+				}
+			}
+			$transaction->commit();
+		} catch (Exception $ex) {
+			$transaction->rollback();
+			var_dump($ex->getMessage());
+			print_r($ex->getTrace());
+			throw new CHttpException(500, 'Failed save to DB!');
+		}
+
+		// file_put_contents('s.json', json_encode($tns));
+		echo 'Done',PHP_EOL;
+	}
+
+	public function upAP838(){
+		include(Yii::app()->basePath.DIRECTORY_SEPARATOR.'commands/trackingCommand.php');
+		$tracking = new trackingCommand('ubm', null);
+		$rs = Tranship::model()->with('shipment')->findAll(  			't.org_id = 101 and t.status = 19 and t.time > "2020-04-01" and shipment.status = 70 and shipment.agent_id = 838');
+		$transaction=Yii::app()->db->beginTransaction();
+		try {
+			foreach($rs as $t){
+				$tracking->_upImTrack($t);
+				echo date('Y-m-d H:i:s'), "\t", $t->connote, PHP_EOL;
+			}
+			$transaction->commit();
+		} catch (Exception $ex) {
+			$transaction->rollback();
+			throw $ex;
+		}
+		echo 'Done';
+	}
+
+	public function gvdblmanifinv(){
+		$to_id = 2716;
+		$owner = Org::model()->findByPk($to_id);
+		$orgRate = OrgRate::model()->find('org_id = :oid AND type = 40', [':oid' => $owner->id]);
+		// chargecode 3184 syd, 1082 mel
+		$ls = file('gv_shipments.csv');
+		$shipments = [];
+		foreach($ls as $l){
+			$r = explode(',', trim($l));
+			$p = ImParcel::model()->find('ref = :r AND agent_id = :o', [':r' => $r[1], ':o' => $to_id]);
+			if(empty($p)){
+				echo $r[1], ' not found', PHP_EOL;
+				continue;
+			}
+			$p->mdata['chargecode'] = preg_match('/^33EVH/', $p->ref)? 1082 : 3184;
+			$shipments[] = $p;
+		}
+		$con = new ImcoConsol;
+		$result = $con->genShipmentsInvoicePro($owner, $orgRate, $shipments);
+		$inv = new Invoice;
+		$isUpdate = false;
+		$inv->date = date('Y-m-d');
+		$inv->status = Invoice::INVOICE_STATUS_PENDING;
+		$inv->type = Invoice::INVOICE_TYPE_DIRECT_MAWB;
+		$inv->dpmt = Invoice::DPMT_IMPORT;
+		$inv->to_id = $to_id;
+		$inv->consol_id = 0;
+		$inv->man_id = 0;
+		$inv->dpt_id = 106;
+		$inv->currency = 1;
+		if ($result[0] > 0) {
+			$inv->total = $result[0];
+			$items = $result[1];
+			$inv->save();
+			$il = new InvLine;
+			$il->inv_id = $inv->id;
+			$il->amount = round($inv->total, 2);
+			$il->gst = 0;
+			$il->qty = 1;
+			$il->mdata['items'] = $items;
+			$il->save();
+		}
+		echo $inv->id, PHP_EOL;
+	}
+
+	public function storageUnitTest(){
+		//test cases
+		$free_days = [0, 2, 5, 7, 10, 14, 21];
+		$span = 140;
+		$stock = 0;
+		$moves = [];
+
+		//forward logic
+		$fcl = function($wk, $free)use(&$moves){
+			$in = 0;
+			$out = 0;
+			
+			foreach($moves as $m){
+				if($m[0] + $free + 1 > $wk * 7) break;
+				//all in before the free date
+				$in++;
+
+				//out before last period and in this period but less than free days;
+				if($m[1] === null || $m[1] + $free + 1 > $wk * 7) continue;
+				if($m[1] + $free < ($wk-1) * 7 || $m[1] - $m[0] < $free){
+					$out++;
+				}
+			}
+			return $in - $out;
+		};
+
+		//quick logic
+		$qcl = function($wk, $free)use(&$moves){
+			$in = 0; 
+			$out = 0;
+
+			// stock balance ending last period
+			$sbd = $wk * 7 - $free;
+			if($sbd < 0) $sbd = 0;
+
+			foreach($moves as $m){
+				if($m[0] >= $sbd) break;
+
+				//all in before the free date and not out before the billing date
+				if($m[1] === null || $m[1] >= $sbd) $in++;
+				
+				if($m[1] === null || $m[1] >= $sbd) continue;
+				//add back out not free
+				if($m[1] >= $sbd - 7 && $m[1] - $m[0] >= $free){
+					$out--;
+				}
+			}
+
+			return $in - $out;
+		};
+
+		//register moves
+		$regMove = function($q, $d) use(&$moves){
+			if($q == 0) return;
+			if($q > 0){
+				for($i = 0; $i < $q; $i++){
+					$moves[] = [$d,null];
+				}
+			}else{
+				$pk = [];
+				foreach($moves as $k => $m){
+					if($m[1] !== null) continue;
+					$pk[] = $k;
+				}
+				shuffle($pk);
+				for($i = 0; $i < -$q; $i++){
+					$moves[$pk[$i]][1] = $d;
+				}
+			}
+		};
+
+		//generate test data table
+		echo '|', str_pad('Week', 6, ' ', STR_PAD_BOTH);
+		foreach(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as $d){
+			echo '|', str_pad($d, 10, ' ', STR_PAD_BOTH);
+		}
+		echo '|', PHP_EOL, str_pad('|', 7, '-'), implode('', array_fill(0, 7, str_pad('|', 11, '-')));
+		for($i = 0; $i < $span; $i++){
+			if($i % 7 == 0) echo '|', PHP_EOL, '|', str_pad(ceil($i / 7) + 1, 6, ' ', STR_PAD_BOTH);
+			$m = rand(0, 20 + min($stock, 20)) - min($stock, 20);
+			$stock += $m;
+			$regMove($m,$i);
+			echo '| ', str_pad($stock.'('.($m > 0? '+' : '').$m.')', 9, ' ');
+		}
+		echo '|', PHP_EOL, PHP_EOL;
+
+		//testing result;
+		echo '|', str_pad('Free', 8, ' ', STR_PAD_BOTH);
+		$wks = floor($span/7);
+		for($i = 1; $i <= $wks; $i++){
+			echo '|', str_pad('Wk '.$i, 8, ' ', STR_PAD_BOTH);
+		}
+		echo '|', str_pad('Total', 8, ' ', STR_PAD_BOTH), '|', PHP_EOL, implode('', array_fill(0, $wks+2, str_pad('|', 9, '-')));
+
+		foreach($free_days as $free){
+			echo '|', PHP_EOL, '|', str_pad($free.'D', 8, ' ', STR_PAD_BOTH);
+			$ttf = 0;
+			$ttq = 0;
+			for($i = 1; $i <= $wks; $i++){
+				$f = $fcl($i, $free);
+				$q = $qcl($i, $free);
+				$ttf += $f;
+				$ttq += $q;
+				echo '|', str_pad($f == $q? ' ='.$f : $f.'/'.$q, 8, ' ', $f == $q? STR_PAD_RIGHT : STR_PAD_BOTH);
+			}
+			echo '|', str_pad($ttf == $ttq? ' ='.$ttf : $ttf.'/'.$ttq, 8, ' ', $ttf == $ttq? STR_PAD_RIGHT : STR_PAD_BOTH);
+		}
+
+		echo '|', PHP_EOL, PHP_EOL;
+	}
+
+	public function apfwratio(){
+		$date_from = date('Y-m-d', strtotime('-15 day'));
+		$date_to = date('Y-m-d', strtotime('-1 day'));
+		
+		$fw_ir = 1;
+
+		$fwRoundWeight = function($w){
+			if ($w <= 0.3) {
+				return $w;
+			} elseif ($w <= 0.5) {
+				return round($w * 12) / 20;
+			} elseif ($w <= 1) {
+				return 0.35+round(rand(0,100)/100*0.15,2);
+			} elseif ($w <= 2) {
+				return 0.45+round(rand(0, 100)/100*0.05, 2);//round($w * 5) / 10;//0.35+round(rand(0,100)/100*0.14,2);
+			} elseif ($w<=3) {
+				return 0.85+round(rand(0, 100)/100*0.14, 2);
+			} elseif ($w<=4) {
+				return 1.85+ round(rand(0, 100)/100*0.14, 2);//0.85+ round(rand(0,100)/100*0.14,2);
+			} elseif ($w <= 5) {
+				return 2.85+round(rand(0, 100)/100*0.14, 2);
+			} elseif ($w > 5 && $w <= 9) {
+				return 5;
+			} elseif ($w <= 12.5) {
+				return 9;
+			} elseif ($w > 12.5) {
+				return $w - 3.5;
+			} else {
+				return $w;
+			}
+		};
+		//get ap zones, weight range
+		$sql = 'SELECT z1,pc_lo,pc_hi FROM `zone_map` where org_id = 101 and chargecode_id = 0 and zone_id = 3';
+		$ap_zones = $this->db->createCommand($sql)->queryAll();
+
+		$sql = 'SELECT zone,weight_lo,weight_hi,item FROM zone_rate where rate_id = 101 and item > 0';
+		$ap_wrs = $this->db->createCommand($sql)->queryAll();
+
+		//get fw zones, weight range
+		$sql = 'SELECT z1,pc_lo,pc_hi FROM `zone_map` where org_id = 115 and chargecode_id = 0 and zone_id = 1';
+		$fw_zones = $this->db->createCommand($sql)->queryAll();
+		
+		$sql =  'SELECT zone,weight_lo,weight_hi,item FROM zone_rate where rate_id = 52 and item > 0';
+		$fw_wrs = $this->db->createCommand($sql)->queryAll();
+		
+		//fw new rates
+		$fw_wrs = [
+['zone' => 'SYD', 'weight_lo' => 0, 'weight_hi' => 0.3, 'item' => 3.65],
+['zone' => 'SYD', 'weight_lo' => 0.3, 'weight_hi' => 25, 'item' => 3.95],
+['zone' => 'NON-SYD', 'weight_lo' => 0, 'weight_hi' => 0.3, 'item' => 3.65],
+['zone' => 'NON-SYD', 'weight_lo' => 0.3, 'weight_hi' => 0.5, 'item' => 4.35],
+['zone' => 'NON-SYD', 'weight_lo' => 0.5, 'weight_hi' => 1, 'item' => 4.7],
+['zone' => 'NON-SYD', 'weight_lo' => 1, 'weight_hi' => 3, 'item' => 5.55],
+['zone' => 'NON-SYD', 'weight_lo' => 3, 'weight_hi' => 5, 'item' => 7.05],
+['zone' => 'NON-SYD', 'weight_lo' => 5, 'weight_hi' => 10, 'item' => 8.36],
+['zone' => 'NON-SYD', 'weight_lo' => 10, 'weight_hi' => 15, 'item' => 10.25],
+['zone' => 'NON-SYD', 'weight_lo' => 15, 'weight_hi' => 20, 'item' => 11.93],
+['zone' => 'NON-SYD', 'weight_lo' => 20, 'weight_hi' => 25, 'item' => 14.34],
+		];
+
+		//get shipments
+		$sql = 'SELECT weight, a.postcode, a.suburb FROM shipment s LEFT JOIN addr a on s.cnee_id = a.id WHERE s.agent_id = 3113 AND s.type = 10 AND s.created >= :df AND s.created <= :dt AND s.pkg = 1 AND s.weight < 20 AND s.status < 100';
+
+		$rs = $this->db->createCommand($sql)->bindValues([':df' => $date_from, ':dt' => $date_to])->queryAll();
+
+		$getZone = function($pc, &$zones){
+			foreach($zones as $z){
+				if($z['pc_lo'] <= $pc && $z['pc_hi'] >= $pc){
+					return $z['z1'];
+				}
+			}
+			return false;
+		};
+
+		$getCost = function($weight, $zone, &$wrs){
+			foreach($wrs as $r){
+				if($r['zone'] != $zone) continue;
+				if($r['weight_lo'] < $weight && $r['weight_hi'] >= $weight){
+					return $r['item'];
+				}
+			}
+			return false;
+		};
+
+		$ap_stat = [];
+		$fw_stat = [];
+		$metro_diff = [];
+		$diff_stat = [];
+
+		foreach($rs as $r){
+			$ac = false;
+			$fc = false;
+			$az = false;
+			$fz = false;
+			//ap zone
+			$az = $getZone($r['postcode'], $ap_zones);
+			if($az != false){
+//				$ap_stat['zone'][$az]++;
+				$ac = $getCost($r['weight'], $az, $ap_wrs);
+//				if($ac !== false) $ap_stat['cost'] += $ac;
+			}
+
+			//fw zone
+			if(FastwayAPI::isInDeliveryArea($r['postcode'], $r['suburb'])){
+				$fz = $getZone($r['postcode'], $fw_zones);
+				if($fz != false){
+					$fw_stat['zone'][$fz]++;
+					$fc = $getCost($fwRoundWeight($r['weight']), $fz, $fw_wrs);
+					if($fc !== false) $fw_stat['cost'] += $fc;
+				}
+			}
+			
+			if($ac !== false && $fc !== false && ($fc * ($fz == 'SYD'? $fw_ir : 1)) < $ac){
+				$fw_stat['save'] += $ac-$fc;
+				if(in_array(substr($az,1), [0,1])){ //metro
+					$metro_diff[] = $ac-$fc;
+					$diff_stat[] = $az.','.$fz.','.$r['weight'].','.($ac-$fc);
+				}
+			}else{
+				// if($fc !== false) echo 'F>A '.$fc.' > '.$ac, PHP_EOL;
+				$ap_stat['zone'][$az]++;
+								if($ac !== false) $ap_stat['cost'] += $ac;
+			}
+		}
+		
+		$mr = [0, 0];
+		foreach($ap_stat['zone'] as $z=>$q){
+			if(in_array(substr($z,1), [0,1])) $mr[0] += $q;
+			else $mr[1] += $q;
+		}
+
+		//diff
+		sort($metro_diff);
+		$md = ceil((($mr[0]+$mr[1]) * 0.65 - $mr[0]) / 0.35);
+		$at = 0;
+		for($ati = 0; $ati < $md; $ati++){
+			if($metro_diff[$ati] > 2) break;
+			$at += $metro_diff[$ati];
+		}
+		// $fw_stat['cost'] = $fw_stat['cost'] / $fw_ir;
+		
+		echo $mr[0].'/'.($mr[0]+$mr[1]).' = '.round($mr[0] / ($mr[0]+$mr[1]) * 10000)/100, '%', PHP_EOL;
+		if($md > 0){
+			echo 'move '.$ati.' fw metro to ap,'.($mr[0]+$ati).'/'.($mr[0]+$mr[1]+$ati).' = '.(round(($mr[0]+$ati) / ($mr[0]+$mr[1]+$ati) * 10000)/100).'% extra cost: $'.$at, PHP_EOL;
+		}
+		echo 'Total mixed cost: $', ($ap_stat['cost'] + $fw_stat['cost'] + $at), PHP_EOL;
+		echo json_encode($ap_stat),PHP_EOL,json_encode($fw_stat),PHP_EOL;
+		
+		//diff stat
+		//file_put_contents('af_diff.csv', implode(PHP_EOL, $diff_stat));
+	}
+
+	public function scapratio(){
+		$date_from = '2020-07-01';
+		$date_to = '2020-07-31';
+
+		//get ap zones, weight range
+		$sql = 'SELECT z1,pc_lo,pc_hi FROM `zone_map` where org_id = 101 and chargecode_id = 0 and zone_id = 3';
+		$ap_zones = $this->db->createCommand($sql)->queryAll();
+		
+		//get shipments
+		$sql = 'SELECT s.ref,s.weight, a.postcode, a.suburb FROM shipment s LEFT JOIN addr a on s.cnee_id = a.id WHERE s.agent_id = 3113 AND s.type = 10 AND s.created >= :df AND s.created <= :dt AND s.pkg = 1 AND s.weight < 20 AND s.status < 100';
+
+		$rs = $this->db->createCommand($sql)->bindValues([':df' => $date_from, ':dt' => $date_to])->queryAll();
+
+		$getZone = function($pc, &$zones){
+			foreach($zones as $z){
+				if($z['pc_lo'] <= $pc && $z['pc_hi'] >= $pc){
+					return $z['z1'];
+				}
+			}
+			return false;
+		};
+
+		$ap_stat = [0,0];
+		$fw = 0;
+
+		foreach($rs as $r){
+			if(preg_match('/^(2|Q)X/', $r['ref'])){
+				$fw++;
+				continue;
+			}
+			if(!preg_match('/^AMQ/', $r['ref'])){
+				continue;
+			}
+			//ap zone
+			$az = $getZone($r['postcode'], $ap_zones);
+			if($az != false){
+				if(in_array(substr($az,1), [0,1])){
+					$ap_stat[0]++;
+				}else{
+					$ap_stat[1]++;
+				}
+			}
+		}
+
+		var_dump($ap_stat);
+		echo (round($ap_stat[0]/array_sum($ap_stat)*10000)/100).'% metro', PHP_EOL;
+		echo 'Fastway: '.$fw, PHP_EOL;
+	}
+
+	public function fw_change(){
+		$fw = new FastwayAPI(true, false, $type);
+
+		$getZone = function($pc, &$zones){
+			foreach($zones as $z){
+				if($z['pc_lo'] <= $pc && $z['pc_hi'] >= $pc){
+					return $z['z1'];
+				}
+			}
+			return false;
+		};
+
+		$sql = 'SELECT z1,pc_lo,pc_hi FROM `zone_map` where org_id = 115 and chargecode_id = 0 and zone_id = 1';
+		$fw_zones = $this->db->createCommand($sql)->queryAll();
+
+		$rs = ImParcel::model()->findAll('consol_id IN (62627, 63006, 63009)');
+		$pc = 0;
+		$c = 0;
+		foreach($rs as $p){
+			$ts = $p->trans[0];
+			if($ts->org_id != 115) continue;
+			$z = $getZone($p->postcode, $fw_zones);
+			$wt = $fw->roundWeight($p->weight);
+			if($wt > 0.3 && $z == 'SYD'){
+				if(empty($ts->mdata['fw_toRf'])){
+					$ts->mdata['fw_toRf'] = 'SYD';
+					$ts->mdata['fw_origin'] = 'syd';
+					$ts->save();
+					echo 'add sort for '.$ts->connote, PHP_EOL;
+				};
+				continue;
+			}
+			$csl = ChangeShipmentLabel::model()->find("newref = :ref", [":ref" => $p->ref]);
+			if(!empty($csl) || $p->status > 60) continue; // $p->scan_no == 0
+			$pref = $p->ref;
+			$trans = Yii::app()->db->beginTransaction();
+			try{
+				$ts->pid = null;
+				$ts->save();
+				$p->refresh();
+				if($p->createFwLabelWithNR()){
+					$p->can = $pref;
+					unset($p->mdata['fw_cl_err']);
+					$p->update(['can', 'meta']);
+					$csl = new ChangeShipmentLabel;
+					$csl->pid = $p->id;
+					$csl->pref = $pref;
+					$csl->phbn = $p->hbn;
+					$csl->newref = $p->ref;
+					$csl->save();
+					$c++;
+				}else{
+					$ts->pid = $p->id;
+					$ts->save();
+					$p->mdata['fw_cl_err'] = 1;
+					$p->nolog = true;
+					$p->updateMeta();
+					$p->nolog = false;
+					$pc++;
+					echo $p->hbn,' problem get new label', PHP_EOL;
+				}
+				$trans->commit();
+			} catch (Exception $ex) {
+				$trans->rollback();
+				throw $ex;
+			}
+			//echo $p->hbn,' changed ',$pref,' to ',$p->ref, PHP_EOL;
+			//break;
+		}
+		
+		echo $c.' success, ',$pc,' failed', PHP_EOL;
+
+		/*$ls = file('fw_change_label.csv');
+		foreach($ls as $i => $l){
+			$r = explode(',', trim($l));
+			if(preg_match('/"([\d\.]+)"/', $r[4], $m)){
+				$z = $getZone(substr($r[3],1,-1), $fw_zones);
+				$r[5] = $fwRoundWeight($m[1], true);
+				$r[6] = $fwRoundWeight($m[1]);
+				$r[7] = $z;
+				$r[8] = $r[6] > 0.3 && $z == 'SYD' ? 'n' : 'Y';
+			}
+			$ls[$i] = implode(',', $r).PHP_EOL;
+		}
+		file_put_contents('fw_change_label_3.csv', implode('', $ls));
+		*/
+	}
+
+	public function delete_fastway_cache()
+	{
+		Yii::app()->cache->delete('fastwayArea');
+		Yii::app()->cache->delete('fastwaySorting');
+		echo 'Done', PHP_EOL;
+	}
+
+
+	public function weightUP3113(){
+		$ls = file('3113_weight.tsv');
+		$c = 0;
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			foreach($ls as $l){
+				$r = explode("\t", trim($l));
+				$r[1] = floatval($r[1]);
+				$p = ImParcel::model()->find('t.ref = :r', [':r' => $r[0]]);
+				if(empty($p)){
+					$csl = ChangeShipmentLabel::model()->find('pref = :r', [':r' => $r[0]]);
+					if(!empty($csl)) $p = $csl->shipment;
+				}
+				if(empty($p)){
+					echo $r[0], ' not found', PHP_EOL;
+					continue;
+				}
+				if(abs($r[1] - $p->weight) / $p->weight > 0.2){
+					echo 'Weight change >20% '.$p->hbn.' '.$p->weight.' -> '.$r[1], PHP_EOL;
+				}
+				if($p->weight != round($r[1]*100)/100 && $r[1] > 0){
+					$p->weight = $r[1];
+					$p->update(['weight']);
+					$c++;
+				}
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+		echo $c.' shipments updated', PHP_EOL;
+	}
+
+	public function weightVari3113(){
+		$ls = file('3113_weight.tsv');
+		//get fw zones, weight range
+		$sql = 'SELECT z1,pc_lo,pc_hi FROM `zone_map` where org_id = 115 and chargecode_id = 0 and zone_id = 1';
+		$zones = $this->db->createCommand($sql)->queryAll();
+
+		$sql =  'SELECT zone,weight_lo,weight_hi,item FROM zone_rate where rate_id = 52 and item > 0';
+		$wrs = $this->db->createCommand($sql)->queryAll();
+
+		$getZone = function($pc, &$zones){
+			foreach($zones as $z){
+				if($z['pc_lo'] <= $pc && $z['pc_hi'] >= $pc){
+					return $z['z1'];
+				}
+			}
+			return false;
+		};
+
+		$getCost = function($weight, $zone, &$wrs){
+			foreach($wrs as $r){
+				if($r['zone'] != $zone) continue;
+				if($r['weight_lo'] < $weight && $r['weight_hi'] >= $weight){
+					return $r['item'];
+				}
+			}
+			return false;
+		};
+		$crs = Consol::model()->findAll('id IN (62627, 63006, 63009)');
+		$cs = [];
+		foreach($crs as $c){
+			$cs[$c->id] = $c->no;
+		}
+
+		$csv = ['Consol,HBN,Old Weight,New Weight,Old Cost,New Cost'];
+		foreach($ls as $l){
+			$r = explode("\t", trim($l));
+			$r[1] = floatval($r[1]);
+			$p = ImParcel::model()->find('t.ref = :r', [':r' => $r[0]]);
+			if(empty($p)){
+				$csl = ChangeShipmentLabel::model()->find('pref = :r', [':r' => $r[0]]);
+				if(!empty($csl)) $p = $csl->shipment;
+			}
+			if(empty($p)){
+				echo $r[0], ' not found', PHP_EOL;
+				continue;
+			}
+			$ow = 0;
+			foreach($p->logs() as $log){
+				if(preg_match('/Weight changed from: ([\d\.]+)/', $log->meta, $m)){
+					$ow = $m[1];
+				}
+			}
+			if(!isset($cs[$p->consol_id])) echo $p->hbn, ' not in 3 consols?', PHP_EOL;
+			$z = $getZone($p->postcode);
+			$oc = $getCost($ow, $z);
+			$nc = $getCost($p->weight, $z);
+			$csv[] = $cs[$p->consol_id].','.$p->hbn.','.$ow.','.$p->weight.','.$oc.','.$nc;
+		}
+		file_put_contents('../3113_wt_change.csv', implode("\n", $csv));
+		echo 'Done', PHP_EOL;
+	}
+	
+	public function csladdpid(){
+		$rs = ChangeShipmentLabel::model()->findAll();
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			foreach($rs as $r){
+				$p = ImParcel::model()->find('hbn = :n', [':n' => $r->phbn]);
+				if(!empty($p)){
+					$r->pid = $p->id;
+					$r->update(['pid']);
+				}
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function shipmentfromarchive(){
+		$hbn = $this->prompt("HBN: ");
+		$db = $this->db;
+		$sql = 'SELECT * FROM shipment_archive WHERE hbn = :hbn';
+		$r = $db->createCommand($sql)->bindValues([':hbn' => $hbn])->queryRow();
+		if(empty($r)){
+			echo $hbn.' not found in archive', PHP_EOL;
+			return;
+		}
+		//var_dump($r);
+		$transArch = function ($ss, $m=[]) use (&$db) {
+			$trans = $db->beginTransaction();
+			try {
+				foreach ($ss as $sql) {
+					echo $sql, PHP_EOL;
+					$cmd = $db->createCommand($sql);
+					if(!empty($m)) $cmd->bindValues($m);
+					$cmd->execute();
+				}
+				$trans->commit();
+			} catch (Exception $ex) {
+				$trans->rollback();
+				throw $ex;
+			}
+		};
+
+		//restore edimsg
+		$transArch([
+				'INSERT INTO `edimsg` SELECT * FROM `edimsg_archive` where fid = :fid',
+				'DELETE FROM `edimsg_archive` WHERE fid = :fid',
+			], [':fid' => $r['id']]);
+
+		//restore logs
+		$transArch([
+				'INSERT INTO `log` SELECT * FROM `log_archive` WHERE lid = :fid',
+				'DELETE FROM `log_archive` WHERE lid = :fid',
+			], [':fid' => $r['id']]);
+
+		//tracking
+		$transArch([
+			'INSERT INTO `tracking` SELECT * FROM `tracking_archive` WHERE pid = :fid',
+			'DELETE FROM `tracking_archive` WHERE pid = :fid',
+		], [':fid' => $r['id']]);
+
+		//address
+		foreach (['cnor_id', 'cnee_id', 'receiver_id', 'notify_id'] as $f) {
+			if(empty($r[$f])) continue;
+			$transArch([
+				'INSERT INTO `addr` SELECT * FROM `addr_archive` WHERE `id` = :fid',
+				'DELETE FROM `addr_archive` WHERE id = :fid',
+			], [':fid' => $r[$f]]);
+		}
+
+		//shipment
+		$transArch([
+			'INSERT INTO `shipment` SELECT * FROM `shipment_archive` s WHERE id = :id',
+			'DELETE FROM `shipment_archive` WHERE id = :id',
+		], [':id' => $r['id']]);
+
+		echo 'Done', PHP_EOL;
+	}
+
+	public function gvShipper(){
+		$data = $this->_loadXlsData($this->args[1]);
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			foreach($data as $r){
+				$p = ImParcel::model()->find('ref = :r', [':r' => $r[1]]);
+				if(empty($p)){
+					echo $r[1], ' not found', PHP_EOL;
+					continue;
+				}
+				$p->cnor->name = $r[2];
+				$p->cnor->address = $r[3];
+				$p->cnor->suburb = $r[4];
+				$p->cnor->state = $r[5];
+				$p->cnor->country = $r[7];
+				$p->cnor->save();
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function fwmanifest(){
+		//by shipment scan time
+		$sql = 'select s.id, date(json_value(s.meta, "$.scan_time")) as day from tranship t left join shipment s on s.id = t.pid WHERE t.org_id = 115 and t.status > 10 and s.created >= "2020-01-01"';
+
+		$rs = $this->db->createCommand($sql)->queryAll();
+		$mans = [];
+		foreach($rs as $r){
+			if(empty($r['day'])) continue;
+			$mans[$r['day']][] = $r['id'];
+		}
+
+		foreach($mans as $day => $ss){
+			$ref = 'Checkin_'.$day;
+			$trans = Yii::app()->db->beginTransaction();
+			try{
+				$mani = Manifest::model()->find('type = 90 AND fwd_id = 115 AND ref = :r', [':r' => $ref]);
+				if(empty($mani)){
+					$mani = new Manifest;
+					$mani->type = 90;
+					$mani->fwd_id = 115;
+					$mani->ref = $ref;
+					$mani->created = $day.' 23:59:59';
+					$mani->save();
+				}
+				foreach($ss as $s){
+					$sql = 'SELECT p.id FROM mani_map p INNER JOIN manifest m ON m.id = p.mani_id WHERE m.type = 90 AND p.fid = :pid';
+					$t = $this->db->createCommand($sql)->bindValues([':pid' => $s])->queryScalar();
+					if(!empty($t)) continue;
+					$mm = new ManiMap;
+					$mm->mani_id = $mani->id;
+					$mm->fid = $s;
+					$mm->model = 'ImParcel';
+					$mm->save();
+				}
+				$trans->commit();
+			} catch (Exception $ex) {
+				$trans->rollback();
+				throw $ex;
+			}
+			echo $day.' manifest done', PHP_EOL;
+		}
+		echo 'Done', PHP_EOL;
+
+		return;
+		//by shipment_scan table
+		$sql = 'select pid, date(scan_time) as day from (select ss.pid, ss.scan_time from tranship t left join shipment_scan ss on ss.pid = t.pid WHERE t.org_id = 115 and t.status > 10 and ss.scan_time >= "2020-01-01") t GROUP by pid order by scan_time';
+
+		$rs = $this->db->createCommand($sql)->queryAll();
+		$mans = [];
+		foreach($rs as $r){
+			$mans[$r['day']][] = $r['pid'];
+		}
+
+		foreach($mans as $day => $ss){
+			$ref = 'Checkin_'.$day;
+			$trans = Yii::app()->db->beginTransaction();
+			try{
+				$mani = new Manifest;
+				$mani->type = 90;
+				$mani->fwd_id = 115;
+				$mani->ref = $ref;
+				$mani->created = $day.' 23:59:59';
+				$mani->save();
+				foreach($ss as $s){
+					$sql = 'SELECT p.id FROM mani_map p INNER JOIN manifest m ON m.id = p.mani_id WHERE m.type = 90 AND p.fid = :pid';
+					$t = $this->db->createCommand($sql)->bindValues([':pid' => $s])->queryScalar();
+					if(!empty($t)) continue;
+					$mm = new ManiMap;
+					$mm->mani_id = $mani->id;
+					$mm->fid = $s;
+					$mm->model = 'ImParcel';
+					$mm->save();
+				}
+				$trans->commit();
+			} catch (Exception $ex) {
+				$trans->rollback();
+				throw $ex;
+			}
+			echo $day.' manifest done', PHP_EOL;
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function APIntShipment(){
+		$hbns = $this->prompt('HBN: ');
+		$up = strtoupper($this->prompt('Update: ', 'N'));
+		
+		$apa = new AusPostAPI('syd', true, false); //TMA
+
+		$pcode = strtoupper($this->prompt('Product (ECM8/AIR8/PTI8):', 'AIR8'));
+
+		foreach(preg_split('/[\s,;]/', trim($hbns)) as $hbn){
+			$p = ExParcel::model()->find('hbn = :h', [':h' => $hbn]);
+			if($up == 'Y'){
+				//echo 'Updating '.$hbn.PHP_EOL;
+				$r = $apa->updateIntShipment($p->mdata['apsid'], $p, $pcode);
+			}else{
+				//echo 'Creating '.$hbn.PHP_EOL;
+				$p->ref = '';
+				$r = $apa->createIntShipments($p, $pcode);
+				$p->mdata['apsid'] = $r->shipments[0]->shipment_id;
+				$p->ref = $r->shipments[0]->items[0]->tracking_details->article_id;
+				$p->status = 25;
+			}
+
+			$r2 = $apa->createLabels($p->mdata['apsid']);
+
+			foreach($r2->labels as $lbl){
+				$t = 0;
+				while($t < 5){
+					sleep(2);
+					$r3 = $apa->getLabel($lbl->request_id);
+					foreach($r3->labels as $l){
+						if(empty($l->url)) continue;
+						$p->note = $l->url;
+						echo 'wget "'.$l->url.'" -O '.$p->ref.'.pdf'.PHP_EOL;
+						break 2;
+					}
+					$t++;
+				}
+			}
+			$p->save();
+		}
+		echo 'Done', PHP_EOL;
+	}
+
+	public function dfemanifest(){
+		$rs = ImParcel::model()->findAll("hbn IN ('ECN1478025970', 'ECN1474015675', 'ECN1474015669', 'ECN1478025967', 'ECN1478025966', 'ECN1478025962', 'ECN1474015623', 'ECN1474015622', 'ECN1474015621', 'ECN1474015620', 'ECN1474015619', 'ECN1474015615', 'ECN1474015614', 'ECN1474015613', 'ECN1474015612', 'ECN1474015607', 'ECN1474015606', 'ECN1478025953', 'ECN1474015409')");
+		$imConsolService = new ImConsolService();
+		$imConsolService->doDfeManifest($rs);
+		echo 'Done', PHP_EOL;
+	}
+
+	public function clearDeliveryNoticeEmail(){
+		foreach(glob('runtime/importsmail/*.emz') as $f){
+			if(preg_match('/EM(\d+)\.emz$/', $f, $m)){
+				$id = $this->db->createCommand('SELECT id FROM imports_mail WHERE id = '.$m[1].' LIMIT 1;')->queryScalar();
+				if(empty($id)){
+					unlink($f);
+					echo $f, PHP_EOL;
+				}
+			}
+		}
+		
+		$sql = "SELECT no FROM imports_mail WHERE subject LIKE 'Mail delivery %'";
+		$rs = $this->db->createCommand($sql)->queryAll();
+		foreach($rs as $r){
+			$f = 'runtime/importsmail/'.$r['no'].'.emz';
+			if(is_file($f)){
+				echo 'remove '.$f, PHP_EOL;
+				unlink($f);
+			}
+		}
+		$this->db->createCommand("DELETE FROM imports_mail WHERE subject LIKE 'Mail delivery %'")->execute();
+		echo 'Done', PHP_EOL;
+	}
+
+	public function cleanDuplicateEmails(){
+		$sql = "SELECT * FROM imports_mail WHERE id > 902576";
+		$rs = $this->db->createCommand($sql)->queryAll();
+		$body_hashs = [];
+		foreach($rs as $r){
+			$bh = md5($r['plain_body'].$r['from'].$r['to']);
+			if(in_array($bh, $body_hashs)){
+				//remove file
+				$f = 'runtime/importsmail/'.$r['no'].'.emz';
+				if(is_file($f)){
+					echo 'remove '.$f, PHP_EOL;
+					unlink($f);
+				}
+				//remove mail user
+				$this->db->createCommand("DELETE FROM mail_user WHERE mail_id = ".$r['id'])->execute();
+				//remove mail
+				$this->db->createCommand("DELETE FROM imports_mail WHERE id = ".$r['id'])->execute();
+			}else{
+				$body_hashs[] = $bh;
+			}
+		}
+		echo 'Done', PHP_EOL;
+	}
+	
+	public function test(){
+		return;
+		$fw = new FastwayAPI(true);
+		$c = $fw->addressValidation($s->cnee);
+		var_dump($c);
+		//$c = $fw->newConsignment($s);
+		// var_dump($c);
+		// $d = $fw->getLabel($c->data->conId);
+		// $d = $fw->getLabel(3131808, 'MP0002552857');
+		// file_put_contents('a5_label.pdf', $d);
+		var_dump($fw->err);
+		var_dump($fw->result);
+		return;
+		$c = '33EVJ9000001';
+		$aid = $c.sprintf('%02s', 1).'00093'.'50'.'0';
+		$aid .= AusPostAPI::aidChkDgt($aid);
+		echo $aid;
+	}
+
+	public function withdrawACRMutiple(){
+		$cns = Consol::model()->findAll("id in (".$this->prompt('Consol ID: ').")");
+		foreach ($cns as $cnk => $cn)
+		{
+			sleep(5);
+			$senderSite = Yii::app()->params['ics']['testing']? Yii::app()->params['ics']['test_site'] : Yii::app()->params['ics']['prod_site'];
+			if(empty($cn)){
+				die("Consol not found\n");
+			}else{
+				echo "AWB: ", $cn->awb, "\n";
+			}
+			$oawb = explode("-",$cn->awb)[0].explode("-",$cn->awb)[1];
+			$hwb = empty($cn->mdata['house_bill'])? $cn->no : $cn->mdata['house_bill'];
+			$airline = substr(trim($cn->airline), 0, 2);
+			$flight = substr(trim($cn->flight), 2);
+			$transaction=Yii::app()->db->beginTransaction();
+			try {
+				$os = Edimsg::model()->findAll("status = 50 AND type = 'AIRCR-C' AND fid = :id AND sender =:sender", [':id' => $cn->id,':sender'=>$senderSite]);
+				$omid = null;
+				if(!empty($os)){
+					foreach($os as $o){
+						if(preg_match('/MWB:'.$oawb.'/', $o->msg) && preg_match('/BGM\+933:::AIRCR\+([^\+:]+):\d+\+9\'/', $o->msg, $m)){
+							$omid = $m[1];
+							break;
+						}
+					}
+				}
+			if(empty($omid)){
+				echo 'Original MSG not found for ', $cn->no, "\n";
+			}else{
+				$em = new Edimsg;
+				$em->dt = date('Y-m-d H:i:s');
+				$em->type = 'AIRCR-C';
+				$em->sender =$senderSite;
+				$em->receiver = Yii::app()->params['ics']['customs_id'];
+				$em->status = 19;
+				$em->fid = $cn->id;
+				$em->save();
+				$em->mid = sprintf('%06s', substr($em->id, -6));
+				$vn = Edimsg::model()->count('type = :t AND fid = :fid AND sender = :sender', [':t' => 'AIRCR-C', ':fid' => $cn->id,':sender'=>$senderSite]) + 1;
+				$msg = "UNH+".$em->mid."+CUSCAR:D:99B:UN'
+BGM+933:::AIRCR+".$omid.":".$vn."+50'
+RFF+HWB:".$cn->no."'
+RFF+MWB:".$oawb."'
+TDT+20+".$flight."++6+".$airline."::3'
+DTM+178:".date("Ymd", strtotime($cn->eta)).":102'
+";
+				$mc = substr_count($msg, "\n")+1;
+				$msg .= "UNT+".$mc."+".$em->mid."'";
+				$em->msg = $msg;
+				$em->status = 20;
+				$em->save();
+			}
+			foreach($cn->shipments as $i=>$p){
+	//                    if(($p->bwf&4)<=0)                        continue;
+				echo $p->ref."\n";
+				$p->mdata['heldEta'] = [];
+				$p->updateMeta();
+				$os = Edimsg::model()->findAll("status = 50 AND type = 'AIRCR-S' AND fid = :id AND sender =:sender", [':id' => $p->id,':sender'=>$senderSite]);
+				$omid = null;
+				if(!empty($os)){
+					foreach($os as $o){
+						if(preg_match('/MWB:'.$oawb.'/', $o->msg) && preg_match('/BGM\+933:::AIRCR\+([^\+:]+):\d+\+9\'/', $o->msg, $m)){
+							$omid = $m[1];
+							break;
+						}
+					}
+				}
+				if(empty($omid)){
+					echo 'Original MSG not found for ', $p->hbn, "\n";
+					continue;
+				}
+				$em = new Edimsg;
+				$em->dt = date('Y-m-d H:i:s');
+				$em->type = 'AIRCR-S';
+				$em->sender = $senderSite;
+				$em->receiver = Yii::app()->params['ics']['customs_id'];
+				$em->status = 19;
+				$em->fid = $p->id;
+				$em->save();
+				$em->mid = sprintf('%06s', substr($em->id, -6));
+				$vn = Edimsg::model()->count('type = :t AND fid = :fid AND sender =:sender', [':t' => 'AIRCR-S', ':fid' => $p->id,':sender'=>$senderSite]) + 1;
+				$msg = "UNH+".$em->mid."+CUSCAR:D:99B:UN'
+BGM+933:::AIRCR+".$omid.":".$vn."+50'
+RFF+HWB:".$p->hbn."'
+RFF+MWB:".$oawb."'
+TDT+20+".$flight."++6+".$airline."::3'
+DTM+178:".date("Ymd", strtotime($cn->eta)).":102'
+";
+				$mc = substr_count($msg, "\n")+1;
+				$msg .= "UNT+".$mc."+".$em->mid."'";
+				$em->msg = $msg;
+				$em->status = 20;
+				$em->save();
+			}
+				$transaction->commit();
+			} catch (Exception $ex) {
+				$transaction->rollback();
+				throw $ex;
+			}
+			echo "Done\n";
+
+		}
+		
+	}
+
+
+
+}

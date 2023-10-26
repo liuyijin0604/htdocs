@@ -1,0 +1,192 @@
+<?php
+
+/**
+ * This is the model class for table "salesfunnel_requirements_questions".
+ *
+ * The followings are the available columns in table 'salesfunnel_requirements_questions':
+ * @property integer $id
+ * @property integer $question_num
+ * @property string $question
+ * @property integer $question_type
+ */
+
+
+class SalesfunnelRequirementsQuestions extends CActiveRecord
+{
+	const QUESTIONTYPENUMBER = 4;
+	const QUESTIONTYPETEXTFIELD = 1;
+	const QUESTIONTYPERADIOBUTTON = 2;
+	const QUESTIONTYPECHECKBOX = 3;
+	const LASTQUESTIONQUESTIONTYPE = 99;
+	/**
+	 * @return string the associated database table name
+	 */
+
+	public static $questionType = [
+		4	=> 'Number Text Field',
+		1	=> 'Text Field',
+		2	=> 'Radio Button',
+		3	=> 'Check Box',
+		99  => 'Last Question'
+	];
+
+	public function tableName()
+	{
+		return 'salesfunnel_requirements_questions';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('question_num, question, question_type', 'required'),
+			array('question_num, question_type', 'numerical', 'integerOnly'=>true),
+			array('question', 'length', 'max'=>200),
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, question_num, question, question_type', 'safe', 'on'=>'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+			'salesfunnelRequirementsAnswers' => [self::HAS_MANY, 'SalesfunnelRequirementsAnswer', 'question_id'],
+		);
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return array(
+			'id' => 'ID',
+			'question_num' => 'Question Num',
+			'question' => 'Question',
+			'question_type' => 'Question Type',
+		);
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search($pgn = true, $ps = 30, $ec = false)
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('id',$this->id);
+		$criteria->compare('question_num',$this->question_num);
+		$criteria->compare('question',$this->question,true);
+		$criteria->compare('question_type',$this->question_type);
+		$with = [];
+
+		// if(!empty($this->id))
+		// {
+		// 	$with=['SalesfunnelRequirementsAnswer'];
+		// 	$criteria->compare('SalesfunnelRequirementsAnswer.question_id',$this->id);
+		// }
+
+		$criteria->with = $with;
+		$criteria->together = true;
+		$sort = new CSort(get_called_class());
+		$sort->defaultOrder = 't.id DESC';
+		$pagerparams = $_GET;
+		return new CActiveDataProvider($this, [
+			'criteria' => $criteria,
+			'sort' => $sort,
+			'pagination' => $pgn ? [
+				'pageSize' => $ps,
+				'params' => $pagerparams,
+			] : false,
+		]);
+	}
+
+	public function searchById($id=1)
+	{
+		$criteria = SalesfunnelRequirementsQuestions::model()->findByPk($id);
+		return $criteria;
+	}
+
+	public function getQuestionType($id=1)
+	{
+		$qustion = SalesfunnelRequirementsQuestions::model()->findByPk($id);
+
+		if (empty($qustion))
+			return "";
+		else
+			return $qustion['question_type'];	
+	}
+
+	public function getQuestionNumber()
+	{
+		$questionNum = '';
+		$questionNum .= $this->question_num;
+		return $questionNum;
+	}
+
+	public function getALlQuestionList()
+	{
+		$qa=SalesfunnelRequirementsQuestions::model()->findAll();
+		$results=[];
+		foreach ($qa as $key => $value) {
+			$results[$value["id"]] = explode('</br>',$value->question)[0];
+		}
+		return $results;
+	}
+
+	public function showQuestionType()
+	{
+		$queTypeStr = '';
+		switch ($this->question_type) {
+			case self::QUESTIONTYPENUMBER:
+				$queTypeStr.=$this->question_type.":[Number text field]";
+				break;
+			case self::QUESTIONTYPETEXTFIELD:
+				$queTypeStr.=$this->question_type.":[Text field]";
+				break;
+			case self::QUESTIONTYPERADIOBUTTON:
+				$queTypeStr.=$this->question_type.":[Radio Button]";
+				break;
+			case self::QUESTIONTYPECHECKBOX:
+				$queTypeStr.=$this->question_type.":[Check Box]";
+				break;
+			
+			default:
+				// code...
+				break;
+		}
+		return $queTypeStr;
+	}
+
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return SalesfunnelRequirementsQuestions the static model class
+	 */
+	public static function model($className=__CLASS__)
+	{
+		return parent::model($className);
+	}
+}

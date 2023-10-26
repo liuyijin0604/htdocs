@@ -1,0 +1,356 @@
+<?php
+
+class PayInvoiceController extends PController{
+	
+	public function actionPay($token)
+	{
+		// get token
+		$token = $this->safe_b64decode($token);
+		$iv = str_repeat("\x00", openssl_cipher_iv_length('AES-256-CBC'));
+		$data = rtrim(openssl_decrypt(base64_decode($token), 'AES-128-CBC', md5(PoliPaymentApi::PAYLINK_KEY), 0, $iv), "\0");
+		$invoice = json_decode($data);
+
+		if (!empty($invoice) && isset($invoice->invoice_id)) {
+
+			// valid paylink
+			$this->payInvoiceDirect($invoice->invoice_id);
+		} else {
+			// invalid pay link
+			echo 'invalid pay link';
+		}
+	}
+
+	public function actionPaypal()
+	{
+		if(!empty($_GET['token'])){// get token
+			$token = $this->safe_b64decode($_GET['token']);
+			$iv = str_repeat("\x00", openssl_cipher_iv_length('AES-256-CBC'));
+			$data = rtrim(openssl_decrypt(base64_decode($token), 'AES-128-CBC', md5(PoliPaymentApi::PAYLINK_KEY), 0, $iv), "\0");
+			$invoice = json_decode($data);
+		}
+
+		if(!empty($_GET['action'])){
+			$ppc = new PaypalClient(true, false);
+			switch($_GET['action']){
+				case 'createOrder':
+					$inv = Invoice::model()->findByPk($invoice->invoice_id);
+					$amt = round(($inv->getBalance() +0.3) / 0.974,2);
+					$data = [[
+						'reference_id' => $inv->id,
+          				'description' => 'Invoice '.$inv->no,
+						'amount' => [
+							'currency_code' => Invoice::$currencies[$inv->currency],
+							'value' => $amt,
+						]
+					]];
+					$resp = $ppc->createOrder($data);
+					echo json_encode(['orderID' => $resp->result->id]);
+				break;
+				case 'captureOrder':
+					$data = json_decode(file_get_contents('php://input'));
+					$resp = $ppc->captureOrder($data->orderID);
+					//record payment, mark invoice paid
+					if(empty($resp->result->purchase_units[0]->payments->captures) || $resp->result->purchase_units[0]->payments->captures[0]->status != 'COMPLETED'){
+						echo json_encode(['captured' => false]);
+					}else{
+						$inv = Invoice::model()->findByPk($resp->result->purchase_units[0]->reference_id);
+
+						if (!in_array($inv->status, [1, 9, 10])) {
+							$inv_bal = $inv->getBalance();
+							$paid_amount = $resp->result->purchase_units[0]->payments->captures[0]->amount->value;
+							// create a payment
+							$payment = new Payment();
+							$payment->org_id = $inv->to_id;
+							$payment->amount = $paid_amount;
+							$payment->ref = 'Paypal TRN: ' . $resp->result->purchase_units[0]->payments->captures[0]->id;
+							$payment->date = date('Y-m-d');
+							$payment->ata = max($paid_amount - $inv_bal, 0);
+							$payment->type = 7; // default by ETF
+							$payment->currency = $inv->currency; // AUD
+							$payment->status = 6; // posted status ? paid finish?
+							if(!$payment->save())
+							{
+								Emailog::sendEmailTo('dev@toplogistics.com.au', json_encode($data)."</br>".json_encode($resp)," Paypal Invoice error");
+							}
+
+							// link payment with invoice table
+							$pi = new PayInv();
+							$pi->inv_id = $inv->id;
+							$pi->pay_id = $payment->id;
+							$pi->amount = min($inv_bal, $paid_amount);
+							$pi->save();
+
+							// update invoice status
+							// status as :
+							// 7 - partially paid
+							// 9 - paid
+							$left = $inv_bal - $paid_amount;
+							if ($left <= 0.001) {
+								$inv->status = 9;
+								Invoice::funcChangeAddress($inv);
+							} else {
+								$inv->status = 7;
+							}
+							$inv->save();
+						}
+						// echo json_encode(['captured' => true]);
+						if($inv->funcIsPaypalRedirect()){
+							$strUrl = $inv->getPaypalRedirect();
+							echo json_encode(['captured' => true,'redirect'=>$strUrl]);
+						}
+						else{
+							echo json_encode(['captured' => true]);
+						}
+					}
+				break;
+			}
+			Yii::app()->end();
+		}
+
+		if (!empty($invoice) && isset($invoice->invoice_id)) {
+			$inv = Invoice::model()->findByPk($invoice->invoice_id);
+            $this->renderPartial('paypal', ['inv' => $inv]);
+		} else {
+			throw new CHttpException(404, 'Invalid pay link!');
+		}
+	}
+
+	private function safe_b64encode($string)
+	{
+		$data = base64_encode($string);
+		$data = str_replace(['+', '/', '='], ['-', '_', ''], $data);
+		return $data;
+	}
+
+	private function safe_b64decode($string)
+	{
+		$data = str_replace(['-', '_'], ['+', '/'], $string);
+		$mod4 = strlen($data) % 4;
+		if ($mod4) {
+			$data .= substr('====', $mod4);
+		}
+		return base64_decode($data);
+	}
+
+	private function payInvoiceDirect($id)
+	{
+		$model = $this->loadModel($id);
+
+		if (!empty($model)) {
+			// check to see if we have paid before
+			// 1 : pending
+			// 7 : partially paid
+			// 9 : paid
+			// 10 ; cancelled
+			// 1 : pending
+			if ($model->status != 1 && $model->status != 9 && $model->status != 10) {
+				// create call back url
+				$home_page = Yii::app()->createAbsoluteUrl('');
+				$call_back_root = Yii::app()->createAbsoluteUrl('/') . '/payInvoice/poli/' . $id . '.app?op=';
+				$callback_success_url = $call_back_root . 'success';
+				$callback_fail_url = $call_back_root . 'fail';
+				$callback_cancel_url = $call_back_root . 'cancel';
+				$callback_notiry_url = $call_back_root . 'notify';
+
+				// check to see if the invoice has been paid partially before
+				// if partially paid before we should get the left amount
+				$payinv_model = new PayInv();
+				$payinv_model->inv_id = $id;
+				$paid_amount = $payinv_model->totalAmount();
+				if (!empty($paid_amount)) {
+					$amount = $model->total - $paid_amount;
+				} else {
+					$amount = $model->total;
+				}
+				$amount += min($amount * 0.01, 3);
+
+				$invoice_ref = empty($model->no) ? $model->id : $model->no;
+
+				$data = [
+					'Amount' => $amount,
+					'CurrencyCode' => 'AUD',
+					'MerchantReference' => $invoice_ref,
+					'MerchantHomepageURL' => $home_page,
+					'SuccessURL' => $callback_success_url,
+					'FailureURL' => $callback_fail_url,
+					'CancellationURL' => $callback_cancel_url,
+					'NotificationURL' => $callback_notiry_url,
+				];
+
+				PoliPaymentApi::initiate($data, $model->id >= 500000? 'tla' : 'pcae');
+			} else {
+				// 9 : invoice has been paid
+				if ($model->status == 9) {
+					Invoice::funcChangeAddress($model);
+					echo 'invoice has been paid';
+				} else {
+					echo 'invoice status(' . $model->status . ') is wrong ';
+				}
+			}
+		} else {
+			echo 'Sorry, invalid invoice';
+		}
+	}
+
+	public function actionPoli($id, $op)
+	{
+		$model = $this->loadModel($id);
+
+		// transaction token returned by poli , we should saved this if need check status again
+		$poli_token = $_GET['token'];
+
+		// get trn by token
+		$trn_info = PoliPaymentApi::getPoliTrn($poli_token, $id > 500000? 'tla' : 'pcae');
+
+		if (!empty($trn_info['ErrorCode'])) {
+			// payed failed save log
+			$poli_model = new PaymentGatewayHistory();
+			$poli_model->invoice_id = $id;
+			$poli_model->trn = 'invalid';
+			$poli_model->token = $poli_token;
+			$poli_model->result = 'failed';
+			$poli_model->payed_time = new CDbExpression('NOW()');
+
+			$poli_model->meta = json_encode($trn_info);
+			$poli_model->save();
+			echo $trn_info['ErrorMessage'];
+			exit();
+		}
+
+		// record history from POLI call back
+		$poli_model = PaymentGatewayHistory::model()->find('trn = :trn', [':trn' => $trn_info['TransactionRefNo']]);
+		if (!isset($poli_model)) {
+			$poli_model = new PaymentGatewayHistory();
+			$poli_model->trn = $trn_info['TransactionRefNo'];
+		} else {
+			if ($poli_model->result == 'success' && !empty($poli_model->payed_time)) {
+				echo 'you have paid the invoice successfully already before!';
+				exit();
+			}
+		}
+
+		$poli_model->invoice_id = $id;
+		$poli_model->token = $poli_token;
+		$poli_model->meta = json_encode($trn_info);
+		$poli_model->result = $op;
+		$poli_model->payed_time = new CDbExpression('NOW()');
+
+		if (!empty($model)) {
+			switch ($op) {
+
+				case 'success':
+					// should update invoice status here
+					$this->afterPayedByPoli($id, $trn_info);
+					break;
+
+				case 'fail':
+					break;
+
+				case 'cancel':
+					break;
+
+				case 'notify':
+					break;
+
+				default:
+					echo 'unknown error occurred !';
+					break;
+			}
+		} else {
+			// important , we should check why this id not existing
+			// because client has payed for this invoice
+			// we should record this error with invoice id and pay result information
+			$poli_model->result = $op . " can't find the invoice";
+		}
+
+		$poli_model->save();
+
+		echo $poli_model->result;
+	}
+
+/**
+	 * process after payed by POLI successfully
+	 * we should do :
+	 * 1. create a payment
+	 * 2. link payment with invoice by pay_inv table
+	 * @param $id
+	 * @param $trnInfo
+	 */
+	private function afterPayedByPoli($id, $trnInfo)
+	{
+
+		// get original invoice data
+		$invoice_model = $this->loadModel($id);
+		if (!empty($invoice_model)) {
+
+			// left amount
+			// algorithm : invoice total - paid in payment table
+			$payinv_model = new PayInv();
+			$payinv_model->inv_id = $id;
+			$paid_amount = $payinv_model->totalAmount();
+			$left_amount = $invoice_model->total - $paid_amount;
+
+			// 9 : paid
+			// 10 ; cancelled
+			// 1 : pending
+			if ($invoice_model->status != 9 &&
+				$invoice_model->status != 10 &&
+				$invoice_model->status != 1) {
+
+				// create a payment
+				$payment = new Payment();
+				$payment->org_id = $invoice_model->to_id;
+				$payment->amount = $trnInfo['AmountPaid'];
+				$payment->ref = 'POLI TRN: ' . $trnInfo['TransactionRefNo'];
+				$payment->date = date('Y-m-d', time());
+				$payment->ata = $left_amount - $payment->amount;
+				$payment->type = 1; // default by ETF
+				$payment->bank = 10; // westbank
+				$payment->currency = 1; // AUD
+				$payment->status = 6; // posted status ? paid finish?
+				$payment->save();
+
+				// link payment with invoice table
+				$pi = new PayInv();
+				$pi->inv_id = $id;
+				$pi->pay_id = $payment->id;
+				$pi->amount = $payment->amount;
+				$pi->save();
+
+				// update invoice status
+				// status as :
+				// 7 - partially paid
+				// 9 - paid
+				$left = $left_amount - $payment->amount;
+				if ($left <= 0.001) {
+					$invoice_model->status = 9;
+					Invoice::funcChangeAddress($invoice_model);
+				} else {
+					$invoice_model->status = 7;
+				}
+				$invoice_model->save();
+			} else {
+				// we got payment , but sounds the invoice has been paid over
+				// how to record this ?
+				// TODO ...
+			}
+		} else {
+			// invalid invoice id
+			// how to record this ?
+			// TODO ...
+		}
+	}
+	
+	public function loadModel($id)
+	{
+		if($id >= 500000){
+			$app_name = Yii::app()->name;
+			Yii::app()->name = 'TLA';
+		}
+		$model = Invoice::model()->findByPk($id);
+		if ($model === null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		return $model;
+	}
+}

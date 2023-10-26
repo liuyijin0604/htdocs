@@ -1,0 +1,98 @@
+<style>
+	.column_green {
+		background-color: greenyellow;
+	}
+
+	.column_red {
+		background-color: pink;
+	}
+	
+	.column_yellow {
+		background-color: orange;
+	}
+
+	.column_red_1 {
+		background-color: red;
+	}
+</style>
+<?php
+/* @var $this PickupBookingController */
+/* @var $model PickupBooking */
+
+$this->breadcrumbs=array(
+	'Pickup Bookings'=>array('index'),
+	'Manage',
+);
+
+$this->menu=array(
+	array('label'=>'List PickupBooking', 'url'=>array('index')),
+	array('label'=>'Create PickupBooking', 'url'=>array('create')),
+);
+
+Yii::app()->clientScript->registerScript('search', "
+$('.search-button').click(function(){
+	$('.search-form').toggle();
+	return false;
+});
+$('.search-form form').submit(function(){
+	$('#pickup-booking-grid').yiiGridView('update', {
+		data: $(this).serialize()
+	});
+	return false;
+});
+");
+?>
+
+<h1>Manage Pickup Bookings</h1>
+<div style="right: 60px;position: absolute;">
+	<a class="tab_link" href="<?=$this->createUrl('pickupBookingSlot/manage');?>" title="Manage Slots"><div class="icon" style="background-position:-16px 0"></div> Manage Slots</a>
+</div>
+<p>
+You may optionally enter a comparison operator (<b>&lt;</b>, <b>&lt;=</b>, <b>&gt;</b>, <b>&gt;=</b>, <b>&lt;&gt;</b>
+or <b>=</b>) at the beginning of each of your search values to specify how the comparison should be done.
+</p>
+
+<?php echo CHtml::link('Advanced Search','#',array('class'=>'search-button')); ?>
+<div class="search-form" style="display:none">
+<?php $this->renderPartial('_search',array(
+	'model'=>$model,
+)); ?>
+</div><!-- search-form -->booking
+
+<?php $this->widget('zii.widgets.grid.CGridView', array(
+	'id'=>'pickup-booking-grid',
+	'dataProvider'=>$model->search(),
+	'filter'=>$model,
+	'columns'=>array(
+		array('name' => 'booking_number', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->createURL("pickupBooking/update", array("id" => $data->id))."\" class=\"tab_link\" title=\"".$data->booking_number. "\">".$data->booking_number."</a>"','cssClassExpression' => '(!empty($data->mdata["pre_processed"])&&($data->mdata["pre_processed"]==1))? "column_green" : ((!empty($data->mdata["update_after_pre_process"])&&($data->mdata["update_after_pre_process"]==1))?"column_yellow":"")'),
+		array('name' => 'ref','header'=>'Connote', 'type' => 'raw', 'value' => '($data->status == 10)?"$data->ref":"<a href=\"".Yii::app()->createURL("imParcel/update", array("id" => $data->shipment_id))."\" class=\"tab_link\" title=\"".$data->shipment->hbn. "\">".$data->shipment->hbn."</a>"',),		
+		array('name'=>'depot_id', 'value'=> 'PickupBooking::$depot[$data["depot_id"]]', 'filter'=>CHtml::dropDownList('PickupBooking[depot_id]', $model->depot_id, $this->t($model::$depot), ['prompt'=>$this->t('All')])),
+		'create_date',
+		'booking_time',
+		array('name' => 'status', 'value' => 'PickupBooking::$state[$data["status"]]', 'filter'=>CHtml::dropDownList('PickupBooking[status]', $model->status, $this->t($model::$state), ['prompt'=>$this->t('All')])),
+		array('header' => 'Storage', 'value' => '$data->shipment->checkStorageInvoiceStatus()', 'cssClassExpression' => '!empty($data->shipment) ? $data->shipment->getPickupBookingStorageColor() : ""'),
+		'driver_name',
+		'rego',
+		'company_name',
+		'company_email',
+		array('header'=>'shrink_wrap','value'=>'@$data->mdata["shrink_wrap"]'),
+		array('header' => 'rack','type'=>'raw','value' => 'empty($data->shipment)?"":$data->shipment->getRackName(false,true)'),
+		array('name'=>'note','type'=>'raw',"value"=> '($data->status == 10)?"":$data->getNoteContent()'),
+		array('name'=>'accountCode','type'=>'raw',
+			'value'=>function ($data) {
+			return CHtml::tag('div', ['title'=>@$data->getAccountCodeDiscount()], mb_substr(strip_tags(@$data->mdata["account_code"]), 0, 25));
+		}),
+		['class'=>'oButtonColumn',
+			'template'=>'{edit}',
+			'buttons'=>[
+				'edit' => [
+					'url'=>'Yii::app()->createURL("pickupBooking/editBookingInfo")."?id=".$data->id',
+					'imageUrl'=>false,
+					'visible'=>'true',
+					'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('edit'), 'title' => '$data->id','data-win-class'=>'XL'],
+				]
+			],
+		]
+		//'meta',
+	),
+)); ?>

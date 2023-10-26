@@ -1,0 +1,1525 @@
+<?php
+
+class icsCommand extends CConsoleCommand
+{
+	private $db;
+	private $args;
+	private $debug = false;
+
+	public function run($args)
+	{
+		$hr = date('G');
+		$mn = intval(date('i'));
+		$this->db = Yii::app()->getDb();
+		$this->args = $args;
+		foreach ($this->args as $ag) {
+			if ($ag == '-d') {
+				$this->debug = true;
+			}
+		}
+
+		if (!empty($args[0]) && method_exists($this, $args[0])) {
+			$this->{$args[0]}();
+		} else {
+			$pid = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR.'ics.pid';
+			if (is_file($pid) && filectime($pid) > time() - 1800) {
+				return false;
+			}
+			if($this->debug) echo 'Sending Queued Message', PHP_EOL;
+			$this->icsSend();
+			/*file_put_contents($pid, '1');
+			if ($this->debug) echo 'Fecthing Message', PHP_EOL;
+			$this->fetch();
+			unlink($pid);
+			*/
+			//$this->process();
+			// if($mn % 10 == 0){
+			// 	$c = $this->cleanBox();
+			// }
+		}
+	}
+	
+	public function funcFetch($siteId,$limit = 1000)
+	{
+		$ef = new icsFetcher($siteId);
+		$st = microtime(true);
+		$edis = $ef->fetchMsgFor(false, $limit);
+		$transaction=Yii::app()->db->beginTransaction();
+		try {
+			if($this->debug) echo count($edis), '@', (microtime(true) - $st), PHP_EOL;
+			$i = 0;
+			foreach ($edis as $edi) {
+				$i++;
+				$ns = explode('_', $edi->name);
+				if(empty($ns[1]) && empty($edi->data)) continue;
+				$ns[1] = ltrim($ns[1], '0');
+				if(Edimsg::model()->count('mid = :mid AND sender = :sndr AND receiver = :receiver AND dt > date_sub(NOW(), INTERVAL 15 DAY)', [':mid' => $ns[1], ':sndr' => $ns[0], ':receiver' => $ns[2]]) > 0) continue;
+				$em = new Edimsg;
+				$em->dt = date('Y-m-d H:i:s');
+				$em->type = '';
+				$em->sender = $ns[0];
+				$em->receiver = $ns[2];
+				$em->status = 10;
+				$em->mid = $ns[1];
+				$em->msg = $edi->data;
+				$em->save();
+				echo "1";
+			}
+			$transaction->commit();
+		} catch (Exception $ex) {
+			$transaction->rollback();
+			throw $ex;
+			return;
+		}
+		$ef->finish();
+		if($this->debug) echo (microtime(true) - $st), PHP_EOL;	
+	}
+
+	public function funcCleanBox($siteId,$cap){
+		$ef = new icsFetcher($siteId);
+		if(!empty($this->args[1]) && intval($this->args[1]) > 0){
+			$cap = intval($this->args[1]);
+		}
+		$c = $ef->cleanBox($cap);
+		if($this->debug) echo $c.' messages cleaned', PHP_EOL;
+		$ef->finish();
+		$this->fetch($siteId,$cap-1000);
+	}
+
+	public function fetch($siteId = "FJT773H",$cap=1000)
+	{
+		$this->funcFetch($siteId,$cap);
+	}
+
+	public 	function icsCleanBox()
+	{
+		$this->funcCleanBox('FJT773H',10000);
+		$this->funcCleanBox('FJR636T',2000);
+
+	}
+
+	public function cleanBox(){
+		$this->funcDoMQ('icsCleanBox','icsCleanBox');
+	}
+
+	public function cleanBoxTest(){
+		$this->funcFetch('FJR636T',1000);
+	}
+
+	public function icsProcess()
+	{
+		$this->funcProcess('FJT773H');
+		$this->funcProcess('FJR636T');
+	}
+
+	public function process()
+	{
+		$this->funcDoMQ('icsProcess','icsProcess');
+	}
+
+
+	public function icsSend()
+	{
+		$this->funcSend('FJT773H');
+		$this->funcSend('FJR636T');
+	}
+
+
+	public function send()
+	{
+		$this->funcDoMQ('icsSend','icsSend');
+	}
+
+	public function sendById()
+	{
+		$id  = $this->prompt('edi Id');
+		$this->funcSend('FJT773H',$id);
+		$this->funcSend('FJR636T',$id);
+	}
+
+	public function funcProcessById()
+	{
+		$id = $this->prompt('Test Id: ');
+		$siteId = $this->prompt('siteId: ');
+		Yii::import('application.libs.edifact.ediParser');
+		$icsSetting =  Yii::app()->params['otherICS'][$siteId];
+		$senderSite = $icsSetting['testing']? $icsSetting['test_site'] : $icsSetting['prod_site'];
+		$rs = Edimsg::model()->findAll(['condition'=>'id in ('.$id.') and (receiver=:senderSite or sender =:senderSite)','params'=>[':senderSite'=>$senderSite],'order'=>'dt ASC']);
+
+		$transaction=Yii::app()->db->beginTransaction();
+		try{
+		foreach ($rs as $r) {
+			if ($this->debug) echo 'Processing Message '.$r->id, PHP_EOL;
+			$ep = new ediParser($r->msg);
+			$r->mdata['ackreq'] = $ep->getExchValue('UNB', 90);
+			$r->mdata['mrn'] = $ep->getExchValue('UNH', 10);
+			$mtyp = $ep->getExchValue('UNH', 20, 0);
+			$r->type = $mtyp == 'CUSRES'? $ep->getEdiValue('BGM', 10, 3) : $mtyp;
+			switch ($r->type) {
+				case 'CONTRL':
+					if(preg_match_all('/UCM\+(\d+)\+CUSCAR:D:99B\:UN\+(4|7)[+\']+/', $r->msg, $m) > 0 || preg_match_all('/UCI\+0*(\d+)\+.+\+(4|7)[+\']+/', $r->msg, $m) > 0){
+						foreach($m[1] as $i=>$mid){
+							$rm = Edimsg::model()->find('mid = :mid AND dt > DATE_SUB(NOW(), INTERVAL 10 DAY) AND sender = :senderSite', [':mid' => substr($mid, -6),':senderSite'=>$senderSite]);
+							if ($rm) {
+								if(empty($r->rid)) $r->rid = $rm->id;
+								if(empty($r->fid)) $r->fid = $rm->fid;
+								if($rm->status < 40){
+									$rm->status = $m[2][$i] == 7? 40 : 44;
+									$rm->rid = $r->id;
+									$rm->save();
+								}
+							}
+						}
+					}
+					$r->status = 19;
+					$r->save();
+				break;
+
+				case 'ESMR':
+					$c = preg_match('/RFF\+ABO:([^:\-\+]+)\-([^:]+):/', $r->msg, $m)? Consol::model()->find('no = :n', [':n' => $m[1]]) : false;
+					if ($c) {
+						$r->fid = $c->id;
+						$c->status = 40;
+						if (preg_match('/S(\d+)\-\d+/', $m[2], $sm)) { //sub consol
+							if (preg_match("/RFF\+AIZ:([^:\-\+']+)'/", $r->msg, $m)) {
+								$c->mdata['subc'][$sm[1]]['ecn'] = $m[1];
+							}
+						} else {
+							if (preg_match("/RFF\+AIZ:([^:\-\+']+)'/", $r->msg, $m)) {
+								$c->mdata['aiz'] = $m[1];
+							}
+						}
+						$c->save();
+						if (preg_match_all("/CST\+(\d+)'FTX\+AHN\+\+\+([^:\-\+']+)'/", $r->msg, $m)) {
+							$i = 0;
+							foreach ($c->shipments as $p) {
+								if ($p->status == 30) {
+									if (!empty($m[2][$i]) && $m[2][$i] == 'CLEAR') {
+										$p->status = 40;
+										$p->save();
+									}
+									$i++;
+								}
+							}
+						}
+					}
+					$r->status = 19;
+					$r->save();
+					$r->ctrlMsg();
+				break;
+				
+				case 'AIROUTR':
+				case 'SEAOUTR':
+					preg_match('/RFF\+ABO:([^:\+]+)::(\d+)/', $r->msg, $m);
+					if (isset($m[1])) {
+						$oref = $m[1].':'.ltrim($m[2],0);
+						$hbn = preg_match('/^(.+)\-(\d{1,2})$/', $m[1], $nm)? $nm[1] : $m[1];
+
+						// $c = Consol::model()->find('no = :n', [':n' => $hbn]);
+						// if(!empty($c)) $r->fid = $c->id;
+					}
+					$omt = substr($r->type, 0, -1);
+					//update AIROUT/SEAOUT status
+					$om = Edimsg::model()->find('status IN (30,40,60) AND type = :t AND msg LIKE :ref AND sender = :senderSite', [':t' => $omt, ':ref' => '%+'.$oref.'+%',':senderSite'=>$senderSite]);
+					if($om){
+						if(preg_match('/THIS TRANSACTION WAS REJECTED/', $r->msg)){
+							$om->status = 60;
+							$cn = Consol::model()->findByPk($om->fid);
+							Emailog::sendEmailTo('imports@toplogistics.com.au', json_encode("ICS ".$cn->no." outturn is rejected"),"ICS ".$cn->no." outturn is rejected");
+							$cn->mdata['aoutreject'] = 1;
+							$cn->save();
+						}else{
+							$om->status = 50;
+							if(!empty($om->mdata['sids'])){
+								foreach ($om->mdata['sids'] as $sid) {
+									$p = Shipment::model()->findByPk($sid);
+									$p->mdata['aco'] = 1;
+									$p->updateMeta();
+								}
+							}
+							$cn = Consol::model()->findByPk($om->fid);
+							$cn->mdata['aoutsent'] = 1;
+							$cn->save();
+						}
+						$om->save();
+						$r->fid = $om->fid;
+					}
+					$r->status = 19;
+					$r->save();
+					$r->ctrlMsg();
+				break;
+
+				case 'SEACRR':
+				case 'AIRCRR':
+					preg_match('/RFF\+ABO:([^:\+]+)::(\d+)/', $r->msg, $m);
+					if (isset($m[1])) {
+						$oref = $m[1].':'.ltrim($m[2],0);
+						$hbn = preg_match('/^(.+)-(\d{1,2})$/', $m[1], $nm)? $nm[1] : $m[1];
+						
+						$omt = substr($r->type, 0, -1);
+
+						$c = Consol::model()->find('no = :n', [':n' => $hbn]);
+						if (empty($c)) {
+							$p = ImParcel::model()->find(['condition'=>'hbn = :n and status != :status','params'=>[':n' => $hbn,':status' => ImParcel::STATE_CANCELLED],'order'=>'id desc']);
+							if (empty($p)) {
+								break;
+							}
+							$r->fid = $p->id;
+							$omt .= '-S';
+						} else {
+							if(!preg_match('/THIS TRANSACTION WAS REJECTED/', $r->msg)){
+								$c->mdata['acr_stat'] = '5';
+
+								if (!$c->save()) {
+									Log::log2file(json_encode($c->getErrors()), 'acr_log', 'customs');
+								} else {
+									// Log::log2file($c->no."==>". json_encode($c->mdata), 'acr_success_log', 'custom');
+								}
+								if (!empty($c->process)) {
+									$c->process->updateStatus(ConsolProcess::STATE_WAITING_SUB_ACR);
+								}
+							}else{
+								$c->mdata['acr_stat'] = 0;
+								if(empty($c->mdata['send_acr_notice']))
+								{
+									$c->mdata['send_acr_notice'] = 1;
+									Emailog::sendEmailTo('imports@toplogistics.com.au', $c->no." ACR/SCR was rejected",$c->no." ACR/SCR was rejected");
+								}
+								$c->save();
+							}
+							$r->fid = $c->id;
+							$omt .= '-C';
+						}
+						//update ACR/SCR status
+						$om = Edimsg::model()->find('fid = :fid AND status IN (30,40,60) AND type = :t AND msg LIKE :ref AND sender = :senderSite', [':fid' => $r->fid, ':t' => $omt, ':ref' => '%+'.$oref.'+%',':senderSite'=>$senderSite]);
+						if($om){
+							$om->status = preg_match('/THIS TRANSACTION WAS REJECTED/', $r->msg)? 60 : 50;
+							$om->save();
+						}
+						$r->status = 19;
+						$r->save();
+						$r->ctrlMsg();
+					}
+				
+				break;
+
+				case 'CARST':
+					$isSea=false;
+					if (preg_match('/DTM\+9:(\d{14})/', $r->msg, $dtm)) {
+						$r->dt = date('Y-m-d H:i:s', strtotime($dtm[1]));
+					}
+					if (preg_match("/RFF\+MWB:([^:\+']+)[:\+']+/", $r->msg, $m)) {
+						$mwb = $m[1];
+					}
+					if (preg_match("/RFF\+MB:([^:\+']+)[:\+']+/", $r->msg, $m)) {
+						$mwb = $m[1];
+						$isSea=true;
+					}
+					if (preg_match("/TDT\+20\+([^:\+']+)\+\+11\+\+\+\+([^:\+']+)::11/", $r->msg, $m)) {
+						$vesselId = $m[2];
+						$voyage = $m[1];
+						$isSea=true;
+					}
+
+					if (preg_match("/RFF\+AAQ:([^:\+']+)[:\+']+/", $r->msg, $m)) {
+						$containerNo = $m[1];
+						$isSea=true;
+					}
+
+
+					if (preg_match("/RFF\+(HWB|BH):([^:\+']+)[:\+']+/", $r->msg, $m)) {
+						$hbn = $m[2];
+						if($isSea) {
+							//$p = ImParcel::model()->with('consol')->find('t.hbn = :n AND t.cbwf&16384=0 AND (TRIM(consol.awb) = :mb OR TRIM(JSON_VALUE(consol.meta, "$.house_bill")) = :mb)', [':n' => $hbn, ':mb' => trim($mwb)]);
+							$p = ImParcel::model()->with('consol')->find('t.hbn = :n AND t.cbwf&16384=0 AND (TRIM(consol.airline) = :vesselId and TRIM(consol.flight) = :voyage and TRIM(consol.container_no) = :containerNo)', [':n' => $hbn, ':vesselId' => trim($vesselId),':voyage'=>$voyage,':containerNo'=>$containerNo]);
+
+						}else{
+							$p = ImParcel::model()->with('consol')->find('t.hbn = :n AND t.cbwf&16384=0 AND (REGEXP_REPLACE(consol.awb, "[^0-9]+", "") = :mb OR REGEXP_REPLACE(JSON_VALUE(consol.meta, "$.house_bill"), "[^0-9]+", "") = :mb)', [':n' => $hbn, ':mb' => preg_replace('/[^\d]+/', '', $mwb)]);
+						}
+						if (empty($p)) {
+							$c = Consol::model()->find('type IN(15,70) AND no = :n', [':n' => $hbn]);
+							if (!empty($c)) {
+								$r->fid=$c->id;
+								$awb = preg_replace('/[^\d]+/', '', $c->awb);
+								if (strpos($r->msg, 'CONSOLIDATED STATUS:DCLALLOWED') > 0) {
+									preg_match('/CONSOLIDATED STATUS:(HELD|CLEAR)/', $r->msg, $m);
+									$ms = Edimsg::model()->findAll('status = 18 AND fid = :c', [':c' => $c->id]);
+									$shadows = $c->shadowMap;
+									if(!empty($shadows))
+									{
+										foreach ($c->shadowMap as $key => $shadowMap) {
+											$airline = substr(trim($shadowMap->shadowConsol->airline), 0, 2);
+											$flight = substr(trim($shadowMap->shadowConsol->flight), 2);
+											if(preg_match('/TDT\+20\+'.$flight.'/i',$r->msg)&&preg_match('/'.$airline.'/i',$r->msg))
+											{
+												$c = $shadowMap->shadowConsol;
+												foreach ($ms as $em) {
+													if(preg_match('/TDT\+20\+'.$flight.'/',$em->msg)&&preg_match('/'.$airline.'/',$em->msg))
+													{
+														$em->status = 20 ; // push to sending queue
+														$em->save();
+
+														$c->mdata['dclallowed'] = 1;
+														$c->mdata['ubmsent'] = 1;
+													}
+												}
+											}
+										}
+									}else
+									{
+										$c->mdata['dclallowed'] = 1;
+										if (!empty($ms)) {
+											$c->mdata['ubmsent'] = 1;
+										}
+
+										foreach ($ms as $em) {
+											$em->status = 20 ; // push to sending queue
+											$em->save();
+										}
+									}
+
+								} elseif ($awb==$mwb && $r->isLatest() && in_array($c->type, [70])) {
+									$cleared = false;
+									$c = DmawbConsol::model()->findByPk($c->id);
+									$shipment=$c->linkShipment(false);
+									preg_match('/CONSOLIDATED STATUS:(HELD|CLEAR)/', $r->msg, $m);
+									if ($m[1] == 'CLEAR') {
+										$cleared = true;
+										$c->status = 60;
+										$shipment->status = 60;
+										if($shipment->scanCount()>0&&$shipment->status!=ImParcel::STATE_CLEAR&&!$shipment->isParcelPickup())
+										{
+											$shipment->status = ImParcel::STATE_CLEAR_WAIT;
+											$shipment->mdata["clear_wait_process"] = true;
+										}
+										
+									} else {
+										$c->status = 50;
+										$shipment->status = 55;
+										if (preg_match_all("/FTX\+AHN\+\+\+([\s\S]*?)'/i", $r->msg, $mreasons)) {
+											$shipment->mdata['held_reason'] = implode("\n", $mreasons[1]);
+											$shipment->heldReason();
+										}
+									}
+									$shipment->save();
+									//gero 2019-11-26 add
+									// if($cleared)
+									// {
+									// 	$shipment->checkStorageShipmentForVipAccount();
+									// }
+								}
+								$c->save();
+							}
+						} else {
+							$r->fid = $p->id;
+							/*if (!$isSea) {
+								$awb = preg_replace('/[^\d]+/', '', $p->consol->awb);
+								$hwb = empty($p->consol->mdata['house_bill'])? '' : preg_replace('/[^\d]+/', '', $p->consol->mdata['house_bill']);
+							} else {
+								$awb = trim($p->consol->awb);
+								$hwb = empty($p->consol->mdata['house_bill'])? '' : trim($p->consol->mdata['house_bill']);
+							}
+							//in_array($mwb, [$awb, $hwb]) && 
+							*/
+							if ($r->isLatest()) {
+								$cleared = false;
+								preg_match('/CONSOLIDATED STATUS:(HELD|CLEAR|SUBUBMOV|CONCLEAR)/', $r->msg, $m);
+								if ($m[1] == 'CLEAR') {
+									if($p->status<ImParcel::STATE_DUTY_HELD||$p->status==ImParcel::STATE_SUB_UBM||$p->status==ImParcel::STATE_CONCLEAR)
+									{
+										$hasHeld = false;
+										/*********************this is for the shipment which may have mutiple ETA and multiple cargo status from ICS******************************************************/
+										if(preg_match("/DTM\+132\:(\d{4})(\d{2})(\d{2})/i", $r->msg, $thisM))
+										{
+											$thisEta = $thisM[1].$thisM[2].$thisM[3];//get ETA from msg
+											if(empty($p->mdata['heldEta']))
+											{
+												$p->mdata['heldEta'] = [$thisEta=>ImParcel::STATE_CLEAR];
+											}else
+											{
+												$p->mdata['heldEta'][$thisEta] =ImParcel::STATE_CLEAR;
+											}
+										}
+
+										if(!empty($p->mdata['heldEta']))
+										{
+											foreach ($p->mdata['heldEta'] as $ek => $heldValue) {
+												if($heldValue==ImParcel::STATE_HELD)
+												{
+													$hasHeld = true;
+												}
+											}
+										}
+
+										/***************************************************************************/
+
+										if(!$hasHeld)
+										{
+											$tempStatus = 60;
+											if($p->status!=ImParcel::STATE_CLEAR)
+											{
+												if (!$p->canSAC(true)) {
+													$tempStatus = 57;
+												}elseif ($p->hasCustomProcess() && empty($p->mdata['screen_period_exceed'])) {  //means the shipment go through our custom process
+													if((($p->bwf & 512 > 0) && ($p->bwf & 128 == 0)) && $p->status != 58 )
+													{
+														$tempStatus = 57;
+													}
+												}
+											}
+											
+											if($tempStatus == 60)
+											{
+												if($p->scanCount()>0&&$p->status!=ImParcel::STATE_CLEAR&&!$p->isParcelPickup())
+												{
+													$tempStatus = ImParcel::STATE_CLEAR_WAIT;
+													$p->mdata["clear_wait_process"] = true;
+												}
+											}
+											$cleared = true;
+
+											if(!empty($p->agent->extra['self_customs']))
+											{
+												//for own broker customer just keep clear
+												if($tempStatus==ImParcel::STATE_DUTY_HELD)
+												{
+													$tempStatus = ImParcel::STATE_CLEAR;
+												}
+												if($p->scanCount()>0)
+												{
+													$tempStatus = ImParcel::STATE_CLEAR_WAIT;
+													$p->mdata["clear_wait_process"] = true;
+												}
+
+											}
+
+
+											$p->status = $tempStatus;
+										}
+									}
+								}elseif ($m[1] == 'SUBUBMOV') {
+									if($p->status < 62) $p->status = 62;
+								}elseif ($m[1] == 'CONCLEAR') {
+									if($p->status < 62) $p->status = 59;
+								} else {
+									$p->status = 55;
+									// get exactly held reason
+									if (preg_match_all("/FTX\+AHN\+\+\+([\s\S]*?)'/i", $r->msg, $mreasons)) {
+										if(preg_match("/DTM\+132\:(\d{4})(\d{2})(\d{2})/i", $r->msg, $thisM))
+										// this is for the shipment which may have mutiple ETA and multiple cargo status from ICS
+										{
+											$thisEta = $thisM[1].$thisM[2].$thisM[3];//get ETA from msg
+											if(empty($p->mdata['heldEta']))
+											{
+												$p->mdata['heldEta'] = [$thisEta=>$p->status];
+											}else
+											{
+												$p->mdata['heldEta'][$thisEta] = $p->status;
+											}
+										}
+
+										$p->mdata['held_reason'] = implode("\n", $mreasons[1]);
+										$p->heldReason();
+									}
+								}
+
+								$p->save();
+								//gero 2019-11-26 add
+								// if($cleared)
+								// {
+								// 	$p->checkStorageShipmentForVipAccount();
+								// }
+							}
+						}
+						if ($this->debug) echo 'HBN '.$hbn, PHP_EOL;
+					}else{
+						$c = Consol::model()->find('type IN(15,70) AND REGEXP_REPLACE(awb, "[^0-9]+", "") = :n', [':n' => $mwb]);
+						if (!empty($c)) $r->fid=$c->id;
+						if ($this->debug) echo 'MWB '.$mwb, PHP_EOL;
+					}
+					//preg_match('/RFF\+ABO:([^:\-]+):/', $r->msg, $m);
+					if(!empty($r->fid)) $r->status = 19;
+					$r->save();
+					$r->ctrlMsg();
+				break;
+				case 'UBMREQR':
+					$c = preg_match('/RFF\+ABO:([^:\-\+]+)/', $r->msg, $m)? Consol::model()->find('no = :n', [':n' => $m[1]]) : false;
+					if(empty($c)){//air
+						$c = preg_match('/RFF\+MWB:([^:\-\+\']+)/', $r->msg, $m)? Consol::model()->find('REGEXP_REPLACE(awb, "[^0-9]+", "") = :n', [':n' => $m[1]]) : false;
+					}
+					if(empty($c)){//sea
+						$c = preg_match('/RFF\+MB:([^:\-\+\']+)/', $r->msg, $m)? Consol::model()->find('TRIM(awb) = :n OR TRIM(JSON_VALUE(meta, "$.house_bill")) = :n', [':n' => trim($m[1])]) : false;
+					}
+					if(empty($c)){//sea
+						$c = preg_match("/RFF\+AAQ:([^:\+']+)[:\+']+/", $r->msg, $m)? Consol::model()->find('container_no = :n', [':n' => trim($m[1])]) : false;
+					}
+
+					$shadows = $c->shadowMap;
+					$shadowConsol = null;
+					if(!empty($shadows))
+					{
+						foreach ($c->shadowMap as $key => $shadowMap) {
+							$airline = substr(trim($shadowMap->shadowConsol->airline), 0, 2);
+							$flight = substr(trim($shadowMap->shadowConsol->flight), 2);
+							if(preg_match('/TDT\+20\+'.$flight.'/',$r->msg)&&preg_match('/'.$airline.'/',$r->msg))
+							{
+								$shadowConsol = $shadowMap->shadowConsol;// get shadow consol
+							}
+						}
+					}
+
+
+					$approv = preg_match('/:UNDERBOND APPROVAL/', $r->msg);
+					$ubout = preg_match('/LOC\+5\+(GP29H)/', $r->msg) && !preg_match('/LOC\+4\+(GP29H)/', $r->msg);
+
+					if(empty($ubout))
+					{
+						$ubout = preg_match('/LOC\+5\+(GP47K)/', $r->msg) && !preg_match('/LOC\+4\+(GP47K)/', $r->msg);
+					}
+
+					if(empty($ubout))
+					{
+						$ubout = preg_match('/LOC\+5\+(GQ48B)/', $r->msg) && !preg_match('/LOC\+4\+(GQ48B)/', $r->msg);
+					}
+
+					if (!empty($c)) {
+						$r->fid = $c->id;
+						if(preg_match('/RFF\+BH:([^:\-\+\']+)/', $r->msg, $m)){
+							$p = ImParcel::model()->find('consol_id = :cid AND hbn = :n', [':cid' => $c->id, ':n' => $m[1]]);
+							if(!empty($p)){
+								$r->fid = $p->id;
+								if($approv && $ubout){ //submove clear
+									if(!preg_match('/UB OUT/', $p->can)) $p->can = trim($p->can.' UB OUT');
+									if($p->status < 60) $p->status = 60;
+									$p->update(['can', 'status']);
+								}
+							}
+						}elseif($approv && $c->mdata['ubmsent'] != 9) {
+							$c->mdata['ubmsent'] = 9; // 9 means approved
+							if (!empty($c->process)&&empty($shadowConsol)) {
+								if(empty($$c->mdata['NOA_SENT_UB']))
+								{
+									$c->process->updateStatus(ConsolProcess::STATE_WAITING_AIRPORT_CKIN);
+								}
+							}
+							$c->save();
+						}
+
+						if($approv &&!empty($shadowConsol)&&$shadowConsol->mdata['ubmsent'] != 9) {
+							$shadowConsol->mdata['ubmsent'] = 9; // 9 means approved
+							if (!empty($shadowConsol->process)) {
+								if(empty($shadowConsol->mdata['NOA_SENT_UB']))
+								{
+									$shadowConsol->process->updateStatus(ConsolProcess::STATE_WAITING_AIRPORT_CKIN);
+								}
+							}
+							$shadowConsol->save();
+						}
+					}
+
+					$r->status = 19;
+					$r->save();
+					$r->ctrlMsg();
+				break;
+				case 'UBMREQE':
+					$c = preg_match('/RFF\+ABO:([^:\-\+]+)/', $r->msg, $m)? Consol::model()->find('no = :n', [':n' => $m[1]]) : false;
+					if(empty($c)){
+						$c = preg_match('/RFF\+MWB:([^:\-\+\']+)/', $r->msg, $m)? Consol::model()->find('REGEXP_REPLACE(awb, "[^0-9]+", "") = :n', [':n' => $m[1]]) : false;
+					}
+					if (!empty($c)) {
+						// get exactly rejected reason
+						$rt = preg_match_all("/FTX\+AAO\+\+\+([\s\S]*?)'/i", $r->msg, $mreasons);
+						$reasons = '';
+						if ($rt !== false) {
+							foreach ($mreasons[1] as $k => $one) {
+								$reasons .= $one . "\n";
+							}
+						}
+
+						if(!empty($c->mdata['ubmsent'])&&$c->mdata['ubmsent']==9&&preg_match("/(MESSAGE ALREADY EXISTS)|(THIS TRANSACTION WAS ACCEPTED WITHOUT ERRORS AND WARNINGS)/i", $reasons))
+						{
+						}elseif(preg_match("/(THIS TRANSACTION WAS ACCEPTED WITHOUT ERRORS AND WARNINGS)/i", $reasons))
+						{
+
+						}else
+						{
+							/**********************************For Checking All Shadow Consols*******************************************/
+							$shadows = $c->shadowMap;
+							$shadowConsol = null;
+							if(!empty($shadows))
+							{
+								foreach ($c->shadowMap as $key => $shadowMap) {
+									if($shadowMap->shadowConsol->mdata['ubmsent']==1||empty($shadowMap->shadowConsol->mdata['ubmsent']))
+									{
+										$shadowMap->shadowConsol->mdata['ubmsent'] = 7; // rejected
+										if (!empty($shadowMap->shadowConsol->process)) {
+											if($shadowMap->shadowConsol->process!=ConsolProcess::STATE_CONSOL_PROCESS_DONE)
+											{
+												if(empty($shadowMap->shadowConsol->mdata['NOA_SENT_UB']))
+												{
+													$shadowMap->shadowConsol->process->updateStatus(ConsolProcess::STATE_UB_REJECT);
+												}
+											}
+										}
+										$shadowMap->shadowConsol->mdata['ubm_reject_reason'] = $reasons; // save rejected reasons
+										$shadowMap->shadowConsol->save();
+									}
+								}
+							}
+							/*****************************************************************************/
+
+
+							if($c->mdata['ubmsent']==1||empty($c->mdata['ubmsent']))
+							{
+								$c->mdata['ubmsent'] = 7; // rejected
+								if (!empty($c->process)) {
+									if($c->process!=ConsolProcess::STATE_CONSOL_PROCESS_DONE)
+									{
+										if(empty($c->mdata['NOA_SENT_UB']))
+										{
+											$c->process->updateStatus(ConsolProcess::STATE_UB_REJECT);
+										}
+									}
+								}
+								$c->mdata['ubm_reject_reason'] = $reasons; // save rejected reasons
+								$c->save();
+							}
+						}
+						$r->fid = $c->id;
+					}
+					$r->status = 19;
+					$r->save();
+					$r->ctrlMsg();
+				break;
+
+				case 'ERM':
+					if(preg_match('/RFF\+AAY:([^:\-\+]+)/', $r->msg, $m)){
+						$p = ImParcel::model()->find('hbn = :n', [':n' => $m[1]]);
+						if(!empty($p)) $r->fid = $p->id;
+					}
+					$r->status = 19;
+					$r->save();
+					$r->ctrlMsg();
+				break;
+
+				default:
+					$r->status = 19;
+					$r->save();
+					$r->ctrlMsg();
+				break;
+			}
+		}
+			$transaction->commit();
+		} catch (Exception $ex){
+			$transaction->rollback();
+			throw  $ex;
+		}
+
+		//check sent status
+		$rs = Edimsg::model()->findAll('status = 30 AND sender = :sndr and type != "CONTRL" AND dt > DATE_SUB(NOW(), INTERVAL 24 HOUR) AND dt < DATE_SUB(NOW(), INTERVAL 2 HOUR)', [':sndr' => $icsSetting['prod_site']]);
+		foreach($rs as $r){
+			if(empty($r->mdata['resend']) || (count($r->mdata['resend']) < 3 && strtotime($r->mdata['resend'][count($r->mdata['resend']) - 1]) < (time() - 3600))){
+				$r->status = 20;
+				if(!isset($r->mdata['resend'])) $r->mdata['resend'] = [];
+				$r->mdata['resend'][] = date('Y-m-d H:i:s');
+				$r->save();
+				$this->log('Resend message '.$r->id);
+			}
+		}
+	}
+
+	public function funcProcess($siteId)
+	{
+		Yii::import('application.libs.edifact.ediParser');
+		$icsSetting =  Yii::app()->params['otherICS'][$siteId];
+		$senderSite = $icsSetting['testing']? $icsSetting['test_site'] : $icsSetting['prod_site'];
+		$rs = Edimsg::model()->findAll(['condition'=>'status = 10 AND fid = 0 AND rid = 0 AND dt > DATE_SUB(NOW(), INTERVAL 15 DAY) AND (receiver=:senderSite or sender =:senderSite)','params'=>[':senderSite'=>$senderSite],'order'=>'dt ASC']);
+
+		$transaction=Yii::app()->db->beginTransaction();
+		try{
+		foreach ($rs as $r) {
+			if ($this->debug) echo 'Processing Message '.$r->id, PHP_EOL;
+			$ep = new ediParser($r->msg);
+			$r->mdata['ackreq'] = $ep->getExchValue('UNB', 90);
+			$r->mdata['mrn'] = $ep->getExchValue('UNH', 10);
+			$mtyp = $ep->getExchValue('UNH', 20, 0);
+			$r->type = $mtyp == 'CUSRES'? $ep->getEdiValue('BGM', 10, 3) : $mtyp;
+			switch ($r->type) {
+				case 'CONTRL':
+					if(preg_match_all('/UCM\+(\d+)\+CUSCAR:D:99B\:UN\+(4|7)[+\']+/', $r->msg, $m) > 0 || preg_match_all('/UCI\+0*(\d+)\+.+\+(4|7)[+\']+/', $r->msg, $m) > 0){
+						foreach($m[1] as $i=>$mid){
+							$rm = Edimsg::model()->find('mid = :mid AND dt > DATE_SUB(NOW(), INTERVAL 10 DAY) AND sender = :senderSite', [':mid' => substr($mid, -6),':senderSite'=>$senderSite]);
+							if ($rm) {
+								if(empty($r->rid)) $r->rid = $rm->id;
+								if(empty($r->fid)) $r->fid = $rm->fid;
+								if($rm->status < 40){
+									$rm->status = $m[2][$i] == 7? 40 : 44;
+									$rm->rid = $r->id;
+									$rm->save();
+								}
+							}
+						}
+					}
+					$r->status = 19;
+					$r->save();
+				break;
+
+				case 'ESMR':
+					$c = preg_match('/RFF\+ABO:([^:\-\+]+)\-([^:]+):/', $r->msg, $m)? Consol::model()->find('no = :n', [':n' => $m[1]]) : false;
+					if ($c) {
+						$r->fid = $c->id;
+						$c->status = 40;
+						if (preg_match('/S(\d+)\-\d+/', $m[2], $sm)) { //sub consol
+							if (preg_match("/RFF\+AIZ:([^:\-\+']+)'/", $r->msg, $m)) {
+								$c->mdata['subc'][$sm[1]]['ecn'] = $m[1];
+							}
+						} else {
+							if (preg_match("/RFF\+AIZ:([^:\-\+']+)'/", $r->msg, $m)) {
+								$c->mdata['aiz'] = $m[1];
+							}
+						}
+						$c->save();
+						if (preg_match_all("/CST\+(\d+)'FTX\+AHN\+\+\+([^:\-\+']+)'/", $r->msg, $m)) {
+							$i = 0;
+							foreach ($c->shipments as $p) {
+								if ($p->status == 30) {
+									if (!empty($m[2][$i]) && $m[2][$i] == 'CLEAR') {
+										$p->status = 40;
+										$p->save();
+									}
+									$i++;
+								}
+							}
+						}
+					}
+					$r->status = 19;
+					$r->save();
+					$r->ctrlMsg();
+				break;
+				
+				case 'AIROUTR':
+				case 'SEAOUTR':
+					preg_match('/RFF\+ABO:([^:\+]+)::(\d+)/', $r->msg, $m);
+					if (isset($m[1])) {
+						$oref = $m[1].':'.ltrim($m[2],0);
+						$hbn = preg_match('/^(.+)\-(\d{1,2})$/', $m[1], $nm)? $nm[1] : $m[1];
+
+						// $c = Consol::model()->find('no = :n', [':n' => $hbn]);
+						// if(!empty($c)) $r->fid = $c->id;
+					}
+					$omt = substr($r->type, 0, -1);
+					//update AIROUT/SEAOUT status
+					$om = Edimsg::model()->find('status IN (30,40,60) AND type = :t AND msg LIKE :ref AND sender = :senderSite', [':t' => $omt, ':ref' => '%+'.$oref.'+%',':senderSite'=>$senderSite]);
+					if($om){
+						if(preg_match('/THIS TRANSACTION WAS REJECTED/', $r->msg)){
+							$om->status = 60;
+							$cn = Consol::model()->findByPk($om->fid);
+							Emailog::sendEmailTo('imports@toplogistics.com.au', json_encode("ICS ".$cn->no." outturn is rejected"),"ICS ".$cn->no." outturn is rejected");
+							$cn->mdata['aoutreject'] = 1;
+							$cn->save();
+						}else{
+							$om->status = 50;
+							if(!empty($om->mdata['sids'])){
+								foreach ($om->mdata['sids'] as $sid) {
+									$p = Shipment::model()->findByPk($sid);
+									$p->mdata['aco'] = 1;
+									$p->updateMeta();
+								}
+							}
+							$cn = Consol::model()->findByPk($om->fid);
+							$cn->mdata['aoutsent'] = 1;
+							$cn->save();
+						}
+						$om->save();
+						$r->fid = $om->fid;
+					}
+					$r->status = 19;
+					$r->save();
+					$r->ctrlMsg();
+				break;
+
+				case 'SEACRR':
+				case 'AIRCRR':
+					preg_match('/RFF\+ABO:([^:\+]+)::(\d+)/', $r->msg, $m);
+					if (isset($m[1])) {
+						$oref = $m[1].':'.ltrim($m[2],0);
+						$hbn = preg_match('/^(.+)-(\d{1,2})$/', $m[1], $nm)? $nm[1] : $m[1];
+						
+						$omt = substr($r->type, 0, -1);
+
+						$c = Consol::model()->find('no = :n', [':n' => $hbn]);
+						if (empty($c)) {
+							$p = ImParcel::model()->find(['condition'=>'hbn = :n','params'=>[':n' => $hbn],'order'=>'id desc']);
+							if (empty($p)) {
+								break;
+							}
+							$r->fid = $p->id;
+							$omt .= '-S';
+						} else {
+							if(!preg_match('/THIS TRANSACTION WAS REJECTED/', $r->msg)){
+								$c->mdata['acr_stat'] = '5';
+
+								if (!$c->save()) {
+									Log::log2file(json_encode($c->getErrors()), 'acr_log', 'customs');
+								} else {
+									// Log::log2file($c->no."==>". json_encode($c->mdata), 'acr_success_log', 'custom');
+								}
+								if (!empty($c->process)) {
+									$c->process->updateStatus(ConsolProcess::STATE_WAITING_SUB_ACR);
+								}
+							}else{
+								$c->mdata['acr_stat'] = 0;
+								if(empty($c->mdata['send_acr_notice']))
+								{
+									$c->mdata['send_acr_notice'] = 1;
+									Emailog::sendEmailTo('imports@toplogistics.com.au', $c->no." ACR/SCR was rejected",$c->no." ACR/SCR was rejected");
+								}
+								$c->save();
+							}
+							$r->fid = $c->id;
+							$omt .= '-C';
+						}
+						//update ACR/SCR status
+						$om = Edimsg::model()->find('fid = :fid AND status IN (30,40,60) AND type = :t AND msg LIKE :ref AND sender = :senderSite', [':fid' => $r->fid, ':t' => $omt, ':ref' => '%+'.$oref.'+%',':senderSite'=>$senderSite]);
+						if($om){
+							$om->status = preg_match('/THIS TRANSACTION WAS REJECTED/', $r->msg)? 60 : 50;
+							$om->save();
+						}
+						$r->status = 19;
+						$r->save();
+						$r->ctrlMsg();
+					}
+				
+				break;
+
+				case 'CARST':
+					$isSea=false;
+					if (preg_match('/DTM\+9:(\d{14})/', $r->msg, $dtm)) {
+						$r->dt = date('Y-m-d H:i:s', strtotime($dtm[1]));
+					}
+					if (preg_match("/RFF\+MWB:([^:\+']+)[:\+']+/", $r->msg, $m)) {
+						$mwb = $m[1];
+					}
+					if (preg_match("/RFF\+MB:([^:\+']+)[:\+']+/", $r->msg, $m)) {
+						$mwb = $m[1];
+						$isSea=true;
+					}
+					if (preg_match("/TDT\+20\+([^:\+']+)\+\+11\+\+\+\+([^:\+']+)::11/", $r->msg, $m)) {
+						$vesselId = $m[2];
+						$voyage = $m[1];
+						$isSea=true;
+					}
+
+					if (preg_match("/RFF\+AAQ:([^:\+']+)[:\+']+/", $r->msg, $m)) {
+						$containerNo = $m[1];
+						$isSea=true;
+					}
+
+
+					if (preg_match("/RFF\+(HWB|BH):([^:\+']+)[:\+']+/", $r->msg, $m)) {
+						$hbn = $m[2];
+						if($isSea) {
+							//$p = ImParcel::model()->with('consol')->find('t.hbn = :n AND t.cbwf&16384=0 AND (TRIM(consol.awb) = :mb OR TRIM(JSON_VALUE(consol.meta, "$.house_bill")) = :mb)', [':n' => $hbn, ':mb' => trim($mwb)]);
+							$p = ImParcel::model()->with('consol')->find('t.hbn = :n AND t.cbwf&16384=0 AND (TRIM(consol.airline) = :vesselId and TRIM(consol.flight) = :voyage and TRIM(consol.container_no) = :containerNo)', [':n' => $hbn, ':vesselId' => trim($vesselId),':voyage'=>$voyage,':containerNo'=>$containerNo]);
+
+						}else{
+							$p = ImParcel::model()->with('consol')->find('t.hbn = :n AND t.cbwf&16384=0 AND (REGEXP_REPLACE(consol.awb, "[^0-9]+", "") = :mb OR REGEXP_REPLACE(JSON_VALUE(consol.meta, "$.house_bill"), "[^0-9]+", "") = :mb)', [':n' => $hbn, ':mb' => preg_replace('/[^\d]+/', '', $mwb)]);
+						}
+						if (empty($p)) {
+							$c = Consol::model()->find('type IN(15,70) AND no = :n', [':n' => $hbn]);
+							if (!empty($c)) {
+								$r->fid=$c->id;
+								$awb = preg_replace('/[^\d]+/', '', $c->awb);
+								if (strpos($r->msg, 'CONSOLIDATED STATUS:DCLALLOWED') > 0) {
+									preg_match('/CONSOLIDATED STATUS:(HELD|CLEAR)/', $r->msg, $m);
+									$ms = Edimsg::model()->findAll('status = 18 AND fid = :c', [':c' => $c->id]);
+									$shadows = $c->shadowMap;
+									if(!empty($shadows))
+									{
+										foreach ($c->shadowMap as $key => $shadowMap) {
+											$airline = substr(trim($shadowMap->shadowConsol->airline), 0, 2);
+											$flight = substr(trim($shadowMap->shadowConsol->flight), 2);
+											if(preg_match('/TDT\+20\+'.$flight.'/i',$r->msg)&&preg_match('/'.$airline.'/i',$r->msg))
+											{
+												$c = $shadowMap->shadowConsol;
+												foreach ($ms as $em) {
+													if(preg_match('/TDT\+20\+'.$flight.'/',$em->msg)&&preg_match('/'.$airline.'/',$em->msg))
+													{
+														$em->status = 20 ; // push to sending queue
+														$em->save();
+
+														$c->mdata['dclallowed'] = 1;
+														$c->mdata['ubmsent'] = 1;
+													}
+												}
+											}
+										}
+									}else
+									{
+										$c->mdata['dclallowed'] = 1;
+										if (!empty($ms)) {
+											$c->mdata['ubmsent'] = 1;
+										}
+
+										foreach ($ms as $em) {
+											$em->status = 20 ; // push to sending queue
+											$em->save();
+										}
+									}
+
+								} elseif ($awb==$mwb && $r->isLatest() && in_array($c->type, [70])) {
+									$cleared = false;
+									$c = DmawbConsol::model()->findByPk($c->id);
+									$shipment=$c->linkShipment(false);
+									preg_match('/CONSOLIDATED STATUS:(HELD|CLEAR)/', $r->msg, $m);
+									if ($m[1] == 'CLEAR') {
+										$cleared = true;
+										$c->status = 60;
+										$shipment->status = 60;
+										if($shipment->scanCount()>0&&$shipment->status!=ImParcel::STATE_CLEAR&&!$shipment->isParcelPickup())
+										{
+											$shipment->status = ImParcel::STATE_CLEAR_WAIT;
+											$shipment->mdata["clear_wait_process"] = true;
+										}
+										
+									} else {
+										$c->status = 50;
+										$shipment->status = 55;
+										if (preg_match_all("/FTX\+AHN\+\+\+([\s\S]*?)'/i", $r->msg, $mreasons)) {
+											$shipment->mdata['held_reason'] = implode("\n", $mreasons[1]);
+											$shipment->heldReason();
+										}
+									}
+									$shipment->save();
+									//gero 2019-11-26 add
+									// if($cleared)
+									// {
+									// 	$shipment->checkStorageShipmentForVipAccount();
+									// }
+								}
+								$c->save();
+							}
+						} else {
+							$r->fid = $p->id;
+							/*if (!$isSea) {
+								$awb = preg_replace('/[^\d]+/', '', $p->consol->awb);
+								$hwb = empty($p->consol->mdata['house_bill'])? '' : preg_replace('/[^\d]+/', '', $p->consol->mdata['house_bill']);
+							} else {
+								$awb = trim($p->consol->awb);
+								$hwb = empty($p->consol->mdata['house_bill'])? '' : trim($p->consol->mdata['house_bill']);
+							}
+							//in_array($mwb, [$awb, $hwb]) && 
+							*/
+							if ($r->isLatest()) {
+								$cleared = false;
+								preg_match('/CONSOLIDATED STATUS:(HELD|CLEAR|SUBUBMOV|CONCLEAR)/', $r->msg, $m);
+								if ($m[1] == 'CLEAR') {
+									if($p->status<ImParcel::STATE_DUTY_HELD||$p->status==ImParcel::STATE_SUB_UBM||$p->status==ImParcel::STATE_CONCLEAR)
+									{
+										$hasHeld = false;
+										/*********************this is for the shipment which may have mutiple ETA and multiple cargo status from ICS******************************************************/
+										if(preg_match("/DTM\+132\:(\d{4})(\d{2})(\d{2})/i", $r->msg, $thisM))
+										{
+											$thisEta = $thisM[1].$thisM[2].$thisM[3];//get ETA from msg
+											if(empty($p->mdata['heldEta']))
+											{
+												$p->mdata['heldEta'] = [$thisEta=>ImParcel::STATE_CLEAR];
+											}else
+											{
+												$p->mdata['heldEta'][$thisEta] =ImParcel::STATE_CLEAR;
+											}
+										}
+
+										if(!empty($p->mdata['heldEta']))
+										{
+											foreach ($p->mdata['heldEta'] as $ek => $heldValue) {
+												if($heldValue==ImParcel::STATE_HELD)
+												{
+													$hasHeld = true;
+												}
+											}
+
+											if($hasHeld)
+											{
+												$p->updateMeta();
+											}
+										}
+
+										/***************************************************************************/
+
+										if(!$hasHeld)
+										{
+											$tempStatus = 60;
+											if($p->status!=ImParcel::STATE_CLEAR)
+											{
+												if (!$p->canSAC(true)) {
+													$tempStatus = 57;
+												}elseif ($p->hasCustomProcess() && empty($p->mdata['screen_period_exceed'])) {  //means the shipment go through our custom process
+													if((($p->bwf & 512 > 0) && ($p->bwf & 128 == 0)) && $p->status != 58 )
+													{
+														$tempStatus = 57;
+													}
+												}
+											}
+											
+											if($tempStatus == 60)
+											{
+												if($p->scanCount()>0&&$p->status!=ImParcel::STATE_CLEAR&&!$p->isParcelPickup())
+												{
+													$tempStatus = ImParcel::STATE_CLEAR_WAIT;
+													$p->mdata["clear_wait_process"] = true;
+												}
+											}
+											$cleared = true;
+
+											if(!empty($p->agent->extra['self_customs']))
+											{
+												//for own broker customer just keep clear
+												if($tempStatus==ImParcel::STATE_DUTY_HELD)
+												{
+													$tempStatus = ImParcel::STATE_CLEAR;
+												}
+												if($p->scanCount()>0)
+												{
+													$tempStatus = ImParcel::STATE_CLEAR_WAIT;
+													$p->mdata["clear_wait_process"] = true;
+												}
+
+											}
+
+
+											$p->status = $tempStatus;
+										}
+									}
+								}elseif ($m[1] == 'SUBUBMOV') {
+									if($p->status < 62) $p->status = 62;
+								}elseif ($m[1] == 'CONCLEAR') {
+									if($p->status < 62) $p->status = 59;
+								} else {
+									$p->status = 55;
+									// get exactly held reason
+									if (preg_match_all("/FTX\+AHN\+\+\+([\s\S]*?)'/i", $r->msg, $mreasons)) {
+										if(preg_match("/DTM\+132\:(\d{4})(\d{2})(\d{2})/i", $r->msg, $thisM))
+										// this is for the shipment which may have mutiple ETA and multiple cargo status from ICS
+										{
+											$thisEta = $thisM[1].$thisM[2].$thisM[3];//get ETA from msg
+											if(empty($p->mdata['heldEta']))
+											{
+												$p->mdata['heldEta'] = [$thisEta=>$p->status];
+											}else
+											{
+												$p->mdata['heldEta'][$thisEta] = $p->status;
+											}
+										}
+
+										$p->mdata['held_reason'] = implode("\n", $mreasons[1]);
+										$p->heldReason();
+									}
+								}
+
+								$p->save();
+								//gero 2019-11-26 add
+								// if($cleared)
+								// {
+								// 	$p->checkStorageShipmentForVipAccount();
+								// }
+							}
+						}
+						if ($this->debug) echo 'HBN '.$hbn, PHP_EOL;
+					}else{
+						$c = Consol::model()->find('type IN(15,70) AND REGEXP_REPLACE(awb, "[^0-9]+", "") = :n', [':n' => $mwb]);
+						if (!empty($c)) $r->fid=$c->id;
+						if ($this->debug) echo 'MWB '.$mwb, PHP_EOL;
+					}
+					//preg_match('/RFF\+ABO:([^:\-]+):/', $r->msg, $m);
+					if(!empty($r->fid)) $r->status = 19;
+					$r->save();
+					$r->ctrlMsg();
+				break;
+				case 'UBMREQR':
+					$c = preg_match('/RFF\+ABO:([^:\-\+]+)/', $r->msg, $m)? Consol::model()->find('no = :n', [':n' => $m[1]]) : false;
+					if(empty($c)){//air
+						$c = preg_match('/RFF\+MWB:([^:\-\+\']+)/', $r->msg, $m)? Consol::model()->find('REGEXP_REPLACE(awb, "[^0-9]+", "") = :n', [':n' => $m[1]]) : false;
+					}
+					if(empty($c)){//sea
+						$c = preg_match('/RFF\+MB:([^:\-\+\']+)/', $r->msg, $m)? Consol::model()->find('TRIM(awb) = :n OR TRIM(JSON_VALUE(meta, "$.house_bill")) = :n', [':n' => trim($m[1])]) : false;
+					}
+					if(empty($c)){//sea
+						$c = preg_match("/RFF\+AAQ:([^:\+']+)[:\+']+/", $r->msg, $m)? Consol::model()->find('container_no = :n', [':n' => trim($m[1])]) : false;
+					}
+					
+
+					$shadows = $c->shadowMap;
+					$shadowConsol = null;
+					if(!empty($shadows))
+					{
+						foreach ($c->shadowMap as $key => $shadowMap) {
+							$airline = substr(trim($shadowMap->shadowConsol->airline), 0, 2);
+							$flight = substr(trim($shadowMap->shadowConsol->flight), 2);
+							if(preg_match('/TDT\+20\+'.$flight.'/',$r->msg)&&preg_match('/'.$airline.'/',$r->msg))
+							{
+								$shadowConsol = $shadowMap->shadowConsol;// get shadow consol
+							}
+						}
+					}
+
+
+					$approv = preg_match('/:UNDERBOND APPROVAL/', $r->msg);
+					$ubout = preg_match('/LOC\+5\+(GP29H)/', $r->msg) && !preg_match('/LOC\+4\+(GP29H)/', $r->msg);
+
+					if(empty($ubout))
+					{
+						$ubout = preg_match('/LOC\+5\+(GP47K)/', $r->msg) && !preg_match('/LOC\+4\+(GP47K)/', $r->msg);
+					}
+
+					if(empty($ubout))
+					{
+						$ubout = preg_match('/LOC\+5\+(GQ48B)/', $r->msg) && !preg_match('/LOC\+4\+(GQ48B)/', $r->msg);
+					}
+
+					if (!empty($c)) {
+						$r->fid = $c->id;
+						if(preg_match('/RFF\+BH:([^:\-\+\']+)/', $r->msg, $m)){
+							$p = ImParcel::model()->find('consol_id = :cid AND hbn = :n', [':cid' => $c->id, ':n' => $m[1]]);
+							if(!empty($p)){
+								$r->fid = $p->id;
+								if($approv && $ubout){ //submove clear
+									if(!preg_match('/UB OUT/', $p->can)) $p->can = trim($p->can.' UB OUT');
+									if($p->status < 60) $p->status = 60;
+									$p->update(['can', 'status']);
+								}
+							}
+						}elseif($approv && $c->mdata['ubmsent'] != 9) {
+							$c->mdata['ubmsent'] = 9; // 9 means approved
+							if (!empty($c->process)&&empty($shadowConsol)) {
+								if(empty($c->mdata['NOA_SENT_UB']))
+								{
+									$c->process->updateStatus(ConsolProcess::STATE_WAITING_AIRPORT_CKIN);
+								}
+							}
+							$c->save();
+						}
+
+						if($approv &&!empty($shadowConsol)&&$shadowConsol->mdata['ubmsent'] != 9) {
+							$shadowConsol->mdata['ubmsent'] = 9; // 9 means approved
+							if (!empty($shadowConsol->process)) {
+								if(empty($shadowConsol->mdata['NOA_SENT_UB']))
+								{
+									$shadowConsol->process->updateStatus(ConsolProcess::STATE_WAITING_AIRPORT_CKIN);
+								}
+							}
+							$shadowConsol->save();
+						}
+					}
+
+					$r->status = 19;
+					$r->save();
+					$r->ctrlMsg();
+				break;
+				case 'UBMREQE':
+					$c = preg_match('/RFF\+ABO:([^:\-\+]+)/', $r->msg, $m)? Consol::model()->find('no = :n', [':n' => $m[1]]) : false;
+					if(empty($c)){
+						$c = preg_match('/RFF\+MWB:([^:\-\+\']+)/', $r->msg, $m)? Consol::model()->find('REGEXP_REPLACE(awb, "[^0-9]+", "") = :n', [':n' => $m[1]]) : false;
+					}
+					if (!empty($c)) {
+						// get exactly rejected reason
+						$rt = preg_match_all("/FTX\+AAO\+\+\+([\s\S]*?)'/i", $r->msg, $mreasons);
+						$reasons = '';
+						if ($rt !== false) {
+							foreach ($mreasons[1] as $k => $one) {
+								$reasons .= $one . "\n";
+							}
+						}
+						$c->mdata['ubmerror'] = 0;
+
+						if(!empty($c->mdata['ubmsent'])&&$c->mdata['ubmsent']==9&&preg_match("/(MESSAGE ALREADY EXISTS)|(THIS TRANSACTION WAS ACCEPTED WITHOUT ERRORS AND WARNINGS)/i", $reasons))
+						{
+						}elseif(preg_match("/(THIS TRANSACTION WAS ACCEPTED WITHOUT ERRORS AND WARNINGS)/i", $reasons))
+						{
+
+						}else
+						{
+							$c->mdata['ubmerror'] = 1; // rejected
+							$shadows = $c->shadowMap;
+							$shadowConsol = null;
+							if(!empty($shadows))
+							{
+								foreach ($c->shadowMap as $key => $shadowMap) {
+									if($shadowMap->shadowConsol->mdata['ubmsent']==1||empty($shadowMap->shadowConsol->mdata['ubmsent']))
+									{
+										$shadowMap->shadowConsol->mdata['ubmsent'] = 7; // rejected
+										if (!empty($shadowMap->shadowConsol->process)) {
+											if($shadowMap->shadowConsol->process!=ConsolProcess::STATE_CONSOL_PROCESS_DONE)
+											{
+												if(empty($shadowMap->shadowConsol->mdata['NOA_SENT_UB']))
+												{
+													$shadowMap->shadowConsol->process->updateStatus(ConsolProcess::STATE_UB_REJECT);
+												}
+											}
+										}
+										$shadowMap->shadowConsol->mdata['ubm_reject_reason'] = $reasons; // save rejected reasons
+										$shadowMap->shadowConsol->save();
+									}
+								}
+							}
+
+							if($c->mdata['ubmsent']==1||empty($c->mdata['ubmsent']))
+							{
+								$c->mdata['ubmsent'] = 7; // rejected
+								if (!empty($c->process)) {
+									if($c->process!=ConsolProcess::STATE_CONSOL_PROCESS_DONE)
+									{
+										if(empty($c->mdata['NOA_SENT_UB']))
+										{
+											$c->process->updateStatus(ConsolProcess::STATE_UB_REJECT);
+										}
+									}
+								}
+								$c->mdata['ubm_reject_reason'] = $reasons; // save rejected reasons
+								$c->save();
+							}else
+							{
+								$c->updateMeta();
+							}
+						}
+						$r->fid = $c->id;
+					}
+					$r->status = 19;
+					$r->save();
+					$r->ctrlMsg();
+				break;
+
+				case 'ERM':
+					if(preg_match('/RFF\+AAY:([^:\-\+]+)/', $r->msg, $m)){
+						$p = ImParcel::model()->find('hbn = :n', [':n' => $m[1]]);
+						if(!empty($p)) $r->fid = $p->id;
+					}
+					$r->status = 19;
+					$r->save();
+					$r->ctrlMsg();
+				break;
+
+				default:
+					$r->status = 19;
+					$r->save();
+					$r->ctrlMsg();
+				break;
+			}
+		}
+			$transaction->commit();
+		} catch (Exception $ex){
+			$transaction->rollback();
+			throw  $ex;
+		}
+
+		//check sent status
+		$rs = Edimsg::model()->findAll('status = 30 AND sender = :sndr and type != "CONTRL" AND dt > DATE_SUB(NOW(), INTERVAL 24 HOUR) AND dt < DATE_SUB(NOW(), INTERVAL 2 HOUR)', [':sndr' => $icsSetting['prod_site']]);
+		foreach($rs as $r){
+			if(empty($r->mdata['resend']) || (count($r->mdata['resend']) < 3 && strtotime($r->mdata['resend'][count($r->mdata['resend']) - 1]) < (time() - 3600))){
+				$r->status = 20;
+				if(!isset($r->mdata['resend'])) $r->mdata['resend'] = [];
+				$r->mdata['resend'][] = date('Y-m-d H:i:s');
+				$r->save();
+				$this->log('Resend message '.$r->id);
+			}
+		}
+	}
+
+	public function funcSend($siteId,$ediId = null)
+	{
+		$icsSetting =  Yii::app()->params['otherICS'][$siteId];
+		$senderSite = $icsSetting['testing']? $icsSetting['test_site'] : $icsSetting['prod_site'];
+		//$this->debug = 1;
+		require_once('PHPMailer/class.phpmailer.php');
+		require_once('PHPMailer/class.smtp.php');
+		$mail = new PHPMailer();
+		$mail->IsSMTP();
+		$mail->SMTPKeepAlive = true;
+		$mail->Host = $icsSetting['host'];  // Specify main and backup SMTP servers
+        $mail->Port = 587; 
+		if ($this->debug) {
+			$mail->SMTPDebug = 1;
+		}else{
+			$mail->SMTPDebug = 2;
+			$mail->Debugoutput = function($str, $level) {
+				file_put_contents(Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR.'ics_smtp.log', date('Y-m-d H:i:s'). "\t$level\t".trim($str)."\n", FILE_APPEND | LOCK_EX);
+			};
+		}
+		$mail->SMTPSecure = 'tls';        
+        $mail->SMTPAuth = true; // Enable SMTP authentication
+		$mail->Username = $icsSetting['username']; // SMTP username
+		$mail->Password = $icsSetting['password'];
+		$mail->Sender   = $icsSetting['email'];
+		$mail->From = $icsSetting['email'];
+		$mail->FromName = 'HVLV';
+		$mail->AddAddress($icsSetting['customs_email']);
+		//update scheduled status
+		if(empty($ediId))
+		{
+			$sql = "UPDATE `edimsg` SET `status` = 20 WHERE `status` = 18 AND `type` != 'UBMREQ' AND dt < NOW() AND `sender` = '".$senderSite."'";
+			Yii::app()->db->createCommand($sql)->execute();
+		}
+
+		//send msg in batch
+		if(empty($ediId))
+		{
+			$rs = Edimsg::model()->findAll(['condition' => "status = 20 AND sender = '".$senderSite."'", 'limit' => 3000]);
+		}else
+		{
+			$rs = Edimsg::model()->findAll("id in (".$ediId.") AND sender = '".$senderSite."'");
+		}
+
+		$mgs = [];
+		foreach ($rs as $r) {
+			if (!isset($msg[$r->type])) {
+				$msg[$r->type] = [];
+			}
+			$mgs[$r->type][] = $r;
+		}
+
+		$exg_msg_limit = ['CONTRL' => 500, 'SEAOUT' => 1];
+		foreach ($mgs as $typ => $ems) {
+			$pel = empty($exg_msg_limit[$typ])? 100 : $exg_msg_limit[$typ];
+			$tt = sizeof($ems);
+			$exs = ceil($tt / $pel);
+			for ($i = 0; $i < $exs; $i++) {
+				$ms = array_slice($ems, $i*$pel, $pel);
+				$icsm = new icsMailer($siteId);
+				$icsm->addEDI($ms);
+				if ($icsm->signEncrypt()) {
+					$mail->clearCustomHeaders();
+					$mail->addCustomHeader('Importance: HIGH');
+					$mail->addCustomHeader('Content-Disposition: attachment; filename="smime.p7m"');
+					$mail->addCustomHeader('Content-Transfer-Encoding: base64');
+					$mail->Subject =  $icsm->Subject;
+					$mail->Body = $icsm->Body;
+					$mail->ContentType = 'application/x-pkcs7-mime; smime-type=enveloped-data; name="smime.p7m"';
+					if ($mail->Send()) {
+						$transaction=Yii::app()->db->beginTransaction();
+						try{
+							foreach ($ms as $r) {
+								$r->status = 30;
+								$r->save();
+							}
+							$transaction->commit();
+						} catch (Exception $ex){
+							$transaction->rollback();
+							throw  $ex;
+						}
+						$msg = $typ.' '.$icsm->Subject.', '.sizeof($ms).' messges sent';
+						echo $msg, PHP_EOL;
+					} else {
+						echo 'Problem sending email to Customs', PHP_EOL;
+						$msg = 'Mailer Error: ' . $mail->ErrorInfo;
+						if ($this->debug) echo $msg, PHP_EOL;
+					}
+					$this->log($msg);
+				} else {
+					echo 'Encryption Error: ' . implode("\n", $icsm->err);
+				}
+				sleep(5);
+			}
+		}
+		
+		$mail->SmtpClose();
+
+		/*send msg one by one
+		$rs = Edimsg::model()->findAll(['condition' => 'status = 20', 'limit' => 20]);
+		foreach($rs as $r){
+			$icsm = new icsMailer();
+			$icsm->addEDI($r);
+			if(!$icsm->signEncrypt()) continue;
+			$mail->clearCustomHeaders();
+			$mail->addCustomHeader($icsm->Header);
+			$mail->Subject =  $icsm->Subject;
+			$mail->Body =  $icsm->Body;
+			if($mail->Send()) {
+				$r->status = 30;
+				$r->save();
+				echo $r->type.' '.$icsm->Subject." sent\n";
+			}else{
+				echo "Problem sending email to Customs\n";
+				if($this->debug) echo "Mailer Error: " . $mail->ErrorInfo;
+				break;
+			}
+		}
+		$mail->SmtpClose();
+		if(Edimsg::model()->count('status = 20') > 0){
+			sleep(2);
+			$this->send();
+		}*/
+	}
+
+
+	public function funcDoMQ($key,$func)
+	{
+		$status = $this->checkMQProcessing($key);
+		if(!empty($status))
+		{
+			echo "processing";
+			return;
+		}
+
+		$this->setMQProcessing($key,1200);
+
+		$this->$func();
+
+		$this->deleteMQProcessing($key);
+	}
+
+	private function checkMQProcessing($key)
+	{
+		$mqRecord = Yii::app()->cache->get('MQRecord:'.$key);
+		if(!empty($mqRecord))
+		{
+			echo "xxxxxx";
+			return 1;
+		}
+		return 0;
+	}
+
+	private function setMQProcessing($key,$expired=null)
+	{
+		if(!empty($expired))
+		{
+			$mqRecord = Yii::app()->cache->set('MQRecord:'.$key,'MQRecord:'.$key,$expired);
+		}else
+		{
+			$mqRecord = Yii::app()->cache->set('MQRecord'.$key,'MQRecord:'.$key);
+		}
+		return 1;
+	}
+
+	private function deleteMQProcessing($key)
+	{
+		$this->setMQProcessing($key,1);
+		return 1;
+	}
+
+	public function deleteMQProcessingGo()
+	{
+		$key = $this->prompt("MQKey");
+		$this->setMQProcessing($key,1);
+		return 1;
+	}
+
+
+	public function log($m)
+	{
+		$lf = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR.'ics.log';
+		@file_put_contents($lf, date('Y-m-d H:i:s').' '.$m."\n", FILE_APPEND);
+	}
+	
+	public function test()
+	{
+		Yii::import('application.libs.edifact.ediParser');
+		$edi = file_get_contents($this->args[1]);
+		$ep = new ediParser($edi);
+		var_dump($ep->getExchValue('UNB', 90));
+		var_dump($ep->getExchValue('UNH', 10));
+		var_dump($ep->getExchValue('UNH', 20, 0));
+		var_dump($ep->getEdiValue('BGM', 10, 3));
+		preg_match('/RFF\+ABO:([^:\-]+)\-([^:]+):/', $edi, $m);
+		var_dump($m[1]);
+	}
+}

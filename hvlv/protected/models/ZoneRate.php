@@ -1,0 +1,712 @@
+<?php
+
+/**
+ * This is the model class for table "zone_rate".
+ *
+ * The followings are the available columns in table 'zone_rate':
+ * @property string $id
+ * @property string $rate_id
+ * @property string $zone
+ * @property string $zone_name
+ * @property string $weight_lo
+ * @property string $weight_hi
+ * @property string $base
+ * @property string $item
+ * @property string $perkg
+ * @property string $nkg
+ * @property string $minimum
+ * @property integer $gst
+ */
+class ZoneRate extends CActiveRecord{
+
+	public static $gsts = array(
+		1 => 'Inc GST',
+		2 => 'Ex GST',
+		3 => 'GST Free',
+	);
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName(){
+		return 'zone_rate';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules(){
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('rate_id, chargecode_id,zone, zone_name, weight_lo, weight_hi, base, item, perkg, nkg, minimum,min_incl, levy', 'safe'),
+			array('gst', 'numerical', 'integerOnly'=>true),
+			array('rate_id,chargecode_id', 'length', 'max'=>11),
+			array('zone', 'length', 'max'=>20),
+			array('weight_lo, weight_hi, base, item, perkg, minimum,min_incl, levy', 'length', 'max'=>10),
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, rate_id,chargecode_id, zone, zone_name, weight_lo, weight_hi, base, item, perkg, nkg, minimum,min_incl, gst, levy, start_date', 'safe', 'on'=>'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations(){
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+			'orgrate' => array(self::BELONGS_TO, 'OrgRate', 'rate_id'),
+		);
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels(){
+		return array(
+			'id' => 'ID',
+			'rate_id' => 'Rate',
+            'chargecode_id' => 'Charge Code',
+			'zone' => 'Zone',
+			'zone_name' => 'Zone Name',
+			'weight_lo' => 'Wt. Lo',
+			'weight_hi' => 'Wt. Hi',
+			'base' => 'Base',
+			'item' => 'Item',
+			'perkg' => 'Perkg',
+			'nkg' => 'nkg',
+			'minimum' => 'Minimum',
+			'min_incl' => 'Minimum Include',
+			'gst' => 'GST',
+			'levy' => 'Levy',
+			'start_date' => 'Start Date'
+		);
+	}
+	
+	public function getCode(){
+		$c = '';
+		if($this->rate_id == 2){
+			$c = 'XI50';
+		}elseif($this->rate_id == 3){
+			switch($this->weight_hi){
+				case 0.5:
+					$c = 'X0A';
+				break;
+				case 1:
+					$c = 'X31';
+				break;
+				case 3:
+					$c = 'X33';
+				break;
+				case 5:
+					$c = 'X35';
+				break;
+			}
+		}
+		
+		return $c;
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search(){
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('id',$this->id);
+		$criteria->compare('rate_id',$this->rate_id);
+		$criteria->compare('zone',$this->zone,true);
+		$criteria->compare('zone_name',$this->zone_name,true);
+		$criteria->compare('weight_lo',$this->weight_lo,true);
+		$criteria->compare('weight_hi',$this->weight_hi,true);
+		$criteria->compare('base',$this->base,true);
+		$criteria->compare('item',$this->item,true);
+		$criteria->compare('perkg',$this->perkg,true);
+		$criteria->compare('nkg',$this->nkg,true);
+		$criteria->compare('minimum',$this->minimum,true);
+		$criteria->compare('min_incl',$this->min_incl,true);
+		$criteria->compare('gst',$this->gst);
+
+		return new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+		));
+	}
+
+    /**
+     * @param $zoneRateId
+     * @return CActiveDataProvider
+     */
+    public function getZoneRateWeightRange($zoneRateId){
+
+        $criteria = new CDbCriteria;
+        $criteria->condition = 'rate_id = :rid';
+        $criteria->params = array(':rid' => $zoneRateId);
+        $criteria->group = 'weight_lo';
+        $criteria->order = 'weight_lo ASC';
+
+        return new CActiveDataProvider($this, array(
+            'criteria'=>$criteria,
+        ));
+    }
+
+    /**
+     * @param $zoneRateId
+     * @return CActiveDataProvider
+     */
+    public function getZoneRateWeightRangeByArray($zoneRateId,$isChargecode = false){
+    	if(!empty($isChargecode))
+    	{
+    		$rt = ZoneRate::model()->findAll('chargecode_id = :rid group by weight_lo,weight_hi ORDER BY weight_lo ASC',array(':rid' => $zoneRateId));
+    	}else
+    	{
+    		$rt = ZoneRate::model()->findAll('rate_id = :rid group by weight_lo,weight_hi ORDER BY weight_lo ASC',array(':rid' => $zoneRateId));
+    	}
+        $rates = array();
+        foreach ( $rt as $rate ) {
+            $oneRate = array(
+                'weight_lo' => $rate['weight_lo'],
+                'weight_hi' => $rate['weight_hi'],
+                'data' => array()
+            );
+
+            // get related zone weight span price setting
+            if(!empty($isChargecode))
+	    	{
+	    		$zonePrices = ZoneRate::model()->findAll('chargecode_id = :rid and weight_lo = :wlo and weight_hi = :whi ORDER BY zone',
+                array(':rid' => $zoneRateId,':wlo' => $rate['weight_lo'] ,':whi' => $rate['weight_hi']));
+	    	}else
+	    	{
+	    		$zonePrices = ZoneRate::model()->findAll('rate_id = :rid and weight_lo = :wlo and weight_hi = :whi ORDER BY zone',
+                array(':rid' => $zoneRateId,':wlo' => $rate['weight_lo'] ,':whi' => $rate['weight_hi']));
+	    	}
+            foreach ( $zonePrices as $price ) {
+                $oneRate['data'][] = array(
+                    'code' => $price['zone'],
+                    'name' => $price['zone_name'],
+                    'ppc' => isset($price['item']) ? $price['item'] : 0,
+                    'pkg' => isset($price['perkg']) ? $price['perkg'] : 0,
+                    'minimum' => isset($price['minimum']) ? $price['minimum'] : 0,
+                    'min_incl' => isset($price['min_incl']) ? $price['min_incl'] : 0,
+                    'base' => isset($price['base']) ? $price['base'] : 0,
+                    'nkg' => isset($price['nkg']) ? $price['nkg'] : 0,
+                );
+            }
+            $rates[] = $oneRate;
+        }
+        return $rates;
+    }
+
+    /**
+     * get price rate weight ranges based on charge code ID
+     * @param $chargeCodeId
+     * @return array
+     */
+    public function getZoneRateWeightRangeByArrayByChargecode($chargeCodeId,$version = null){
+    	$rt = null;
+    	if(empty($version))
+    	{
+    		$rt = ZoneRate::model()->findAll('chargecode_id = :rid group by weight_lo,weight_hi ORDER BY weight_lo ASC',array(':rid' => $chargeCodeId));
+    	}else
+    	{
+    		$rt = ZoneRateBk::model()->findAll('chargecode_id = :rid and version =:version group by weight_lo,weight_hi ORDER BY weight_lo ASC',array(':rid' => $chargeCodeId,':version' => $version));
+    	}
+        
+        $rates = array();
+        foreach ( $rt as $rate ) {
+            $oneRate = array(
+                'weight_lo' => $rate['weight_lo'],
+                'weight_hi' => $rate['weight_hi'],
+                'data' => array()
+            );
+
+            // get related zone weight span price setting
+            $zonePrices = null;
+            if(empty($version))
+	    	{
+	    		$zonePrices = ZoneRate::model()->findAll('chargecode_id = :cid and weight_lo = :wlo and weight_hi = :whi ORDER BY zone',
+                array(':cid' => $chargeCodeId,':wlo' => $rate['weight_lo'] ,':whi' => $rate['weight_hi']));
+	    	}else
+	    	{
+	    		$zonePrices = ZoneRateBk::model()->findAll('chargecode_id = :cid and weight_lo = :wlo and weight_hi = :whi and version = :version ORDER BY zone',
+                array(':cid' => $chargeCodeId,':wlo' => $rate['weight_lo'] ,':whi' => $rate['weight_hi'],':version' => $rate['version']));
+	    	}
+            
+            foreach ( $zonePrices as $price ) {
+                $oneRate['data'][] = array(
+                    'code' => $price['zone'],
+                    'name' => $price['zone_name'],
+                    'ppc' => isset($price['item']) ? $price['item'] : 0,
+                    'pkg' => isset($price['perkg']) ? $price['perkg'] : 0,
+                    'minimum' => isset($price['minimum']) ? $price['minimum'] : 0,
+                    'min_incl' => isset($price['min_incl']) ? $price['min_incl'] : 0,
+                    'base' => isset($price['base']) ? $price['base'] : 0,
+                    'nkg' => isset($price['nkg']) ? $price['nkg'] : 0,
+                );
+            }
+            $rates[] = $oneRate;
+        }
+        return $rates;
+    }
+
+    public static function getBestCourierByZoneAndKg($orgRates,$zone,$import_id,$cvalue)
+    {
+    	$bestCourier =["name"=>"Fastway","price"=>0.0];
+    	$zoneMapArr = ZoneMapTest::model()->findAll(" z1 =:zone and import_id = :import_id",[":zone"=>$zone,"import_id"=>$import_id]);
+    	$postcodes =[];
+    	//get the zone arr from the all zoneMapArr
+
+    	foreach ($zoneMapArr as $key => $zoneMap) {
+    		if($zoneMap->pc_lo == $zoneMap->pc_hi)
+    		{
+    			$postcodes[] = $zoneMap->pc_lo;
+    		}else
+    		{
+    			for($i = $zoneMap->pc_lo;$i<$zoneMap->pc_hi;$i++) 
+    			{
+    				$postcodes[] = $i;
+    			}
+    		}
+    	}
+
+    	$weights =[];
+    	$min = explode("-", $cvalue)[0];
+    	$max = explode("-", $cvalue)[1];
+    	$sp= 0.05;//seperate the weight range 0.1 if it is 0.05, it will be accuracier;
+    	$index = ($max-$min)/$sp;
+    	if(($max*100000)%($sp*100000)!=0)
+    	{
+    		$index = (int)$index+1;
+    	}
+    	$total =0.0;
+    	for($i=0;$i<$index;$i++) {
+    		$weights[] =($i+1)*$sp+$min;
+    		$total +=$weights[$i];
+    	}
+    	$rtCouriers =[];
+    	//loop check the orgRates
+    	foreach ($orgRates as $orgRateKey => $orgRate) {
+    		$count = 0;
+    		$myPrice = 0;
+    		$myWeight = 0;
+    		$lastPriceCourier = null;
+	    	foreach ($postcodes as $key => $postcode) 
+	    	{
+	    		foreach ($weights as $key2 => $weight) 
+	    		{		
+	    				$thisWeight =$weight;
+	    				if($weight<$max)
+	    				{
+	    					$thisWeight =$weight+0.001;
+	    				}
+	    				$resultPrice = 0.0;
+	    				if($lastPriceCourier==null)
+	    				{
+	    					$onePriceBestCourier = ImParcel::getSingleCourierByPostcodeWeight($orgRate,$postcode,$thisWeight,1);
+	    					$lastPriceCourier = $onePriceBestCourier;
+	    					$resultPrice=$onePriceBestCourier['price'];
+	    				}else
+	    				{
+	    					$postcodeDiff = false;
+	    					$weightDiff = false;
+	    					if($postcode>=$onePriceBestCourier['pc_lo']&&$postcode<=$onePriceBestCourier['pc_hi'])
+	    					{
+	    						$postcodeDiff = true;
+	    					}
+	    					if($thisWeight>$onePriceBestCourier['weight_lo']&&$thisWeight<=$onePriceBestCourier['weight_hi'])
+	    					{
+	    						$weightDiff = true;
+	    					}
+	    					if($postcodeDiff&&$weightDiff)//when the weight and postcode in the same area
+	    					{
+	    						$zr = $lastPriceCourier['zr'];
+	    						$temp = $zr['base'] + $zr['item'];
+								if ($zr['nkg'] > 0) {
+									$wl = $thisWeight- ($zr['base'] > 0 ? $zr['nkg'] : 0);
+									$temp += ceil($wl / $zr['nkg']) * $zr['perkg'];
+								} else {
+									$temp +=  $thisWeight * $zr['perkg'];
+								}
+								if ($zr['minimum'] > 0 && $temp < $zr['minimum']) {
+									$temp = $zr['minimum'];
+								}
+
+						    	$resultPrice=$temp;
+	    					}else
+	    					{
+	    						$onePriceBestCourier = ImParcel::getSingleCourierByPostcodeWeight($orgRate,$postcode,$thisWeight,1);
+	    						$lastPriceCourier = $onePriceBestCourier;
+		    					$resultPrice=$onePriceBestCourier['price'];
+	    					}
+	    				}
+
+	    				if($lastPriceCourier["type"]=="piece")
+				    	{
+				    		// echo $lastPriceCourier["type"];// (x1*(w1/t)+x2*(w2/t)+x3*(w3/t))/t
+				    		// $myPrice += ($resultPrice/$thisWeight/2)*($thisWeight/$total);
+				    		// echo $resultPrice."*({$resultPrice}/${thisWeight}/2/*({$thisWeight}/{$total})=".($resultPrice/$thisWeight/2)*($thisWeight/$total)."||";
+				    	}else if($lastPriceCourier["type"]=="kg")
+				    	{
+				    		// echo $lastPriceCourier["type"];
+				    		// $myPrice += $resultPrice/$thisWeight;
+				    	}
+				    	$myPrice+= $resultPrice;
+			    		$myWeight+=$thisWeight;
+	    				$count++;	
+	    				
+	    		}
+	    	}
+	    	$myPrice =$myPrice/$count;
+	    	$rtCouriers[] = ['id' => $orgRate->id, 'price' => AppHelper::money_format('%i', $myPrice), 'name' => $orgRate->name];
+	    	//echo $count."xxx";
+    	}
+
+    	if (empty($rtCouriers)) {
+			return ['id' => 0, 'price' => '0.0', 'name' =>''];
+		} else {
+			//find the cheap one from the $rtCouriers;
+			$cheap = $rtCouriers[0];
+			$cheapPrice = $rtCouriers[0]['price'];
+			foreach ($rtCouriers as $index => $oneCourier) {
+				if ($index == 0) {
+					continue;
+				}
+				if ($oneCourier['price'] < $cheapPrice) {
+					$cheap = $oneCourier;
+					$cheapPrice = $oneCourier['price'];
+				}
+			}
+			return $cheap;
+		}
+    }
+
+    public static function getBestCourierByZoneAndKgWithCache(&$orgRates,$zone,$import_id,$cvalue,&$allZoneMapArr,&$weightMapArr)
+    {
+    	$bestCourier =["name"=>"Fastway","price"=>0.0];
+    	$zoneMapArr = [];
+    	foreach($allZoneMapArr as $oneZoneMap)
+    	{
+    		if($oneZoneMap->z1==$zone)
+    		{
+    			$zoneMapArr[] = $oneZoneMap;
+    		}
+    	}
+
+    	//$zoneMapArr = ZoneMapTest::model()->findAll(" z1 =:zone and import_id = :import_id",[":zone"=>$zone,"import_id"=>$import_id]);
+    	$postcodes =[];
+    	$postcodeCountNum =0;
+    	foreach ($zoneMapArr as $key => $zoneMap) {
+    		if($zoneMap->pc_lo == $zoneMap->pc_hi)
+    		{
+    			$postcodes[] = $zoneMap->pc_lo;
+    		}else
+    		{
+    			for($i = $zoneMap->pc_lo;$i<$zoneMap->pc_hi;$i++) 
+    			{
+    				$postcodes[] = $i;
+    			}
+    		}
+    	}
+
+
+    	$weights =[];
+    	$min = explode("-", $cvalue)[0];
+    	$max = explode("-", $cvalue)[1];
+    	$sp= 0.05;
+    	$index = ($max-$min)/$sp;
+    	/*seperate the price range with $sp*/
+    	if(($max*100000)%($sp*100000)!=0)
+    	{
+    		$index = (int)$index+1;
+    	}
+    	$total =0.0;
+    	for($i=0;$i<$index;$i++) {
+    		$weights[] =($i+1)*$sp+$min;
+    		$total +=$weights[$i];
+    	}
+    	$rtCouriers =[];
+
+    	/*calculate every the price of every orgRate*/
+    	foreach ($orgRates as $orgRateKey => $orgRate) {
+    		$count = 0;
+    		$myPrice = 0;
+    		$myWeight = 0;
+    		$lastPriceCourier = null;
+    		$postcodePriceArr = [];
+    		//echo count($postcodes)."xxx".count($weights);
+	    	foreach ($postcodes as $key => $postcode)
+	    	{
+	    		$postcodePrice =0;
+	    		$weightCount = 0;
+	    		foreach ($weights as $key2 => $weight) 
+	    		{		
+	    				$thisWeight =$weight;
+	    				if($weight<$max)
+	    				{
+	    					$thisWeight =$weight+0.001;
+	    				}
+	    				$resultPrice = 0.0;
+	    				if($lastPriceCourier==null)
+	    				{
+	    					$onePriceBestCourier = ImParcel::getSingleCourierByPostcodeWeight($orgRate,$postcode,$thisWeight,1);
+	    					$lastPriceCourier = $onePriceBestCourier;
+	    					$resultPrice=$onePriceBestCourier['price'];
+	    				}else
+	    				{
+	    					$postcodeDiff = false;
+	    					$weightDiff = false;
+	    					if($postcode>=$onePriceBestCourier['pc_lo']&&$postcode<=$onePriceBestCourier['pc_hi'])
+	    					{
+	    						$postcodeDiff = true;
+	    					}
+	    					if($thisWeight>$onePriceBestCourier['weight_lo']&&$thisWeight<=$onePriceBestCourier['weight_hi'])
+	    					{
+	    						$weightDiff = true;
+	    					}
+	    					if($postcodeDiff&&$weightDiff)//when the weight and postcode in the same area
+	    					{
+	    						$zr = $lastPriceCourier['zr'];
+	    						$temp = $zr['base'] + $zr['item'];
+								if ($zr['nkg'] > 0) {
+									$wl = $thisWeight- ($zr['base'] > 0 ? $zr['nkg'] : 0);
+									$temp += ceil($wl / $zr['nkg']) * $zr['perkg'];
+								} else {
+									$temp +=  $thisWeight * $zr['perkg'];
+								}
+								if ($zr['minimum'] > 0 && $temp < $zr['minimum']) {
+									$temp = $zr['minimum'];
+								}
+
+						    	$resultPrice=$temp;
+	    					}else
+	    					{
+	    						$onePriceBestCourier = ImParcel::getSingleCourierByPostcodeWeight($orgRate,$postcode,$thisWeight,1);
+	    						$lastPriceCourier = $onePriceBestCourier;
+		    					$resultPrice=$onePriceBestCourier['price'];
+	    					}
+	    				}
+
+	    				// if($lastPriceCourier["type"]=="piece")
+				    	// {
+				    	// 	// echo $lastPriceCourier["type"];// (x1*(w1/t)+x2*(w2/t)+x3*(w3/t))/t
+				    	// 	// $myPrice += ($resultPrice/$thisWeight/2)*($thisWeight/$total);
+				    	// 	// echo $resultPrice."*({$resultPrice}/${thisWeight}/2/*({$thisWeight}/{$total})=".($resultPrice/$thisWeight/2)*($thisWeight/$total)."||";
+				    	// }else if($lastPriceCourier["type"]=="kg")
+				    	// {
+				    	// 	// echo $lastPriceCourier["type"];
+				    	// 	// $myPrice += $resultPrice/$thisWeight;
+				    	// }
+				    	if($resultPrice!=0)
+				    	{
+					    	$postcodePrice+= $resultPrice;
+					    	//echo $resultPrice."xx";
+				    		$myWeight+=$thisWeight;
+		    				$count++;	
+		    				$weightCount++;
+	    				}
+	    		}
+	    		if($postcodePrice>0)
+	    		{
+	    			$postcodePriceArr[$postcode] = $postcodePrice/$weightCount;
+	    		}else
+	    		{
+	    			$postcodePriceArr[$postcode] = 0;
+	    		}
+	    	}
+	    	if($count>0)
+	    	{
+	    		$thisTotalPostcodeWeight = 0;
+	    		foreach ($postcodePriceArr as $pcpaKey => $value) {
+	    			if($value>0)
+	    			{
+	    				$thisTotalPostcodeWeight += $weightMapArr[$pcpaKey];
+	    			}
+	    		}
+	    		foreach ($postcodePriceArr as $pcpaKey => $value) {
+	    			if($value>0)
+	    			{
+	    			$myPrice+=$value*($weightMapArr[$pcpaKey]/$thisTotalPostcodeWeight);
+	    			}
+	    		}
+	    		//echo $weightMapArr[$postcode];
+	    		//echo $totalPostcodeWeight;
+	    		//$myPrice =$myPrice;
+	    		$rtCouriers[] = ['id' => $orgRate->id, 'price' => AppHelper::money_format('%i', $myPrice), 'name' => $orgRate->name];
+	    	}
+	    	//echo $count."xxx";
+    	}
+
+    	if (empty($rtCouriers)) {
+			return ['id' => 0, 'price' => '0.0', 'name' =>''];
+		} else {
+			//find the cheap one from the $rtCouriers;
+			$cheap = $rtCouriers[0];
+			$cheapPrice = $rtCouriers[0]['price'];
+			foreach ($rtCouriers as $index => $oneCourier) {
+				if ($index == 0) {
+					continue;
+				}
+				if ($oneCourier['price'] < $cheapPrice) {
+					$cheap = $oneCourier;
+					$cheapPrice = $oneCourier['price'];
+				}
+			}
+			return $cheap;
+		}
+    }
+
+    public static function getBestCourierByZoneAndKgWithCacheWithDataSource(&$orgRates,$zone,$import_id,$cvalue,&$allZoneMapArr,&$weightMapArr,&$dataSource)
+    {
+    	echo $zone;
+    	$bestCourier =["name"=>"Fastway","price"=>0.0];
+    	$zoneMapArr = [];
+    	foreach($allZoneMapArr as $oneZoneMap)
+    	{
+    		if($oneZoneMap->z1==$zone)
+    		{
+    			$zoneMapArr[] = $oneZoneMap;
+    		}
+    	}
+
+    	$postcodes =[];
+    	$postcodeCountNum =0;
+    	foreach ($zoneMapArr as $key => $zoneMap) {
+    		if($zoneMap->pc_lo == $zoneMap->pc_hi)
+    		{
+    			$postcodes[] = $zoneMap->pc_lo;
+    		}else
+    		{
+    			for($i = $zoneMap->pc_lo;$i<$zoneMap->pc_hi;$i++) 
+    			{
+    				$postcodes[] = $i;
+    			}
+    		}
+    	}
+
+    	$name = "Estimated";
+    	$weights =[];
+    	$min = explode("-", $cvalue)[0];
+    	$max = explode("-", $cvalue)[1];
+    	$sp= 0.25;
+    	$index = ($max-$min)/$sp;
+    	/*seperate the price range with $sp*/
+    	if(($max*10000)%($sp*10000)!=0)
+    	{
+    		$index = (int)$index+1;
+    	}
+    	$total =0.0;
+    	for($i=0;$i<$index;$i++) {
+    		$weights[] =($i+1)*$sp+$min;
+    		$total +=$weights[$i];
+    	}
+    	$rtCourier =[];
+    	$postcodePriceArr = [];
+    	$count = 0;
+    	foreach ($postcodes as $key => $postcode)
+	    {
+	    		if(!empty($dataSource[$postcode]))
+	    		{
+	    			$name = "";
+	    		}
+	    }
+
+    	/*calculate every the price of every postcode*/
+    	foreach ($postcodes as $key => $postcode)
+	    {
+	    	echo $postcode;
+	    		$postcodePrice =0;
+	    		$weightCount = 0;
+	    		if($name=="")
+	    		{
+		    		if(!empty($dataSource[$postcode]))
+		    		{
+		    			$cpostcodes = $dataSource[$postcode];
+		    			foreach ($cpostcodes as $ck => $cv)
+		    			{
+		    				if($cv<$min||$cv>$max)
+		    				{
+		    					unset($cpostcodes[$ck]);
+		    				}
+		    			}
+		    			if(!empty($cpostcodes))
+		    			{
+		    				$weights = $cpostcodes;
+		    			}
+		    		}else
+		    		{
+		    			continue;
+		    		}
+	    		}
+
+	    		foreach ($weights as $key2 => $weight) 
+	    		{
+	    				$thisWeight =$weight;
+	    				if($weight<$max)
+	    				{
+	    					$thisWeight =$weight+0.001;
+	    				}
+	    				$cheapPrice = 999999;
+	    				foreach($orgRates as $ok =>$orgRate)
+	    				{
+	    					$onePriceBestCourier = ImParcel::getSingleCourierByPostcodeWeight($orgRate,$postcode,$thisWeight,1,true);
+		    				$lastPriceCourier = $onePriceBestCourier;
+		    				if(!empty($onePriceBestCourier['price'])&&($cheapPrice>$onePriceBestCourier['price']||$cheapPrice==999999))
+		    				{
+		    					$cheapPrice = $onePriceBestCourier['price'];
+		    				}
+	    				}
+	    				if($cheapPrice==999999)
+	    				{
+	    					$cheapPrice=0;
+	    				}
+
+				    	if($cheapPrice>0)
+				    	{
+					    	$postcodePrice+= $cheapPrice;
+		    				$count++;	
+		    				$weightCount++;
+	    				}
+	    		}
+	    		if($postcodePrice>0)
+	    		{
+	    			$postcodePriceArr[$postcode] = $postcodePrice;
+	    		}else
+	    		{
+	    			$postcodePriceArr[$postcode] = 0;
+	    		}
+	    }
+
+	    if($count>0)
+	    {
+	    	$myPrice = array_sum($postcodePriceArr)/$count;
+	    	$rtCourier = ['id' => 0,'price' => AppHelper::money_format('%i', $myPrice), 'name' => $name];
+	    }else
+	    {
+	    	$rtCourier = ['id' => 0,'price' => "", 'name' => $name];
+	    }
+    	return $rtCourier;
+    }
+
+
+
+    /**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return ZoneRate the static model class
+	 */
+	public static function model($className=__CLASS__){
+		return parent::model($className);
+	}
+}

@@ -1,0 +1,113 @@
+<?php
+
+// This is the configuration for yiic console application.
+// Any writable CConsoleApplication properties can be configured here.
+return array(
+	'basePath'=>dirname(__FILE__).DIRECTORY_SEPARATOR.'..',
+	'name'=>'HVLV App',
+
+	// preloading 'log' component
+	'preload'=>array('log'),
+
+	// autoloading model and component classes
+	'import'=>array(
+		'application.models.*',
+		'application.components.*',
+		'application.modules.REST.src.SmsNotice.*',
+		'application.services.*',
+	),
+	// application components
+	'components'=>array(
+		'db'=>array(
+			'connectionString' => 'mysql:host=localhost;dbname=hvlv',//54.206.212.233;dbname=hvlv_db',
+			'emulatePrepare' => true,
+			'username' => 'root',
+			'password' => '123456',
+			'charset' => 'utf8',
+		),
+		'db_tla'=>array(
+			'connectionString' => 'mysql:host=localhost;dbname=hvlv',
+			'emulatePrepare' => true,
+			'username' => 'root',
+			'password' => '123456',
+			'charset' => 'utf8',
+			'class' => 'CDbConnection',
+		),
+        /*'cache'=>array(
+                'class'=>'system.caching.CDbCache',
+                'connectionID'=>'db',
+        ),*/
+        'cache'=>array(
+                'class'=>'CRedisCache',
+                'hostname'=>'localhost',
+                'port'=>6379,
+                'database'=>0,
+                'options'=>STREAM_CLIENT_CONNECT,
+                'keyPrefix'=>'hvlv_',
+        ),
+        'cache_java'=>array(
+                'class'=>'CRedisCache',
+                'hostname'=>'127.0.0.1',
+                'port'=>6379,
+                'database'=>0,
+                'options'=>STREAM_CLIENT_CONNECT,
+                'keyPrefix'=>'java:',
+                'hashKey'=>false,
+                'serializer'=>false
+        ),
+		'log'=>array(
+			'class'=>'CLogRouter',
+			'routes'=>array(
+				array(
+					'class'=>'CFileLogRoute',
+					'levels'=>'error, warning',
+				),
+				array(
+					'class'=>'CFileLogRoute',
+					'levels'=>'trace',
+					'categories'=>'system.db.*',
+					'logFile'=>'sql.log',
+				),
+			),
+		),
+
+		'session' => array(
+			'class' => 'CDbHttpSession',
+			'connectionID' => 'db',
+			'timeout' => 2700,
+			'autoCreateSessionTable' => false,
+		),
+
+		'xero' => array(
+			'class' => 'Xero',
+			'appType' => 'private',
+			// 'oAuthCallback' => 'http://localhost/xero/xero/auth', //oauth callback field - not needed for private apps
+			'signatures' => array(
+				// local
+				'consumer_key' => 'XAP9LTZ5R43RQQ060XYVV5NELHXNBF',
+				'shared_secret' => 'YH7LTXUC1JCQTDXSYPWYRGA79I2EDJ',
+				//certificates
+				'rsa_private_key' => dirname(__DIR__).DIRECTORY_SEPARATOR.'data/xero_key.pem',
+				'rsa_public_key'  => dirname(__DIR__).DIRECTORY_SEPARATOR.'data/xero_cert.cer',
+			)
+		),
+
+		'request' => array(
+			'hostInfo' => 'http://localhost',
+			'baseUrl' => '/hvlv',
+			'scriptUrl' => 'index.php',
+		),
+	),
+
+	// application-level parameters that can be accessed
+	// using Yii::app()->params['paramName']
+	'params'=>array(
+		// this is used in contact page
+		'adminEmail'=>'test@orite.com',
+		'fileRepoPath'=>dirname(__DIR__).DIRECTORY_SEPARATOR.'filerepo',
+		'tmp'=>dirname(__DIR__).DIRECTORY_SEPARATOR.'runtime',
+		'ics' => include(dirname(__FILE__).DIRECTORY_SEPARATOR.'ics.php'),
+		'otherICS' => include(dirname(__FILE__).DIRECTORY_SEPARATOR.'other_ics.php'),
+		'settings'=>include(dirname(__FILE__).DIRECTORY_SEPARATOR.'settings.php'),
+	),
+);

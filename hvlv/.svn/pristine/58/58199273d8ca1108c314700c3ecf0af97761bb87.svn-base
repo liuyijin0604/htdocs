@@ -1,0 +1,179 @@
+<?php
+$this->widget('zii.widgets.CBreadcrumbs', array(
+    'homeLink'=>CHtml::link('Home', array('site/index')),
+    'links' => array(
+        'Customer Serivce',
+    ),
+));
+?>
+<ul class="nav nav-tabs" id="myTab<?=@$_GET['tabid']?>">
+   <?php if(!isset($singleCheck)):?>
+  <li><a href="#tracking<?=@$_GET['tabid']?>" data-toggle="tab">查件</a></li>
+<?php endif;?>
+  <li><a href="#submit<?=@$_GET['tabid']?>" data-toggle="tab">其他查询以及意见反馈</a></li>
+  <li><a href="#list<?=@$_GET['tabid']?>" data-toggle="tab">查件历史记录</a></li>
+</ul>
+
+<div class="tab-content">
+  <div class="tab-pane active" id="tracking<?=@$_GET['tabid']?>">
+      <?php  if(!isset($singleCheck))Yii::app()->runController('/ims/shipment/tracking');
+?>
+
+  </div>
+  <div class="tab-pane" id="submit<?=@$_GET['tabid']?>">
+    
+<h1>Customer Service</h1>
+<div class="form">
+    <?php $form=$this->beginWidget('CActiveForm', array(
+        'id'=>'cs_qs_form'.@$_GET['tabid'],
+        'action'=>Yii::app()->createUrl($this->route),
+        'method'=>'post',
+    )); ?>
+        <div class="form-group">
+                <?php if(!isset($singleCheck))// echo CHtml::label(Yii::t('shipmentquestion','Multiple reference numbers'),'ShipmentQuestionSubmit[mhbns]'),'<span class="required">*</span>'; ?>
+                <?php 
+                if(!isset($singleCheck))
+                {
+                    // echo CHtml::textArea('ShipmentQuestionSubmit[mhbns]','',array('cols'=>60, 'rows' => 5,"class"=>"form-control")); 
+                    // echo "<p><small>Up to 200 numbers. Divided by ,; space or enter</small></p>";
+                }else
+                {
+                    echo CHtml::textArea('ShipmentQuestionSubmit[mhbns]',$model->ref,array('cols'=>60, 'rows' => 5,"class"=>"form-control","style"=>"display:none")); 
+                }
+                ?>
+        </div>
+        <br>
+        <div class="form-group">
+                <?php echo CHtml::label(Yii::t('shipmentquestion','Email'),'Email'); ?><span class="required">*</span>
+                <?php echo CHtml::textField('ShipmentQuestionSubmit[email]','',["class"=>"form-control","style"=>"width:250px;"]); ?>
+        </div>
+        <br>
+        <div class="form-group">
+                <?php echo CHtml::label(Yii::t('shipmentquestion','question'),'faq'); ?><span class="required">*</span>
+                <?php echo CHtml::dropDownList('faq','',$faqList,["class"=>"form-control","style"=>"width:250px;"]); ?>
+        </div>
+        <br>
+        <div class="form-group">
+                <?php echo CHtml::label(Yii::t('shipmentquestion','note'),'ShipmentQuestionSubmit[c_note]'); ?><span class="required">*</span>
+                 <?php echo CHtml::textArea('ShipmentQuestionSubmit[c_note]','',array('cols'=>60, 'rows' => 3,"class"=>"form-control")); ?>
+        </div>
+        <br>
+        <div class="form-group">
+                <?php echo CHtml::label(Yii::t('shipmentquestion','Upload Pictures'),'Upload Pictures'); ?>
+                 <?php
+                if(!isset($singleCheck))
+                {
+                    echo "<p><small>name the file as referenceNumber-1.jpg to match the reference numbers</small></p>";
+                }
+                ?>
+                 <?php
+              $this->widget('CMultiFileUpload', array(
+                 'model'=>$shipmentQuestionSubmit,
+                 'attribute'=>'photos',
+                 'accept'=>'jpg|gif|png',
+                 'htmlOptions'=>["accept"=>"image/gif, image/jpeg"],
+                 'options'=>array(
+                 ),
+                 'denied'=>'File is not allowed',
+                 'max'=>10, // max 10 files
+              ));
+            ?>
+        </div>
+         <br>
+
+        <div class="form-group">
+                 <?php echo CHtml::submitButton(Yii::t('shipmentquestion','submit'),array("class"=>"form-control update","style"=>"width:250px;")); ?>
+        </div>
+
+
+    <?php $this->endWidget(); ?>
+</div>
+
+
+
+  </div>
+  <div class="tab-pane" id="list<?=@$_GET['tabid']?>">
+      
+
+    <br>
+    <br>
+    <br>
+     <?php $this->widget('application.extensions.booster.TbExtendedGridView',array(
+        'fixedHeader'=>true,
+        'id'=>'qs_grid_view'.@$_GET['tabid'],
+        'filter'=>$model,
+        'type'=>'striped bordered',
+        'headerOffset'=>40,
+        'responsiveTable'=>true,
+        'dataProvider'=>$model->search(),
+        'template' => "{summary}\n{items}\n{pager}",
+        'columns'=>array(
+                array('name' => 'ticket','type'=>'raw', 'value' => '$data->ShipmentQuestionSubmit->ticket'),
+                ["name"=>"ref","value"=>'@$data->shipment->ref',"filter"=>"<input type='text' value='$model->ref' name='ShipmentQuestion[ref]' class='form-control' placeholder=''>"],
+                ["name"=>"faq","header"=>Yii::t('shipmentquestion','question'),"filter"=>false],
+                // ["name"=>"faq_answer","filter"=>false],
+                // ["name"=>"s_note",'type'=>'raw',"filter"=>false,'value'=>'"<a href=\"".Yii::app()->createURL("ims/customerService/checkDetail", array("id" => $data->id))."\" class=\"tab_link\" title=\"".$data->id."\" target=\"_blank\">".CHtml::tag("div", ["title"=>strip_tags($data->s_note)], mb_substr(strip_tags($data->s_note), 0, 25))."</a>"'],
+                // ["name"=>"answer_date","filter"=>false],
+                ["name"=>"process_type","filter"=>false,'value'=>'ShipmentQuestion::$processTypes[$data->process_type]',"filter"=>CHtml::dropDownList("ShipmentQuestion[process_type]",$model->process_type,ShipmentQuestion::$processTypes,['prompt' => 'All','class'=>'form-control'])],
+                ["name"=>"ShipmentQuestionSubmit.date"],
+                // ["name"=>"c_read","type"=>"raw","filter"=>CHtml::dropDownList("ShipmentQuestion[c_read]",$model->c_read,ShipmentQuestion::$readTypes2,['prompt' => 'All','class'=>'form-control']),"value"=> '"<a href=\"".Yii::app()->createURL("ims/customerService/csRead", array("id" => $data->id))."\" label=\"Log\" data-win-class=\"L\" class=\"grid_view_btn\" target=\"_blank\" title=\"".ShipmentQuestion::$readTypes[$data->c_read]."\" >".ShipmentQuestion::$readTypes[$data->c_read]."</a>"'],
+                // array('name' => 'faq','filter'=>false),
+                // array('name' => 'date','filter'=>false),
+                // array('name' => 'read','filter'=>false)
+                      [
+                'class'=>'oButtonColumn',
+                'template'=>'{images}{emails}',
+                'buttons'=>[
+                  'images' => [
+                        'imageUrl'=>false,
+                        'options' => ['class' => ' grid_view_btn', 'label' => 'Log', 'data-win-class' => 'L','target'=>'_blank'],
+                        'visible' => 'true',
+                        'url' => 'Yii::app()->createUrl("ims/customerService/getImages", ["id" => $data->id])',
+                        'label' => '查看详情与图片'
+                    ],
+                    'emails' => [
+                        'imageUrl'=>false,
+                        'options' => ['class' => ' grid_view_btn', 'label' => 'Log', 'data-win-class' => 'L','target'=>'_blank'],
+                        'visible' => 'true',
+                        'url' => 'Yii::app()->createUrl("ims/customerService/getEmails", ["id" => $data->id])',
+                        'label' => '查看相关email'
+                    ]
+                ],
+            ],
+            ),
+        ),
+        
+    );
+    ?>
+
+
+  </div>
+</div>
+
+
+<script type="text/javascript">
+$(function(){
+  $('#<?='cs_qs_form'.@$_GET['tabid']?>').on('success',function(){
+    $("#qs_grid_view<?=@$_GET['tabid']?>").yiiGridView("update");
+  });
+
+     jQuery('#qs_grid_view<?=@$_GET['tabid']?>').yiiGridView({'ajaxUpdate':['qs_grid_view<?=@$_GET['tabid']?>'],'ajaxVar':'ajax','pagerClass':'no\x2Dclass','loadingClass':'grid\x2Dview\x2Dloading','filterClass':'filters','tableClass':'items\x20table\x20table\x2Dstriped\x20table\x2Dbordered','selectableRows':1,'enableHistory':false,'updateSelector':'\x7Bpage\x7D,\x20\x7Bsort\x7D','filterSelector':'\x7Bfilter\x7D','pageVar':'ShipmentQuestion_page','afterAjaxUpdate':function() {
+            jQuery('.popover').remove();
+            jQuery('[data-toggle=popover]').popover();
+            jQuery('.tooltip').remove();
+            jQuery('[data-toggle=tooltip]').tooltip();
+        },'selectionChanged':function(id) {
+                $("#"+id+" input[type=checkbox]").change();
+            }});
+
+    $('#myTab<?=@$_GET['tabid']?> a:first').tab('show');
+
+    $('#myTab<?=@$_GET['tabid']?> a').click(function (e) {
+      e.preventDefault();
+      $(this).tab('show');
+    })
+
+});
+
+
+</script>

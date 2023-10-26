@@ -1,0 +1,97 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<!--Created with Liquid Studio 2018 (https://www.liquid-technologies.com)-->
+<xs:schema attributeFormDefault="unqualified" elementFormDefault="qualified" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+    <xs:element name="request">
+        <xs:complexType>
+            <xs:all>
+                <xs:element name="orderCode" type="xs:string" minOccurs="1" />
+                <xs:element name="eta" type="xs:string" minOccurs="1" />
+                <xs:element name="etaTimezone" type="xs:string" minOccurs="1" />
+                <xs:element name="etd" type="xs:string" minOccurs="1" />
+                <xs:element name="etdTimezone" type="xs:string" minOccurs="1" />
+                <xs:element name="deliveryStartTime" type="xs:string" minOccurs="0" />
+                <xs:element name="deliveryStartTimezone" type="xs:string" minOccurs="0" />
+                <xs:element name="deliveryEndTime" type="xs:string" minOccurs="0" />
+                <xs:element name="deliveryEndTimezone" type="xs:string" minOccurs="0" />
+                <xs:element name="pol" type="xs:string" minOccurs="1" />
+                <xs:element name="pod" type="xs:string" minOccurs="1" />
+                <xs:element name="blno" type="xs:string" minOccurs="1" />
+                <xs:element name="hbl" type="xs:string" minOccurs="1" />
+                <xs:element name="cargoReadyDate" type="xs:date" minOccurs="1" />
+                <xs:element name="cargoReadyTimezone" type="xs:string" minOccurs="1" />
+                <xs:element name="documentList" minOccurs="0">
+                    <xs:complexType>
+                        <xs:sequence>
+                            <xs:element name="document" minOccurs="1" maxOccurs="unbounded">
+                                <xs:complexType>
+                                    <xs:sequence>
+                                        <xs:element name="type" minOccurs="1">
+                                            <xs:simpleType>
+                                                <xs:restriction base="xs:string">
+                                                    <xs:enumeration value="CI" />
+                                                    <xs:enumeration value="PL" />
+                                                    <xs:enumeration value="BILL_OF_LADING" />
+                                                    <xs:enumeration value="BOOKING_CONFIRM" />
+                                                    <xs:enumeration value="CONTAINER_MANIFEST" />
+                                                    <xs:enumeration value="POD" />
+                                                    <xs:enumeration value="TRUCK_MANIFEST" />
+                                                    <xs:enumeration value="ROAD_MANIFEST" />
+                                                    <xs:enumeration value="OTHER" />
+                                                </xs:restriction>
+                                            </xs:simpleType>
+                                        </xs:element>
+                                        <xs:element name="fileType" minOccurs="1">
+                                            <xs:simpleType>
+                                                <xs:restriction base="xs:string">
+                                                    <xs:enumeration value="PDF" />
+                                                    <xs:enumeration value="XLS" />
+                                                    <xs:enumeration value="XLSX" />
+                                                    <xs:enumeration value="DOC" />
+                                                    <xs:enumeration value="DOCX" />
+                                                    <xs:enumeration value="JPG" />
+                                                    <xs:enumeration value="JPEG" />
+                                                </xs:restriction>
+                                            </xs:simpleType>
+                                        </xs:element>
+                                        <xs:element name="fileData" type="xs:string" minOccurs="1" />
+                                        <xs:element name="remark" minOccurs="0">
+                                            <xs:simpleType>
+                                                <xs:restriction base="xs:string">
+                                                    <xs:maxLength value="256" />
+                                                </xs:restriction>
+                                            </xs:simpleType>
+                                        </xs:element>
+                                    </xs:sequence>
+                                </xs:complexType>
+                            </xs:element>
+                        </xs:sequence>
+                    </xs:complexType>
+                </xs:element>
+                <xs:element name="routeList" minOccurs="1">
+                    <xs:complexType>
+                        <xs:sequence>
+                            <xs:element name="route" minOccurs="1" maxOccurs="unbounded">
+                                <xs:complexType>
+                                    <xs:all>
+                                        <xs:element name="transportMode" type="xs:string" minOccurs="1" />
+                                        <xs:element name="carrierCode" type="xs:string" minOccurs="0" />
+                                        <xs:element name="vessel" type="xs:string" minOccurs="0" />
+                                        <xs:element name="voyage" type="xs:string" minOccurs="0" />
+                                        <xs:element name="pol" type="xs:string" minOccurs="1" />
+                                        <xs:element name="pod" type="xs:string" minOccurs="1" />
+                                        <xs:element name="eta" type="xs:string" minOccurs="1" />
+                                        <xs:element name="etaTimezone" type="xs:string" minOccurs="1" />
+                                        <xs:element name="etd" type="xs:string" minOccurs="1" />
+                                        <xs:element name="etdTimezone" type="xs:string" minOccurs="1" />
+                                        <xs:element name="ladingBillNo" type="xs:string" minOccurs="1" />
+                                        <xs:element name="houseBillNo" type="xs:string" minOccurs="1" />
+                                    </xs:all>
+                                </xs:complexType>
+                            </xs:element>
+                        </xs:sequence>
+                    </xs:complexType>
+                </xs:element>
+            </xs:all>
+        </xs:complexType>
+    </xs:element>
+</xs:schema>

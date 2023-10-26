@@ -1,0 +1,909 @@
+<div style="position: absolute; right:400px;top:10px;font-size:2em;font-weight:bold;">
+  <?php
+  	$checkModel = $model->parent;
+  	$myDpmt = SiReconcileDpmt::model()->find('si_reconcile_id=:sid and dpmt=:dpmt',[':sid'=>$model->parent->id,':dpmt'=>$_GET['tab']]);
+  	if(!empty($myDpmt))
+  	{
+  		$checkModel = $myDpmt;
+  	}
+  	if($checkModel->status==SiReconcile::LINKING_BILLING_STATUS)
+  	{
+  		if($model->parent->org_id==101)
+		{
+			echo '<a href ='.Yii::app()->createURL("siReconcile/viewRTSReport", array("rec_id" => $model->rec_id,'dpmt'=>$_GET['tab'])).' class="tab_link" title='.$model->rec_id.'><span style=\"background-position:-48px -688px\" class=\"icon\"></span>view RTS Report</a><br />';
+		}
+      echo "<a class=\"jqm_link\"  href=\"" .$this->createUrl("siReconcile/createDisputeCase", ['id'=>$model->rec_id,'dpmt'=>$_GET['tab']])
+       ."\" title=\"create_dispute_case\" ><span style=\"background-position:-48px -688px\" class=\"icon\"></span>create_dispute_case</a>";
+   	}elseif($checkModel->status==SiReconcile::WEIGHT_CHECKING_STATUS)
+   	{
+   		echo '<a href ='.Yii::app()->createURL("siReconcile/viewWeightDiffReport", array("rec_id" => $model->rec_id,'dpmt'=>$_GET['tab'])).' class="tab_link" title='.$model->rec_id.'><span style=\"background-position:-48px -688px\" class=\"icon\"></span>viewWeightDiffReport</a>';
+   	}elseif($checkModel->status==SiReconcile::SURCHARGE_CHECKING_STATUS)
+   	{
+   		if($model->parent->org_id==101)
+		{
+			echo '<a href ='.Yii::app()->createURL("siReconcile/viewRTSReport", array("rec_id" => $model->rec_id,'dpmt'=>$_GET['tab'])).' class="tab_link" title='.$model->rec_id.'><span style=\"background-position:-48px -688px\" class=\"icon\"></span>view RTS Report</a><br />';
+		}
+   		echo '<a href ='.Yii::app()->createURL("siReconcile/viewSurchargeReport", array("rec_id" => $model->rec_id,'dpmt'=>$_GET['tab'])).' class="tab_link" title='.$model->rec_id.'><span style=\"background-position:-48px -688px\" class=\"icon\"></span>view Surcharge Report</a>';
+   	} else if ($checkModel->status == SiReconcile::SI_RECONCILE_DONE_STATUS) {
+   		if($model->parent->org_id==101)
+		{
+			echo '<a href ='.Yii::app()->createURL("siReconcile/viewRTSReport", array("rec_id" => $model->rec_id,'dpmt'=>$_GET['tab'])).' class="tab_link" title='.$model->rec_id.'><span style=\"background-position:-48px -688px\" class=\"icon\"></span>view RTS Report</a><br />';
+		}
+      echo "<a class=\"jqm_link\"  href=\"" .$this->createUrl("siReconcile/createDisputeCase", ['id'=>$model->rec_id,'dpmt'=>$_GET['tab']])
+       ."\" title=\"create_dispute_case\" ><span style=\"background-position:-48px -688px\" class=\"icon\"></span>create_dispute_case</a>";
+   		echo '<br /><a href ='.Yii::app()->createURL("siReconcile/viewWeightDiffReport", array("rec_id" => $model->rec_id,'dpmt'=>$_GET['tab'])).' class="tab_link" title='.$model->rec_id.'><span style=\"background-position:-48px -688px\" class=\"icon\"></span>viewWeightDiffReport</a>';
+   		echo '<br /><a href ='.Yii::app()->createURL("siReconcile/viewSurchargeReport", array("rec_id" => $model->rec_id,'dpmt'=>$_GET['tab'])).' class="tab_link" title='.$model->rec_id.'><span style=\"background-position:-48px -688px\" class=\"icon\"></span>view Surcharge Report</a>';
+   	}
+
+
+  ?>
+
+</div>
+<style>
+    .cloumn_red{
+        background-color:pink;
+    }  
+    .column_direct{
+        color: green;
+        font-weight: bold;
+    }
+</style>
+
+<div class="form">
+<?php 
+	$url = $this->createUrl('cargoProcess/update');
+	$form=$this->beginWidget('CActiveForm', array(
+	'id'=>'si-reconcile-acr_form'.$_GET['tab'].$_GET['tabid'],
+	'enableAjaxValidation'=>false,
+	'action'=> $url."?id=".$model->rec_id."&dpmt=".$_GET['tab'])
+	);
+?>
+<?php if($checkModel->status<SiReconcile::LINKING_BILLING_STATUS):?>
+	<div class="row buttons" style="width:30%;">
+
+			<?php
+			    $uploadType = FileRepo::SI_CONFIRM_FILE;
+			 	$pphash = "";
+				echo '<br /><h3>', CHtml::label($this->t('Import Confirm Invoice File'), '</h3>');
+				$pphash = FileRepo::uploadHash($model->parent, $uploadType);
+				$this->widget('application.extensions.plupload.PluploadWidget', [
+					'config' => [
+						'url' => $this->createUrl('siReconcile/ajaxImportReconciliationConfirmList')."?pphash=".$pphash."&dpmt=".$_GET['tab'],
+						'max_file_size' => Yii::app()->params['maxFileSize'],
+						'unique_names' => true,
+						'file_list_height' => 60,
+						'visible_header' => false,
+						'filters' => [
+							['title' => Yii::t('app', 'Excel files'), 'extensions' => 'csv,xls,xlsx,pdf'],
+						],
+						//'resize' => array('width' => 800, 'height' => 800, 'quality' => 80),
+						'language' => Yii::app()->language,
+						'max_file_number' => 2,
+						'autostart' => false,
+						'jquery_ui' => false,
+						'reset_after_upload' => true,
+					],
+					'callbacks' => [
+						'FileUploaded' => 'function(up,file,response){alert("Import Confirm Invoice File Success");$("#'.$_GET["tabid"].'").trigger("reload_excofile_grid");}',
+					],
+					'id' => $_GET['tab'].$_GET['tabid'].'_excofile_uploader_1',
+				]);
+			?>
+	</div>
+<?php endif;?>
+	</br>
+	</br>
+	<div class="row">
+		<div class="col" style="margin-right: 25px;border:1px;">
+			<div class="row rowcol-left">
+				<?php echo CHtml::label('status','status'); ?>
+				<?php 
+				if(empty($myDpmt))
+				{
+					echo CHtml::dropDownList('si_reconcile_dpmt_status'.$_GET['tab'],@$checkModel->status, SiReconcile::$states,array('prompt'=>'Select','disabled' => 'disabled'));
+				}else
+				{
+					echo CHtml::dropDownList('si_reconcile_dpmt_status'.$_GET['tab'],@$myDpmt->status, SiReconcile::$states,array('prompt'=>'Select','disabled' => 'disabled'));
+				}
+				?>
+				<div style="background-position:-240px -416px" class="icon"></div>
+			</div>
+			<div class="row rowcol-left">
+				<?php echo CHtml::label('Invoice Date','Invoice Date'); ?>
+				<?php echo CHtml::textField('invoice_date', $model->parent->inv_date, array('class' => 'date_input')); ?>
+			</div>
+			<div class="row rowcol-left">
+				<?php echo CHtml::label('GST','GST'); ?>
+				<?php echo CHtml::numberField('gst',@$model->parent->total_gst); ?>
+			</div>
+		</div>
+		<div class="row rowcol">
+				<?php echo CHtml::label('Note','Note'); ?>
+				<?php 
+					echo CHtml::textArea('note', $model->parent->note,["rows"=>4,"cols"=>60]);
+				?>
+		</div>
+		<div class="row rowcol-left">
+				 <?php echo CHtml::button('Update', array('class' => 'updateStatus'));?>
+		</div>
+	</div>
+
+
+	<?php if($checkModel->status==SiReconcile::ERROR_CHECKING_STATUS):?>
+	<div class="row buttons">
+			<?php   echo CHtml::button('Error Check Done',array('class'=>'error_check_done'));?>
+	</div>
+	<?php endif; ?>
+
+	<?php if($checkModel->status==SiReconcile::WEIGHT_CHECKING_STATUS):?>
+	<div class="row buttons">
+			<?php   echo CHtml::button('Weight Check Done',array('class'=>'weight_check_done'));?>
+	</div>
+	<?php endif; ?>
+
+	<?php if($checkModel->status==SiReconcile::RATE_CHECKING_STATUS):?>
+	<div class="row buttons">
+			<?php   echo CHtml::button('Rate Check Done',array('class'=>'rate_check_done'));?>
+	</div>
+	<?php endif; ?>
+
+	<?php if($checkModel->status==SiReconcile::SURCHARGE_CHECKING_STATUS):?>
+	<div class="row buttons">
+			<?php   echo CHtml::button('Surcharge Check Done',array('class'=>'surcharge_check_done'));?>
+	</div>
+	<?php endif; ?>
+
+
+	<?php if($checkModel->status==SiReconcile::LINKING_BILLING_STATUS):?>
+	<div class="row buttons">
+			<?php   echo CHtml::button('Linking Billing',array('class'=>'linking_billing','id'=>'linking_billing'));?>
+	</div>
+
+	<div class="row buttons">
+			<?php   echo CHtml::button('Linking Billing Done',array('class'=>'linking_billing_done'));?>
+	</div>
+	<?php endif; ?>
+
+
+	<div class="row buttons" style="position:absolute; right:140px; top:6em; font-size: 24px; ">
+		<?php 
+			foreach(SiReconcile::$confirmed_status as $key => $value) 
+			{
+				if(empty($myDpmt))
+				{
+					if(($model->parent->confirm_status&$key)>0)
+					{
+						echo CHtml::label($value,$value,['style'=>'background-color:RGB(255,152,0)']);
+					}
+				}else
+				{
+					if(($myDpmt->confirm_status&$key)>0)
+					{
+						echo CHtml::label($value,$value,['style'=>'background-color:RGB(255,152,0)']);
+					}
+				}
+			}
+		?>
+
+	</div>
+
+	<div class="row buttons" style="position:absolute;top:3em;right:14em;margin-top: 1em;">
+		<ul>
+			<li>
+			<?php echo "<a target='_blank'  href=\"" .$this->createUrl("siReconcile/exportErrorList",['id'=>$model->rec_id,'dpmt'=>$_GET['tab']])."\" title=\"exportErrorList\" ><span style=\"background-position:-48px -688px\" class=\"icon\"></span>export_error_list&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</a>"; ?>
+			</li>
+			<li>
+			<?php echo "<a target='_blank' href=\"" .$this->createUrl("siReconcile/exportWeightDiff", ['id'=>$model->rec_id,'dpmt'=>$_GET['tab']])."\" title=\"exportWeightDiff\" ><span style=\"background-position:-48px -688px\" class=\"icon\"></span>export_weight_diff&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</a>"; ?>
+			</li>
+			<li>
+			<?php echo "<a target='_blank'  href=\"" .$this->createUrl("siReconcile/exportRateDiff",['id'=>$model->rec_id,'dpmt'=>$_GET['tab']] )."\" title=\"exportRateCost\" ><span style=\"background-position:-48px -688px\" class=\"icon\"></span>export_rate_cost&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</a>"; ?>
+			</li>
+			<li>
+			<?php echo "<a target='_blank'  href=\"" .$this->createUrl("siReconcile/exportSurchargeDiff", ['id'=>$model->rec_id,'dpmt'=>$_GET['tab']])."\" title=\"exportSurcharge\" ><span style=\"background-position:-48px -688px\" class=\"icon\"></span>export_surcharge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</a>"; ?>
+			</li>
+			<li>
+			<?php echo "<a target='_blank'  href=\"" .$this->createUrl("siReconcile/exportCanDispute", ['id'=>$model->rec_id,'dpmt'=>$_GET['tab']])."\" title=\"exportCanDispute\" ><span style=\"background-position:-48px -688px\" class=\"icon\"></span>export_CanDispute&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</a>"; ?>
+			</li>
+			<li>
+			<?php echo "<a target='_blank'  href=\"" .$this->createUrl("siReconcile/exportEizInfo", ['id'=>$model->rec_id,'dpmt'=>$_GET['tab']])."\" title=\"exportEizInfo\" ><span style=\"background-position:-48px -688px\" class=\"icon\"></span>export_EizInfo&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</a>"; ?>
+			</li>
+		</ul>
+	</div>
+	
+	<div class="row buttons">
+		<table style="width:80%;border: 1px #000 solid;">
+			<thead style="font-size: 2em;"><th>Supplier(Ex GST)</th><th>TLA Accrued(Ex GST)</th><th>Customer Charged(Ex GST)</th></thead>
+			<tr style="text-align: center;font-size: 1.5em;"><td>$<?=number_format($model->parent->total_ex_gst,2,'.',',')?> <?=$model->parent->getCurrency()?></td><td>$<?=number_format($model->parent->getTlaAccured(),2,'.',',');?> <?=$model->parent->getCurrency()?></td><td>$<?=number_format($model->parent->getChargedCustomerOnly(),2,'.',',')?> <?=$model->parent->getCurrency()?>+$<?=number_format($model->parent->getRecharged(),2,'.',',')?> <?=$model->parent->getCurrency()?></td></tr>
+			<tr style="text-align: center;font-size: 1.5em;"><td></td><td></td><td>GP <?=number_format($model->parent->getChargedCustomer()*100/$model->parent->total_ex_gst,2,'.','')?>%</td></tr>
+		</table>
+		</br>
+
+
+		<p style="font-size: 1.5em;">
+			<span style="margin-right: 80px;"><font style="font-size: 2em;font-weight: bold;">Total: </font><?=$model->parent->total?> <?=$model->parent->getCurrency()?></span>
+
+		</p>
+		<p>
+			<?php if(empty($myDpmt)):?>
+			<span style="margin-right: 80px;"><font style="font-size: 2em;font-weight: bold;">Current Total EX GST: </font><?=$model->parent->getCurrentTotalExGST()?> <?=$model->parent->getCurrency()?></span>
+			<span><font style="font-size: 2em;font-weight: bold;">Total Confirmed:</font> <?=$model->parent->getCurrentConfirmedTotal()?><?=$model->parent->getCurrency()?></span>
+			<?php else:?>
+				<span style="margin-right: 80px;"><font style="font-size: 2em;font-weight: bold;">Current Total EX GST: </font><?=$model->parent->getCurrentTotalExGST($_GET['tab'])?> <?=$model->parent->getCurrency()?></span>
+			<span><font style="font-size: 2em;font-weight: bold;">Total Confirmed:</font> <?=$myDpmt->getCurrentConfirmedTotal($model->parent)?><?=$model->parent->getCurrency()?></span>
+
+			<?php endif;?>
+		</p>
+	</div>
+	</br>
+	</br>
+	</br>
+
+<?php
+if($checkModel->status==SiReconcile::ERROR_CHECKING_STATUS&&$model->parent->org_id!=101)
+{
+	$this->widget('application.extensions.CSpanableGridView.CSpanableGridView', [
+		'id'=>$_GET['tab'].$_GET['tabid'].'_reconcile_grid',
+		'cssFile' => false,
+		'dataProvider'=>$model->search(true, 30),
+		'filter'=>$model,
+		'columns'=>[		
+			['name'=>'ref'],
+			['name'=>'item_code'],
+			['name'=>'type','type'=>'raw','value'=>'$data->getErrorTypes()', 'filter' => SiReconcileLine::$type],
+			['name'=>'my_charge'],
+			['name'=>'value'],
+			['name'=>'my_value'],
+			['name'=>'weight','value'=>'in_array($data->parent->org_id, SiReconcile::$pureCbmCourier)?$data->weight."(".$data->org_charge_weight.")":$data->weight'],
+			['name'=>'cs_charge_weight'],
+			['name'=>'cust_check_weight'],
+			['name'=>'manifest_weight'],
+			['header'=>'is_confirmed','value'=>'$data->getIsConfirmed()'],
+			['class'=>'oButtonColumn',
+				'template'=>'{operate}',
+				'buttons'=>[
+					'operate' => [
+						'url'=>'Yii::app()->createURL("siReconcile/updateLine")."?id=".$data->id',
+						'imageUrl'=>false,
+						'visible'=>'$data->type>0||$data->my_value!=$data->value?true:false',
+						'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => 'Si Reconcile Detail'.'$data->id'],
+					]
+				],
+			]
+		],
+	]);
+}
+
+if($checkModel->status==SiReconcile::ERROR_CHECKING_STATUS&&$model->parent->org_id==101)
+{
+	$this->widget('application.extensions.CSpanableGridView.CSpanableGridView', [
+		'id'=>$_GET['tab'].$_GET['tabid'].'_reconcile_grid',
+		'cssFile' => false,
+		'dataProvider'=>$model->search(true, 30),
+		'filter'=>$model,
+		'columns'=>[		
+			['name'=>'ref'],
+			['name'=>'item_code'],
+			['name'=>'type','type'=>'raw','value'=>'$data->getErrorTypes()', 'filter' => SiReconcileLine::$type],
+			['name'=>'my_charge'],
+			['name'=>'value'],
+			['name'=>'api_value'],
+			['name'=>'my_value'],
+			['name'=>'weight'],
+			['name'=>'cs_charge_weight'],
+			['name'=>'cust_check_weight'],
+			['name'=>'manifest_weight'],
+			['header'=>'is_confirmed','value'=>'$data->getIsConfirmed()'],
+			['class'=>'oButtonColumn',
+				'template'=>'{details}&nbsp;{operate}',
+				'buttons'=>[
+					'details' => [
+						'url'=>'Yii::app()->createURL("siReconcile/getApmanifestDetail")."?id=".$data->id',
+						'imageUrl'=>false,
+						'visible'=>'in_array($data->item_code,["eparcel","eparcel-fuel"])?true:false',
+						'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => 'Si Reconcile Detail'.'$data->id'],
+					],
+					'operate' => [
+						'url'=>'Yii::app()->createURL("siReconcile/updateLine")."?id=".$data->id',
+						'imageUrl'=>false,
+						'visible'=>'$data->type>0||$data->api_value==0?true:false',
+						'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => 'Si Reconcile Detail'.'$data->id'],
+					]
+				],
+			]
+		],
+	]);
+}
+if($checkModel->status==SiReconcile::WEIGHT_CHECKING_STATUS&&$model->parent->org_id!=101)
+{
+	$this->widget('application.extensions.CSpanableGridView.CSpanableGridView', [
+		'id'=>$_GET['tab'].$_GET['tabid'].'_reconcile_grid',
+		'cssFile' => false,
+		'dataProvider'=>$model->search(true, 30),
+		'filter'=>$model,
+		'columns'=>[		
+			['name'=>'ref'],
+			['name'=>'item_code'],
+			['name'=>'type','type'=>'raw','value'=>'$data->getErrorTypes()', 'filter' => SiReconcileLine::$type],
+			['name'=>'weight','value'=>'$data->isPureCBMSiReconcileLine()?($data->weight."(".$data->org_charge_weight.")"):$data->weight'],
+			['name'=>'cs_charge_weight'],
+			['name'=>'cust_check_weight'],
+			['name'=>'manifest_weight'],
+			['name'=>'weight_diff'],
+			['header'=>'is_confirmed','value'=>'$data->getIsConfirmed()'],
+			array('name'=>'chargeWeightDiff','value'=>'$data->getChargeWeightDiff()','filter'=>false,'cssClassExpression' => 'in_array($data->parent->org_id,SiReconcile::$cbmCourier)?($data->getChargeWeightDiff()>=10? "cloumn_red_rec" : ""):($data->getChargeWeightDiff()>0? "cloumn_red_rec" : "")'),
+		    array('header'=>'viewInvoice','type'=>'raw','value'=>'(!empty($data->getWeightDiffInvoice())?("<a href=\"".Yii::app()->createURL("invoice/print", array("id" => $data->getWeightDiffInvoice()->id))."\" target=\"_blank\">".$data->getWeightDiffInvoice()->no."</a>"):"")."&nbsp;&nbsp;".(!empty($data->getSurchargeInvoice())?("<a href=\"".Yii::app()->createURL("invoice/print", array("id" => $data->getSurchargeInvoice()->id))."\" target=\"_blank\">".$data->getSurchargeInvoice()->no."</a>"):"")'),
+		       array(
+		          'class'=>'oButtonColumn',
+		          'template'=>'{Customer Invoice Diff}{operate}',
+		          'buttons'=>[
+		            'Customer Invoice Diff' => [
+		              'url'=>' Yii::app()->createURL("siReconcile/diffInvoiceCheck")."?id=".$data->id."&&parent_id=".$data->rec_id',
+		              'imageUrl'=>false,
+		              'visible'=>'$data->item_code == "item" && $data->getChargeWeightDiff()>0?true:false',
+		              'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => '$data->id'],
+		            ],
+					'operate' => [
+						'url'=>'Yii::app()->createURL("siReconcile/updateLine")."?id=".$data->id',
+						'imageUrl'=>false,
+						'visible'=>'$data->type>0||$data->my_value==0?true:false',
+						'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => 'Si Reconcile Detail'.'$data->id'],
+					]
+		          ]
+		    )
+		],
+	]);
+}
+
+if($checkModel->status==SiReconcile::WEIGHT_CHECKING_STATUS&&$model->parent->org_id==101)
+{
+	$this->widget('application.extensions.CSpanableGridView.CSpanableGridView', [
+		'id'=>$_GET['tab'].$_GET['tabid'].'_reconcile_grid',
+		'cssFile' => false,
+		'dataProvider'=>$model->search(true, 30),
+		'filter'=>$model,
+		'columns'=>[		
+			['name'=>'ref'],
+			['name'=>'item_code'],
+			['name'=>'type','type'=>'raw','value'=>'$data->getErrorTypes()', 'filter' => SiReconcileLine::$type],
+			['name'=>'weight'],
+			['name'=>'cs_charge_weight'],
+			['name'=>'cust_check_weight'],
+			['name'=>'manifest_weight'],
+			['name'=>'weight_diff'],
+			array('name'=>'chargeWeightDiff','value'=>'$data->getChargeWeightDiff()','filter'=>false,'cssClassExpression' => 'in_array($data->parent->org_id,SiReconcile::$cbmCourier)?$data->getChargeWeightDiff()>=10? "cloumn_red_rec" : "":$data->getChargeWeightDiff()>0? "cloumn_red_rec" : ""'),
+			['header'=>'is_confirmed','value'=>'$data->getIsConfirmed()'],
+		     array('header'=>'viewInvoice','type'=>'raw','value'=>'(!empty($data->getWeightDiffInvoice())?("<a href=\"".Yii::app()->createURL("invoice/print", array("id" => $data->getWeightDiffInvoice()->id))."\" target=\"_blank\">".$data->getWeightDiffInvoice()->no."</a>"):"")."&nbsp;&nbsp;".(!empty($data->getSurchargeInvoice())?("<a href=\"".Yii::app()->createURL("invoice/print", array("id" => $data->getSurchargeInvoice()->id))."\" target=\"_blank\">".$data->getSurchargeInvoice()->no."</a>"):"")'),
+			['class'=>'oButtonColumn',
+				'template'=>'{details}&nbsp;{Customer Invoice Diff}',
+				'buttons'=>[
+					'details' => [
+						'url'=>'Yii::app()->createURL("siReconcile/getApmanifestDetail")."?id=".$data->id',
+						'imageUrl'=>false,
+						'visible'=>'$data->item_code=="eparcel"?true:false',
+						'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => 'Si Reconcile Detail'.'$data->id'],
+					],
+					'Customer Invoice Diff' => [
+		              'url'=>' Yii::app()->createURL("siReconcile/diffInvoiceCheck")."?id=".$data->id."&&parent_id=".$data->rec_id',
+		              'imageUrl'=>false,
+		              'visible'=>'$data->item_code == "item" && $data->getChargeWeightDiff()>0?true:false',
+		              'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => '$data->id'],
+		            ]
+				],
+			]
+		],
+	]);
+}
+if($checkModel->status==SiReconcile::RATE_CHECKING_STATUS&&$model->parent->org_id!=101)
+{
+	$this->widget('application.extensions.CSpanableGridView.CSpanableGridView', [
+		'id'=>$_GET['tab'].$_GET['tabid'].'_reconcile_grid',
+		'cssFile' => false,
+		'dataProvider'=>$model->search(true, 30),
+		'filter'=>$model,
+		'columns'=>[		
+			['name'=>'ref'],
+			['name'=>'item_code'],
+			['name'=>'type','type'=>'raw','value'=>'$data->getErrorTypes()', 'filter' => SiReconcileLine::$type],
+			['name'=>'my_charge'],
+			['name'=>'value'],
+			['name'=>'my_value'],
+			['name'=>'weight','value'=>'$data->isPureCBMSiReconcileLine()?($data->weight."(".$data->org_charge_weight.")"):$data->weight'],
+			['name'=>'cs_charge_weight'],
+			['name'=>'cust_check_weight'],
+			['name'=>'manifest_weight'],
+			['name'=>'diff','value'=>'$data->value-$data->my_value'],
+			['header'=>'is_confirmed','value'=>'$data->getIsConfirmed()'],
+			['header'=>'confirm_cost_ex_gst','value'=>'@$data->mdata["confirm_cost_ex_gst"]'],
+		       array(
+		          'class'=>'oButtonColumn',
+		          'template'=>'{Customer Invoice Diff}',
+		          'buttons'=>[
+		            'Customer Invoice Diff' => [
+		              'url'=>' Yii::app()->createURL("siReconcile/diffInvoiceCheck")."?id=".$data->id."&&parent_id=".$data->rec_id',
+		              'imageUrl'=>false,
+		              'visible'=>'$data->item_code == "item" && $data->getChargeWeightDiff()>0?true:false',
+		              'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => '$data->id'],
+		            ],
+		          ]
+		        ),
+			['class'=>'oButtonColumn',
+				'template'=>'{operate}',
+				'buttons'=>[
+					'operate' => [
+						'url'=>'Yii::app()->createURL("siReconcile/updateLine")."?id=".$data->id',
+						'imageUrl'=>false,
+						'visible'=>'$data->type>0||$data->my_value==0?true:false',
+						'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => 'Si Reconcile Detail'.'$data->id'],
+					]
+				],
+			]
+		],
+	]);
+}
+
+if($checkModel->status==SiReconcile::RATE_CHECKING_STATUS&&$model->parent->org_id==101)
+{
+	$this->widget('application.extensions.CSpanableGridView.CSpanableGridView', [
+		'id'=>$_GET['tab'].$_GET['tabid'].'_reconcile_grid',
+		'cssFile' => false,
+		'dataProvider'=>$model->search(true, 30),
+		'filter'=>$model,
+		'columns'=>[		
+			['name'=>'ref'],
+			['name'=>'item_code'],
+			['name'=>'type','type'=>'raw','value'=>'$data->getErrorTypes()', 'filter' => SiReconcileLine::$type],
+			['name'=>'my_charge'],
+			['name'=>'value'],
+			['name'=>'api_value'],
+			['name'=>'my_value'],
+			['name'=>'weight'],
+			['name'=>'cs_charge_weight'],
+			['name'=>'cust_check_weight'],
+			['name'=>'manifest_weight'],
+			['name'=>'diff','value'=>'$data->value-$data->my_value'],
+			['header'=>'is_confirmed','value'=>'$data->getIsConfirmed()'],
+			['header'=>'confirm_cost_ex_gst','value'=>'@$data->mdata["confirm_cost_ex_gst"]'],
+		       array(
+		          'class'=>'oButtonColumn',
+		          'template'=>'{Customer Invoice Diff}',
+		          'buttons'=>[
+		            'Customer Invoice Diff' => [
+		              'url'=>' Yii::app()->createURL("importWeightCheck/diffInvoiceCheck")."?id=".$data->id."&&parent_id=".$data->rec_id',
+		              'imageUrl'=>false,
+		              'visible'=>'$data->item_code == "item" && $data->getChargeWeightDiff()>0?true:false',
+		              'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => '$data->id'],
+		            ],
+		          ]
+		        ),
+			['class'=>'oButtonColumn',
+				'template'=>'{details}&nbsp;{operate}',
+				'buttons'=>[
+					'operate' => [
+						'url'=>'Yii::app()->createURL("siReconcile/updateLine")."?id=".$data->id',
+						'imageUrl'=>false,
+						'visible'=>'true',
+						'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => 'Si Reconcile Detail'.'$data->id'],
+					],
+					'details' => [
+						'url'=>'Yii::app()->createURL("siReconcile/getApmanifestDetail")."?id=".$data->id',
+						'imageUrl'=>false,
+						'visible'=>'$data->item_code=="eparcel"?true:false',
+						'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => 'Si Reconcile Detail'.'$data->id'],
+					]
+				],
+			]
+		],
+	]);
+}
+
+if($checkModel->status==SiReconcile::SURCHARGE_CHECKING_STATUS&&$model->parent->org_id!=101)
+{
+	$this->widget('application.extensions.CSpanableGridView.CSpanableGridView', [
+		'id'=>$_GET['tab'].$_GET['tabid'].'_reconcile_grid',
+		'cssFile' => false,
+		'dataProvider'=>$model->search(true, 30),
+		'filter'=>$model,
+		'columns'=>[		
+			['name'=>'ref'],
+			['name'=>'item_code'],
+			['name'=>'type','type'=>'raw','value'=>'$data->getErrorTypes()', 'filter' => SiReconcileLine::$type],
+			['name'=>'value'],
+			['name'=>'my_value'],
+			['header'=>'diff','value'=>'$data->value-$data->my_value'],
+			['header'=>'is_confirmed','value'=>'$data->getIsConfirmed()'],
+			['header'=>'confirm_cost_ex_gst','value'=>'@$data->mdata["confirm_cost_ex_gst"]'],
+			array('header'=>'viewInvoice','type'=>'raw','value'=>'!empty($data->getSurchargeInvoice())?"<a href=\"".Yii::app()->createURL("invoice/print", array("id" => $data->getSurchargeInvoice()->id))."\" target=\"_blank\">".$data->getSurchargeInvoice()->no."</a>":""')
+		],
+	]);
+}
+
+if($checkModel->status==SiReconcile::SURCHARGE_CHECKING_STATUS&&$model->parent->org_id==101)
+{
+	$this->widget('application.extensions.CSpanableGridView.CSpanableGridView', [
+		'id'=>$_GET['tab'].$_GET['tabid'].'_reconcile_grid',
+		'cssFile' => false,
+		'dataProvider'=>$model->search(true, 30),
+		'filter'=>$model,
+		'columns'=>[		
+			['name'=>'ref'],
+			['name'=>'item_code'],
+			['name'=>'type','type'=>'raw','value'=>'$data->getErrorTypes()', 'filter' => SiReconcileLine::$type],
+			['name'=>'value'],
+			['name'=>'my_value'],
+			['header'=>'diff','value'=>'$data->value-$data->my_value'],
+			['header'=>'is_confirmed','value'=>'$data->getIsConfirmed()'],
+			['header'=>'confirm_cost_ex_gst','value'=>'@$data->mdata["confirm_cost_ex_gst"]'],
+			['class'=>'oButtonColumn',
+				'template'=>'{details}',
+				'buttons'=>[
+					'details' => [
+						'url'=>'Yii::app()->createURL("siReconcile/getApmanifestDetail")."?id=".$data->id',
+						'imageUrl'=>false,
+						'visible'=>'$data->item_code=="eparcel-fuel"?true:false',
+						'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => 'Si Reconcile Detail'.'$data->id'],
+					]
+				],
+			]
+		],
+	]);
+}
+
+if($checkModel->status==SiReconcile::LINKING_BILLING_STATUS||$checkModel->status==SiReconcile::SI_RECONCILE_DONE_STATUS)
+{
+	$dispute = new DisputeLine();
+	$dispute->unsetAttributes();
+	if (isset($_GET['DisputeLine'])) {
+		$dispute->attributes = $_GET['DisputeLine'];
+	}
+	$dispute->rec_id = $model->rec_id;
+	$dispute->dpmt = $_GET['tab'];
+	$disputeAmount = 0;
+	$dDatas = $dispute->search(false)->data;
+	foreach ($dDatas as $key => $value) {
+		$disputeAmount +=$value->dispute_amount_ex_gst;
+	}
+	echo "<h3>Dispute: {$disputeAmount} AUD</h3>";
+
+	$this->widget('application.extensions.CSpanableGridView.CSpanableGridView', [
+		'id'=>$_GET['tab'].$_GET['tabid'].'_dispute_grid',
+		
+		'cssFile' => false,
+		'dataProvider'=>$dispute->search(true, 30),
+		'filter'=>$dispute,
+		'columns'=>[		
+			['name'=>'line_ref', 'value' => '@$data->line->ref'],
+			['name'=>'line_item_code', 'value' => '@$data->line->item_code'],
+			['name'=>'line_value', 'value' => '@$data->line->value'],
+			['name'=>'line_my_value', 'value' => '@$data->line->my_value'],
+			['name'=>'dispute_amount_ex_gst'],
+			['name'=>'credit_amount_ex_gst'],
+			['name'=>'note'],
+			['name'=>'status'],
+			['class'=>'application.extensions.CSpanableGridView.oSpanableButtonColumn',
+			'template'=>'{credit}',
+			'buttons'=>[
+				'credit' => [
+					'url'=>'Yii::app()->createURL("siReconcile/updateDisputeStatus")."?id=".$data->dispute_id',
+					'imageUrl'=>false,
+					'visible'=>'true',
+					'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => '$data->id'],
+				],
+			],
+			'spanable' => true, 'spanDepands' => ['$data->dispute_id']
+			]
+		],
+	]);
+}
+
+if($checkModel->status==SiReconcile::LINKING_BILLING_STATUS)
+{
+	$this->widget('application.extensions.CSpanableGridView.CSpanableGridView', [
+		'id'=>$_GET['tab'].$_GET['tabid'].'_reconcile_grid',
+		'cssFile' => false,
+		'dataProvider'=>$model->search(true, 30),
+		'filter'=>$model,
+		'columns'=>[		
+			['name'=>'ref'],
+			['name'=>'item_code'],
+			['name'=>'type','type'=>'raw','value'=>'$data->getErrorTypes()', 'filter' => SiReconcileLine::$type],
+			['name'=>'my_charge'],
+			['name'=>'value'],
+			['name'=>'my_value'],
+			['name'=>'weight'],
+			['name'=>'cs_charge_weight'],
+			['name'=>'cust_check_weight'],
+			['name'=>'manifest_weight'],
+			['name'=>'weight_diff'],
+			['class'=>'oButtonColumn',
+				'template'=>'{operate}',
+				'buttons'=>[
+					'details' => [
+						'url'=>'Yii::app()->createURL("siReconcile/getApmanifestDetail")."?id=".$data->id',
+						'imageUrl'=>false,
+						'visible'=>'$data->item_code=="eparcel"?true:false',
+						'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => 'Si Reconcile Detail'.'$data->id'],
+					],
+					'operate' => [
+						'url'=>'Yii::app()->createURL("siReconcile/getReconcileDetail")."?id=".$data->id',
+						'imageUrl'=>false,
+						'visible'=>'true',
+						'options' => ['class' => 'tab_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => 'Si Reconcile Detail'.'$data->id'],
+					]
+				],
+			]
+		],
+	]);
+}
+
+if($checkModel->status==SiReconcile::SI_RECONCILE_DONE_STATUS)
+{
+	$this->widget('application.extensions.CSpanableGridView.CSpanableGridView', [
+		'id'=>$_GET['tab'].$_GET['tabid'].'_reconcile_grid',
+		'cssFile' => false,
+		'dataProvider'=>$model->search(true, 30),
+		'filter'=>$model,
+		'columns'=>[		
+			['name'=>'ref'],
+			['name'=>'item_code'],
+			['name'=>'type','type'=>'raw','value'=>'$data->getErrorTypes()', 'filter' => SiReconcileLine::$type],
+			['name'=>'my_charge'],
+			['name'=>'value'],
+			['name'=>'my_value'],
+			['name'=>'weight'],
+			['name'=>'cs_charge_weight'],
+			['name'=>'cust_check_weight'],
+			['name'=>'manifest_weight'],
+			['name'=>'weight_diff'],
+		     array('header'=>'viewInvoice','type'=>'raw','value'=>'(!empty($data->getWeightDiffInvoice())?("<a href=\"".Yii::app()->createURL("invoice/print", array("id" => $data->getWeightDiffInvoice()->id))."\" target=\"_blank\">".$data->getWeightDiffInvoice()->no."</a>"):"")."&nbsp;&nbsp;".(!empty($data->getSurchargeInvoice())?("<a href=\"".Yii::app()->createURL("invoice/print", array("id" => $data->getSurchargeInvoice()->id))."\" target=\"_blank\">".$data->getSurchargeInvoice()->no."</a>"):"")'),
+			['class'=>'oButtonColumn',
+				'template'=>'{operate}',
+				'buttons'=>[
+					'operate' => [
+						'url'=>'Yii::app()->createURL("siReconcile/getReconcileDetail")."?id=".$data->id',
+						'imageUrl'=>false,
+						'visible'=>'true',
+						'options' => ['class' => 'tab_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => 'Si Reconcile Detail'.'$data->id'],
+					]
+				],
+			]
+		],
+	]);
+}
+
+; ?>
+</br>
+</br>
+<div class="row buttons" style="width:30%;display: inline-block;">
+		<?php
+			$uploadType = FileRepo::SI_CONFIRM_FILE;
+			$fr = new FileRepo('search');
+			$fr->unsetAttributes();
+			$fr->theTypes[] = $uploadType;
+			$fr->fid = $model->rec_id;
+			$mf = Acl::hasAccess('B:org/manageFile');
+			$this->widget('zii.widgets.grid.CGridView', [
+				'id'=>$_GET['tab'].$_GET['tabid'].'_excofile-grid',
+				'cssFile' => false,
+				'summaryText'=>'',
+				'dataProvider'=> $fr->search(),
+				'filter'=>$fr,
+				'columns'=>[
+					['name' => 'name', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->baseUrl."/filerepo/".$data->hash."/".$data->name."\" target=\"_blank\">".$data->name."</a>"'],
+					[
+						'name'=>'size',
+						'value'=>'$data->formatSize()',
+						'filter' => false,
+					],
+					'date',
+					'type',
+					['name' => 'status', 'type'=>'raw', 'value' => '$data->getStatus()',
+						'filter'=>CHtml::dropDownList('FileRepo[status]', $fr->status, FileRepo::$states, ['prompt'=>$this->t('All')]) ],
+					[
+						'class'=>'oButtonColumn',
+						'template'=>'{update}',
+						'buttons'=>[
+							'update' => [
+								'url'=>'Yii::app()->createUrl("imParcel/fileUpdate",array("id"=>$data->id))',
+								'imageUrl'=>false,
+								'visible'=>'true',
+								'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Update'), 'title' => '$data->name'],
+							],
+						],
+					],
+				],
+			]);
+			?>
+	</div>
+
+
+
+<script type="text/javascript">
+
+			var tabSi = $('#<?=$_GET["tabid"];?>');
+			var panelSi = $('#<?=$_GET["tabid"];?>').data('panel');
+
+			tabSi.unbind('reload_reconcile_grid').bind('reload_reconcile_grid', function(){
+				$('#<?=$_GET["tabid"];?>_reconcile_grid', tabSi.data('panel')).yiiGridView('update');
+				return false;
+			});
+
+			tabSi.unbind('reload_excofile_grid').bind('reload_excofile_grid', function(){
+				$('#<?=$_GET["tabid"];?>_excofile-grid', tabSi.data('panel')).yiiGridView('update');
+				return false;
+			});
+
+			tabSi.data('panel').off('change', 'select.pfile_status').on('change', 'select.pfile_status', function(){
+				$.post('files/status', {'id': $(this).data('id'), 'status': $(this).val() });
+			});
+
+			function uploading_on(obj) {
+				obj.addClass('uploading');
+				obj.val('    Uploading');
+				obj.prop('disabled', 'disabled');
+			}
+
+			function uploading_off(obj,str) {
+				obj.removeClass('uploading');
+				obj.val(str);
+				obj.removeProp('disabled');
+			}
+
+			 $('.error_check_done',panelSi).on('click',function(){
+				if( confirm('Are you sure to Error Check Done')){
+						$.get('<?=$this->createUrl("siReconcile/updateStatus")."?id=".$model->rec_id."&&status=20&&dpmt=".$_GET["tab"]?>',function(r){
+							r = JSON.parse(r);
+								if(r.done==true){
+										myApp.alert(r.msg, false); 
+								 }else{
+										myApp.alert(r.msg, false);   
+							 }
+								tabSi.trigger('reload_reconcile_grid');
+					 });
+				
+				}
+			});
+
+			$('.weight_check_done',panelSi).on('click',function(){
+				if( confirm('Are you sure to Weight Check Done')){
+						$.get('<?=$this->createUrl("siReconcile/updateStatus")."?id=".$model->rec_id."&&status=30&&dpmt=".$_GET["tab"]?>',function(r){
+							r = JSON.parse(r);
+								if(r.done==true){
+										myApp.alert(r.msg, false); 
+								 }else{
+										myApp.alert(r.msg, false);   
+							 }
+								tabSi.trigger('reload_reconcile_grid');
+					 });
+				
+				}
+			});
+
+
+			$('.rate_check_done',panelSi).on('click',function(){
+				if( confirm('Are you sure to Rate Check Done')){
+						$.get('<?=$this->createUrl("siReconcile/updateStatus")."?id=".$model->rec_id."&&status=40&&dpmt=".$_GET["tab"]?>',function(r){
+							r = JSON.parse(r);
+								if(r.done==true){
+										myApp.alert(r.msg, false); 
+								 }else{
+										myApp.alert(r.msg, false);   
+							 }
+								tabSi.trigger('reload_reconcile_grid');
+					 });
+				
+				}
+			});
+
+			$('.surcharge_check_done',panelSi).on('click',function(){
+				if( confirm('Are you sure to Surcharge Check Done')){
+						$.get('<?=$this->createUrl("siReconcile/updateStatus")."?id=".$model->rec_id."&&status=50&&dpmt=".$_GET["tab"]?>',function(r){
+							r = JSON.parse(r);
+								if(r.done==true){
+										myApp.alert(r.msg, false); 
+								 }else{
+										myApp.alert(r.msg, false);   
+							 }
+								tabSi.trigger('reload_reconcile_grid');
+					 });
+				
+				}
+			});
+
+			$('.linking_billing',panelSi).on('click',function(){
+				if( confirm('Are you sure to Link Billing')){
+						uploading_on($('#linking_billing',panelSi));
+						$.get('<?=$this->createUrl("siReconcile/linkBilling")."?id=".$model->rec_id."&&dpmt=".$_GET["tab"]?>',function(r){
+							r = JSON.parse(r);
+								if(r.done==true){
+									uploading_off($('#linking_billing',panelSi),'Linking Billing');
+										myApp.alert(r.msg, false); 
+								 }else{
+								 	uploading_off($('#linking_billing',panelSi),'Linking Billing');
+										myApp.alert(r.msg, false);   
+							 }
+								tabSi.trigger('reload_reconcile_grid');
+					 });
+				
+				}
+			});
+
+			$('.linking_billing_done',panelSi).on('click',function(){
+				if( confirm('Are you sure to Link Billing Done')){
+						$.get('<?=$this->createUrl("siReconcile/updateStatus")."?id=".$model->rec_id."&&status=60&&dpmt=".$_GET["tab"]?>',function(r){
+							r = JSON.parse(r);
+								if(r.done==true){
+										myApp.alert(r.msg, false); 
+								 }else{
+										myApp.alert(r.msg, false);   
+							 }
+								tabSi.trigger('reload_reconcile_grid');
+					 });
+				
+				}
+			});
+
+			$('.updateStatus',panelSi).on('click',function(){
+				if( confirm('Are you sure to update status?')){
+					var form = new FormData(document.getElementById("si-reconcile-acr_form<?=$_GET['tab'].$_GET['tabid']?>"));
+					 $.ajax({
+					            url: '<?=$this->createUrl("siReconcile/updateStatusDirect")."?id=".$model->rec_id."&&dpmt=".$_GET["tab"]?>'+'&&status='+$('#si_reconcile_dpmt_status<?=$_GET["tab"]?>',panelSi).val(),
+					            type: "post",
+					            data: form,
+					            processData: false,
+					            contentType: false,
+					            success: function(r) {
+					               	r = JSON.parse(r);
+									if(r.done==true){
+										myApp.alert(r.msg, false);
+									 }else
+									 {
+										myApp.alert(r.msg, false); 
+						             }
+						             tabSi.trigger('reload_reconcile_grid');
+						         },
+					            error: function(e) {
+					                console.log(e);
+					            }
+					        });			
+				}
+				return false;
+			});
+
+			$('#si_reconcile_dpmt_status<?=$_GET["tab"]?>', panelSi).next().on('dblclick', function(){
+				if(window.confirm('Are you sure to override status?')){
+					$(this).prev().attr('disabled', false);
+				}
+			});
+
+
+			$(panelSi).off('click', '#btn-save').on('click', '#btn-save', function() {
+				uploading_on($('#btn-save'));
+
+				var formData = new FormData();
+				formData.append('id', '<?=$model->rec_id?>');
+				formData.append('confirm_inv_file', $('#confirm_inv_file', panelSi)[0].files[0]);
+				$.ajax({
+					url: '<?=Yii::app()->createUrl("siReconcile/ajaxImportReconciliationConfirmList")?>',
+					type: 'POST',
+					data: formData,
+					processData: false,
+					contentType: false,
+					success: function(r) {
+						uploading_off($('#btn-save'),'submit');
+						r = JSON.parse(r);
+						if (r.done) {
+							myApp.notice(r.msg, 5000);
+						} else {
+							myApp.alert(r.msg, false);
+						}
+					},
+					error: function(r) {
+						uploading_off($('#btn-save'),'submit');
+						myApp.alert('System error', false);
+					}
+				});
+		});
+</script>
+
+
+<?php $this->endWidget();?>

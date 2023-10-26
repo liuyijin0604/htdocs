@@ -1,0 +1,627 @@
+<?php
+
+/**
+ * This is the model class for table "consol_process".
+ *
+ * The followings are the available columns in table 'consol_process':
+ * @property integer $id
+ * @property integer $fid
+ * @property integer $type
+ * @property integer $status
+ * @property integer $main_type
+ * @property string $started
+ * @property string $to_warehouse
+ * @property string $date
+ * @property string $airport
+ * @property string $pick_dead_date
+ * @property string $meta
+ */
+class ConsolProcess extends CActiveRecord
+{
+	public $mdata;
+	public $nolog=false;
+	public $custom_log_note='';
+		
+	const TYPE_FULL_PROCESS=0;
+	const TYPE_LOCAL_PROCESS=1;
+	const TYPE_NO_PROCESS=2;
+	const TYPE_NZ=3;
+	const TYPE_DIRECT_AIR_CONSOL=4;
+	const TYPE_DIRECT_SEA_CONSOL=5;
+	const TYPE_CONSOL_SEA=6;
+		 
+	const STATE_NEW=1;
+	const STATE_WAITING_MAIN_ACR=2;
+	const STATE_MAIN_ACR_SENT=3;
+	const STATE_WAITING_SUB_ACR=4;
+	const STATE_WAITING_SEND_UBM=8;
+	const STATE_UB_ON_SCHEDULE=9;
+	const STATE_UB_REJECT=11;
+	const STATE_WAITING_AIRPORT_CKIN=16;
+	const STATE_WAITING_NOTIFY_DRIVER_PICKUP=20;
+	const STATE_NOTIFIED_DRIVER=21;
+	const STATE_WAITING_WH_SCAN=24;
+	const STATE_WAITING_AIR_MANI=28;
+	const STATE_WAITING_CREATE_INVOICE=32;
+	const STATE_CONSOL_PROCESS_DONE=80;
+		
+	const SEA_TODO_MBL_HBL=2;
+	const SEA_MANIFEST=4;
+	const SEA_PRE_ALERT=8;
+	const SEA_ARRIVAL_NOTICE=16;
+	const SEA_WAITING_MANI=28;
+	const SEA_PORT_CHARGES_INVOICE=32;
+	const SEA_DELIVERY_ORDER=64;
+	const SEA_SWB_TELEX_RELEASE=128;
+	const DU_SCR = 4;
+	const DU_UB = 8;
+	const DU_PORTCHARGE = 16;
+	const DU_DO = 32;
+	const DU_CARTAGE = 64;
+	const DU_CLR = 32768;
+
+	const DU_RECEIPTO = 256;
+	const DU_UNPACKS = 512;
+
+	const DU_UNPACKINGO = 1024;
+	const DU_MANIFEST = 2048;
+	const DU_EXCEPTION = 4096;
+	const DU_DEHIRE = 8192;
+	const DU_INVOICE = 16384;
+		
+	const SEA_FINISH_STATES=255;
+	const CHECK_FAK = 2;
+		
+	public static $airport_types=[
+		'Dnata T1'=>'Dnata T1',
+		'Dnata T2'=>'Dnata T2',
+		'Menzies'=>'Menzies',
+		'Qantas T1'=>'Qantas T1',
+		'Qantas T3'=>'Qantas T3',
+	];
+	public static $pmc_type=[
+		'ULD'=>'ULD',
+		'LOOSE'=>'LOOSE',
+	];
+		
+	public static $driver_tel_no=[
+		'0000000000' =>'Test',
+	];
+	/**
+	 * @return string the associated database table name
+	 */
+	public static $states=[
+		1=>'New',
+		2=>'Waiting send Main ACR',
+		3=>'Main ACR sent',
+		4=>'Waiting send Sub ACR',
+		8=>'Waiting Send UB Move',
+		9=>'UB On Schedule',
+		11=>'UB Reject',
+		16=>'Waiting Airport Checked in',
+		20=>'Waiting to Notify Driver Pick Up',
+		21=>'Notified Driver',
+		24=>'Wating for WH scan',
+		28=>'Waiting for AirOut/Manifest',
+		32=>'Waiting for created Invoice',
+		80=>'Consol Process done',
+	];
+		
+	public static $seaStates=[
+		1=>'New',
+		2=>'Waiting send Main ACR',
+		3=>'Main ACR sent',
+		4=>'Waiting send Sub ACR',
+		8=>'Waiting Send UB Move',
+		9=>'UB On Schedule',
+		11=>'UB Reject',
+		16=>'Waiting Airport Checked in',
+		20=>'Waiting to Notify Driver Pick Up',
+		21=>'Notified Driver',
+		24=>'Wating for WH scan',
+		28=>'Waiting for AirOut/Manifest',
+		32=>'Waiting for created Invoice',
+		80=>'Consol Process done',
+		128=>'SWB/TELEX RELEASE/ORIGINAL'
+	];
+
+	public static $newSeaStates=[
+		1=>'Documentation',
+		16=>'Waiting Receipt Outturn/Unpack schedule',
+		24=>'Waiting WH Scan',
+		28=>'Waiting Unpack Outturn/Manifest',
+		32=>'Exception/Dehire/Create Invoice',
+		80=>'Process Done'
+	];
+		
+	public static $seaStatesShort=[
+		2=>'MBL',
+		4=>'MAN',
+		8=>'PRE',
+		16=>'ARR',
+		32=>'POR',
+		64=>'DEL',
+		128=>'SWB',
+	];
+
+	public static $seaDocumentationStatuses=[
+		4=>'SCR',
+		8=>'UB',
+		16=>'PTC',
+		32=>'DO',
+		64=>'Cartage'
+	];
+
+	public static $seaDMDocumentationStatuses=[
+		4=>'SCR',
+		32768=>'CLR',
+		16=>'PTC',
+		32=>'DO',
+		64=>'Cartage'
+	];
+
+	public static $seaFakDocumentationStatuses=[
+		8=>'UB',
+		32=>'DO',
+		64=>'Cartage'
+	];
+	public static $seaDocumentationStatuses16=[
+		256=>'Receipt',
+		512=>'Unpack'
+	];
+
+	public static $seaDocumentationStatuses32=[
+		1024=>'Exception',
+		2048=>'Dehire',
+		4096=>'IMInvoice'
+	];
+
+	public static $seaDocumentationStatusesArr=[
+		self::SEA_ARRIVAL_NOTICE=>[
+		256=>'ReceiptO',
+		512=>'UnpackS'
+	],
+		self::SEA_WAITING_MANI=>[
+		1024=>'Unpack_Outturn',
+		2048=>'Manifest'
+	],
+		self::SEA_PORT_CHARGES_INVOICE=>[
+		4096=>'Exception',
+		8192=>'Dehire',
+		16384=>'IMInvoice'
+		]
+	];
+		
+	public static $types=[
+		0=>'full process',
+		1=>'local',
+		2=>'NO_PROCESS',
+		3=>'NZ type',
+		4=>'Direct AIR Consol',
+		5=>'Direct Sea Consol',
+		6 => 'Sea Consol'
+	];
+
+	public static $main_types=[
+		1=>'Air Process',
+		2=>'Sea Process',
+	];
+
+	public static $unpackContainerStatus = array(
+		0 => 'New',
+		1 => 'Completed'
+	);
+
+	public function tableName()
+	{
+		return 'consol_process';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return [
+			['fid, type, status, started, date', 'required'],
+			['fid, type, status,main_type', 'numerical', 'integerOnly'=>true],
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			['id, fid, type, status, started,airport,to_warehouse,pick_dead_date,date,main_type, meta', 'safe', 'on'=>'search'],
+		];
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return [
+			'consol'=>[self::BELONGS_TO,'Consol','fid'],
+		];
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return [
+			'id' => 'ID',
+			'fid' => 'Fid',
+			'type' => 'Type',
+			'status' => 'Status',
+			'started' => 'Started',
+			'date' => 'Date',
+			'meta' => 'Meta',
+		];
+	}
+	public function getStatus()
+	{
+		if ($this->main_type==1) {
+			return isset(static::$states[$this->status])? Yii::t(strtolower(__CLASS__), static::$states[$this->status]) : $this->status;
+		} elseif ($this->main_type==2) {
+			return $this->seaTypeStatus();
+		}
+	}
+
+	public function seaTypeStatus()
+	{
+		return isset(static::$newSeaStates[$this->status])? Yii::t(strtolower(__CLASS__), static::$newSeaStates[$this->status]) : $this->status;
+		// $status='';
+		// foreach (self::$seaStatesShort as $key=>$value) {
+		// 	if (($this->status&$key)==0) {
+		// 		$status.=$value."|";
+		// 	}
+		// }
+		// return $status;
+	}
+		
+	public function beforeSave()
+	{
+		if ($this->status == ConsolProcess::STATE_WAITING_WH_SCAN) {
+			if (empty($this->to_warehouse) || $this->to_warehouse<='2015-08-01') {
+				$this->to_warehouse=date('Y-m-d H:i:s');
+			}
+		}
+
+		if (!empty($this->mdata)) {
+			$this->meta= json_encode($this->mdata);
+		}
+		return true;
+	}
+	public function updateMeta($nolog=true)
+	{
+		$this->nolog = $nolog;
+		$this->meta = json_encode($this->mdata);
+		$this->update(['meta']);
+	}
+		
+	public function afterFind()
+	{
+		if (!empty($this->meta)) {
+			$this->mdata= json_decode($this->meta, true);
+		}
+		return true;
+	}
+		
+	public function addTrack()
+	{
+		if (isset($this->consol->type)&&$this->consol->type==70) {
+			if ($this->status== self::STATE_NOTIFIED_DRIVER) {
+				$shipment= $this->consol->linkShipment(false);
+				if (!$shipment->hasTracking(12)) {
+					$shipment->addTracking(12, 'Parcels picked up', 'Botany');
+				}
+			}
+		}
+	}
+	public function afterSave()
+	{
+		$this->checkSeaConsolCanBeToNextStatus();
+		$this->addTrack();
+		//add log
+		if (!$this->nolog&&!empty($this)) {
+			$extra=empty($this->custom_log_note)?[]:['note'=>$this->custom_log_note];
+			Log::add($this, $this->isNewRecord? 3 : 4, array_merge(['status' => $this->getStatus()], $extra));
+		}
+		if (isset($this->consol->type)&&$this->consol->type==70&&$this->status== ConsolProcess::STATE_WAITING_WH_SCAN) {
+			foreach ($this->consol->shipments as $shipment) {
+				if (!$shipment->hasTracking(ImParcel::STATE_DRIVER_PICK_UP)) {
+					$shipment->addTracking(ImParcel::STATE_DRIVER_PICK_UP, 'The parcel has already been picked up to the warehouse', 'Botany');
+				}
+			}
+		}
+	}
+		
+	public function updateStatus($status, $type=false)
+	{
+		if ($status == ConsolProcess::STATE_WAITING_WH_SCAN)
+		{
+			if((empty($this->consol->mdata['ContainerUnloadDate'])||empty($this->mdata['unpacking_team']))&&$this->consol->service==Consol::SEACONSOL&&$this->consol->dpt_id==Org::TLA_DEPARTMENT_SYDNEY)
+			{
+				return 'Empty unpacking date or unpacking team';
+			}
+
+			if(!Acl::hasAccess("C:consolProcess/sendToWarehouseScan"))
+			{
+				return 'Access denied';
+			}
+
+			$agentIds = $this->consol->getAllAgentId();
+			$creditLimitValue = SystemSetting::getCreditLimitValue();
+			//check account limit
+
+			foreach ($agentIds as $key => $agentId) {
+				$agt = Org::model()->findByPk($agentId);
+				if($agt->overCreditLimit()  && !in_array($agt->type, [60, 65])){
+					//return '联系财务确认客人付款情况';
+					$balance = $agt->getAccBalanceDetails();
+					
+					$thisTotal = 0;
+					foreach ($this->consol->shipments as $key => $p) {
+						if($p->status==ImParcel::STATE_CLEAR&&$p->getValue()>=$creditLimitValue)
+						{
+							if(($balance+$thisTotal)<0)
+							{
+								$thisTotal+=$p->getValue();
+								if($p->status!=ImParcel::STATE_ACCOUNT_HELD)
+								{
+									$p->mdata['acc_held_before_status']=$p->status;
+								}
+								$p->status = ImParcel::STATE_ACCOUNT_HELD;
+								$p->update(['status','meta']);
+							}
+						}
+					}
+				}
+			}
+		}
+
+
+		$update=false;
+		if (key_exists($status, self::$states)) {
+			$this->status=$status;
+			if ($status == ConsolProcess::STATE_WAITING_WH_SCAN) {
+				if (empty($this->to_warehouse) || $this->to_warehouse<='2015-08-01') {
+					$this->to_warehouse=date('Y-m-d H:i:s');
+				}
+			}elseif($status == ConsolProcess::STATE_NOTIFIED_DRIVER && !empty($this->to_warehouse)){
+				$this->to_warehouse = null;
+			}
+
+			$update=true;
+		}
+		if (!empty($type) && key_exists($type, self::$types)) {
+			$this->type=$type;
+			$update=true;
+		}
+		$this->date=date('Y-m-d H:i:s');
+		if ($update) {
+			$this->update(['status','date','type','to_warehouse']);
+		}
+		return 1;
+	}
+
+
+	public function getDocumentationStatus($isHtml = true)
+	{
+		$str = "";
+		$changeline = 0;
+		$thisState = ($this->consol->type==DmawbConsol::$my_type)?ConsolProcess::$seaDMDocumentationStatuses:ConsolProcess::$seaDocumentationStatuses;
+		if(!empty($this->consol->mdata["is_fak"]))
+		{
+			$thisState = ConsolProcess::$seaFakDocumentationStatuses;
+		}
+
+		foreach (ConsolProcess::$seaDocumentationStatusesArr as $key => $value) {
+			if($this->status==$key)
+			{
+				$thisState =$value;
+				break;
+			}
+		}
+
+		foreach ($thisState as $key => $seaDocumentationStatus) {
+			if($changeline>0&&$changeline>30)
+			{
+				$changeline=0;
+				$str .=  "</br></br>";
+			}
+			if(($this->sub_status&$key)>0&&($this->sub_status_ignore&$key)>0)
+			{
+				$color = "sea_do_blue";
+			}elseif(($this->sub_status&$key)>0&&($this->sub_status_ignore&$key)==0)
+			{
+				$color = "sea_do_green";
+			}else
+			{
+				$color = "sea_do_red";
+			}
+
+			if($key==self::DU_UB&&!empty($this->consol->mdata['ubmsent']))
+			{
+				if($this->consol->mdata['ubmsent']==1)
+				{
+					$seaDocumentationStatus = "UB_SENT";
+				}elseif($this->consol->mdata['ubmsent']==7)
+				{
+					$seaDocumentationStatus = "UB_ERROR";
+				}
+			}
+
+			if($key==self::DU_DO&&!empty($this->consol->mdata['send_do_email']))
+			{
+				$seaDocumentationStatus = "DO[S]";
+			}
+
+			$str .= CHtml::link($seaDocumentationStatus,Yii::app()->createURL("consolProcess/seaDocumentationOperation",array("id"=>$this->consol->id,'process_type'=>$key)),["class"=>"jqm_link sea_do_block {$color}"]);
+			$changeline+=strlen($seaDocumentationStatus)+2;
+		}
+		return $str;
+	}
+
+	public function getAllDocumentationStatus($isHtml = true)
+	{
+		$str = "";
+		$changeline = 0;
+		$thisState = ($this->consol->type==DmawbConsol::$my_type)?ConsolProcess::$seaDMDocumentationStatuses:ConsolProcess::$seaDocumentationStatuses;
+		if(!empty($this->consol->mdata["is_fak"]))
+		{
+			$thisState = ConsolProcess::$seaFakDocumentationStatuses;
+		}
+
+		foreach (ConsolProcess::$seaDocumentationStatusesArr as $key => $value) {
+			$thisState =$thisState+$value;
+		}
+
+		foreach ($thisState as $key => $seaDocumentationStatus) {
+			if($changeline>0&&$changeline>24)
+			{
+				$changeline=0;
+				$str .=  "</br></br>";
+			}
+			if(($this->sub_status&$key)>0&&($this->sub_status_ignore&$key)>0)
+			{
+				$color = "sea_do_blue";
+			}elseif(($this->sub_status&$key)>0&&($this->sub_status_ignore&$key)==0)
+			{
+				$color = "sea_do_green";
+			}else
+			{
+				$color = "sea_do_red";
+			}
+
+			if($key==self::DU_UB&&!empty($this->consol->mdata['ubmsent']))
+			{
+				if($this->consol->mdata['ubmsent']==1)
+				{
+					$seaDocumentationStatus = "UB_SENT";
+				}elseif($this->consol->mdata['ubmsent']==7)
+				{
+					$seaDocumentationStatus = "UB_ERROR";
+				}
+			}
+
+			$str .= CHtml::link($seaDocumentationStatus,Yii::app()->createURL("consolProcess/seaDocumentationOperation",array("id"=>$this->consol->id,'process_type'=>$key)),["class"=>"jqm_link sea_do_block {$color}"]);
+			$changeline+=strlen($seaDocumentationStatus)+2;
+		}
+		return $str;
+	}
+
+	public function getNeedFinishDocumentationStatus()
+	{
+		$str = "";
+		$changeline = 0;
+		$thisState = ($this->consol->type==DmawbConsol::$my_type)?ConsolProcess::$seaDMDocumentationStatuses:ConsolProcess::$seaDocumentationStatuses;
+		if(!empty($this->consol->mdata["is_fak"]))
+		{
+			$thisState = ConsolProcess::$seaFakDocumentationStatuses;
+		}
+
+		foreach (ConsolProcess::$seaDocumentationStatusesArr as $key => $value) {
+			if($this->status==$key)
+			{
+				$thisState =$thisState+$value;
+			}
+		}
+
+		return $thisState;
+
+	}
+
+	public function checkSeaConsolCanBeToNextStatus()
+	{
+		if($this->consol->service==Consol::SEACONSOL&&in_array($this->status,[ConsolProcess::STATE_NEW,ConsolProcess::SEA_ARRIVAL_NOTICE,ConsolProcess::SEA_WAITING_MANI,ConsolProcess::SEA_PORT_CHARGES_INVOICE]))
+		{
+			$allPass = true;
+			$thisStates = $this->getNeedFinishDocumentationStatus();
+			foreach ($thisStates as $status => $value)
+			{
+				if((($status&$this->sub_status)==0)&&(($status&$this->sub_status_ignore)==0))
+				{
+					$allPass = false;
+					break;
+				}
+			}
+			if($allPass&&!empty($thisStates))// push to next status
+			{
+				foreach (self::$newSeaStates as $status => $value) {
+					if($this->status<$status)
+					{
+						$this->status = $status;
+						$this->update(["status"]);
+						break;
+					}
+				}
+			}
+			return $allPass;
+		}
+	}
+
+	public function addOperationLog($operation)
+	{
+		Log::add($this, $this->isNewRecord? 3 : 4, array_merge(['status' => $this->getStatus()], ["operation"=>$operation]));
+	}
+
+	public function getUnpackContainStatus()
+	{
+		$state = isset($this->mdata['unpack_status']) ? self::$unpackContainerStatus[$this->mdata['unpack_status']] : self::$unpackContainerStatus[0];
+		return $state;
+	}
+
+
+
+
+
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search()
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('id', $this->id);
+		$criteria->compare('fid', $this->fid);
+		$criteria->compare('type', $this->type);
+		$criteria->compare('main_type', $this->main_type);
+		$criteria->compare('status', $this->status);
+		$criteria->compare('started', $this->started, true);
+		$criteria->compare('date', $this->date, true);
+		$criteria->compare('to_warehouse', $this->to_warehouse, true);
+		$criteria->compare('airport', $this->airport, true);
+		$criteria->compare('pick_dead_date', $this->pick_dead_date, true);
+		$criteria->compare('meta', $this->meta, true);
+
+		return new CActiveDataProvider($this, [
+			'criteria'=>$criteria,
+		]);
+	}
+ 
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return ConsolProcess the static model class
+	 */
+	public static function model($className=__CLASS__)
+	{
+		return parent::model($className);
+	}
+}

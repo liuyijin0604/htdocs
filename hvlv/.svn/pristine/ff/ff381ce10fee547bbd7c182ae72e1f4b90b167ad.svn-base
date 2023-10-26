@@ -1,0 +1,409 @@
+<?php
+
+/**
+ * This is the model class for table "gatepass_courier".
+ *
+ * The followings are the available columns in table 'gatepass_courier':
+ * @property integer $id
+ * @property integer $courier_id
+ * @property integer $type
+ * @property string $create_time
+ * @property string $driver_name
+ * @property string $driver_rego
+ * @property string $no
+ * @property string $ref
+ * @property integer $status
+ * @property string $meta
+ */
+class GatepassCourier extends CActiveRecord
+{
+    /**
+     * @return string the associated database table name
+     */
+    public static $courier_id=[
+    ];
+    public static $types=[
+        0=>'Courier',
+        10=>'Self Pick UP',
+    ];
+    public $mdata;
+    public function tableName()
+    {
+        return 'gatepass_courier';
+    }
+        
+    public static $gatepass_courier=[
+        101=>'AusPost eParcel',
+        115=>'FastWay',
+        Org::ORGID_COURIER_TNT=>'TNT',
+        'toll'=>'Toll',
+        Org::ORGID_COURIER_BORDER => 'Border',
+        2619 => '4PX',
+        Org::ORGID_COURIER_SF=>'SF',
+        'TP' =>'Truck Delivery/PICKUP',
+        // 2797 => 'BFE',
+		'AUP' => 'AUP',
+        // 'ALH' => 'ALH',
+        // 2995 => 'dpex',
+        4018=>'ECIGA',
+        // Org::ORGID_COURIER_D2Z => 'D2Z', // 混入AusPost eParcel 101
+        // Org::ORGID_COURIER_SENDLE => 'Sendle',
+        // '3025-SYD'=>'UBI-SYD',
+        // '3025-MEL'=>'UBI-MEL',
+        // '3025-BNE'=>'UBI-BNE',
+        // '3025-ADL'=>'UBI-ADL',
+        // Org::ORGID_COURIER_DFE=>'DFE',
+        // 'allied'=>'Allied',
+        // 'moving'=>'moving',
+        'pp'=>'Parcel Point',
+        4117=>'Fastgo',
+        Org::ORGID_COURIER_STARTRACK=>'Startrack',
+        Org::ORGID_COURIER_FL_HUNTER=>'Hunter',
+		Org::ORGID_COURIER_GV_AUPOST=>'GV Aupost',
+        'Other'=>'Other'
+        // Org::ORGID_COURIER_AUSLETTER=>'Letter',
+    ];
+
+    public static $gatepassMQ=[
+        101,115,Org::ORGID_COURIER_TNT,'toll',Org::ORGID_COURIER_SF,Org::ORGID_COURIER_BORDER,Org::ORGID_COURIER_FL,Org::ORGID_COURIER_GV_AUPOST
+    ];
+
+
+    const TPCOURIER = 'TP';
+
+    /**
+     * @return array validation rules for model attributes.
+     */
+    public function rules()
+    {
+        // NOTE: you should only define rules for those attributes that
+        // will receive user inputs.
+        return [
+            ['create_time', 'required'],
+            ['courier_id, status,type', 'numerical', 'integerOnly'=>true],
+            ['driver_name,driver_rego','length','max'=>80],
+            ['ref','length','max'=>200],
+            ['no','length','max'=>20],
+            // The following rule is used by search().
+            // @todo Please remove those attributes that should not be searched.
+            ['id, courier_id, create_time, status,ref,driver_name,driver_rego,type,no', 'safe', 'on'=>'search'],
+        ];
+    }
+
+    /**
+     * @return array relational rules.
+     */
+    public function relations()
+    {
+        // NOTE: you may need to adjust the relation name and the related
+        // class name for the relations automatically generated below.
+        return [
+            'lines'=>[self::HAS_MANY,'GatepassShipment','parent_id','order' => 'fid ,sno ASC'],
+            'driverLicense'=>[self::BELONGS_TO,'DriverLicense','driver_license_id'],
+        ];
+    }
+
+    /**
+     * @return array customized attribute labels (name=>label)
+     */
+    public function attributeLabels()
+    {
+        return [
+            'id' => 'ID',
+            'courier_id' => 'Courier',
+            'create_time' => 'Create Time',
+            'status' => 'Status',
+            'type'=>'Type',
+            'meta' => 'Meta',
+        ];
+    }
+    /**
+     *
+     * @param type $rs Array of gatePassShipment
+     */
+    public static function genGatePassTicket($rs, $courier_id, $type, $gatepass_signature, $driver_name, $driver_rego, $ref,$isMQ= false,$postData=false,$checkdr=null)
+    {
+            $model=new GatepassCourier();
+            $ocourier_id = $courier_id;
+            if($courier_id==self::TPCOURIER)
+            {
+                $cargo = CargoProcess::model()->find('shipment_id = :sid',['sid'=>$rs[0]->fid]);
+                if(!empty($cargo))
+                {
+                     $courier_id = $cargo->driver_id;
+                }else
+                {
+                    $courier_id = 0;//PICKUP
+                }
+                //$courier_id =Org::ORGID_COURIER_PCA;// Truck/PICKUP is belong to PCA
+                $model->mdata['is_tp']='TP';
+            }
+
+            if($courier_id=='AUP'||$courier_id=='moving'||$courier_id=='pp'||$courier_id=='Other')
+            {
+                $courier_id = Org::ORGID_COURIER_TLA;
+            }
+
+            if($courier_id=='ALH')
+            {
+                $courier_id = 3578;
+            }
+
+            if(preg_match('/3025/', $courier_id))
+            {
+                $courier_id = 3025;
+            }
+
+            if($courier_id=='toll'||$courier_id=='allied')
+            {
+                $courier_id = Org::ORGID_COURIER_EIZ;
+            }
+
+            $ids = array_column($rs, 'id');
+            $model->courier_id=$courier_id;
+            $model->type=$type;
+            $model->ref=$ref;
+            $model->create_time=date('Y-m-d H:i:s');
+            $model->driver_name=$driver_name;
+            $model->driver_rego=$driver_rego;
+            $model->mdata['gatepass_signature']=$gatepass_signature;
+            $model->mdata['ocourier_id']=$ocourier_id;
+            if(!empty($checkdr))
+            {
+                $model->driver_license_id = $checkdr->id;
+            }
+
+            if(!empty($isMQ))
+            {
+                $model->mdata['isMQ'] = $isMQ;
+            }
+            if(!empty($postData))
+            {
+                if(!empty($postData['gatepass_signature']))
+                {
+                    unset($postData['gatepass_signature']);
+                }
+
+                if(!empty($postData['fileText']))
+                {
+                    unset($postData['fileText']);
+                }
+                $model->mdata['postData']=json_encode($postData);
+            }
+            $model->user_id = User::currentUserID();
+            if (!$model->save())
+            {
+                Log::log2file("Gatepass fail for {$driver_name}|{$driver_rego}|{$ref}|{$type}".json_encode($model)."gatePassShipmentIds:".join(',',$ids), "transaction_err_log", "transaction");
+                return false;
+            }else
+            {
+                 Log::log2file("Gatepass for gatePassShipmentIds:".join(',',$ids), "transaction_err_log", "transaction");
+            }
+
+        self::handlingShipmentIntoGatepass($model,$rs,$ocourier_id,$courier_id);
+        
+        return $model->id;
+       
+    }
+
+    public static function handlingShipmentIntoGatepass($model,$rs,$ocourier_id,$courier_id)
+    {
+        $batchShipments=[];
+        foreach ($rs as $key => $r) {
+            if($key%5000==0)
+            {
+                $batchShipments[]=[];
+            }
+            $batchShipments[count($batchShipments)-1][]=$r;
+        }
+        $handle = [];
+
+        foreach ($batchShipments as $key => $thisRs)
+        {
+            $transaction=Yii::app()->db->beginTransaction();
+            try 
+            {
+                foreach ($thisRs as $r) {
+                    $r->gate_pass_time=date('Y-m-d H:i:s');
+                    $r->parent_id=$model->id;
+                    $r->status= GatepassShipment::GATEPASS_FINISHED;
+                    $r->save();
+                    $shipment = ImParcel::model()->findByPk($r->fid);
+                    if(empty($shipment))
+                    {
+                        continue;
+                    }
+                    $shipment->addTrackingLimited(Tracking::TYPE_HAND_OVER, "Shipment despatched to courier", empty($shipment->odepot) ? '' : $shipment->odepot->suburb,  $r->gate_pass_time);
+                    if($ocourier_id=='moving')
+                    {
+                        if(!in_array($shipment->id, $handle))
+                        {
+                            $handle[$shipment->id] = $shipment->id;
+                            $shipment->can = '新仓'.$shipment->can;
+                            $shipment->update(['can']);
+                        }
+                    }
+
+                    if(!empty($model->mdata['is_tp'])&&$model->mdata['is_tp']=='TP')
+                    {
+                        if(empty($r->mdata['cargo_process_id']))//this is for some parcel is not sub shipment but scanned multiple times
+                        {
+                            $rps = GatepassShipment::model()->findAll('fid = :fid and parent_id = 0',[":fid"=>$r->fid]);
+                            foreach ($rps as $rp) {
+                                $rp->gate_pass_time=date('Y-m-d H:i:s');
+                                $rp->parent_id=$model->id;
+                                $rp->status= GatepassShipment::GATEPASS_FINISHED;
+                                $rp->save();
+                            }
+                        }
+                        if(!empty($shipment->cargo_process)){
+                            $shipment->cargo_process->pickupProcessDone();
+                            $booking = PickupBooking::model()->findByAttributes(['shipment_id'=>$shipment->id]);
+                            if (!empty($booking)){
+                                $booking->status = PickupBooking::DONE;
+                                $booking->save();
+                            }
+                        }
+                    }
+
+                    if($courier_id==4018)
+                    {
+                        if(!empty($shipment->cargo_process)){
+                            $shipment->cargo_process->pickupProcessDone();
+                        }
+                    }
+                }
+                $transaction->commit();
+            } catch (Exception $ex) {
+                $transaction->rollback();
+                Log::log2file("Gatepass for gatePassShipmentIds:".$ex->getMessage(), "transaction_err_log", "transaction");
+                return false;
+            }
+        }
+    }
+    public function beforeSave()
+    {
+        if (!empty($this->mdata)) {
+            $this->meta= json_encode($this->mdata);
+        }
+        return true;
+    }
+    public function afterFind()
+    {
+        if (!empty($this->meta)) {
+            $this->mdata= json_decode($this->meta, true);
+        }
+        $this->genNo();
+    }
+    public function genNo()
+    {
+        if (empty($this->no)) {
+            $this->no="GP".sprintf("%07s", substr($this->id, -7));
+            $this->update('no');
+        }
+    }
+        
+
+    /**
+     * Retrieves a list of models based on the current search/filter conditions.
+     *
+     * Typical usecase:
+     * - Initialize the model fields with values from filter form.
+     * - Execute this method to get CActiveDataProvider instance which will filter
+     * models according to data in model fields.
+     * - Pass data provider to CGridView, CListView or any similar widget.
+     *
+     * @return CActiveDataProvider the data provider that can return the models
+     * based on the search/filter conditions.
+     */
+    public function search()
+    {
+        // @todo Please modify the following code to remove attributes that should not be searched.
+        $criteria=new CDbCriteria;
+        $criteria->compare('id', $this->id);
+        if(!empty($this->courier_id))
+        {
+            if(is_numeric($this->courier_id))
+            {
+                $criteria->addCondition('courier_id = '.$this->courier_id.' or json_value(t.meta,"$.ocourier_id")="'.$this->courier_id.'"');
+            }else
+            {
+                $criteria->addCondition('json_value(t.meta,"$.ocourier_id")="'.$this->courier_id.'"');
+            }
+        }
+        
+        $criteria->compare('create_time', $this->create_time, true);
+        $criteria->compare('status', $this->status);
+        $criteria->compare('type', $this->type);
+        $criteria->compare('meta', $this->meta, true);
+        $criteria->compare('ref', $this->ref, true);
+        $criteria->compare('driver_name', $this->driver_name, true);
+        $criteria->compare('driver_rego', $this->driver_rego, true);
+        $criteria->compare('no', $this->no, true);
+
+        return new CActiveDataProvider($this, [
+            'criteria'=>$criteria,
+            'sort'=>[
+                'defaultOrder'=>'t.id DESC',
+            ],
+            'pagination'=>[
+                'pageSize'=>30,
+            ]
+        ]);
+    }
+    
+    public function getTotalPacks()
+    {
+        return sizeof($this->lines);
+    }
+
+    public function getCourierName()
+    {
+        if(!empty($this->ref))
+        {
+            return $this->ref;
+        }
+        $courierId = 0;
+        if(!empty($this->mdata['ocourier_id']))
+        {
+            $courierId = $this->mdata['ocourier_id'];
+        }else
+        {
+            $courierId = $this->courier_id;
+        }
+        $name = @GatepassCourier::$gatepass_courier[$courierId];
+        if(empty($name))
+        {
+            $name = @Org::model()->findByPk($this->courier_id)->name;
+            if(empty($name))
+            {
+                $name = "PICKUP";
+            }
+        }
+        return $name;
+    }
+    public function getPickUpType()
+    {
+        return @GatepassCourier::$types[$this->type];
+    }
+
+    public function getAllLines()
+    {
+        $criteria = new CDbCriteria();
+        $criteria->addCondition("parent_id = {$this->id}");
+        $criteria->with = ["shipment","shipment.consol"];
+        $criteria->order = "consol.awb,fid,sno desc";
+        $lines = GatepassShipment::model()->findAll($criteria);
+        return $lines;
+    }
+    /**
+     * Returns the static model of the specified AR class.
+     * Please note that you should have this exact method in all your CActiveRecord descendants!
+     * @param string $className active record class name.
+     * @return GatepassCourier the static model class
+     */
+    public static function model($className=__CLASS__)
+    {
+        return parent::model($className);
+    }
+}

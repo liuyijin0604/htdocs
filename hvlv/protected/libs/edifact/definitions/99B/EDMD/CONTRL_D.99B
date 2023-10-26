@@ -1,0 +1,32 @@
+
+1  Segment table
+
+Pos    Tag Name                                      S   R
+
+           HEADER SECTION
+
+0010   UNH Message header                            M   1     
+0020   UCI Interchange response                      M   1     
+           
+		   DETAIL SECTION
+		   
+0030       ----- Segment group 1  -----------        C   999999------+
+0040   UCM Message/package response                  M   1           |
+                                                                     |
+0050       ----- Segment group 2  -----------        C   999--------+|
+0120   UCS Segment error indication                  M   1          ||
+0130   UCD Data element error indication             C   99--------++|
+                                                                     
+0030       ----- Segment group 3  -----------        C   999999------+
+0040   UCF Message/package response                  M   1           |
+                                                                     |
+0050       ----- Segment group 4  -----------        C   999--------+|
+0120   UCM Message/package response                  M   1          ||
+                                                                    ||
+0050       ----- Segment group 5  -----------        C   99--------+||
+0120   UCS Segment error indication                  M   1         |||
+0130   UCD Data element error indication             C   1--------+++|
+
+           SUMMARY SECTION
+		   
+1150   UNT Message trailer                           M   1   

@@ -1,0 +1,529 @@
+<?php
+
+class WarehouseProcessController extends Controller
+{
+	/**
+	 * Declares class-based actions.
+	 */
+	protected $nonAjax = ['index'];
+	protected $skipAcl = [];
+
+	protected $org;
+	protected $type;
+	protected $warehouseProcessService;
+
+	public function beforeAction($action)
+	{
+		if(!Yii::app()->request->isAjaxRequest) $this->layout = 'whscan';
+		if (!Yii::app()->user->isGuest) {
+			$this->org = Org::model()->findByPk(Yii::app()->user->org);
+			$this->type = 'sc';
+		}
+		$this->warehouseProcessService = new WarehouseProcessService();
+		return parent::beforeAction($action);
+	}
+	
+	public function actionIndex()
+	{
+		$this->render('index',[]);
+	}
+
+	public function actionProcessPage()
+	{
+		switch ($_GET['tab']) {
+			case 'check_in':
+				$op ='checkin';
+				$barcode =  isset($_GET['barcode']) ? $_GET['barcode'] : '';
+				$this->render('check_in_consol_list', ['op' => $op,'barcode'=>$barcode]);
+				break;
+			case 'inspection':
+				$this->render('inspection_list',[]);
+				break;
+			case 'putaway_sort_held':
+				$this->render('putaway_sort_held_list',[]);
+				break;
+			case 'preparation':
+				$this->render('preparation_list',[]);
+				break;
+			case 'gatepass_sign':
+				$this->render('gatepass_sign_list',[]);
+				break;
+			case 'held_shipment_resorting':
+				$this->render('held_shipment_resorting_list',[]);
+			default:
+				# code...
+				break;
+		}
+	}
+
+	public function actionGetCheckInReport()
+	{
+		if(!empty($_GET['path']))
+		{
+			$pathArr = explode('/', $_GET['path']);
+			$pathCount = count($pathArr);
+			if($pathCount==2)
+			{
+				$result = $this->warehouseProcessService->getCheckInReportForConsol($pathArr[1]);
+				$str2 = '';
+				foreach ($result as $key => $r) {
+					$str3="";
+					$heldStr = "";
+					// foreach ($r as $key2 => $value) {
+					// 	if($key2!="courierId"&&$key2!="Courier"&&!preg_match('/held/i', $key2))
+					// 	{
+					// 		$str3.=" {$key2}:{$value}&nbsp;&nbsp;";
+					// 	}
+					// }
+					if($r['Held_Scan']>0||$r['Held_Total']>0)
+					{
+						$heldStr ='<font color="red">'.$r['Held_Total']."</font>";
+					}else
+					{
+						$heldStr =$r['Held_Total'];
+					}
+
+					$str3=" {$r['Courier']}:{$str3}&nbsp;&nbsp;Held:{$heldStr}";
+					$strSearch = "";
+					if($r['Unscaned']>0||$r['Oversize']>0||$r['Held_Scan']>0||$r['Held_Total']>0)
+					{
+						$strSearch = '<span class="exp" data-path="'.$this->getDptId().'/'.$pathArr[1].'/'.$r['courierId'].'" data-loaded="0"></span>';
+					}else
+					{
+						$strSearch = 'Done:';
+					}
+					$str2.='<li><p>'.$strSearch.$str3.'</p><ul></ul></li>';
+				}
+				$str = "<li><ul>".$str2."</ul></li>";
+				echo $str;
+				return;
+			}elseif($pathCount==3)
+			{
+				[$header,$result,$percent] = $this->warehouseProcessService->getCheckInReportForConsolCourier($pathArr[1],$pathArr[2]);
+				echo $this->warehouseProcessService->ajaxPLchart($header,$result,$percent);
+				return;
+			}
+		}
+	
+		$result = $this->warehouseProcessService->getCheckInReport($this->getDptId());
+		$totalArr = $result[0];
+		$resultArr = $result[1];
+		$str2 = '';
+		$today = date("Y-m-d");
+		foreach ($resultArr as $key => $r) {
+			$strHeld1 = "{$r[7]}";
+			$strHeld2 = "{$r[8]}";
+			if($r[5]>0)
+			{
+				$strHeld1 = "<font color='red'>{$strHeld1}</font>";
+			}
+			if($r[6]>0)
+			{
+				$strHeld2 = "<font color='red'>{$strHeld2}</font>";
+			}
+			$blank = "";
+			$strLen = 2*strlen($r[0])+13;
+			for ($i=0; $i < $strLen; $i++) { 
+				$blank .="&nbsp;";
+			}
+			$str3=$r[0]."&nbsp;--&nbsp;</td><td>Total HBL:&nbsp;{$r[1]}&nbsp;&nbsp;/&nbsp;&nbsp;PKG:{$r[2]}&nbsp;&nbsp"."<table>
+					<tr><td>{$blank}</td><td>Done HBL: {$r[3]}&nbsp;&nbsp;/&nbsp;&nbsp;PKG:&nbsp;{$r[4]}</td></tr>
+					<tr><td>{$blank}</td><td>Left HBL: {$r[5]}&nbsp;&nbsp;/&nbsp;&nbsp;PKG:&nbsp;{$r[6]}</td></tr>
+					<tr><td>{$blank}</td><td>Held Left HBL:&nbsp;{$strHeld2}&nbsp;&nbsp;/&nbsp;&nbsp;PKG:{$strHeld1}</td></tr></table>";
+			$str2.='<li><p style="margin:0 0 0px;"><span class="exp" data-path="'.$this->getDptId().'/'.$key.'" data-loaded="0"></span> '.$str3.'</p><ul></ul></li>';
+		}
+		$str = "<li><h2>{$today}</h2><p>Total - Consols:{$totalArr['consols']}&nbsp;&nbsp;</p>
+				<p>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Total:&nbsp;{$totalArr['pkg']}&nbsp;&nbsp;</p>
+				<p>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Done:&nbsp;{$totalArr['scanCount']}&nbsp;&nbsp;({$totalArr['scanPercent']})</p>
+				<p>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Left:&nbsp;{$totalArr['left']}</p><p>Details:</p><ul>".$str2."</ul></li>";
+
+		echo $str;
+
+		// echo '<li><p>Total - Consols: 1,433,071.93 &nbsp;&nbsp; GP: 626,875.90 &nbsp;&nbsp; Cost: 720,256.84 + 85,939.19 &nbsp;&nbsp; Margin: 43.74%</p><ul><li><p><span class="exp" data-path="106/2022-03-01/2022-03-31//10" data-loaded="0"></span> Import &nbsp;&nbsp; Rev: 1,228,824.68 &nbsp;&nbsp; GP: 430,633.01 &nbsp;&nbsp; Cost: 712,252.48 + 85,939.19 &nbsp;&nbsp; Margin: 35.04%&nbsp;</p><ul></ul></li><li><p><span class="exp" data-path="106/2022-03-01/2022-03-31//40" data-loaded="0"></span> 3PL &nbsp;&nbsp; Rev: 184,127.83 &nbsp;&nbsp; GP: 176,258.19 &nbsp;&nbsp; Cost: 7,869.64 + 0.00 &nbsp;&nbsp; Margin: 95.73%&nbsp;</p><ul></ul></li><li><p><span class="exp" data-path="106/2022-03-01/2022-03-31//50" data-loaded="0"></span> TopCourierService &nbsp;&nbsp; Rev: 20,119.42 &nbsp;&nbsp; GP: 19,984.70 &nbsp;&nbsp; Cost: 134.72 + 0.00 &nbsp;&nbsp; Margin: 99.33%&nbsp;</p><ul></ul></li></ul></li>';
+	}
+
+	public function actionGetPutawaySortHeldList()
+	{
+		if(!empty($_GET['path']))
+		{
+			$pathArr = explode('/', $_GET['path']);
+			$pathCount = count($pathArr);
+			if($pathCount==2)
+			{
+				if (isset($_GET['FiltersForm'])) {
+					$filtersForm->filters = $_GET['FiltersForm'];
+				}
+				[$sortAttributes,$provide,$percent] = $this->warehouseProcessService->getPutawaySortHeldDetail($pathArr[0],$pathArr[1]);
+				//echo $this->warehouseProcessService->ajaxPLchart($header,$result,$percent);
+				$filtersForm = new FiltersForm;
+				$reportService = new ReportService();
+				$dataprovider = $reportService->preDataProvider($filtersForm, $provide, $sortAttributes);
+				$this->renderPartial('grid_view',['model'=>$dataprovider, 'filter' => $filtersForm,'attributes' => $sortAttributes,'uid'=>join('',$pathArr)]);
+				return;
+			}
+		}
+	
+		$result = $this->warehouseProcessService->getPutawaySortHeldList($this->getDptId());
+		$totalArr = $result['total'];
+		$today = date("Y-m-d");
+		$str2 = '';
+		foreach ($result as $key => $r) {
+			if($key=='total') continue;
+			$str3="";
+			foreach ($r as $key2 => $value) {
+				if($key2!="name")
+				{
+					$str3.=" {$key2}:{$value}&nbsp;&nbsp;";
+				}
+			}
+			$str2.='<li><p><span class="exp" data-path="'.$this->getDptId().'/'.$key.'" data-loaded="0"></span> '.Yii::t('whscan',$r['name']).'&nbsp;&nbsp;'.$str3.'</p><ul></ul></li>';
+		}
+		$str = "<li><p><h2>{$today}</h2>".Yii::t('whscan','Sort Held')." and ".Yii::t('whscan','Put Away')." Summary Total - :{$totalArr['total']}&nbsp;&nbsp;</p>
+				<p>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Done:&nbsp;{$totalArr['done']}&nbsp;&nbsp;({$totalArr['donePercent']})</p>
+				<p>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Left:&nbsp;{$totalArr['left']}</p><p>Details:</p><ul>".$str2."</ul></li>";
+
+		echo $str;
+		// echo '<li><p>Total - Consols: 1,433,071.93 &nbsp;&nbsp; GP: 626,875.90 &nbsp;&nbsp; Cost: 720,256.84 + 85,939.19 &nbsp;&nbsp; Margin: 43.74%</p><ul><li><p><span class="exp" data-path="106/2022-03-01/2022-03-31//10" data-loaded="0"></span> Import &nbsp;&nbsp; Rev: 1,228,824.68 &nbsp;&nbsp; GP: 430,633.01 &nbsp;&nbsp; Cost: 712,252.48 + 85,939.19 &nbsp;&nbsp; Margin: 35.04%&nbsp;</p><ul></ul></li><li><p><span class="exp" data-path="106/2022-03-01/2022-03-31//40" data-loaded="0"></span> 3PL &nbsp;&nbsp; Rev: 184,127.83 &nbsp;&nbsp; GP: 176,258.19 &nbsp;&nbsp; Cost: 7,869.64 + 0.00 &nbsp;&nbsp; Margin: 95.73%&nbsp;</p><ul></ul></li><li><p><span class="exp" data-path="106/2022-03-01/2022-03-31//50" data-loaded="0"></span> TopCourierService &nbsp;&nbsp; Rev: 20,119.42 &nbsp;&nbsp; GP: 19,984.70 &nbsp;&nbsp; Cost: 134.72 + 0.00 &nbsp;&nbsp; Margin: 99.33%&nbsp;</p><ul></ul></li></ul></li>';
+	}
+
+
+	public function actionGetInspectionList()
+	{
+		$model = new ShipmentWhInspection('search');
+		$model->unsetAttributes();
+
+		if(!empty($_GET['ShipmentWhInspection']))
+		{
+			$model->setAttributes($_GET['ShipmentWhInspection']);
+		}
+		$model->dpt_id = $this->getDptId();
+
+		$result = $this->warehouseProcessService->getInspectionTotalInfo($this->getDptId());
+		$str2 = '';
+		$today = date("Y-m-d");
+		$str = "<li><p><h2>{$today}</h2>Total - :{$result['total']}&nbsp;&nbsp;</p>
+				<p>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Done:&nbsp;{$result['done']}&nbsp;&nbsp;({$result['donePercent']})</p>
+				<p>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Left:&nbsp;{$result['left']}</p><p>Details:</p></li>";
+
+		echo $str;
+
+
+		$this->renderPartial('_sub_inspection',['model'=>$model,'uid'=>$model->dpt_id."inspection"]);
+		return;
+
+	}
+
+	public function actionDeleteInspectionFile()
+	{
+		$id = $_POST['id'];
+		$file = FileRepo::model()->findByPk($id);
+		$file->status = FileRepo::DELETED;
+	}
+
+	public function actionGetGatePassSignList()
+	{
+		
+		$result = $this->warehouseProcessService->getGapsignSummeryList($this->getDptId());
+		$str2 = '';
+		foreach ($result as $key => $r) {
+			$str3="";
+			foreach ($r as $key2 => $value) {
+				if($key2!="courier"&&$value!=null)
+				{
+					$str3.=" {$key2}:{$value}&nbsp;&nbsp;";
+				}
+			}
+			$str2.='<li><p> '.$str3.' <a href="'.Yii::app()->baseUrl.'/../gapsig/gatePass/index.app?direct='.$r['courier'].'&&dptId='.$this->getDptId().'" class="exp" target="_blank" style="display:inline-block">Sign '.$r['Courier'].'</a></p><ul></ul></br></li>';
+		}
+		$str = "<li><p>Gatepass Sign Summary Group By Courier</p><ul>".$str2."</ul></li>";
+
+		echo $str;
+
+		// echo '<li><p>Total - Consols: 1,433,071.93 &nbsp;&nbsp; GP: 626,875.90 &nbsp;&nbsp; Cost: 720,256.84 + 85,939.19 &nbsp;&nbsp; Margin: 43.74%</p><ul><li><p><span class="exp" data-path="106/2022-03-01/2022-03-31//10" data-loaded="0"></span> Import &nbsp;&nbsp; Rev: 1,228,824.68 &nbsp;&nbsp; GP: 430,633.01 &nbsp;&nbsp; Cost: 712,252.48 + 85,939.19 &nbsp;&nbsp; Margin: 35.04%&nbsp;</p><ul></ul></li><li><p><span class="exp" data-path="106/2022-03-01/2022-03-31//40" data-loaded="0"></span> 3PL &nbsp;&nbsp; Rev: 184,127.83 &nbsp;&nbsp; GP: 176,258.19 &nbsp;&nbsp; Cost: 7,869.64 + 0.00 &nbsp;&nbsp; Margin: 95.73%&nbsp;</p><ul></ul></li><li><p><span class="exp" data-path="106/2022-03-01/2022-03-31//50" data-loaded="0"></span> TopCourierService &nbsp;&nbsp; Rev: 20,119.42 &nbsp;&nbsp; GP: 19,984.70 &nbsp;&nbsp; Cost: 134.72 + 0.00 &nbsp;&nbsp; Margin: 99.33%&nbsp;</p><ul></ul></li></ul></li>';
+	}
+
+	public function actionGetPreparationList()
+	{
+		if(!empty($_GET['path']))
+		{
+			$pathArr = explode('/', $_GET['path']);
+			$pathCount = count($pathArr);
+			if($pathCount==3)
+			{
+				$pa = explode(',', $pathArr[0]);
+				$params = [];
+				foreach ($pa as $k => $v) {
+					if(!empty($v))
+					{
+						$pp = explode('|', $v);
+						$params[$pp[0]] = $pp[1];
+					}
+				}
+				$dptId = $pathArr[1];
+				$type = $pathArr[2];
+				$result = $this->warehouseProcessService->getPreparationSummeryGatepassList($dptId,$params,$type);
+				$str2 = '';
+				foreach ($result as $key => $r) {
+					$str3="";
+					foreach ($r as $key2 => $value) {
+						if($key2=="ids")
+						{
+
+						}elseif($key2!="Type")
+						{
+							$str3.=" {$key2}:{$value}&nbsp;&nbsp;";
+						}else
+						{
+							$str3.=" {$value}&nbsp;&nbsp;";
+						}
+					}
+
+					if(empty($paramsStr))
+					{
+						$paramsStr=$k."|".$v;
+					}else
+					{
+						$paramsStr=$paramsStr.",".$k."|".$v;
+					}
+
+					$str2.='<li><p><span class="exp" data-path="'.$paramsStr.'/'.$this->getDptId().'/'.$type.'/'.$key.'" data-loaded="0"></span>'.$str3.' <a href="'.Yii::app()->baseUrl.'/../gapsig/gatePass/needProcessParcelList.app?ids='.$r['ids'].'&&notSearch=1'.'&&cargoType='.$type.'&&gatepass_no='.$key.'&&ddpt_id='.$this->getDptId().'" class="exp" target="_blank">Prepare</a></p><ul></ul></li>';
+				}
+				$str = "<li><ul>".$str2."</ul></li>";
+				echo $str;
+
+				return;
+
+			}elseif($pathCount==4)
+			{
+				$pa = explode(',', $pathArr[0]);
+				$params = [];
+				foreach ($pa as $k => $v) {
+					if(!empty($v))
+					{
+						$pp = explode('|', $v);
+						$params[$pp[0]] = $pp[1];
+					}
+				}
+				$dptId = $pathArr[1];
+				$type = $pathArr[2];
+				$gatepassNo = $pathArr[3];
+				[$sortAttributes,$provide] = $this->warehouseProcessService->getPreparationGatepassShipments($dptId,$params,$type,$gatepassNo);
+				
+				$filtersForm = new FiltersForm;
+				$reportService = new ReportService();
+				$dataprovider = $reportService->preDataProvider($filtersForm, $provide, $sortAttributes);
+				$this->renderPartial('grid_view',['model'=>$dataprovider, 'filter' => $filtersForm,'attributes' => $sortAttributes,'uid'=>$gatepassNo]);
+				return;
+			}
+		}
+
+
+		$params = [];
+		if(!empty($_POST))
+		{
+			$params = $_POST;
+		}else
+		{
+			$params['pickupDate'] = 'tomorrow';
+		}
+		$result = $this->warehouseProcessService->getPreparationSummeryList($this->getDptId(),$params);
+		$totalArr = $result['total'];
+		$str2 = '';
+		foreach ($result as $key => $r) {
+			if($key=='total') continue;
+			$str3="";
+			foreach ($r as $key2 => $value) {
+				if($key2=="ids")
+				{
+
+				}elseif($key2!="Type")
+				{
+					$str3.=" {$key2}:{$value}&nbsp;&nbsp;";
+				}else
+				{
+					$str3.=" {$value}&nbsp;&nbsp;";
+				}
+			}
+			if($key!=CargoProcess::PICKUP_CARGO)
+			{
+				$paramsStr = "";
+				foreach ($params as $k => $v) {
+					if(empty($paramsStr))
+					{
+						$paramsStr=$k."|".$v;
+					}else
+					{
+						$paramsStr=$paramsStr.",".$k."|".$v;
+					}
+				}
+				$str2.='<li><p><span class="exp" data-path="'.$paramsStr.'/'.$this->getDptId().'/'.$key.'" data-loaded="0"></span>'.$str3.' <a href="'.Yii::app()->baseUrl.'/../gapsig/gatePass/needProcessParcelList.app?ids='.$r['ids'].'&&notSearch=1'.'&&cargoType='.$key.'" class="exp" target="_blank">Prepare</a></p><ul></ul></li>';
+			}else
+			{
+				$str2.='<li><p> '.$str3.' <a href="'.Yii::app()->baseUrl.'/../gapsig/gatePass/needProcessParcelList.app?ids='.$r['ids'].'&&notSearch=1'.'&&cargoType='.$key.'&&ddpt_id='.$this->getDptId().'" class="exp" target="_blank">Prepare</a></p><ul></ul></li>';
+			}
+		}
+
+		$today = date("Y-m-d");
+		$str = "<li><p><h2>{$today}</h2>Total - :{$totalArr['total']}&nbsp;&nbsp;</p>
+				<p>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Done:&nbsp;{$totalArr['done']}&nbsp;&nbsp;({$totalArr['donePercent']})</p>
+				<p>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Left:&nbsp;{$totalArr['left']}</p><p>Preparation Group By Courier:</p><ul>".$str2."</ul></li>";
+
+		if(!empty( $_POST))
+		{
+			$strAll = '<ul id="pl-sum-report-data_'.$params['tabid'].'" class="report_list" style="margin-top: 20px; list-style: none;font-size: 1.2em;">'.$str.'</ul>';
+			echo $strAll;
+		}else
+		{
+			echo $str;
+		}
+	}
+
+	public function actionGetHeldShipmentGatepassList()
+	{
+		if(!empty($_GET['path']))
+		{
+			$pathArr = explode('/', $_GET['path']);
+			$pathCount = count($pathArr);
+			if($pathCount==2)
+			{
+				$pa = explode(',', $pathArr[0]);
+				$params = [];
+				$dptId = $pathArr[0];
+				$gatepassNo = $pathArr[1];
+				[$sortAttributes,$provide] = $this->warehouseProcessService->getPreparationGatepassShipments($dptId,$params,"",$gatepassNo,1);
+				
+				$filtersForm = new FiltersForm;
+				$reportService = new ReportService();
+				$dataprovider = $reportService->preDataProvider($filtersForm, $provide, $sortAttributes);
+				$this->renderPartial('grid_view',['model'=>$dataprovider, 'filter' => $filtersForm,'attributes' => $sortAttributes,'uid'=>$gatepassNo]);
+				return;
+			}
+		}
+	
+		$result = $this->warehouseProcessService->getHeldShipmentGatepassSummary($this->getDptId());
+		$totalArr = $result[0];
+		$resultArr = $result[1];
+		$today = date("Y-m-d");
+		$str2 = '';
+		foreach ($resultArr as $key => $r)
+		{
+			$blank = "";
+			$strLen = 2*strlen("GP No. ".$r[0])+13;
+			for ($i=0; $i < $strLen; $i++) { 
+				$blank .="&nbsp;";
+			}
+			$str3="GP No. ".$r[1]." "."&nbsp;--&nbsp;</td><td>Total HBL:&nbsp;{$r[2]}&nbsp;&nbsp;"."<table>
+					<tr><td>{$blank}</td><td>Done HBL: {$r[4]}&nbsp;&nbsp;</td></tr>
+					<tr><td>{$blank}</td><td>Left HBL: ".($r[2]-$r[4])."&nbsp;&nbsp;</td></tr>
+					</table>";
+			$str2.='<li><p style="margin:0 0 0px;"><span class="exp" data-path="'.$this->getDptId().'/'.$key.'" data-loaded="0"></span> '.$str3.'</p><ul></ul></li>';
+		}
+
+		$str = "<li><p><h2>{$today}</h2>Total - Gatepasses:{$totalArr['gatepasses']}&nbsp;&nbsp;</p>
+				<p>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Total:&nbsp;{$totalArr['totalShipments']}&nbsp;&nbsp;</p>
+				<p>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Done:&nbsp;{$totalArr['allTotalResortShipment']}&nbsp;&nbsp;({$totalArr['donePercent']})</p>
+				<p>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Left:&nbsp;".($totalArr['totalShipments']-$totalArr['allTotalResortShipment'])."</p><p>Details:</p><ul>".$str2."</ul></li>";
+		echo $str;
+
+	}
+
+	public function actionUploadFile($id)
+	{
+		$f = $_FILES['file'];
+		$filename = $f['tmp_name'];
+		$name = $f['name'];
+		$comment = $_POST['ShipmentWhInspectionRelations']['comment'];
+		if(!empty($comment))
+		{
+			$namearr = explode('.', $name);
+			$name = $comment.".".end($namearr);
+		}
+		$relation = ShipmentWhInspectionRelations::model()->findByPk($id);
+		$consol = Consol::model()->findByPk($relation->inspection->consol_id);
+		$hash = FileRepo::uploadHash($consol, FileRepo::CONSOL_ATTACHMENT);
+		if(!is_uploaded_file($filename)) return false;
+		$thisHash = $hash;
+		$filesize = filesize($filename);
+		$date = date('Y-m-d H:i:s');
+		$fileHash = hash_file('crc32b', $filename).hash('crc32b', $filesize);
+		$finfo = finfo_open(FILEINFO_MIME_TYPE);
+		$mime = finfo_file($finfo, $f['tmp_name']);
+		$fr = Service::updateUploadSingleFile($filesize,$date,$fileHash,$finfo,$mime,$filename,$name, $thisHash,false,false,false,true,FileRepo::ACTIVE);
+		$relation->file_id = $fr->id;
+		$relation->process_status = ShipmentWhInspection::UPLOAD_STATUS;
+		$relation->upload_time = $date;
+		$relation->check_status = $_POST['ShipmentWhInspectionRelations']['check_status'];
+		$relation->comment = $comment;
+		$relation->save();
+		$relation->inspection->process_status = ShipmentWhInspection::UPLOAD_STATUS;
+		$relation->inspection->upload_time = $date;
+		$relation->inspection->save();
+		$consol->log("upload Inspection File");
+		echo 'done';
+	}
+
+	public function actionInspectionOperation()
+	{
+		$id = $_GET["id"];
+		$_GET["tabid"] = "123456";
+		$result =[];
+		$result['model'] = ShipmentWhInspectionRelations::model()->findByPk($id);
+		$this->render('operation_tab', $result);
+	}
+
+	public function actionDoneInspection()
+	{
+		$id = $_GET["id"];
+		$model = $this->warehouseProcessService->doneInspection($id);
+		$this->ajaxResult($model, ['id']);
+	}
+
+	public function actionUploadDamageFile()
+	{
+		$id = $_GET["id"];
+		$sn = $_GET["sn"];
+		$p = ImParcel::model()->findByPk($id);
+		$f = $_FILES['damage_file'];
+		$filename = $f['tmp_name'];
+		$name = $f['name'];
+		$namearr = explode('.', $name);
+		$name = $p->ref."-".$sn.".".end($namearr);
+
+		$hash = FileRepo::uploadHash($p, FileRepo::SHIPMENT_DAMAGE);
+		if(!is_uploaded_file($filename)) return false;
+		$thisHash = $hash;
+		$filesize = filesize($filename);
+		$date = date('Y-m-d H:i:s');
+		$fileHash = hash_file('crc32b', $filename).hash('crc32b', $filesize);
+		$finfo = finfo_open(FILEINFO_MIME_TYPE);
+		$mime = finfo_file($finfo, $f['tmp_name']);
+		$fr = Service::updateUploadSingleFile($filesize,$date,$fileHash,$finfo,$mime,$filename,$name, $thisHash,false,false,false,true,FileRepo::ACTIVE);
+		$p->bwf  = $p->bwf|ImParcel::DAMAGEBWFCODE;
+		$files = FileRepo::model()->findAll("fid = :fid and type =:type",[":fid"=>$p->id,":type"=>FileRepo::SHIPMENT_DAMAGE]);
+		$damagedPacks = 0;
+		if(!empty($files))
+		{
+			$fileArr = [];
+			foreach ($files as $key => $value) {
+				$fileArr[$value->name] = $value->id;
+			}
+			$damagedPacks = count($fileArr);
+			$p->mdata["damaged_packs"] = $damagedPacks;
+		}	
+		$p->update('bwf','meta');
+		$p->log("upload Damage File");
+		echo 'done';
+	}
+
+	private function getDptId()
+	{
+		$tempWareHouse=106;
+		if (!empty(Yii::app()->session['scan_warehouse']) && Yii::app()->session['scan_warehouse']=='melbourne') {
+			$tempWareHouse=218;
+		}else if (!empty(Yii::app()->session['scan_warehouse']) && Yii::app()->session['scan_warehouse']=='brisbane') {
+			$tempWareHouse=530;
+		}
+		return $tempWareHouse;
+	}
+
+}

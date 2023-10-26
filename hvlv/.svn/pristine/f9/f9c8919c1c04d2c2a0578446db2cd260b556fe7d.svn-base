@@ -1,0 +1,40 @@
+<?php
+class WhscanController extends Controller
+{
+	/**
+	 * Declares class-based actions.
+	 */
+
+	public function beforeAction($action)
+	{
+		$date = Service::getCacheData("loginTime".date("Ymd").User::currentUserID());
+		if(!empty($date)){
+			// print_r($date[0]);
+			$cacheTime = strtotime($date[0]);
+			$nowTime = strtotime("-1 hour",strtotime(date('Y-m-d H:i:s')));
+			// echo $cacheTime."|".$nowTime;
+			// Yii::app()->end();
+			if($cacheTime>=$nowTime){
+				// echo "The difference is within 1 hour";
+				$this->setLoginTime();
+			} else {
+			    // echo "The difference is not within 1 hour";
+			    Yii::app()->user->logout();
+				$this->redirect('../');
+			}
+		}
+		else{
+			$this->setLoginTime();
+		}
+
+		return parent::beforeAction($action);
+	}
+
+	private function setLoginTime()
+	{
+		$dataArr = [date('Y-m-d H:i:s')];
+		Service::setCacheData("loginTime".date("Ymd").User::currentUserID(),$dataArr,3800);
+		// print_r(Service::getCacheData("loginTime".date("Ymd").User::currentUserID()));		
+	}
+
+}

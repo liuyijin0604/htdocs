@@ -1,0 +1,336 @@
+<h2><?=SiReconcile::$types[$type]?> Si Reconcile List</h2>
+<div style="position: absolute; right:80px;">
+  <?php
+
+      echo "<a class=\"jqm_link\"  href=\"" .$this->createUrl("siReconcile/addInvoicePage", ['type'=>$_GET['type']])
+       ."\" title=\"".$_GET['type']."_add_invoice\" ><span style=\"background-position:-48px -688px\" class=\"icon\"></span>".SiReconcile::$types[$type]."_add_invoice</a>";
+  ?>
+
+</div>
+</br>
+</br>
+<div style="position: absolute; right:80px;">
+    <?php
+    foreach (SiReconcile::$states as $key => $value) {
+       echo "<a class=\"tab_link\"  href=\"" .$this->createUrl("", ['type'=>$_GET['type'],'status'=>$key])
+       ."\" title=\"{$value}\" ><span style=\"background-position:-48px -688px\" class=\"icon\"></span>{$value}</a>";
+    }
+    ?>
+</div>
+<br>
+<br>
+<style>
+    .cloumn_red_1{
+        color:red;
+        font-weight: bold;
+    }   
+    .cloumn_orange_1{
+        color:orange;
+        font-weight: bold;
+    }  
+</style>
+
+<div style="width:50%; float: left" id="si-reconcile-client-view<?=$_GET['tabid']?>">
+   <?php 
+   $this->widget('zii.widgets.grid.CGridView', [
+    'id'=>'si-reconcile-client-list-grid'.$_GET['tabid'],
+    'htmlOptions'=>['style'=>'width: 70%'],
+    'cssFile' => false,
+    'dataProvider'=>$dataProvider[0],
+    'filter'=>$dataProvider[1],
+    'columns'=>[
+        ['name'=>'status','headerHtmlOptions' => ['style' => 'display:none'],'filterHtmlOptions' => ['style' => 'display:none'],
+            'htmlOptions' => ['style' => 'display:none'],'type'=>'raw'],
+        ['name'=>'status','value'=>'SiReconcile::$states'.'[$data["status"]]'],
+        ['name'=>'day1','header'=>'<=7'],
+        ['name'=>'day2','header'=>'>7 & <=14'],
+        ['name'=>'day3','header'=>'>14','type'=>'raw','value' => '"<span style=\"color: red\">" . $data["day3"] . "</span>"'],
+    ],
+   ]); 
+   ?>
+</div>
+
+<div style="width:50%; float: left" id="si-reconcile-client-view2<?=$_GET['tabid']?>">
+   <?php 
+   $this->widget('zii.widgets.grid.CGridView', [
+    'id'=>'si-reconcile-client-list-grid2'.$_GET['tabid'],
+    'htmlOptions'=>['style'=>'width: 70%'],
+    'cssFile' => false,
+    'dataProvider'=>$dataProvider2[0],
+    'filter'=>$dataProvider2[1],
+    'columns'=>[
+        ['name'=>'org_name','header'=>'Supplier'],
+        ['name'=>'day1','header'=>'<=7'],
+        ['name'=>'day2','header'=>'>7 & <=14'],
+        ['name'=>'day3','header'=>'>14','type'=>'raw','value' => '"<span style=\"color: red\">" . $data["day3"] . "</span>"'],
+    ],
+   ]); 
+   ?>
+</div>
+
+<br/>
+<div class="form">
+    <div class="row">
+        <div class="row rowcol rowleft">
+        <?php echo Chtml::label('refs(,; Eenter)','refs'); ?>
+        <?php echo Chtml::textArea('SiReconcile[refs]','',array('cols'=>60, 'rows' => 2)); ?>
+        <p><small>Up to 200 numbers.</small></p>
+        </div>
+    </div>
+     <div class="row">
+   <?php  echo CHtml::button('Show All', ['class' => 'show_all']);?>
+    </div>
+</div>
+<div style="right: 20px;position: absolute;">
+<?php
+
+    echo "<a class=\"jqm_link\"  href=\"" .$this->createUrl("siReconcile/adjustSiReconcileRef")
+       ."\" title=\"Import Adjust Si Reconcile Ref\" ><span style=\"background-position:-48px -688px\" class=\"icon\"></span>Import Adjust Si Reconcile Ref</a>";
+  ?>
+
+<a href="#" class="export_search" target="_blank" data-baseurl="<?=$this->createUrl('siReconcile/export', ['type'=>$_GET['type']]);?>"><div style="background-position:-48px -688px" class="icon"></div> Export Current Search</a> 
+</div>
+ <div class="row">
+  <span> <h2> Available Si Reconciles </h2></span>
+                    <!--<div id="loadingPic"  style="width:20px;height:20px;float:left;"></div>-->
+ <div id="si-reconcile-list-view<?=$_GET['tabid']?>">
+      <?php
+         $this->renderPartial('_sub_reconciles', [
+            'model' => $model,
+            'type' =>$type,
+            'status' =>$status
+         ]);
+    ?>
+  </div>
+</div>
+<script>
+$(function(){
+    var tab = $('#<?=$_GET["tabid"];?>');
+    var panel=tab.data('panel');
+    <?php
+     $siReconcileListUrl = 'siReconcile/getReconcileList';
+     ?>
+
+     $('#si-reconcile-client-view<?=$_GET['tabid']?>',panel).on("click", "table tbody td", function(event){
+        // get cargoe id
+        var status = parseInt($(this).parent().children(':nth-child(1)').html());
+        var data = {};
+        data['type'] = <?=$_GET['type']?>;
+        data['status'] = status;
+        $.ajax({
+            type : 'GET',
+            url : '<?php echo Yii::app()->createAbsoluteUrl($siReconcileListUrl, ['tabid'=>$_GET['tabid'],'SiReconcile'=>'1']) ;?>',
+            data: data,
+            dataType: 'html',
+            success:function(resp){
+                $('#si-reconcile-list-view<?=$_GET['tabid']?>',panel).html(resp);
+            },
+        });
+    }); 
+    
+    $('.show_all',panel).on('click',function(event){
+        $('.show_all',panel).val('searching......');
+        var data = {};
+        data['type'] = <?=$_GET['type']?>;
+        data['SiReconcile'] = {"refs":$('#SiReconcile_refs',panel).val()};
+        $.ajax({
+            type : 'GET',
+            url : '<?php echo Yii::app()->createAbsoluteUrl($siReconcileListUrl, ['tabid'=>$_GET['tabid'],'SiReconcile'=>'1']) ;?>',
+            data: data,
+            dataType: 'html',
+            success:function(resp){
+                $('#si-reconcile-list-view<?=$_GET['tabid']?>').html(resp);
+                 $('.show_all',panel).val('Show All');
+            },
+        });
+        
+    });
+
+    $('a.export_search', panel).on('mousedown', function(){
+        var q = $('.filters input, .filters select', panel).serialize();
+        $(this).attr('href', $(this).data('baseurl') + '&' + q);
+    });
+
+    $('a.manualErrorCheckingCurrentSearch', panel).on('mousedown', function(){
+        if(!confirm('Are you sure to error check current search?')){  
+          return false;
+        }
+        var q = $('.filters input, .filters select', panel).serialize();
+        $.ajax({
+                    url: '<?=$this->createUrl('siReconcile/manualErrorCheckingCurrentSearch')?>'+'?' + q,
+                    type: "post",
+                    data: [],
+                    processData: false,
+                    contentType: false,
+                    success: function(r) {
+                        r = JSON.parse(r);
+                        if(r.done)
+                         {
+                               myApp.notice(r.msg, 5000);
+                         }else
+                         {
+                          myApp.alert(r.msg, false);   
+                       }
+                       tab.trigger($trigger);
+                   },
+                    error: function(e) {
+                        console.log(e);
+                    }
+                }); 
+
+        return false;
+    });
+
+    $('a.manualLinkingBillingCurrentSearch', panel).on('mousedown', function(){
+        if(!confirm('Are you sure to linking current search with billing?')){  
+          return false;
+        }
+        var q = $('.filters input, .filters select', panel).serialize();
+        $.ajax({
+                    url: '<?=$this->createUrl('siReconcile/manualLinkingBillingCurrentSearch')?>'+'?' + q,
+                    type: "post",
+                    data: [],
+                    processData: false,
+                    contentType: false,
+                    success: function(r) {
+                        r = JSON.parse(r);
+                        if(r.done)
+                         {
+                               myApp.notice(r.msg, 5000);
+                         }else
+                         {
+                          myApp.alert(r.msg, false);   
+                       }
+                       tab.trigger($trigger);
+                   },
+                    error: function(e) {
+                        console.log(e);
+                    }
+                }); 
+
+        return false;
+    });
+
+    $('a.manualToPayCurrentSearch', panel).on('mousedown', function(){
+        if(!confirm('Are you sure to to pay current search?')){  
+          return false;
+        }
+        var q = $('.filters input, .filters select', panel).serialize();
+        $.ajax({
+                    url: '<?=$this->createUrl('siReconcile/manualToPayCurrentSearch')?>'+'?' + q,
+                    type: "post",
+                    data: [],
+                    processData: false,
+                    contentType: false,
+                    success: function(r) {
+                        r = JSON.parse(r);
+                        if(r.done)
+                         {
+                               myApp.notice(r.msg, 5000);
+                         }else
+                         {
+                          myApp.alert(r.msg, false);   
+                       }
+                       tab.trigger($trigger);
+                   },
+                    error: function(e) {
+                        console.log(e);
+                    }
+                }); 
+
+        return false;
+    });
+
+    $('a.brokerBulkUpdateInvoice', panel).on('mousedown', function(){
+        if(!confirm('Are you sure to bulk update the invoices?')){  
+          return false;
+        }
+        var q = $('.filters input, .filters select', panel).serialize();
+        $.ajax({
+                    url: '<?=$this->createUrl('siReconcile/bulkUpdateLine')?>'+'?' + q,
+                    type: "post",
+                    data: [],
+                    processData: false,
+                    contentType: false,
+                    success: function(r) {
+                        r = JSON.parse(r);
+                        console.log(r);
+                        if(!r.done)
+                         {
+                               myApp.notice(r.msg, 5000);
+                         }else
+                         {
+                          myApp.alert(r.msg, false);   
+                        }
+                       tab.trigger($trigger);
+                   },
+                    error: function(e) {
+                        console.log(e);
+                    }
+                }); 
+
+        return false;
+    });
+
+    $('a.brokerToPayCurrentSearch', panel).on('mousedown', function(){
+        if(!confirm('Are you sure to to pay current search?')){  
+          return false;
+        }
+        var q = $('.filters input, .filters select', panel).serialize();
+        $.ajax({
+                    url: '<?=$this->createUrl('siReconcile/brokerToPayCurrentSearch')?>'+'?' + q,
+                    type: "post",
+                    data: [],
+                    processData: false,
+                    contentType: false,
+                    success: function(r) {
+                        r = JSON.parse(r);
+                        if(r.done)
+                         {
+                               myApp.notice(r.msg, 5000);
+                         }else
+                         {
+                          myApp.alert(r.msg, false);   
+                       }
+                       tab.trigger($trigger);
+                   },
+                    error: function(e) {
+                        console.log(e);
+                    }
+                }); 
+
+        return false;
+    });
+
+    $('a.brokerLinkingBillingCurrentSearch', panel).on('mousedown', function(){
+        if(!confirm('Are you sure to linking current search with billing?')){  
+          return false;
+        }
+        var q = $('.filters input, .filters select', panel).serialize();
+        $.ajax({
+                    url: '<?=$this->createUrl('siReconcile/brokerLinkingBillingCurrentSearch')?>'+'?' + q,
+                    type: "post",
+                    data: [],
+                    processData: false,
+                    contentType: false,
+                    success: function(r) {
+                        r = JSON.parse(r);
+                        if(r.done)
+                         {
+                               myApp.notice(r.msg, 5000);
+                         }else
+                         {
+                          myApp.alert(r.msg, false);   
+                       }
+                       tab.trigger($trigger);
+                   },
+                    error: function(e) {
+                        console.log(e);
+                    }
+                }); 
+
+        return false;
+    });
+})
+  
+</script>

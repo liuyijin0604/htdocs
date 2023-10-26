@@ -1,0 +1,806 @@
+<?php
+
+/**
+ * This is the model class for table "addr".
+ *
+ * The followings are the available columns in table 'addr':
+ * @property string $id
+ * @property string $owner_id
+ * @property string $name
+ * @property string $address
+ * @property string $suburb
+ * @property string $city
+ * @property string $state
+ * @property string $postcode
+ * @property string $country
+ * @property string $tel
+ * @property string $email
+ * @property string $acc
+ */
+class Addr extends CActiveRecord
+{
+	public $old_full_addr;
+	public $auto_match = true;
+	public $name_change = false;
+	const LOCAL_CORRECT_SUBURB = 1;
+	const LOCAL_CORRECT_POSTCODE = 2;
+	const LOCAL_CORRECT_STATE = 4;
+	const GEOCODE_CORRECT_SUBURB = 8;
+	const GEOCODE_CORRECT_POSTCODE = 16;
+	const GEOCODE_CORRECT_STATE = 32;
+	const INCORRECTABLE_STATE = 512;
+
+	public static $editStreetCode = [ 
+		1=>"local correct suburb",
+		2=>"local correct postcode",
+		4=>"local correct state",
+		8=>"geocode correct suburb",
+		16=>"geocode correct postcode",
+		32=>"geocode correct state",
+		512=>"incorrectable"
+	];
+
+
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName()
+	{
+		return 'addr';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return [
+			['owner_id, name, address,company, suburb, city, state, postcode, country, tel, email, cnid_id, cnid_no, acc', 'safe'],
+			['name, email', 'length', 'max'=>200],
+			['suburb, state', 'length', 'max'=>100],
+			['postcode', 'length', 'max'=>20],
+			['company', 'length', 'max'=>250],
+			['country, tel', 'length', 'max'=>50],
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			['id, name, address, suburb, company,city, state, postcode, country, tel, email, cnid_id, cnid_no, acc', 'safe', 'on'=>'search'],
+		];
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return [
+			'cnid' => [self::BELONGS_TO, 'CnID', 'cnid_id'],
+			'latest' => [self::HAS_MANY, 'Addr', '', 'on'=>'latest.cnid_id = t.cnid_id AND t.id < latest.id'],
+		];
+	}
+
+	public function ExportValidate($t=1, $adderr=false)
+	{
+		$err = [];
+		if (empty($this->name)) {
+			$err['name'] = in_array($t, [1,3])? 'Consignor Name required' : 'Consignee Name required';
+		}
+		if (in_array($t, [2, 4])) {
+			if (empty($this->address)) {
+				$err['address'] = 'Consignee Address required';
+			}
+			if (empty($this->tel)) {
+				$err['tel'] = 'Consignee Phone required';
+			}
+		}
+		if ($t == 2 && empty($this->cnid_id)) {
+			$err['cnid_id'] = 'Consignee Chinese ID required';
+		}
+
+		if ($adderr) {
+			foreach ($err as $k => $v) {
+				$this->addError($k, $v);
+			}
+		}
+
+		return $err;
+	}
+
+	public function fullAddress($cs=[])
+	{
+		$cs = empty($cs)? ['suburb', 'city', 'state', 'postcode', 'country'] : $cs;
+		$fa = [];
+		$addr = str_replace(',', ', ', $this->address);
+		foreach ($cs as $c) {
+			if ($c == 'address') {
+				continue;
+			}
+			$fa[] = $this->{$c};
+			//$addr = str_ireplace($this->{$c},'', $addr);
+		}
+		if (!in_array('country', $cs)) {
+			$addr = str_ireplace(', '.$this->country, '', $addr);
+		}
+		return preg_replace('/[ ]*,[, ]+/', ', ', $addr.', '.implode(', ', $fa));
+	}
+
+	public function apAddress($cs=[])
+	{
+		$cs = empty($cs)? ['suburb', 'state', 'postcode'] : $cs;
+		$fa = [];
+		$addr = str_replace(',', ', ', ucwords(strtolower($this->address)));
+		foreach ($cs as $c) {
+			if ($c == 'address') {
+				continue;
+			}
+			$fa[] = $this->{$c};
+		}
+		return preg_replace('/[ ]*,[, ]+/', ', ', $addr."\n ".strtoupper(implode(' ', $fa)));
+	}
+	
+	public function getDest()
+	{
+		return $this->postcode;
+	}
+
+	public function getCnFullAddress($stf = false)
+	{
+		if (!empty($this->state) && strpos($this->address, mb_substr($this->state, 0, 2)) === 0 && !empty($this->city) && strpos($this->address, mb_substr($this->city, 0, 2)) > 0) { //check if address field already contains the full address
+			$ad = $this->address;
+		} else {
+			if ($stf) {
+				if ($this->state == $this->city) {
+					$this->city = mb_substr($this->city, 0, 2);
+				}
+				$this->state = mb_substr($this->state, 0, 2);
+				if (!empty($this->suburb)) {
+					$this->address = str_replace($this->suburb, '', $this->address);
+				}
+				if (!empty($this->city)) {
+					$this->address = str_replace($this->city, '', $this->address);
+				}
+			}
+			$ad = ($this->state == $this->city? $this->state : $this->state.($this->city == '直辖县'? '' : $this->city)).($this->suburb == '市辖区'? '' : $this->suburb).$this->address;
+		}
+		return $stf? preg_replace('/\s+/', '', $ad) : $ad;
+	}
+	
+	public function labelAddress($css="")
+	{
+		if ($this->country != 'PR China') {
+			$cn = preg_replace('/(\w)\/(\w)/', '$1 / $2', $this->name);
+			$a = ucwords(strtolower($cn)).'<br />';
+		} else {
+			$cn = $this->name;
+			$a = $cn.'<br />';
+		}
+		$l = strlen($cn) > 32? 2 : 1;
+		$a2 = $this->fullAddress(['suburb', 'state', 'postcode']);
+		$l += ceil(strlen($a2) / 32);
+		$a .= $a2;
+		$a .= ($l < 4)? '<br />' : ' ';
+		$a .= 'Phone: '.trim($this->tel);
+		if ($l < 5) {
+			return '<p style="'.$css.'">'.$a.'</p>';
+		} else {
+			$fs = 30 - $l*2;
+			return '<p style="font-size:'.$fs.'px;'.$css.'">'.$a.'</p>';
+		}
+	}
+
+	public function setCnAddr($addr, $pc='')
+	{
+		$this->address = preg_replace('/[, ]+/', '', AppHelper::semiAngle(trim($addr)));
+		$this->address = preg_replace('/^中国/', '', $this->address);
+		$this->postcode = $pc;
+		$this->country = 'PR China';
+		$cnp = CnProvince::model()->find('name LIKE :p', [':p' => mb_substr($addr, 0, 2)."%"]);
+		if ($cnp) {
+			$this->state = $cnp->name;
+			foreach ($cnp->cities as $cnc) {
+				if (strpos($addr, mb_substr($cnc->name, 0, -1)) !== false) {
+					$this->city = $cnc->name;
+					if (sizeof($cnc->areas) == 1) {
+						$cna = $cnc->areas[0];
+						$this->suburb = $cna->name;
+						$this->postcode = empty($pc)? $cna->zip : $pc;
+					} else {
+						$sxq = null;
+						foreach ($cnc->areas as $cna) {
+							if ($cna->name == '市辖区') {
+								$sxq = $cna;
+							}
+							if (strpos($addr, mb_substr($cna->name, 0, -1)) > 0) {
+								$this->suburb = $cna->name;
+								$this->postcode = empty($pc)? $cna->zip : $pc;
+								break;
+							}
+						}
+						//set postcode to the city
+						if (empty($this->postcode) && !empty($sxq)) {
+							$this->postcode = $sxq->zip;
+						}
+					}
+					break;
+				}
+			}
+			if (empty($this->city)) {//trying match area directly
+				foreach ($cnp->cities as $cnc) {
+					foreach ($cnc->areas as $cna) {
+						if (strpos($addr, $cna->name) > 0) {
+							$this->city = $cna->city->name;
+							$this->suburb = $cna->name;
+							$this->postcode = empty($pc)? $cna->zip : $pc;
+							break 2;
+						}
+					}
+				}
+			}
+		} else {
+			$cnc = CnCity::model()->find('name LIKE :p', [':p' => mb_substr($addr, 0, 2)."%"]);
+			if ($cnc) {
+				$this->city = $cnc->name;
+				$this->state = $cnc->province->name;
+				foreach ($cnc->areas as $cna) {
+					if (empty($this->postcode)) {
+						$this->postcode = empty($pc)? $cna->zip : $pc;
+					}
+					if (strpos($addr, mb_substr($cna->name, 0, -1)) !== false) {
+						$this->suburb = $cna->name;
+						$this->postcode = empty($pc)? $cna->zip : $pc;
+						break;
+					}
+				}
+			}
+		}
+	}
+
+	public function getZip($debug = false)
+	{
+		if ($debug) {
+			echo '[O] P:', $this->state, ' C:', $this->city, ' S:', $this->suburb, ' Z:', $this->postcode, "\n";
+		}
+		//check zxs
+		$rs = CnCity::model()->with('province')->findAll('province.name LIKE :p', [':p' => $this->state.'%']);
+		$zxs = false;
+		if (sizeof($rs) == 1) {
+			$this->state = $rs[0]->province->name;
+			$o_city = $this->city;
+			$this->city = $rs[0]->name;
+			$a = CnArea::model()->find('city_id = :cid AND name LIKE :a', [':cid' => $rs[0]->id, ':a' => $this->suburb.'%']);
+			if (!$a) {
+				$a = CnArea::model()->find('city_id = :cid AND name LIKE :a', [':cid' => $rs[0]->id, ':a' => $o_city.'%']);
+				if ($a) {
+					$o_suburb = $this->suburb;
+					$this->suburb = $a->name;
+					if (strpos($this->address, $o_suburb) === false) {
+						$this->address = $o_suburb.$this->address;
+					}
+				}
+			}
+		}
+		$a = CnArea::model()->with(['city', 'city.province'])->find([
+			'condition' => 'province.name LIKE :p AND city.name LIKE :c AND t.name LIKE :s',
+			'order' => 't.id',
+			'params' => [':p' => $this->state.'%', ':c' => substr($this->city, 0, 9).'%', ':s' => substr($this->suburb, 0, 9).'%'],
+		]);
+		if (empty($a)) {
+			$a = CnArea::model()->with(['city', 'city.province'])->find([
+				'condition' => 'province.name LIKE :p AND city.name LIKE :c',
+				'order' => 't.id',
+				'params' => [':p' => $this->state.'%', ':c' => substr($this->city, 0, 9).'%'],
+			]);
+		}
+		if (empty($a)) {
+			$a = CnArea::model()->with(['city', 'city.province'])->find([
+				'condition' => 'province.name LIKE :p AND t.name LIKE :s',
+				'order' => 't.id',
+				'params' => [':p' => $this->state.'%', ':s' => substr($this->city, 0, 9).'%'],
+			]);
+			if ($a) {
+				$this->city = $a->city->name;
+				$o_suburb = $this->suburb;
+				$this->suburb = $a->name;
+				if (!empty($o_suburb) && strpos($this->address, $o_suburb) === false) {
+					$this->address = $o_suburb.$this->address;
+				}
+			}
+		}
+		if ($a) {
+			$this->postcode = $a->zip;
+		}
+		if ($debug) {
+			echo '[N] P:', $this->state, ' C:', $this->city, ' S:', $this->suburb, ' Z:', $this->postcode, "\n";
+		}
+	}
+
+	public function auTel()
+	{
+		return self::auTelValid($this->tel);
+	}
+	
+	public static function auTelValid($no)
+	{
+		$tel = preg_replace('/[^\d]+/', '', $no);
+		$tel = trim($tel);
+		$realTel = $tel;
+		if (preg_match('/^1300(\d{6})$/', $tel, $m)) {
+			// in order to avoid error
+			// "message":"Phone number longer than 10 characters: 01300255533.","field":"shipments[0].to.phone"}
+			$realTel = $tel;
+		} elseif (preg_match('/61(\d{10})$/', $tel, $m)) {
+			// in case +61 04 3274 3955
+			$realTel = $m[1];
+		} elseif (preg_match('/61(\d{9})$/', $tel, $m)) {
+			$realTel = '0'.$m[1];
+		} elseif (preg_match('/^0\d{9}$/', $tel)) {
+			$realTel = $tel;
+		} elseif (preg_match('/^\d{9}$/', $tel, $m)) {
+			$realTel = '0'.$tel;
+		} else {
+			return '';
+		}
+		if (strlen($realTel) > 10) {
+			$realTel = substr($realTel, 0, 10);
+		}
+		return $realTel;
+	}
+
+	public function auPhone()
+	{
+		return self::auPhoneValid($this->tel);
+	}
+	public static function auPhoneValid($no)
+	{
+		$tel = preg_replace('/[^\d]+/', '', $no);
+		$tel = trim($tel);
+		$realTel = $tel;
+		if (preg_match('/61(\d{10})$/', $tel, $m)) {
+			// in case +61 04 3274 3955
+			$realTel = $m[1];
+		} elseif (preg_match('/61(\d{9})$/', $tel, $m)) {
+			$realTel = '0'.$m[1];
+		} elseif (preg_match('/^0\d{9}$/', $tel)) {
+			$realTel = $tel;
+		} elseif (preg_match('/^\d{9}$/', $tel, $m)) {
+			$realTel = '0'.$tel;
+		} else {
+			return '';
+		}
+		if (strlen($realTel) > 10) {
+			$realTel = substr($realTel, 0, 10);
+		}
+		return $realTel;
+	}
+
+	public static function checkIsPoBox($address)
+	{
+		return (preg_match('/P\.O\.|PO \d+ABN#|P[\s\.OST]*O[\s\.FICE]*B\s*O\s*X[\s\,\.]*\d*|POST OFFICE|Australia Post|Postal\s*Locker|Parcel\s*Locker|post\s*Locker|Locker\s*Number|Parcel\s*collect|PMB\s*\d+|\d+\s*P[\s\.OST]*O[\s\.FICE]*BOX|CnC\s?Woolworths|Cnc\s?BIG\s?W|(^| )Box\s*\d+/i', $address)&&!preg_match('/(post office street|post office st|Post Office Lane)/i',$address));
+	}
+	public static function getEditStreetCode($editStreetCode)
+	{
+		$result = [];
+		if(empty($editStreetCode))
+		{
+			return "";
+		}else
+		{
+			foreach (self::$editStreetCode as $key => $value) {
+				if(($editStreetCode&$key)>0)
+				{
+					$result[] =$value;
+				}
+			}
+		}
+		return join(',',$result);
+	}
+	public static function checkAuState($state)
+	{
+		$states_reg = ['NSW' => '/New South Wales|^NSW$/i',
+			'ACT' => '/(AUSTRALIAN CAPITAL TERRITORY|^ACT$)/i',
+			'NT' => '/(NORTHERN TERRITORY|^NT$)/i',
+			'QLD' => '/(QUEENSLAND|^QLD$)/i',
+			'SA' => '/(SOUTH AUSTRALIA|^SA$)/i',
+			'TAS' => '/(TASMANIA|^TAS$)/i',
+			'VIC' => '/(VICTORIA|^VIC$)/i',
+			'WA' => '/(WESTERN AUSTRALIA|^WA$)/i',
+		];
+		foreach ($states_reg as $key=>$reg) {
+			if (preg_match($reg, $state)) {
+				return $key;
+			}
+		}
+		return $state;
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return AppHelper::tArray(strtolower(__CLASS__), [
+			'id' => 'ID',
+			'owner_id' => 'Owner',
+			'name' => 'Name',
+			'address' => 'Address',
+			'suburb' => 'Suburb',
+			'city' => 'City',
+			'state' => 'State',
+			'postcode' => 'Postcode',
+			'country' => 'Country',
+			'tel' => 'Tel',
+			'email' => 'Email',
+			'cnid_id' => 'Chinese ID',
+			'cnid_no' => 'ID No.',
+			'acc' => 'Check Confidence',
+		]);
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search()
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('t.id', $this->id);
+		$criteria->compare('t.owner_id', $this->name);
+		$criteria->compare('name', $this->name, true);
+		$criteria->compare('address', $this->address, true);
+		$criteria->compare('suburb', $this->suburb, true);
+		$criteria->compare('city', $this->city, true);
+		$criteria->compare('state', $this->state, true);
+		$criteria->compare('postcode', $this->postcode, true);
+		$criteria->compare('country', $this->country, true);
+		$criteria->compare('tel', $this->tel, true);
+		$criteria->compare('email', $this->email, true);
+		$criteria->compare('cnid_id', $this->cnid_id, true);
+		$criteria->compare('cnid_no', $this->cnid_no, true);
+		$criteria->compare('acc', $this->acc, true);
+
+		return new CActiveDataProvider($this, [
+			'criteria'=>$criteria,
+		]);
+	}
+
+	public function checkCnAddr()
+	{
+		$addr = $this->getCnFullAddress();
+		if (empty($addr)) {
+			return false;
+		}
+		$acr = BaiduAPI::Geocoding($addr);
+		if ($acr->status == 0) {
+			$this->acc = empty($acr->result->confidence)? 1 : $acr->result->confidence;
+		}
+		return $this->acc;
+	}
+
+	public function beforeSave()
+	{
+		$this->name = trim($this->name);
+		$this->tel = trim($this->tel);
+		$this->state = trim($this->state);
+		$this->suburb = trim($this->suburb);
+		$this->city = trim($this->city);
+		$this->postcode = trim($this->postcode);
+		$this->address = trim($this->address);
+		if(!empty($this->email)){
+			$emls = preg_split('/[;,\s]+/', $this->email);
+			if(count($emls) > 1){
+				foreach($emls as $k => $eml){
+					$emls[$k] = (string) filter_var($eml, FILTER_VALIDATE_EMAIL);
+				}
+				$this->email = implode(';', $emls);
+			}else{
+				$this->email = (string) filter_var($this->email, FILTER_VALIDATE_EMAIL);
+			}
+		}
+		if ($this->cnid_id > 0 && !empty($this->cnid) && $this->name != $this->cnid->name) {
+			$this->cnid_id = 0;
+		}
+		if ($this->country == 'PR China') {
+			$this->name = preg_replace('/\s+/', '', $this->name);
+			if ((empty($this->state) || empty($this->city)) && !empty($this->address)) {
+				$this->setCnAddr($this->address);
+			}
+			if (empty($this->postcode)) {
+				$this->getZip();
+			}
+			if (empty($this->cnid_id) && !empty($this->name) && !empty($this->tel)) {
+				$cnid = CnID::model()->find(['condition' => 'status IN (15,18,20) AND bwf = 0 AND name = :n AND mobile = :t', 'params' => [':n' => $this->name, ':t' => $this->tel], 'order' => 'id DESC']);
+
+				if (!$cnid) {
+					$cnid = CnID::model()->find(['condition' => 'name = :n AND status IN (15,18,20) AND bwf = 0', 'params' => [':n' => $this->name], 'order' => 'id DESC']);
+				}
+				// if(!$cnid) $cnid = CnID::model()->find(['condition' => '(name = :n OR mobile = :t) AND status IN (15,18,20) AND bwf = 0', 'params' => array(':n' => $this->name, ':t' => $this->tel), 'order' => 'id DESC']);
+				
+				if ($cnid) {
+					if ($this->name == $cnid->name) {
+						$this->cnid_id = $cnid->id;
+					} elseif (AppHelper::similar_text_cn($this->name, $cnid->name) > 0 && CnID::model()->count('mobile = :t AND status IN (15,18,20) AND bwf = 0', [':t' => $this->tel]) == 1) {
+						$this->cnid_id = $cnid->id;
+						$this->name = $cnid->name;
+						$this->name_change = true;
+					}
+				}
+			}
+		}
+		/* no address check
+		if(!$this->isNewRecord && $this->fullAddress() != $this->old_full_addr){//address changed
+			if($this->country == 'PR China') $this->checkCnAddr();
+		}
+		*/
+
+		$cln = [];
+		if ($this->id > 0)
+		{
+			$o = Addr::model()->findByPk($this->id);
+			foreach (['name','tel','state','suburb','city','postcode','address','country','email'] as $key => $value) {
+				if ($o->$value != $this->$value) {
+					$cln[] = $value.' changed from: ' . $o->$value;
+				}
+			}
+
+			if(!empty($cln))
+			{
+				$p = ImParcel::model()->find('cnee_id=:cid',[':cid'=>$this->id]);
+				if(!empty($p))
+				{
+					$extra = ['|Consignee note' => implode(', ', $cln)];
+					Log::add($p, 4, array_merge(['status' => $p->getStatus()], $extra));
+				}else
+				{
+					$p = ImParcel::model()->find('receiver_id=:cid',[':cid'=>$this->id]);
+					if(!empty($p))
+					{
+						$extra = ['|Receiver note' => implode(', ', $cln)];
+						Log::add($p, 4, array_merge(['status' => $p->getStatus()], $extra));
+					}
+				}
+			}
+		}
+
+
+
+		return true;
+	}
+
+	public function afterSave()
+	{
+		if ($this->cnid_id > 0 && !empty($this->cnid)) {
+			$up = false;
+			if (empty($this->cnid->mobile) && !empty($this->tel)) {
+				$this->cnid->mobile = $this->tel;
+				$up = true;
+			}
+			if (empty($this->cnid->city) && !empty($this->city)) {
+				$this->cnid->city = $this->city;
+				$up = true;
+			}
+			if ($this->cnid->status < 20) {
+				$this->cnid->status = 20;
+				$up = true;
+			}
+			if ($up) {
+				$this->cnid->save();
+			}
+			if ($this->auto_match) {
+				$this->cnid->matchCnee();
+			}
+		}
+		if ($this->name_change && $this->id > 0) {
+			$p = ExParcel::model()->find('cnee_id = :cid', [':cid' => $this->id]);
+			if ($p) {
+				$p->bwf = $p->bwf | 128;
+				$p->custom_log_note = 'Consignee Name changed: '.$this->name.' > '.$cnid->name;
+				$p->save();
+			}
+		}
+		return true;
+	}
+
+	public function afterFind()
+	{
+		$this->old_full_addr = $this->fullAddress();
+	}
+	
+	public function nameInit()
+	{
+		$ns = explode(' ', $this->name);
+		$in = '';
+		if (sizeof($ns) > 1) {
+			return substr($ns[0], 0, 1).'. '.$ns[sizeof($ns) -1];
+		} else {
+			return $this->name;
+		}
+	}
+	
+	public function getTel($no=true)
+	{
+		return preg_replace('/[^\d]+/', '', $this->tel);
+	}
+
+	public function checkPostcode($fix = false,$fromAPi = false)
+	{
+		$type = 0;
+		if (empty($this->state)) {
+			if (empty($this->postcode)) {
+				return 0;
+			}
+			$r = Postcode::model()->find('postcode = :p AND country = "AU"', [':p' => $this->postcode]);
+			if (!empty($r->state)) {
+				$this->state = $r->state;
+				$type = $type|self::LOCAL_CORRECT_STATE;
+			}
+		}
+		$this->state = strtoupper($this->state);
+		$suburb = $this->suburb;
+		$this->suburb = preg_replace(['/\bMT\b\.*/i', '/\bNTH\b\.*/i', '/\bSTH\b\.*/i', '/^PT\b\.*/i', '/^(SAINT\b|ST\.)/i'], ['MOUNT', 'NORTH', 'SOUTH', 'PORT', 'ST'], $suburb);
+		if($this->suburb != $suburb){
+			$type = $type|self::LOCAL_CORRECT_SUBURB;
+		}
+
+		if(Postcode::model()->count('suburb = :sub AND postcode = :p AND state = :s AND country = "AU"', [':sub' => $this->suburb, ':p' => $this->postcode, ':s' => $this->state]) > 0) return empty($type)? 99 : $type;
+
+		//check postcode
+		$rs = Postcode::model()->findAll('postcode = :p AND state = :s AND country = "AU"', [':p' => $this->postcode, ':s' => $this->state]);
+		if (empty($rs)) { //wrong postcode
+			$r = Postcode::model()->find('suburb = :sub AND state = :s AND country = "AU"', [':sub' => $this->suburb, ':s' => $this->state]);
+			if (empty($r->postcode)) { //wrong state
+				$r = Postcode::model()->find('suburb = :sub AND postcode = :p AND country = "AU"', [':sub' => $this->suburb, ':p' => $this->postcode]);
+				if (!empty($r->state)) {
+					$this->state = $r->state;
+					$type = $type|self::LOCAL_CORRECT_STATE;
+				}
+			} else {
+				$this->postcode = $r->postcode;
+				$type = $type|self::LOCAL_CORRECT_POSTCODE;
+			}
+			if ($fix) {
+				$this->save();
+			}
+			return $type;
+		}
+
+		$addressContainsSuburb = function($add, $sub){
+			if(stripos($add, $sub) > 0) return true; //full contain
+			if(strrpos($sub, ' ') > 0 && stripos(str_replace(' ', '', $add), str_replace(' ', '', $sub)) > 0) return true; //compare without space
+			if(stripos(str_replace(' ', '', preg_replace('/\b(SAINT\b|ST\.)/i', 'ST', $add)), str_replace(' ', '', preg_replace(['/\bMOUNT\b/', '/\bNORTH\b/', '/\bSOUTH\b/', '/^PORT\b/'], ['MT', 'NTH', 'STH', 'PT'], $sub))) > 0) return true; //abbrevation
+
+			return false;
+		};
+
+		//not matched
+		foreach ($rs as $r) { //try to see if suburb is in the address line
+			if ($addressContainsSuburb($this->address, $r->suburb)) {
+				$this->suburb = $r->suburb;
+				if ($fix) {
+					$this->save();
+				}
+				$type = $type|self::LOCAL_CORRECT_SUBURB;
+				return $type;
+			}
+		}
+
+		//check suburb
+		// 6837-6848 Perth
+		// 2600,2601 Canberra
+		// 2300 Newcastle
+		// 2500 Wollongong
+		// 3220 Geelong
+		// 4810 Townsville
+		$r = Postcode::model()->find('suburb = :sub AND state = :s AND country = "AU" AND ((postcode > 1000 AND postcode % 1000 > 5) OR (postcode < 1000 AND postcode % 100 > 5)) AND (postcode < 6837 OR postcode > 6848) AND postcode NOT IN (2600, 2601, 2300, 2500, 3220, 4810)', [':sub' => $this->suburb, ':s' => $this->state]);
+		if(!empty($r)){
+			$this->postcode = $r->postcode;
+			$type = $type|self::LOCAL_CORRECT_POSTCODE;
+			if ($fix) {
+				$this->save();
+			}
+			return $type;
+		}
+
+		//only one suburb per postcode
+		if(count($rs) == 1){
+			$this->suburb = $rs[0]->suburb;
+			$type = $type|self::LOCAL_CORRECT_SUBURB;
+			if ($fix) {
+				$this->save();
+			}
+			return $type;
+		}
+
+		if(!$fromAPi)
+		{
+			$this->suburb = $rs[0]->suburb;
+			if ($fix) {
+				$this->save();
+			}
+		}
+		return 0;
+	}
+		
+		
+	/*to check the add is
+	 *    391 Park Road,Regents Park, 2143
+	 *  2. David Road, Padstow, 2211
+	 *
+	 */
+	public function checkSelfDelivery()
+	{
+		if ($this->postcode=="2143"&&preg_match("/Regents Park/i", $this->suburb)) {
+			if (preg_match("/391\s*Park\s*(Road|RD|Roads)/i", $this->address)) {
+				return true;
+			}
+		}
+		if ($this->postcode=="2211"&& preg_match("/Padstow/i", $this->suburb)) {
+			if (preg_match("/(45\s*-\s*53|53|45\/53|45)\s*DAVIES\s*(ROAD|RD|ROADS)/i", $this->address)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public function getCname()
+	{
+		return (strlen($this->name)>8)?substr($this->name, 0,8):$this->name;
+	}
+
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return Addr the static model class
+	 */
+	public static function model($className=__CLASS__)
+	{
+		return parent::model($className);
+	}
+
+	/** 
+	 * This function supports phone numbers like:
+	 * +61-0400-000-000
+	 * +61 0400 000 000
+	 * 400 000 000
+	 * 0400 000 000
+	 * 0400-000-000
+	 * 400-000-000
+	 * 
+	 * returns phone number has prefix '0' in front of '4', e.g. 0400-000-000
+	 * returns false when no match in string 
+	 */
+	public static function extract_australian_phone_numbers($string)
+	{
+		//$pattern = '/(\+61|61|0)\s?\-?\d{1,4}(\s?\-?\d{2,3}){2}/';
+		$pattern = '/(\+61|61|0)?[\s-]*\d{1,4}[\s-]*\d{3}[\s-]*\d{3}/';
+		preg_match_all($pattern, $string, $matches);
+		$phone_numbers = $matches[0];
+		$phone_numbers = preg_replace('/\+?61\s?/', '', $phone_numbers); // remove +61 and optional space
+		$phone_numbers = preg_replace('/\s+/', '', $phone_numbers); // remove all spaces
+		$phone_numbers = preg_replace('/\D/', '', $phone_numbers); // keep only digits
+		$phone_numbers = preg_grep('/^0?4/', $phone_numbers); // keep only phone numbers starting with 04
+		if (!empty($phone_numbers[0])) {
+			if (strlen($phone_numbers[0]) == 9) {
+				return '0' . $phone_numbers[0];
+			} else {
+				return $phone_numbers[0];
+			}
+		} else {
+			return false;
+		}
+	}
+}

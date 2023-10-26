@@ -1,0 +1,68 @@
+<?php
+class ExdirConsol extends Consol{
+
+	public static $my_type = 50;
+
+	public static $states = array(
+		10 => 'New',
+		20 => 'Confirmed',
+		90 => 'Completed',
+	);
+
+	public function rules(){
+		$rules = array(
+			//array('dpt_id', 'required'),
+		);
+		return array_merge(parent::rules(), $rules);
+	}
+	
+	public function totValue($wid = 0, $isAll = false){
+		$sql = 'SELECT SUM(value) AS t FROM shipment WHERE consol_id = '.$this->id;
+		$c = Yii::app()->db->createCommand($sql);
+		return $c->queryScalar();
+	}
+
+	public function genInvoice($to_id, $up = false){
+		$owner = Org::model()->findByPk($to_id);
+		$rates = SellRate::getRates($to_id, 20, $this->created);
+
+		if($up) $inv = Invoice::model()->with('lines')->find('t.status < 10 AND t.type = 30 AND to_id = :id AND lines.model = :m AND lines.fid = :fid', [':id' => $to_id, ':m' => 'Consol', ':fid' => $this->id]);
+		if(empty($inv)) $inv= new Invoice;
+		$inv->type = 30;
+		$inv->dpmt = Invoice::DPMT_EXPORT;
+		$inv->currency = 1;
+		$inv->to_id = $to_id;
+		$inv->status = 2;
+		$inv->date = $this->created;
+		
+		$items = array();
+		$tot = 0;
+		$term = '';
+		$rate = empty($rates['D1'])? 13 : $rates['D1']->perkg;
+		foreach($this->shipments as $p){
+			if($p->agent_id != $to_id) continue;
+			$ec = !in_array($p->state, ['江苏省', '浙江省', '上海市', '安徽省'])? 1 : 0;
+			$amt = round(($rate + $ec) * array_sum($p->eitems['q']) * 100) / 100;
+			$items[] = [$p->hbn, $p->getDesc(), $amt];
+			$tot += $amt;
+		}
+		$inv->mdata['name'] = $owner->name;
+		$inv->mdata['address'] = $owner->getAddress();
+		//$inv->mdata['items'] = $items;
+		$inv->mdata['payterm'] = empty($owner->extra['payterm'])? '2 days' : $owner->extra['payterm'].' days';
+		$inv->due = Invoice::calcDue($inv->date, $inv->mdata['payterm']);
+		$inv->total = $tot;
+		$inv->save();
+
+		$il = new InvLine;
+		$il->inv_id = $inv->id;
+		$il->amount = $inv->total;
+		$il->mdata['items'] = $items;
+		$il->mdata['cono'] = $this->no;
+		$il->model = 'Consol';
+		$il->fid = $this->id;
+		$il->save();
+
+		return $inv;
+	}
+}

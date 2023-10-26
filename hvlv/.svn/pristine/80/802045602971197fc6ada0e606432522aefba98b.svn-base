@@ -1,0 +1,318 @@
+<h3><?=$name?></h3>
+<style>
+	.cloumn_red_1{
+        color:red;
+        font-weight: bold;
+    }   
+    .cloumn_orange_1{
+        color:orange;
+        font-weight: bold;
+    }
+    .cloumn_red{
+        background-color:pink;
+    }  
+    .column_direct{
+        color: green;
+        font-weight: bold;
+    }
+</style>
+
+<?php 
+
+if($cargo->clear == 1){
+	$this->widget('zii.widgets.jui.CJuiTabs', array(
+		'tabs' => array(
+			'Cleared' => array('id' => 'cleared-id', 'content' => $this->render(
+				'_sub_clear_cargos',
+				array('cargo' =>  $cargo,'cargo_type' => 3,'pod_id'=> $pod_id,'deconsolidation'=>1),
+				TRUE
+			)),
+			// 'Reminder' => array('id' => 'reminder-id', 'content' => $this->render(
+			// 	'list_temp',
+			// 	array('pod_id'=> $dpt_id,'deconsolidation'=>2),
+			// 	TRUE
+			// )),
+			'Reminder' => array('ajax'=>$this->createUrl('CargoProcess/getPreDeconsolidationList',['pod_id'=> $pod_id]),'id' => 'reminder-id'),
+		),
+		'options' => array(
+			//'collapsible' => true,
+		),
+		'id' => $_GET["tabid"] .'_mytab-menu',
+	));
+}else if($cargo_type == CargoProcess::PICKUP_CARGO)
+{
+	$this->widget('application.extensions.CSpanableGridView.CSpanableGridView', [
+	'id'=>$_GET["tabid"].'_cargo_process_grid',
+	'cssFile' => false,
+	'dataProvider'=>$cargo->search(true, 200,false,true,$pod_id,$cargo_type),
+	'filter'=>$cargo,
+	'columns'=>[		
+		array('name' => 'hbn', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->createURL("imParcel/update", array("id" => $data->shipment_id))."\" class=\"tab_link\" title=\"".$data->shipment->hbn."\">".$data->shipment->hbn."</a>"',),
+		'ref',
+		['name'=>'agent_id','value'=>'$data->shipment->agent_id'],
+		['name' => 'shipment.consol_no', 'type'=>'raw', 'value' => 'empty($data->shipment->consol_id)? "" : "<a href=\"".Yii::app()->createURL(Consol::getTheConsolType($data->shipment->consol_id)==70?"dmawbConsol/update":"imcoConsol/update", array("id" => $data->shipment->consol_id))."\" class=\"tab_link\" title=\"".@$data->shipment->consol->no."\">".@$data->shipment->consol->no."</a>"','filter'=>CHtml::textField('ImParcel[consol_no]', $cargo->consol_no)],
+		['name' => 'shipment.consol.awb','value'=>'$data->shipment->consol->service==10?$data->shipment->consol->awb:@$data->shipment->consol->mdata["container_no"]','filter'=>CHtml::textField('CargoProcess[awb]',@$cargo->awb)],
+		['name'=>'shipment.cnee.postcode','filter'=>CHtml::textField('CargoProcess[postcode]',@$cargo->postcode)],
+		['name'=>'shipment.can','filter'=>CHtml::textField('CargoProcess[memo]',@$cargo->memo)],
+		array('name'=>'assignedAgent','filter'=>CHtml::dropDownList('CargoProcess[assignedUser]',@$cargo->assignedUser, @User::getTruckUsers(),array('prompt'=>'Select'))),
+		['name' => 'status','type'=>'raw', 'value' => '$data->getFullStatus()','filter'=>false],
+		['name'=>'shipment.status','value' => '$data->shipment->getStatus()','cssClassExpression' => !empty(@$cargo->clear)?'$data->getShowColor("clear")':'$data->getShowColor("held")'],
+		
+		['name'=>'note','value'=>'$data->note'],
+		['name'=>'pickupBookingTime','value' => '@$data->shipment->mdata["pickup_booking_time"]','cssClassExpression' => '$data->getShowColor("pickup")'],
+		['header'=>'First Process Time','value' => '$data->getFirstProcessTime()','cssClassExpression' => '$data->getShowColor("last_process_time")'],
+		['header'=>'Last Process Time','value' => '$data->getLastProcessTime()','cssClassExpression' => '$data->getShowColor("last_process_time")'],
+		['header'=>'goods available address', 'type' => 'raw','value'=>'$data->shipment->getAvailabelLabel()','filter'=>CHtml::textField('CargoProcess[goodsAvailableAddress]',@$cargo->goodsAvailableAddress)],
+		['name'=>'shipment.pkg','cssClassExpression' => '$data->getShowColor("pkg")','filter'=>CHtml::textField('CargoProcess[pkg]',@$cargo->pkg),'value'=>'$data->getPackages()'],
+		['name'=>'plt','type'=>'raw','value'=>'$data->getPltStr()'],
+		['name'=>'shipment.weight','filter'=>CHtml::textField('CargoProcess[weight]',@$cargo->weight),'value'=>'$data->getWeight()'],
+		['name' =>'shipment.cbm','value'=>'$data->getTotalCBM()','filter'=>CHtml::textField('CargoProcess[cbm]',@$cargo->cbm)],
+		['name'=>'shipment.cnee.name','filter'=>CHtml::textField('CargoProcess[cname]',@$cargo->cname)],
+		['name'=>'shipment.cnee.address','filter'=>CHtml::textField('CargoProcess[address]',@$cargo->address)],
+		['name'=>'shipment.cnee.state','filter'=>CHtml::textField('CargoProcess[state]',@$cargo->state)],
+		['header'=>'extra Info','type'=>'raw','value'=>'$data->shipment->getDGWarnings()','filter'=>CHtml::dropDownList('CargoProcess[exInfo]', $cargo->exInfo, $this->t(ImParcel::$exInfos), ['prompt'=>'All'])],
+		['class'=>'application.extensions.CSpanableGridView.oSpanableButtonColumn',
+			'template'=>'{operate}',
+			'buttons'=>[
+				'operate' => [
+					'url'=>'Yii::app()->createURL("cargoProcess/operation")."?id=".$this->ids',
+					'imageUrl'=>false,
+					'visible'=>'true',
+					'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => '$data->id'],
+				],
+			],
+			'spanable' => true, 'spanDepands' => ['@$data->shipment->mdata["pickup_booking_time"]','$data->status']
+		],	
+		['class'=>'oButtonColumn',
+			'template'=>'{operate}&nbsp;{log}',
+			'buttons'=>[
+				'operate' => [
+					'url'=>'Yii::app()->createURL("cargoProcess/operation")."?id=".$data->id',
+					'imageUrl'=>false,
+					'visible'=>'true',
+					'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => '$data->id'],
+				],
+				'log' => [
+					'imageUrl'=>false,
+					'options' => ['class' => 'jqm_link grid_view_btn', 'label' => 'Log', 'data-win-class' => 'L'],
+					'visible' => 'true',
+					'url' => 'Yii::app()->createUrl("cargoProcess/log", ["id" => $data->id])',
+					'label' => 'Log'
+				],
+			],
+		]
+	],
+]);
+}
+
+	
+if($cargo_type == CargoProcess::NORMAL_CARGO)
+{
+	$this->widget('application.extensions.CSpanableGridView.CSpanableGridView', [
+	'id'=>$_GET["tabid"].'_cargo_process_grid',
+	'cssFile' => false,
+	'dataProvider'=>$cargo->search(true, 30,false,true,$pod_id,$cargo_type),
+	'filter'=>$cargo,
+	'columns'=>[		
+		array('name' => 'hbn', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->createURL("imParcel/update", array("id" => $data->shipment_id))."\" class=\"tab_link\" title=\"".$data->shipment->hbn."\">".$data->shipment->hbn."</a>"',),
+		array('name'=>'ref','value'=>'$data->getRef()'),
+		['name'=>'agent_id','value'=>'$data->shipment->agent_id'],
+
+		['name' => 'shipment.consol_no', 'type'=>'raw', 'value' => 'empty($data->shipment->consol_id)? "" : "<a href=\"".Yii::app()->createURL(Consol::getTheConsolType($data->shipment->consol_id)==70?"dmawbConsol/update":"imcoConsol/update", array("id" => $data->shipment->consol_id))."\" class=\"tab_link\" title=\"".@$data->shipment->consol->no."\">".@$data->shipment->consol->no."</a>"','filter'=>CHtml::textField('ImParcel[consol_no]', $cargo->consol_no)],
+		['name' => 'shipment.consol.awb','value'=>'','filter'=>CHtml::textField('CargoProcess[awb]',@$cargo->awb)],
+		['name'=>'shipment.cnee.suburb','filter'=>CHtml::textField('CargoProcess[suburb]',@$cargo->suburb)],
+		['name'=>'shipment.cnee.postcode','filter'=>CHtml::textField('CargoProcess[postcode]',@$cargo->postcode)],
+		['name'=>'shipment.can','filter'=>CHtml::textField('CargoProcess[memo]',@$cargo->memo)],
+		array('name'=>'assignedAgent','filter'=>CHtml::dropDownList('CargoProcess[assignedUser]',@$cargo->assignedUser, @User::getTruckUsers(),array('prompt'=>'Select'))),
+		['name' => 'status','type'=>'raw', 'value' => '$data->getFullStatus()','filter'=>false],
+		['name'=>'shipment.status','value' => '$data->shipment->getStatus()','cssClassExpression' => '$data->getShowColor("held")'],
+		['name' => 'deliveryBookingTime', 'value' => '$data->getDeliveryBookingTime()','cssClassExpression' => '$data->getShowColor()','filter'=>CHtml::textField('CargoProcess[deliveryBookingTime]',@$cargo->getBookingTime())],
+		'note',
+		array('name'=>'driver.name','filter'=>CHtml::dropDownList('CargoProcess[driver_id]',@$cargo->driver_id, @Org::getDriverList($cargo->getDriverTypes($pod_id)),array('prompt'=>'Select'))),
+		['header'=>'First Process Time','value' => '$data->getFirstProcessTime()','cssClassExpression' => '$data->getShowColor("last_process_time")'],
+		['header'=>'Last Process Time','value' => '$data->getLastProcessTime()','cssClassExpression' => '$data->getShowColor("last_process_time")'],
+		['header'=>'goods available address', 'type' => 'raw','value'=>'$data->shipment->getAvailabelLabel()','filter'=>CHtml::textField('CargoProcess[goodsAvailableAddress]',@$cargo->goodsAvailableAddress)],
+		['name'=>'shipment.pkg','cssClassExpression' => '$data->getShowColor("pkg")','filter'=>CHtml::textField('CargoProcess[pkg]',@$cargo->pkg),'value'=>'$data->getPackages()'],
+		['name'=>'plt','type'=>'raw','value'=>'$data->getPltStr()'],
+		['name'=>'shipment.weight','filter'=>CHtml::textField('CargoProcess[weight]',@$cargo->weight),'value'=>'$data->getWeight()'],
+		['name' =>'shipment.cbm','value'=>'$data->getTotalCBM()','filter'=>CHtml::textField('CargoProcess[cbm]',@$cargo->cbm)],
+		['name'=>'shipment.cnee.name','filter'=>CHtml::textField('CargoProcess[cname]',@$cargo->cname)],
+		['name'=>'shipment.cnee.tel','filter'=>CHtml::textField('CargoProcess[tel]',@$cargo->tel)],
+		['name'=>'shipment.cnee.address','filter'=>CHtml::textField('CargoProcess[address]',@$cargo->address)],		
+		['name'=>'shipment.cnee.state','filter'=>CHtml::textField('CargoProcess[state]',@$cargo->state)],	
+		['header'=>'extra Info','type'=>'raw','value'=>'$data->shipment->getDGWarnings()','filter'=>CHtml::dropDownList('CargoProcess[exInfo]', $cargo->exInfo, $this->t(ImParcel::$exInfos), ['prompt'=>'All'])],
+		['class'=>'oButtonColumn',
+			'template'=>'{operate}&nbsp;{log}',
+			'buttons'=>[
+				'operate' => [
+					'url'=>' Yii::app()->createURL("cargoProcess/operation")."?id=".$data->id',
+					'imageUrl'=>false,
+					'visible'=>'true',
+					'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => '$data->id'],
+				],
+				'log' => [
+					'imageUrl'=>false,
+					'options' => ['class' => 'jqm_link grid_view_btn', 'label' => 'Log', 'data-win-class' => 'L'],
+					'visible' => 'true',
+					'url' => 'Yii::app()->createUrl("cargoProcess/log", ["id" => $data->id])',
+					'label' => 'Log'
+				],
+			],
+		]
+	],
+]);
+}
+
+
+if($cargo_type == CargoProcess::B2B_CARGO)
+{
+	if(!empty($cargo->status)&&$cargo->status==CargoProcess::PROCESSDONE)
+	{
+		$provide = $cargo->search(true, 30,false,true,$pod_id,$cargo_type);
+	}else
+	{
+		$provide = $cargo->search(false, 50,false,true,$pod_id,$cargo_type);
+	}
+	$this->widget('application.extensions.CSpanableGridView.CSpanableGridView', [
+	'id'=>$_GET["tabid"].'_cargo_process_grid',
+	'cssFile' => false,
+	'dataProvider'=>$provide,
+	'filter'=>$cargo,
+	'columns'=>[
+		array('name' => 'hbn', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->createURL("imParcel/update", array("id" => $data->shipment_id))."\" class=\"tab_link\" title=\"".$data->shipment->hbn."\">".$data->shipment->hbn."</a>"',),
+		'ref',
+		['name'=>'agent_id','value'=>'$data->shipment->agent_id'],
+		['name' => 'shipment.consol_no', 'type'=>'raw', 'value' => 'empty($data->shipment->consol_id)? "" : "<a href=\"".Yii::app()->createURL(Consol::getTheConsolType($data->shipment->consol_id)==70?"dmawbConsol/update":"imcoConsol/update", array("id" => $data->shipment->consol_id))."\" class=\"tab_link\" title=\"".@$data->shipment->consol->no."\">".@$data->shipment->consol->no."</a>"','filter'=>CHtml::textField('ImParcel[consol_no]', $cargo->consol_no)],
+		['name' => 'shipment.consol.awb','value'=>'$data->shipment->consol->service==10?$data->shipment->consol->awb:@$data->shipment->consol->mdata["container_no"]','filter'=>CHtml::textField('CargoProcess[awb]',@$cargo->awb)],
+		['name'=>'shipment.cnee.suburb','filter'=>CHtml::textField('CargoProcess[suburb]',@$cargo->suburb)],
+		['name'=>'shipment.cnee.postcode','filter'=>CHtml::textField('CargoProcess[postcode]',@$cargo->postcode)],
+		['name'=>'shipment.can','filter'=>CHtml::textField('CargoProcess[memo]',@$cargo->memo)],
+		array('name'=>'assignedAgent','filter'=>CHtml::dropDownList('CargoProcess[assignedUser]',@$cargo->assignedUser, @User::getTruckUsers(),array('prompt'=>'Select'))),
+		
+		['name' => 'status','type'=>'raw', 'value' => '$data->getFullStatus()','filter'=>false,'spanable' => true, 'spanDepands' => ['$data->getOnlyDay()','$data->getFullStatus()','$data->shipment->cnee->postcode']],
+		['name'=>'shipment.status','value' => '$data->shipment->getStatus()','cssClassExpression' => '$data->getShowColor("held")'],
+		['name' => 'deliveryBookingTime','type'=>'raw', 'value' => '$data->getDeliveryBookingTime()."</br>".@$data->amazon_info->booking_ref','filter'=>CHtml::textField('CargoProcess[deliveryBookingTime]',@$cargo->getBookingTime())],
+		
+		['name'=>'note','value'=>'@$data->note'],
+		array('name'=>'driver.name','filter'=>CHtml::dropDownList('CargoProcess[driver_id]',@$cargo->driver_id, @Org::getDriverList($cargo->getDriverTypes($pod_id)),array('prompt'=>'Select'))),
+		['header'=>'First Process Time','value' => '$data->getFirstProcessTime()','cssClassExpression' => '$data->getShowColor("last_process_time")'],
+		['header'=>'Last Process Time','value' => '$data->getLastProcessTime()','cssClassExpression' => '$data->getShowColor("last_process_time")'],
+		['header'=>'goods available address', 'type' => 'raw','value'=>'$data->shipment->getAvailabelLabel()','filter'=>CHtml::textField('CargoProcess[goodsAvailableAddress]',@$cargo->goodsAvailableAddress)],
+		['name'=>'shipment.pkg','cssClassExpression' => '$data->getShowColor("pkg")','filter'=>CHtml::textField('CargoProcess[pkg]',@$cargo->pkg),'value'=>'$data->getPackages()'],
+		['name'=>'plt','type'=>'raw','value'=>'$data->getPltStr()'],
+		['name'=>'shipment.weight','filter'=>CHtml::textField('CargoProcess[weight]',@$cargo->weight),'value'=>'$data->getWeight()'],
+		['name' =>'shipment.cbm','value'=>'$data->getTotalCBM()','filter'=>CHtml::textField('CargoProcess[cbm]',@$cargo->cbm)],
+		['name'=>'shipment.cnee.name','filter'=>CHtml::textField('CargoProcess[cname]',@$cargo->cname)],
+		['name'=>'shipment.cnee.tel','filter'=>CHtml::textField('CargoProcess[tel]',@$cargo->tel)],
+		['name'=>'shipment.cnee.address','filter'=>CHtml::textField('CargoProcess[address]',@$cargo->address)],	
+		['name'=>'shipment.cnee.state','filter'=>CHtml::textField('CargoProcess[state]',@$cargo->state)],	
+		['header'=>'extra Info','type'=>'raw','value'=>'$data->shipment->getDGWarnings()','filter'=>CHtml::dropDownList('CargoProcess[exInfo]', $cargo->exInfo, $this->t(ImParcel::$exInfos), ['prompt'=>'All'])],
+		['class'=>'application.extensions.CSpanableGridView.oSpanableButtonColumn',
+			'template'=>'{operate}',
+			'buttons'=>[
+				'operate' => [
+					'url'=>'Yii::app()->createURL("cargoProcess/operation")."?id=".$this->ids',
+					'imageUrl'=>false,
+					'visible'=>'true',
+					'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => '$data->id'],
+				],
+			],
+			'spanable' => true, 'spanDepands' => ['$data->getOnlyDay()','$data->status','$data->shipment->cnee->postcode']
+		],	
+		['class'=>'oButtonColumn',
+			'template'=>'{operate}&nbsp;{log}',
+			'buttons'=>[
+				'operate' => [
+					'url'=>'Yii::app()->createURL("cargoProcess/operation")."?id=".$data->id',
+					'imageUrl'=>false,
+					'visible'=>'true',
+					'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => '$data->id'],
+				],
+				'log' => [
+					'imageUrl'=>false,
+					'options' => ['class' => 'jqm_link grid_view_btn', 'label' => 'Log', 'data-win-class' => 'L'],
+					'visible' => 'true',
+					'url' => 'Yii::app()->createUrl("cargoProcess/log", ["id" => $data->id])',
+					'label' => 'Log'
+				],
+			],
+		]
+	],
+]);
+}
+
+if($cargo_type == CargoProcess::FBA_CARGO)
+{
+	if(!empty($cargo->status)&&$cargo->status==CargoProcess::PROCESSDONE)
+	{
+		$provide = $cargo->search(true, 30,false,true,$pod_id,$cargo_type);
+	}else
+	{
+		$provide = $cargo->search(false, 50,false,true,$pod_id,$cargo_type);
+	}
+	$this->widget('application.extensions.CSpanableGridView.CSpanableGridView', [
+	'id'=>$_GET["tabid"].'_cargo_process_grid',
+	'cssFile' => false,
+	'dataProvider'=>$provide,
+	'filter'=>$cargo,
+	'columns'=>[
+		array('name' => 'hbn', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->createURL("imParcel/update", array("id" => $data->shipment_id))."\" class=\"tab_link\" title=\"".$data->shipment->hbn."\">".$data->shipment->hbn."</a>"',),
+		'ref',
+		['name'=>'agent_id','value'=>'$data->shipment->agent_id'],
+		['name' => 'shipment.consol_no', 'type'=>'raw', 'value' => 'empty($data->shipment->consol_id)? "" : "<a href=\"".Yii::app()->createURL(Consol::getTheConsolType($data->shipment->consol_id)==70?"dmawbConsol/update":"imcoConsol/update", array("id" => $data->shipment->consol_id))."\" class=\"tab_link\" title=\"".@$data->shipment->consol->no."\">".@$data->shipment->consol->no."</a>"','filter'=>CHtml::textField('ImParcel[consol_no]', $cargo->consol_no)],
+		['name' => 'shipment.consol.awb','value'=>'$data->shipment->consol->service==10?$data->shipment->consol->awb:@$data->shipment->consol->mdata["container_no"]','filter'=>CHtml::textField('CargoProcess[awb]',@$cargo->awb)],
+		['name'=>'shipment.cnee.suburb','filter'=>CHtml::textField('CargoProcess[suburb]',@$cargo->suburb)],
+		['name'=>'shipment.cnee.postcode','filter'=>CHtml::textField('CargoProcess[postcode]',@$cargo->postcode)],
+		['name'=>'shipment.can','filter'=>CHtml::textField('CargoProcess[memo]',@$cargo->memo)],
+		array('name'=>'assignedAgent','filter'=>CHtml::dropDownList('CargoProcess[assignedUser]',@$cargo->assignedUser, @User::getTruckUsers(),array('prompt'=>'Select'))),
+		
+		['name' => 'status','type'=>'raw', 'value' => '$data->getFullStatus()','filter'=>false,'spanable' => true, 'spanDepands' => ['$data->getOnlyDay()','$data->getFullStatus()','$data->shipment->cnee->postcode']],
+		['name'=>'shipment.status','value' => '$data->shipment->getStatus()','cssClassExpression' => '$data->getShowColor("held")'],
+		['name' => 'deliveryBookingTime','type'=>'raw', 'value' => '$data->getDeliveryBookingTime()."</br>".@$data->amazon_info->booking_ref','filter'=>CHtml::textField('CargoProcess[deliveryBookingTime]',@$cargo->getBookingTime())],
+		
+		['name'=>'note','value'=>'@$data->note'],
+		array('name'=>'driver.name','filter'=>CHtml::dropDownList('CargoProcess[driver_id]',@$cargo->driver_id, @Org::getDriverList($cargo->getDriverTypes($pod_id)),array('prompt'=>'Select'))),
+		['header'=>'First Process Time','value' => '$data->getFirstProcessTime()','cssClassExpression' => '$data->getShowColor("last_process_time")'],
+		['header'=>'Last Process Time','value' => '$data->getLastProcessTime()','cssClassExpression' => '$data->getShowColor("last_process_time")'],
+		['header'=>'goods available address', 'type' => 'raw','value'=>'$data->shipment->getAvailabelLabel()','filter'=>CHtml::textField('CargoProcess[goodsAvailableAddress]',@$cargo->goodsAvailableAddress)],
+		['name'=>'shipment.pkg','cssClassExpression' => '$data->getShowColor("pkg")','filter'=>CHtml::textField('CargoProcess[pkg]',@$cargo->pkg),'value'=>'$data->getPackages()'],
+		['name'=>'plt','type'=>'raw','value'=>'$data->getPltStr()'],
+		['name'=>'shipment.weight','filter'=>CHtml::textField('CargoProcess[weight]',@$cargo->weight),'value'=>'$data->getWeight()'],
+		['name' =>'shipment.cbm','value'=>'$data->getTotalCBM()','filter'=>CHtml::textField('CargoProcess[cbm]',@$cargo->cbm)],
+		['name' => 'shipment.rack','type'=>'raw','value' => '$data->shipment->getRackName(false,true)'],
+		['header'=>'extra Info','type'=>'raw','value'=>'$data->shipment->getDGWarnings()','filter'=>CHtml::dropDownList('CargoProcess[exInfo]', $cargo->exInfo, $this->t(ImParcel::$exInfos), ['prompt'=>'All'])],
+		['class'=>'application.extensions.CSpanableGridView.oSpanableButtonColumn',
+			'template'=>'{operate}',
+			'buttons'=>[
+				'operate' => [
+					'url'=>'Yii::app()->createURL("cargoProcess/operation")."?id=".$this->ids',
+					'imageUrl'=>false,
+					'visible'=>'true',
+					'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => '$data->id'],
+				],
+			],
+			'spanable' => true, 'spanDepands' => ['$data->getOnlyDay()','$data->status','$data->shipment->cnee->postcode']
+		],	
+		['class'=>'oButtonColumn',
+			'template'=>'{operate}&nbsp;{log}',
+			'buttons'=>[
+				'operate' => [
+					'url'=>'Yii::app()->createURL("cargoProcess/operation")."?id=".$data->id',
+					'imageUrl'=>false,
+					'visible'=>'true',
+					'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => '$data->id'],
+				],
+				'log' => [
+					'imageUrl'=>false,
+					'options' => ['class' => 'jqm_link grid_view_btn', 'label' => 'Log', 'data-win-class' => 'L'],
+					'visible' => 'true',
+					'url' => 'Yii::app()->createUrl("cargoProcess/log", ["id" => $data->id])',
+					'label' => 'Log'
+				],
+			],
+		]
+	],
+]);
+}
+
+; ?>

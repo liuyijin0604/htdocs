@@ -1,0 +1,181 @@
+<?php
+/**
+ * Controller is the customized base controller class.
+ * All controller classes for this application should extend from this base class.
+ */
+class RestController extends CController{
+	// /**
+	//  * @var string the default layout for the controller view. Defaults to '//layouts/column1',
+	//  * meaning using a single column layout. See 'protected/views/layouts/column1.php'.
+	//  */
+	// public $layout='//layouts/tab';
+	// /**
+	//  * @var array context menu items. This property will be assigned to {@link CMenu::items}.
+	//  */
+	// public $menu=[];
+	// /**
+	//  * @var array the breadcrumbs of the current page. The value of this property will
+	//  * be assigned to {@link CBreadcrumbs::links}. Please refer to {@link CBreadcrumbs::links}
+	//  * for more details on how to specify this property.
+	//  */
+	// public $breadcrumbs=[];
+	
+	protected $skipApikey=[];
+	
+	protected $nonAjax=[];
+	
+	protected $skipIsGuest=[];
+
+	protected $skipAcl=[];
+
+	protected $CaName = '';
+	
+	
+	protected $_INPUT = null;
+	protected $_DATA= null;
+	
+	
+	public function init(){
+		$this->funcSetLanguage();
+		$this->funcSetDATA();
+		
+	}
+	
+	private function funcSetLanguage(){
+		//set language
+		if($_SERVER['REQUEST_METHOD'] == 'OPTIONS') Yii::app()->end();
+
+		if(isset($_GET['lang'])){
+			Yii::app()->session['lang'] = $_GET['lang'];
+		}elseif(empty(Yii::app()->session['lang'])){
+			if(Yii::app()->params['settings']['lang']['value'] == 'auto'){//auto detect
+				if(isset($_SERVER["HTTP_ACCEPT_LANGUAGE"])){
+					$lang=$_SERVER["HTTP_ACCEPT_LANGUAGE"];
+					$lary=explode(",",$lang);
+					$lnp=explode(";",$lary[0]);
+					$lang = substr($lnp[0],0,2);
+					Yii::app()->session['lang'] = $lang == 'zh'? 'zh_cn' : $lang;
+				}else{
+					Yii::app()->session['lang'] = 'en';
+				}
+			}else{
+				Yii::app()->session['lang'] = Yii::app()->params['settings']['lang']['value'];
+			}
+		}
+		Yii::app()->language = Yii::app()->session['lang'];
+	}
+	
+	private function funcSetDATA(){
+				// if (in_array($_SERVER['REQUEST_METHOD'], ['POST', 'PUT'])) {
+		// 	$data = file_get_contents('php://input');
+		// 	$this->data = json_decode($data, true);
+		$_INPUT = file_get_contents('php://input');
+		$_DATA = json_decode($_INPUT, true);
+	}
+	
+	
+	//common filters
+	public function filters() {
+		// return array('apikey','ajaxOnly','isGuest', 'accessControl');
+		return array('apikey','isGuest', 'accessControl');
+	}
+	
+	public function filterIsGuest($filterChain) {
+		if(!in_array($this->getAction()->getId(), $this->skipIsGuest)){
+			if(Yii::app()->user->isGuest) {
+				// echo '<script type="text/javascript">$("#logout").trigger("click");</script>';
+				// Yii::app()->end();
+				//$this->funcRestResponse(false,null,'please login');
+			}
+		}
+		$filterChain->run();
+	}
+	
+	public function filterAccessControl($filterChain) {
+		if($this->getAction()->getId() != 'checkSession'){
+			Yii::app()->session['last_action'] = time();
+		}
+
+		if(empty($this->skipAcl) || !in_array($this->getAction()->getId(), $this->skipAcl)){
+			$this->CaName = 'C:'. $this->getId().'/'.$this->getAction()->getId();
+			Acl::hasAccess($this->CaName, true);
+		}
+		$filterChain->run();
+	}
+	
+	public function filterAjaxOnly($filterChain){
+		if(!Yii::app()->request->isAjaxRequest && (empty($this->nonAjax) || !in_array($this->getAction()->getId(), $this->nonAjax)))
+			throw new CHttpException(400, 'Bad Request, Ajax Access Only!');
+		$filterChain->run();
+	}
+	
+	public function filterApiKey($filterChain){
+		if(!in_array($this->getAction()->getId(), $this->skipApikey)){
+			// $authorization = $_SERVER['HTTP_AUTHORIZATION'];
+			// if($authorization !== '6XiDxDEXiXRiuE1cbRh7aDz6KdM51Q'){
+			// 	throw new CHttpException(403, 'authorization');
+			// }
+		}
+		
+		
+		$filterChain->run();
+	}
+	
+	// public function t($s, $m=[]){
+	// 	if(is_array($s)){
+	// 		foreach($s as $k=>$a){
+	// 			$s[$k] = Yii::t($this->getId(), $a, $m);
+	// 		}
+	// 		return $s;
+	// 	}else{
+	// 		return Yii::t($this->getId(), $s, $m);
+	// 	}
+	// }
+
+	// public function createUrl($route,$params=[],$ampersand='&'){
+	// 	if(isset($_SERVER['HTTP_ORIGIN'])){
+	// 		$url = parent::createUrl($route,$params,$ampersand);
+	// 		return strpos($url,'http')===0? $url : Yii::app()->getRequest()->getHostInfo('').$url;
+	// 	}else{
+	// 		return parent::createUrl($route,$params,$ampersand);
+	// 	}
+	// }
+
+	// public function ajaxResult($model, $attr=[], $msg=''){
+	// 	$es = $model->getErrors();
+	// 	$r = new stdClass;
+	// 	$r->done = false;
+	// 	$r->msg = '';
+	// 	if(isset($model->isCreate)){
+	// 		$r->isCreate = $model->isCreate;
+	// 	}
+	// 	foreach($attr as $k=>$a){
+	// 		if(is_string($k) && !empty($a)) $r->{$k} = $a;
+	// 		if(!is_array($a) && isset($model->{$a})) $r->{$a} = $model->{$a};
+	// 	}
+	// 	if(empty($es)){
+	// 		$r->done = true;
+	// 		$r->msg = empty($msg)? $this->t('{model} Saved Successfully', array('{model}' => get_class($model))) : $msg;
+	// 	}else{
+	// 		foreach($es as $e){
+	// 			foreach($e as $el){
+	// 				$r->msg .= $el.'<br />';
+	// 			}
+	// 		}
+	// 	}
+	// 	echo json_encode($r);
+	// 	Yii::app()->end();
+	// }
+	
+	
+	
+	public function funcRestResponse($isSuccess , $objData,$strMessage){
+		$objResponse = new stdClass;
+        $objResponse->isSuccess = $isSuccess;
+		$objResponse->data =$objData;
+		$objResponse->message =$strMessage;
+        $result = json_encode($objResponse, JSON_UNESCAPED_UNICODE);
+        echo $result;
+		Yii::app()->end();
+	}
+}

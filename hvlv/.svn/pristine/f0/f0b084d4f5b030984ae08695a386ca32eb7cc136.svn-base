@@ -1,0 +1,212 @@
+<?php
+if (empty($model->mdata['blockacr'])):
+?>
+<div class="form">
+    <?php $form=$this->beginWidget('CActiveForm', [
+        'id'=>'dmawb_consol-acr_form',
+        'enableAjaxValidation'=>false,
+    ]);
+    ?>
+
+    <!--
+    <div class="row rowcol rowleft">
+        <?php echo CHtml::label('Org', 'fororg'); ?>
+        <?php
+        $acname = empty($_GET["tabid"])? 'org_ac' : $_GET["tabid"].'_org_ac';
+        $this->widget('zii.widgets.jui.CJuiAutoComplete', [
+            'name' => $acname,
+            'sourceUrl' => ['org/clientSuggest'],
+            'value' =>  '',
+            'options' => [
+                'showAnim' => 'fold',
+                'minLength' => 2,
+                'delay' => 200,
+                'select' => 'js:function(event, ui){ $(this).val(ui.item["label"]); $(this).parent().parent().find("#mdata_cnor").val(ui.item["cnor_name"]);$(this).parent().parent().find("#mdata_cnor_addr").val(ui.item["cnor_add"]);$(this).parent().parent().find("#mdata_cnee").val(ui.item["cnee_name"]);$(this).parent().parent().find("#mdata_cnee_addr").val(ui.item["cnee_add"]);$(this).prevAll("input[type=hidden]").val(ui.item["value"]).data("ov",ui.item["value"]); return false; }',
+                'change' => 'js:function(event, ui){ if(ui.item == null) $(this).prevAll("input[type=hidden]").val(""); return false; }',
+            ],
+            'htmlOptions' => [
+                'size' => '50',
+            ],
+        ]);
+        ?>
+
+        <?php echo $form->error($model, 'owner_id'); ?>
+    </div>
+-->
+    <div class="row rowcol rowleft">
+        <?php echo CHtml::label('Shipper', 'spr'); ?>
+        <?php echo CHtml::textField('mdata[cnor]', @$model->mdata['cnor'], ['size'=>30,'maxlength'=>70]); ?>
+    </div>
+
+    <div class="row rowcol">
+        <?php echo CHtml::label('Shipper Address', 'spr_addr'); ?>
+        <?php echo CHtml::textField('mdata[cnor_addr]', @$model->mdata['cnor_addr'], ['size'=>50,'maxlength'=>100]); ?>
+    </div>
+    
+     <div class="row">
+        <div class="row rowcol rowleft">
+            <?php echo CHtml::label('Consignee', 'cnee'); ?>
+            <?php echo CHtml::textField('mdata[cnee]', @$model->mdata['cnee'], ['size'=>30,'maxlength'=>70]); ?>
+        </div>
+
+        <div class="row rowcol">
+            <?php echo CHtml::label('Consignee Address', 'cnee_addr'); ?>
+            <?php echo CHtml::textField('mdata[cnee_addr]', @$model->mdata['cnee_addr'], ['size'=>30,'maxlength'=>100]); ?>
+        </div>
+        <div class="row rowcol">
+            <?php echo CHtml::label('Consignee Suburb', 'cnee_suburb'); ?>
+            <?php $sacname = empty($_GET["tabid"])? 'mdata[cnee_suburb]' : $_GET["tabid"].'_mdata_cnee_suburb';
+                $this->widget('zii.widgets.jui.CJuiAutoComplete', [
+                    'name' => $sacname,
+                    'sourceUrl' => ['postcode/suggest'],
+                    'value' => (@$model->mdata['cnee_suburb']) ? @$model->mdata['cnee_suburb'] : '',
+                    'options' => [
+                        'showAnim' => 'fold',
+                        'minLength' => 2,
+                        'delay' => 200,
+                        'select' => 'js:function(event, ui){ 
+                                    $(this).val(ui.item["value"]);
+                                    $(this).trigger("ac_after_select", ui); 
+                                    return false; }',
+                    ],
+                    'htmlOptions' => [
+                        'size' => '20',
+                        'name' => 'mdata[cnee_suburb]',
+                    ],
+                ]);
+        ?>
+        </div>
+         <div class="row rowcol">
+            <?php echo CHtml::label('Consignee State', 'cnee_state'); ?>
+             <?php echo CHtml::dropDownList('mdata[cnee_state]', strtoupper(@$model->mdata['cnee_state']), ['ACT' => 'ACT - Australia Capital Territory', 'NSW' => 'NSW - New South Wales', 'NT' => 'NT - Northern Territory', 'QLD' => 'QLD - Queensland', 'SA' => 'SA - South Australia', 'TAS' => 'TAS - Tasmania', 'VIC' => 'VIC - Victoria', 'WA' => 'WA - Western Australia','NI'=>'NI - North Island','SI'=>'SI - South Island'], ['empty' => 'Select One']); ?>
+        </div>
+         <div class="row rowcol">
+            <?php echo CHtml::label('Consignee Postcode', 'cnee_postcode'); ?>
+            <?php echo CHtml::textField('mdata[cnee_postcode]', @$model->mdata['cnee_postcode'], ['size'=>10,'maxlength'=>10]); ?>
+        </div>
+
+        <div class="row rowcol">
+            <?php echo CHtml::label('Consignee Country', 'cnee_country'); ?>
+            <?php echo CHtml::textField('mdata[cnee_country]', @$model->mdata['cnee_country'], ['size'=>10,'maxlength'=>10]); ?>
+        </div>
+    </div>
+
+    <div class="row rowcol rowleft">
+        <?php echo CHtml::label('Receiver For Custom', 'rece'); ?>
+        <?php echo CHtml::textField('mdata[rece]', @$model->mdata['rece'], ['size'=>30,'maxlength'=>70]); ?>
+    </div>
+
+    <div class="row rowcol">
+        <?php echo CHtml::label('Receiver Address For Custom', 'rece_addr'); ?>
+        <?php echo CHtml::textField('mdata[rece_addr]', @$model->mdata['rece_addr'], ['size'=>50,'maxlength'=>100]); ?>
+    </div>
+    <div class="row rowcol rowleft">
+        <?php echo CHtml::label('HAWB No.', 'hwb'); ?>
+        <?php echo CHtml::textField('mdata[house_bill]', @$model->mdata['house_bill'], ['size'=>20,'maxlength'=>50]); ?>
+    </div>
+    <div class="row rowcol">
+    <?php echo CHtml::label('&nbsp;', 'skip_cacr'); ?>
+    <label class="radio_label"><?php echo CHtml::checkBox('mdata[skip_cacr]', @$model->mdata['skip_cacr']); ?> Skip Consol ACR</label>
+  </div>
+
+    <div class="row buttons">
+        <?php
+        echo CHtml::submitButton('Save');
+        $isair = $model->service == 10;
+        if ($isair) {
+            if (empty($model->mdata['acr_stat']) || in_array($model->mdata['acr_stat'], [0])) {
+                echo '&nbsp;', CHtml::button('Send Main ACR', ['class' => 'send_btn']);
+            }
+            if (!empty($model->mdata['acr_stat'])&&in_array($model->mdata['acr_stat'], [5])) {
+                echo '&nbsp;', '<b style="color:green">Main ACR Received</b>';
+            }
+        }
+         echo '&nbsp;', CHtml::button('Send Sub ACR ', ['class' => 'send_sub_btn']);
+        ?>
+    </div>
+
+    <?php $this->endWidget(); ?>
+</div><!-- form -->
+<?php
+endif;
+$p = new ImParcel('search');
+if (!empty($_GET['ImParcel'])) {
+    $p->setAttributes($_GET['ImParcel']);
+}
+$p->consol_id = $model->id;
+
+$this->widget('zii.widgets.grid.CGridView', [
+    'id'=>'acr-grid_'.$_GET["tabid"],
+    'cssFile' => false,
+    'dataProvider'=>$p->search(),
+    'filter'=>$p,
+    'columns'=>[
+        ['name' => 'hbn', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->createURL("imParcel/update", array("id" => $data->id))."\" class=\"tab_link\" title=\"".$data->hbn."\">".$data->hbn."</a>"',],
+        'ref',
+        'can',
+        ['header'=>'Agent','name'=>'agent_name','value'=>'$data->agent->name'],
+        ['name' => 'status', 'value' => '$data->getStatus()',
+            'filter'=>CHtml::dropDownList('ImParcel[status]', $p->status, $this->t(ImParcel::$states), ['prompt'=>$this->t('All')]),],
+        ['name' => 'cnee_name', 'value' => 'empty($data->cnee)? "" : $data->cnee->name',],
+        'postcode',
+        ['name' => 'cnor_tel', 'value' => '$data->cnor->tel',],
+        'pkg',
+        'weight',
+        'dvalue',
+        ['header'=>'ChargeCode','value'=>'$data->getChargecode()'],
+        ['header'=>'extra Info','type'=>'raw','value'=>'$data->getWarnings().$data->getDGWarnings()','filter'=>CHtml::dropDownList('ImParcel[bwf]', $p->bwf, $this->t(ImParcel::$bwfs), ['prompt'=>'All']).CHtml::dropDownList('ImParcel[exInfo]', $p->exInfo, $this->t(ImParcel::$exInfos), ['prompt'=>'All'])],
+        [
+            'class'=>'oButtonColumn',
+            'template'=>'{update}',//{view}
+            'buttons'=>[
+                'view' => [
+                    'imageUrl' => false,
+                    'url' => 'Yii::app()->createURL("imParcel/view", array("id" => $data->id))',
+                    'options' => ['class' => 'jqm_link grid_view_btn'],
+                ],
+                'update' => [
+                    'imageUrl' => false,
+                    'url' => 'Yii::app()->createURL("imParcel/update", array("id" => $data->id))',
+                    'visible' => 'true',
+                    'options' => ['class' => 'tab_link grid_edit_btn', 'label'=>$this->t('Update'), 'title' => '$data->hbn'],
+                ],
+            ],
+        ],
+    ],
+]);
+?>
+<script type="text/javascript">
+    $(function(){
+        var tab = $('#<?=$_GET["tabid"];?>');
+        var panel = tab.data('panel');
+        $('input.send_btn', panel).on('click', function(){
+            var me = $(this);
+            me.prop('disabled', true);
+            $.get('<?=$this->createURL("dmawbConsol/acr", ["id" => $model->id]);?>', function(r){
+                if(r.done){
+                    myApp.notice(r.msg);
+                }else{
+                    myApp.alert(r.msg);
+                }
+                me.prop('disabled', true);
+            }, 'json');
+        });
+         $('input.send_sub_btn', panel).on('click', function(){
+            $.get('<?=$this->createURL("dmawbConsol/acr", ["id" => $model->id,'sub'=>1]);?>', function(r){
+                var me = $(this);
+                me.prop('disabled', true);
+                if(r.done){
+                    myApp.notice(r.msg);
+                }else{
+                    myApp.alert(r.msg);
+                }
+                me.prop('disabled', true);
+            }, 'json');
+        });
+
+      $('#<?=$sacname;?>', panel).on('ac_after_select', function(evt, ui){
+        $("#mdata_cnee_postcode", panel).val(ui.item['pc']);
+        $('#mdata_cnee_state', panel).val(ui.item['st']);
+    });
+    });
+</script>

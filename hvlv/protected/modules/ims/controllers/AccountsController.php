@@ -1,0 +1,818 @@
+<?php
+
+class AccountsController extends Controller{
+	/**
+	 * Declares class-based actions.
+	 */
+	protected $nonAjax=array('export');
+
+	/**
+	 * This is the default 'index' action that is invoked
+	 * when an action is not explicitly requested by users.
+	 */
+	public function actionIndex(){
+		Yii::app()->name = 'TLA';
+        $owner = Org::model()->findByPk(Yii::app()->user->org);
+		$this->render('index',['owner' => $owner,'credit' => $owner->getCreditDetails()]);
+	}
+	
+	public function actionDispute()
+	{
+		$model = new TlaTask();
+		if(!empty($_POST['TlaTask']))
+		{
+			$tlaCustomerDisputeService = new TlaCustomerDisputeService();
+			$tlaCustomerDispute = new TlaCustomerDispute();
+			$tlaTaskService = new TlaTaskService();
+			$file = $tlaCustomerDisputeService->filesToBeFile($_FILES,'TlaTask');
+			$disputeResult = $tlaCustomerDisputeService->importCustomerDisputeTemplate(User::currentUserOrgId(),User::currentUserID(),$file,$_FILES,'TlaTask');
+			if(!empty($disputeResult[0]))
+			{
+				$meta = ["agent_id"=>User::currentUserOrgId()];
+				$tlaCustomerDispute = $disputeResult[2];
+				foreach ($tlaCustomerDispute->lines as $key => $line) {
+					$after7Days = date("Y-m-d 18:00:00",strtotime('+7 day',strtotime(date("Y-m-d 18:00:00"))));
+					$tlaTaskService->createNewTlaTask(DisputeTask::$my_type,"","TlaCustomerDisputeLine",$line->id,Org::TLA_DEPARTMENT_SYDNEY,User::currentUserID(),$_POST['TlaTask']['comment'],$meta,[],null,$after7Days);
+				}
+				$this->ajaxResult($tlaCustomerDispute);
+			}else
+			{
+				$model->addError("Dispute Error", join("</br> ", $disputeResult[1]));
+				$this->ajaxResult($model);
+			}
+		}
+		$disputeTask = new DisputeTask();
+		$disputeTask->unsetAttributes();
+		$disputeTask->org_id = User::currentUserOrgId();
+		if(!empty($_GET['DisputeTask']))
+		{
+			$disputeTask->setAttributes($_GET['DisputeTask']);
+			if(!empty($_GET['DisputeTask']['invNo']))
+			{
+				$disputeTask->invNo =$_GET['DisputeTask']['invNo'];
+			}
+			if(!empty($_GET['DisputeTask']['ref']))
+			{
+				$disputeTask->ref =$_GET['DisputeTask']['ref'];
+			}
+		}
+
+		$this->render('dispute_index', [
+			'model'=>$model,
+			'disputeTask'=>$disputeTask
+		]);
+
+	}
+
+	public function actionExport($id){
+		if(!empty($_GET['xls'])){
+			$this->actionDetail($id);
+		}else{
+			$model=$this->loadInvoiceModel($id);
+			oPDF::renderPDF('invoice', array('inv'=>$model));
+		}
+	}
+
+	public function actionDetail($id){
+		Yii::app()->name = 'TLA';
+		$model=$this->loadInvoiceModel($id);
+		$xls = new oExcel;
+		$mfn = 'Invoice_detail_'.$id;
+		$i = 1;
+		switch($model->type){
+			case 10:
+			case Invoice::INVOICE_TYPE_WDT: {
+                $xls->addRow($i++, array('HBN', 'Detail', 'Packages', 'Weight', 'CBM', 'Base Rate', 'Rate', 'Unit', 'Amount'));
+                $xls->setFont('A1:I1', array('bold' => true));
+                $qty = 0;
+                $wei = 0;
+                $cbm = 0;
+                $tot = 0;
+                foreach ($model->lines as $il) {
+                    if (empty($il->mdata['items'])) continue;
+                    foreach ($il->mdata['items'] as $si => $r) {
+                        $xls->addRow($i++, array($r[0], $r[1], $r[2], $r[3], $r[4], $r[6], $r[7], $r[8], $r[5]));
+                        $tot += $r[5];
+                        $qty += $r[2];
+                        $wei += $r[3];
+                        $cbm += $r[4];
+                    }
+                }
+                $xls->addRow($i, array('', 'Total:', $qty, $wei, $cbm, '', '', '', $tot));
+                $xls->setFont('A' . $i . ':I' . $i, array('bold' => true));
+            }
+			break;
+		}
+		$xls->output($mfn.'.xlsx');
+	}
+        
+    public function actionOrgList(){
+            $model=new Org('search');
+            $model->unsetAttributes();
+            if(isset($_GET['Org'])){
+               $model->attributes=$_GET['Org'];
+           }
+            $model->oids= User::getOrgIds();
+            $this->render('list',array('model'=>$model));
+    }
+
+    /**
+	 * Updates a particular model.
+	 * If update is successful, the browser will be redirected to the 'view' page.
+	 * @param integer $id the ID of the model to be updated
+	 */
+	public function actionUpdate($id){
+                $model=$this->loadModel($id);
+                if(Yii::app()->user->grp>=50&&!in_array($model->id, User::getOrgIds())) Acl::denied403();
+		$own = $model->id == Yii::app()->user->org;
+                $user =empty($model->users[0])? new User:$model->users[0];
+              
+		$_GET['tabid']=12321112;
+		if(isset($_POST['Org'])&&isset($_POST['User'])){
+			if($own){
+				unset($_POST['Org']['status']);
+				unset($_POST['Org']['type']);
+			}
+        		$model->attributes=$_POST['Org'];
+			$model->save();
+                        if(empty($_POST['User']['password'])){
+				unset($_POST['User']['password']);
+			}else{
+				$_POST['User']['password'] = md5($_POST['User']['password']);
+			}
+                        $user->attributes=$_POST['User'];
+                        if($user->isNewRecord){
+                             $user->type=70;
+                             $user->by_id=Yii::app()->user->org;
+                             $user->org_id=$id;
+                        }
+                         $user->save();
+                         $errors=$user->getErrors();
+                         $msg='';
+                         foreach ($errors as $e){
+                             $msg.= implode(':', $e);
+                         }
+                       if(!empty($msg))  $model->addError('User update Failed', $msg);
+			$this->ajaxResult($model);
+		}
+
+            $this->render('update',array('model'=>$model, 'own' => $own,'user'=>$user));
+	}
+    
+        
+        /**
+	 * Creates a new model.
+	 * If creation is successful, the browser will be redirected to the 'view' page.
+	 */
+        public function actionCreate(){
+             	$model=new Org;
+                $user=new User;
+                $_GET['tabid']=12321113;
+		if(isset($_POST['Org'])){
+                    
+			$model->attributes=$_POST['Org'];                  
+                        $model->type=30;
+                        $model->by=Yii::app()->user->org;
+                        $model->status=1;
+			$model->extra = empty($_POST['extra'])? array() : $_POST['extra'];
+			$model->save();
+			$this->ajaxResult($model, array('id', 'code'));
+		} else {
+                    // set default value for Client or Agent organization
+                    $model->by=Yii::app()->user->org;
+                    $model->extra['wthreshold'] = 5;
+                    $model->extra['credit_init_date'] = date('Y-m-d');
+                    $model->extra['creditlimit'] = 10000;
+                    $model->extra['creditterms'] = 14; // credit
+               }
+         	$model->status = 1;
+		$model->country = 'Australia';
+		$this->render('create',array(
+			'model'=>$model,
+			'own' => false,
+                        'user'=>$user,
+		));
+	}
+
+        
+        
+    
+    	/**
+	 * Returns the data model based on the primary key given in the GET variable.
+	 * If the data model is not found, an HTTP exception will be raised.
+	 * @param integer the ID of the model to be loaded
+	 */
+	public function loadModel($id){
+		$model=Org::model()->findByPk($id);
+		if($model===null)
+			throw new CHttpException(404,'The requested page does not exist.');
+		return $model;
+	}
+     
+    public function actionChargecodeList(){
+            $model=new ImportChargeCode();
+            $_GET['tabid']=1232112;
+            $model->unsetAttributes();
+            if(isset($_GET['ImportChargeCode'])){
+               $model->attributes=$_GET['ImportChargeCode'];
+           }
+            $model->oids=  User::getOrgIds();
+            $model->type=1;
+            $this->render('chargecode_list',array('model'=>$model)); 
+     }
+    public function actionOwnerSuggest(){
+        $org_id=Yii::app()->user->org;
+        $a=[];
+        if($org_id>0){
+           $users=User::model()->findAll('org_id=:org_id OR by_id=:org_id',array(':org_id'=>$org_id));
+           foreach ($users as $u){
+               $rs=Org::model()->findAll(array(
+                   'condition'=>'status=1 AND (name LIKE :n OR CODE LIKE :n) AND id=:oid',
+                   'params'=>array(':n'=>'%'.$_GET['term'].'%',':oid'=>$u->org_id),
+                   'limit'=>10,
+                  ));
+                  foreach ($rs as $r){
+                      $a[]=array(
+                          'value'=>$r->id,
+                          'label'=>$r->code.':'.$r->name,
+                     );
+                      
+                  }
+             }
+       }
+       $a=array_unique($a);
+          echo json_encode($a);
+    }
+    
+    
+    public function actionInvoice(){
+    	Yii::app()->name = 'TLA';
+         $model = new Invoice('search');
+            $model->unsetAttributes();
+            $model->invtypes=[60,65];
+            $model->toids = User::getOrgIds();
+            $this->render('invoice_list',array('model'=>$model));
+   }
+    
+       public function actionUpdateChargecode($id){
+            if(!(Yii::app()->user->org==1427||Yii::app()->user->grp<=0)) return false;
+           $_GET['tabid']=12321112;
+           $model= ImportChargeCode::model()->findByPk($id);
+           if( isset($_POST['ImportChargeCode']) ){
+                $model->attributes=$_POST['ImportChargeCode'];
+            if ( !isset($_POST['selected_rates']) ) {
+                $model->addError('couriers','Please select at least one courier');
+            } else {
+                $model->couriersObj = $_POST['selected_rates'];
+              if(isset($_POST['mdata'])){
+                foreach($_POST['mdata'] as $v=>$k){
+                    $model->mdata[$v]=$k;
+                }
+              }
+              if(!isset($_POST['mdata']['selected_service'])){
+                   $model->mdata['selected_service']=[];
+               }
+                $model->save();
+            }
+            $this->ajaxResult($model, array('id'));
+        }
+           $this->render('update_charge_code',array('model'=>$model));  
+       }
+       
+       	/**
+	 * import zone map by charge code
+	 * @param $id
+	 */
+	public function actionChgcodezonemap($id){
+		$modelChargeCode = ImportChargeCode::model()->findByPk($id);
+                $_GET['tabid']='111222333444';
+		$this->render('chargecode_zonemap',array(
+			'model' => $modelChargeCode,
+		));
+	}
+        /**
+	 * save charge code
+	 */
+	public function actionAjaxSaveChargecodeZonemap(){
+		$resp = array('success' => 1,'msg' => 'import successfully');
+		$template_file = empty($_FILES['org-zonemap']) ? array() : $_FILES['org-zonemap'];
+		if ( empty($template_file['tmp_name']) || !is_uploaded_file( $template_file['tmp_name'] ) ) {
+			$resp['msg'] = 'Invalid template file';
+			echo json_encode($resp);
+			return;
+		} else {
+			$xls = new oExcel;
+			$xls->load($template_file['tmp_name']);
+			$data = $xls->getAll();
+
+			$chargecodeId = $_POST['ImportChargeCode']['id'];
+
+			// import org zone map data
+			$this->importChargecodeZoneMapData($chargecodeId,$data);
+
+			//save file
+			FileRepo::storeFile($template_file['tmp_name'], $template_file['name'], 55,$chargecodeId);
+
+		}
+
+		echo json_encode($resp);
+	}
+	private function importChargecodeZoneMapData($chargecodeId,&$data){
+		$index = 0;
+
+		foreach ($data as $row) {
+			if ($index < 1) {
+				$index++;
+				continue;
+			}
+			if (empty($row[1])) {
+				continue;
+			}
+
+			if (preg_match('/([0-9|\,|\-|\s]*)/', $row[3], $matches)) {
+				if ($matches[1] != $row[3]) {
+					echo json_encode(['done' => false, 'msg' => 'Contains character other than<br>numbers or - or , or space']);
+					Yii::app()->end();
+				}
+			} else {
+				echo json_encode(['done' => false, 'msg' => 'Contains character other than<br>numbers or - or , or space']);
+				Yii::app()->end();
+			}
+		}
+
+		// clear old data
+		ZoneMap::model()->deleteAll('chargecode_id = :cid' ,[':cid' => $chargecodeId] );
+		FileRepo::model()->deleteAll('type = 55 and fid = :cid',[':cid' => $chargecodeId]);
+
+		foreach ($data as $row) {
+			if ($index < 1) {
+				$index++;
+				continue;
+			}
+			if (empty($row[1])) continue;
+
+			$code = $row[1];
+			$name = $row[2];
+			$postcodes = explode(',', $row[3]);
+			foreach ( $postcodes as $postcode ) {
+
+				// try to find -
+				$postCodesSpan = explode('-',$postcode );
+				if ( count($postCodesSpan) == 2 ) {
+					$start = intval($postCodesSpan[0]);
+					$end = intval($postCodesSpan[1]);
+
+				} else {
+					// only one post code
+					$start = $end = intval($postCodesSpan[0]);
+				}
+
+				// if existing , do nothing
+				//$zoneMap = ZoneMap::model()->find('org_id = :oid and z1 = :code and pc_lo = :pclo and pc_hi = :pchi',[':oid' => $orgId,':code' => $code,':pclo' => $start,':pchi' => $end]);
+				//if ( empty($zoneMap) )
+				{
+					$zoneMap = new ZoneMap();
+					$zoneMap->setAttributes(array(
+						'org_id' => 0,
+						'zone_id' => 1,
+						'chargecode_id' => $chargecodeId,
+						'z1' => $code,
+						'zone_name' => $name,
+						'pc_lo' => $start,
+						'pc_hi' => $end
+					));
+					$zoneMap->save();
+				}
+			}
+		}
+	}
+        
+       public function actionPcarate($id){
+        $chargecode_id = $id;
+        $_GET['tabid']=1112221122;
+        $model=Org::model()->findByPk(114); // for our own org PCAE
+        $this->render('pcarate',array(
+            'model'=>$model,'chgcodeid' => $chargecode_id
+        ));
+    }
+    /**
+	 * save all pca price for specified charge code
+	 */
+	public function actionSavePcaZonePrice(){
+		$chargeCodeId = $_POST['cid'];
+		$data = $_POST['data'];
+		$data = json_decode($data,true);
+
+		if ( !empty($data) && !empty($chargeCodeId) ) {
+			// step 1 - clear all old zone rate data
+			ZoneRate::model()->deleteAll('chargecode_id = :cid',array(':cid' => $chargeCodeId));
+
+			// step 2 - update all with new zone rate data
+			foreach ( $data as $wRates ) {
+				$lo = $wRates['lo'];
+				$hi = $wRates['hi'];
+				$nkg=$wRates['nkg'];
+				if ( $hi <= 0||$nkg < 0) continue; // ignore invalid one
+				foreach ( $wRates['data'] as $rate ) {
+					$zoneRate = new ZoneRate();
+					$zoneRate->rate_id = 0;
+					$zoneRate->chargecode_id = $chargeCodeId;
+					$zoneRate->weight_lo = $lo;
+					$zoneRate->weight_hi = $hi;
+					$zoneRate->zone = $rate['code'];
+					$zoneRate->zone_name = $rate['name'];
+
+					$zoneRate->item = $rate['ppc'];
+					$zoneRate->base = $rate['base'];
+					$zoneRate->perkg = $rate['pkg'];
+					$zoneRate->nkg = $nkg;
+					$zoneRate->minimum = $rate['minimum'];
+					$zoneRate->gst = 1;
+					$zoneRate->levy = 0;
+					$zoneRate->save();
+				}
+			}
+		}
+
+		$resp = array('success' => 1);
+		echo json_encode($resp);
+
+	}
+        
+          public function actionCreatechargecode(){
+            if(!(Yii::app()->user->org==1427||Yii::app()->user->grp<=0)) return false;
+              $_GET['tabid']=1112323;
+        $model = new ImportChargeCode();
+        if(isset($_POST['ImportChargeCode'])){
+            //$model->setScenario('create');
+            $model->attributes=$_POST['ImportChargeCode'];
+            if ( !isset($_POST['selected_rates']) ) {
+              $model->addError('couriers','Please select at least one courier');
+            } else {
+                $model->created = date('Y-m-d H:i:s');
+                $model->type=1;
+                $model->couriersObj = $_POST['selected_rates'];
+                $model->save();
+            }
+            $this->ajaxResult($model, array('id'));
+        }
+
+        $this->render('create_charge_code',array(
+            'model'=>$model,
+        ));
+
+    }
+	public function loadInvoiceModel($id){
+		Yii::app()->name = 'TLA';
+		$model=Invoice::model()->findByPk($id);
+		if($model===null)
+			throw new CHttpException(404,'The requested page does not exist.');
+		return $model;
+	}
+
+	public function actionExportCurrentSearch(){		
+		if(!empty($_GET['Invoice']))
+		{
+			$model=new Invoice('search');
+			$model->unsetAttributes();  // clear any default values
+			$model->attributes=$_GET['Invoice'];
+			$model->to_id = Yii::app()->user->org;
+		}
+		$dp = $model->search(false);
+
+		$xls = new oExcel;
+		$i = 1;
+		$xls->addRow($i++, ['Invoice No', 'Currency','AWB','Total','Status','Date','Due Date']);
+
+		foreach ($dp->data as $r) {
+			$xls->addRow($i++, [$r->no, $r->getCurrency(), @$r->consol->awb, $r->total, $r->getStatus(), $r->date, $r->due]);
+		}
+
+		// 	// $xls->addRow($i++, [$r->no, $r->getCurrency(),empty($r->consol)? '' : $r->consol->no,@$r->consol->eta,empty($r->consol)? '' : $r->consol->awb,$r->pkg,$r->weight, $r->getStatus(), empty($r->agent)? '' : $r->agent->name,$r->cnor->name,
+		// 	// 	$r->cnor->address, $r->cnee->name, '="'.$r->cnee->tel.'"', $r->cnee->address, $r->cnee->state, $r->cnee->postcode, $r->created, $dd,$extraInfo,$r->can,$r->getRackName(),$r->cref,@$r->mdata['cust_invoice_ref'],@$r->mdata['sea_mark_number']]);
+
+		$xls->output('imp_search_export_'.time().'.xlsx');
+	}
+
+	public function actionExportCurrentSearchPDF(){
+		if(!empty($_GET['Invoice']))
+		{
+			$model=new Invoice('search');
+			$model->unsetAttributes();  // clear any default values
+			$model->attributes=$_GET['Invoice'];
+			$model->to_id = Yii::app()->user->org;
+		}
+		$dp = $model->search(false);
+		$ps = [];
+		foreach ($dp->data as $r) {
+			$invModel=$this->loadInvoiceModel($r->id);
+			$currentPage = oPDF::renderPDF('invoice', array('inv'=>$invModel), 2);
+			$ps[] = $currentPage;
+		}
+		oPDF::mergePDF($ps, 1, true, 'invoices_'.time().'.pdf');
+	}
+
+	public function actionExportCurrentStatement(){
+		$model=new Invoice('search');
+		$model->unsetAttributes();  // clear any default values		
+		if(!empty($_GET['Invoice']))
+		{			
+			$model->attributes=$_GET['Invoice'];
+			$date = !empty($_GET['Invoice']['due']) ? $_GET['Invoice']['due'] : date('Y-m-d');
+			$fromdate = !empty($_GET['Invoice']['date']) ? $_GET['Invoice']['date'] : '1970-01-01';			
+		}
+		$model->to_id = Yii::app()->user->org;
+		$dp = $model->search(false);
+		$rs = $dp->data;
+		$cus = [];
+		$xls = new oExcel;
+		$i = 1;
+
+		$xls->addRow($i++, [$rs[0]->cust->id, $rs[0]->cust->name, empty($subo) ? '' : 'For sub A/C: ' . $subo->name]);
+		$xls->addRow($i, ['No', 'Type', 'AWB', 'Consol', 'Date', 'Due', 'SubTotal', 'GST', 'Total', 'Paid', 'Balance', 'Currency']);
+		$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+		$i++;
+		foreach (Invoice::$currencies as $currency) {
+			$tots[$currency] = [0, 0, 0];
+		}
+		foreach ($rs as $r) {
+			$paid = $r->paidBefore($date);
+			if ($r->type == 10||$r->type==Invoice::INVOICE_TYPE_WDT) {
+				// for import invoice
+				$awb = '';
+				if (!empty($r->mdata['awb'])) {
+					$awb = $r->mdata['awb'];
+				}
+				if (isset($r->lines[0]) && isset($r->lines[0]->mdata['items'])) {
+					foreach ($r->lines[0]->mdata['items'] as $si => $ri) {
+						// $awb = $ri[0];
+						break;
+					}
+				}
+				$xls->addRow($i++, [$r->no, $r->getType(), $awb, $r->consol->no, $r->date, ($r->type != 100 ? $r->due : $r->posted), AppHelper::number_format('%i', $r->total - $r->gst), AppHelper::number_format('%i', $r->gst), AppHelper::number_format('%i', $r->total), AppHelper::number_format('%i', $paid), AppHelper::number_format('%i', $r->total - $paid), $r->getCurrency()]);
+			} else {
+				$awb = '';
+				if (!empty($r->mdata['awb'])) {
+					$awb = $r->mdata['awb'];
+				}
+				if (empty($awb)) {
+					if ($r->type == 40 && !empty($r->consol_id)) {
+						$consol = Consol::model()->find("id=:id", [':id' => $r->consol_id]);
+						if (!empty($consol)) {
+							$awb = $consol->no;
+						}
+					} elseif (!empty($r->job_id)) {
+						$awb = $r->job->awb;
+					}
+				}
+				$xls->addRow($i++, [$r->no, $r->getType(), $awb, @$r->consol->no, $r->date, $r->due, AppHelper::number_format('%i', $r->total - $r->gst), AppHelper::number_format('%i', $r->gst), AppHelper::number_format('%i', $r->total), AppHelper::number_format('%i', $paid), AppHelper::number_format('%i', $r->total - $paid), $r->getCurrency()]);
+			}
+			$tots[$r->getCurrency()][0] += $r->total;
+			$tots[$r->getCurrency()][1] += $paid;
+			$tots[$r->getCurrency()][2] += $r->total - $paid;
+		}
+
+		foreach (Invoice::$currencies as $index => $currency) {
+			$ata = empty($_POST['wcredit']) ? 0 : Payment::orgAtaBefore($i, $date, $_POST['wcredit'], $index);
+			if ($ata > 0) {
+				$as = Payment::orgAtaDetailsBefore($i, $date, $_POST['wcredit'], $index);
+				foreach ($as as $a) {
+					$xls->addRow($i++, [$a['no'], '', $a['ref'], $a['note'], $a['date'], '', '', AppHelper::number_format('%i', $a['total']), AppHelper::number_format('%i', 0 - $a['total']), $currency]);
+					$tots[$currency][1] += $a['total'];
+					$tots[$currency][2] -= $a['total'];
+				}
+			}
+		}
+		foreach ($tots as $currency => $tot) {
+			if ($tot[0] || $tot[1] || $tot[2]) {
+				$xls->addRow($i++, ['', '', '', '', '', '', '', 'Total:', AppHelper::number_format('%i', $tot[0]), AppHelper::number_format('%i', $tot[1]), AppHelper::number_format('%i', $tot[2]), $currency]);
+			}
+		}
+		$xls->addRow($i++, []);
+		foreach ($rs as $r) {
+			$awb_to = [];
+			if (!empty($r->mdata['awb'])) {
+				$awb_to = ['MAWB', $r->mdata['awb']];
+			} elseif ($r->type == 40 && !empty($r->consol_id)) {
+				$consol = Consol::model()->find("id=:id", [':id' => $r->consol_id]);
+				if (!empty($consol)) {
+					$awb_to = ['MAWB', $consol->no];
+				}
+				else{
+					$awb_to = [' ',' '];
+				}
+			}
+			else{
+				$awb_to = [' ',' '];
+			}
+			// $awb_to = array_merge($awb_to, ['Consol', @$r->consol->no]);
+			$xls->addRow($i++, array_merge($awb_to, [' ', 'Inv. No', $r->no, $r->date]));
+			if ($r->type == 100) {
+				$xls->addRow($i, ['HBN', 'Description', 'Unit Price', 'Qty', 'Amount']);
+				$xls->setFont('A' . $i . ':E' . $i, ['bold' => true]);
+				$i++;
+				$description = '';
+				$qty = 0;
+				$tot = 0;
+				foreach ($r->lines as $il) {
+					if (empty($il->mdata['items'])) {
+						continue;
+					}
+					foreach ($il->mdata['items'] as $si => $ri) {
+						$xls->addRow($i++, [$ri[0], $ri[3], $ri[4], $ri[5], $ri[6]]);
+						$qty += intval($ri[5]);
+						$tot += floatval($ri[6]);
+					}
+				}
+				$xls->addRow($i++, ['', 'SubTotal:', '', $qty, $r->total - $r->gst]);
+				$xls->addRow($i++, ['', 'GST:', '', '', $r->gst]);
+				$xls->addRow($i, ['', 'Total:', '', '', $r->total]);
+				$xls->setFont('A' . $i . ':E' . $i, ['bold' => true]);
+				$i++;
+				$xls->addRow($i++, []);
+			} else if ($r->type == 50) {
+				$xls->addRow($i, ['Desc', 'GLCode', 'Qty', 'Price', 'Subtotal', 'Gst', 'Total']);
+				$xls->setFont('A' . $i . ':G' . $i, ['bold' => true]);
+				$i++;
+				$qty = 0;
+				$tot = 0;
+				foreach ($r->lines as $il) {
+					$xls->addRow($i++, [$il->det, $il->ccode, $il->qty, $il->amount - $il->gst, ($il->amount - $il->gst) * $il->qty, $il->gst * $il->qty, $il->amount * $il->qty]);
+					$tot += ($il->amount - $il->gst) * $il->qty;
+					$qty += $il->qty;
+				}
+				$xls->addRow($i++, ['', 'SubTotal:', '', '', '', '', $r->total - $r->gst]);
+				$xls->addRow($i++, ['', 'GST:', '', '', '', '', $r->gst]);
+				$xls->addRow($i, ['', 'Total:', '', '', '', '', $r->total]);
+				$xls->setFont('A' . $i . ':G' . $i, ['bold' => true]);
+				$i++;
+				$xls->addRow($i++, []);
+			} else if ($r->type == 70) {
+				$xls->addRow($i, ['Task', 'Ref', 'Date', 'Desc', 'Price', 'Qty', 'Amount']);
+				$xls->setFont('A' . $i . ':F' . $i, ['bold' => true]);
+				$i++;
+				foreach ($r->lines as $il) {
+					foreach ($il->mdata['items'] as $ri) {
+						$main = WmsTask::model()->find('id = :id', [':id' => str_replace('T', '', $ri[0])]);
+						if (preg_match('/Delivery/', $ri[3])) {
+							$task = WmsTask::model()->find('link_id = :id AND type = 2120', [':id' => str_replace('T', '', $ri[0])]);
+							if (!empty($task) && !empty($task->mdata['shipment_id'])) {
+								$shipments = [];
+								foreach ($task->mdata['shipment_id'] as $sid) {
+									$s = Shipment::model()->findByPk($sid);
+									$shipments[] = $s->ref;
+								}
+								$xls->addRow($i++, [$ri[0], $main->ref, $ri[2], $ri[3], $ri[4], $ri[5], $ri[6], implode(', ', $shipments)]);
+							} else {
+								$xls->addRow($i++, [$ri[0], $main->ref, $ri[2], $ri[3], $ri[4], $ri[5], $ri[6]]);
+							}
+						} else {
+							$xls->addRow($i++, [$ri[0], $main->ref, $ri[2], $ri[3], $ri[4], $ri[5], $ri[6]]);
+						}
+					}
+				}
+				$xls->addRow($i++, ['', 'SubTotal:', '', '', '', $r->total - $r->gst]);
+				$xls->addRow($i++, ['', 'GST:', '', '', '', $r->gst]);
+				$xls->addRow($i, ['', 'Total:', '', '', '', $r->total]);
+				$xls->setFont('A' . $i . ':F' . $i, ['bold' => true]);
+				$xls->addRow($i++, []);
+			} else if ($r->type == Invoice::INVOICE_TYPE_WEIGHT_DIFF) {
+				$xls->addRow($i, ['No', 'Code', 'Description', 'Amount AUD', 'Qty', 'GST', 'Sub Total']);
+				$xls->setFont('A' . $i . ':G' . $i, ['bold' => true]);
+				$i++;
+				foreach ($r->lines as $k => $il) {
+					$xls->addRow($i++, [$k + 1, (!empty($il->getCCodeTypeDesc()) ? $il->getCCodeTypeDesc() : $il->ccode), nl2br($il->det), AppHelper::money_format('%i', $il->amount - $il->gst), $il->qty, $il->getTaxType(), AppHelper::money_format('%i', ($il->amount - $il->gst) * $il->qty)]);
+				}
+
+				if ($r->gst > 0) {
+					$gst = round($r->gst, 2);
+					$xls->addRow($i, ['', '', '', '', '', 'Sub Total:', $r->total - $r->gst]);
+					$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+					$i++;
+					//$tot += $gst;
+					$xls->addRow($i, ['', '', '', '', '', 'GST 10.00%:', $r->gst]);
+					$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+					$i++;
+					$xls->addRow($i, ['', '', '', '', '', 'Total:', $r->total]);
+					$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+					$i++;
+				} else {
+					$xls->addRow($i, ['', '', '', '', '', 'Total:', $r->total]);
+					$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+					$i++;
+				}
+				$xls->addRow($i++, []);
+			} else {
+				if ($r->type == 60) {
+					$xls->addRow($i, ['Desc', 'Product', 'Units', 'Pallets', '', '', 'Amount']);
+				} else if ($r->type == 40 || $r->type == 41) {
+					$xls->addRow($i, ['Desc', 'Code', 'Qty', 'Amount', 'Subtotal']);
+				} else {
+					$xls->addRow($i, ['HBN', 'Shipper', 'Packages', 'Weight', 'Type', 'Rate', 'Amount']);
+				}
+				$xls->setFont('A' . $i . ':G' . $i, ['bold' => true]);
+				$i++;
+				$qty = 0;
+				$wei = 0;
+				$cbm = 0;
+				$tot = 0;
+				foreach ($r->lines as $il) {
+					if ($r->type == 40 || $r->type == 41) {
+						$xls->addRow($i++, [$il->det, $il->ccode, $il->qty, $il->amount - $il->gst, $il->qty * ($il->amount - $il->gst)]);
+						$tot += ($il->amount - $il->gst) * $il->qty;
+						$qty += $il->qty;
+					} else {
+						if (empty($il->mdata['items'])) {
+							continue;
+						}
+						foreach ($il->mdata['items'] as $si => $ri) {
+							// import has different data format with export invoice
+							if ($r->type == 10||$r->type==Invoice::INVOICE_TYPE_WDT) {
+								// for import invoice
+								$charge_wei = round(empty($ri[9]) ? $ri[3] : $ri[9], 2);
+								if (preg_match('/LET\d{7}/i', $ri[0])) {
+									$p = ImParcel::model()->find('ref=:ref', [':ref' => $ri[0]]);
+									if (!empty($p)) {
+										$ri[0] .= '(' . $p->hbn . ')';
+									}
+								}
+								$xls->addRow($i++, [$ri[0], $ri[1], 1, $charge_wei, '', '', $ri[5]]);
+								$tot += floatval($ri[5]);
+								$qty++;
+								$wei += $charge_wei;
+							} elseif ($r->type == 37) {
+								//rts invoice
+								$shipment = Shipment::model()->find('hbn=:hbn', [':hbn' => trim($ri[0])]);
+								if (!empty($shipment)) {
+									$ri[3] = $shipment->ref;
+									if (!empty($shipment->mdata['rts_org_no'])) {
+										$shipment_orig = Shipment::model()->find('hbn=:hbn', [':hbn' => trim($shipment->mdata['rts_org_no'])]);
+										if (isset($shipment_orig)) {
+											$ri[3] .= '//' . $shipment_orig->ref;
+										}
+									}
+								}
+								$xls->addRow($i++, [$ri[0] . '(' . $ri[3] . ')', $ri[1], 1, '', '', '', $ri[2]]);
+								$wei += 0;
+								$qty++;
+								$tot += floatval($ri[2]);
+							} elseif ($r->type == 36) {
+								// for rts scan fee
+								$xls->addRow($i++, [$ri[0], $ri[1], 1, '', $ri[3], $ri[2], isset($ri[4]) ? $ri[4] : '']);
+								$tot += isset($ri[4]) ? floatval($ri[4]) : 0;
+								$qty++;
+								$wei += 0;
+							} elseif ($r->type == 60) {
+								$xls->addRow($i++, ['Storage', $ri[0], $ri[1], $ri[2], '', '', $ri[2] * $ri[3]]);
+								$tot += floatval($ri[2]) * floatval($ri[3]);
+							} else {
+								// for export invoice
+								$xls->addRow($i++, [$ri[0], $ri[1], 1, $ri[2], $ri[4] . '(' . (empty($ri[5]) ? '' : $ri[5]) . ')', isset($ri[6]) ? $ri[6] : '', isset($ri[7]) ? $ri[7] : '']);
+								$tot += isset($ri[7]) ? floatval($ri[7]) : 0;
+								$qty++;
+								$wei += floatval($ri[2]);
+							}
+						}
+					}
+				}
+				$xls->addRow($i++, ['', 'SubTotal:', $qty, $wei, '', '', $r->total - $r->gst]);
+				$xls->addRow($i++, ['', 'GST:', '', '', '', '', $r->gst]);
+				$xls->addRow($i++, ['', 'Total:', '', '', '', '', $r->total]);
+				$xls->setFont('A' . $i . ':G' . $i, ['bold' => true]);
+				$i++;
+				$xls->addRow($i++, []);
+			}
+		}
+		// }
+		// }
+
+		$xls->addRow($i++, []);
+		// // 2022-11-07 gero add export with credit notes
+		// $ataC = empty($_POST['wcredit']) ? 0 : Payment::orgTotalCreditAta($_POST['agent_id']);
+		// if ($ataC > 0) {
+		// 	$xls->addRow($i++, ['Type', 'Credit Note No.', 'Description', 'Date', 'Balance']);
+		// 	$as = Payment::model()->findAll('type = 5 and status in (6,7) AND ata > 0 AND org_id = :oid', [':oid' => $_POST['agent_id']]);
+		// 	foreach ($as as $a) {
+		// 		$xls->addRow($i++, ['Credit',$a->no, $a->ref, $a->date,  AppHelper::money_format('%i', $a->ata)]);
+		// 	}
+		// }
+
+		// $xls->addRow($i++, []);
+
+		/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+		if(!empty($_POST['email']))
+		{
+			$td=Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.'zipemail'.time();
+			if (!file_exists($td)) {
+				mkdir($td);
+			}
+			$file_execel=$td.DIRECTORY_SEPARATOR.'Statement_' . (empty($_POST['agent_id']) ? 'ALL' : $_POST['agent_id']) . '.xlsx';
+			$xls->output($file_execel, false, false);
+			$files=[$file_execel, basename($file_execel)];
+			return $files;
+		}
+
+		$xls->output('imp_search_statement_'.time().'.xlsx');
+	}
+
+}

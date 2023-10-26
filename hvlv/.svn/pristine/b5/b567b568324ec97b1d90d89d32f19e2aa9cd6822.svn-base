@@ -1,0 +1,189 @@
+<?php
+/*
+ * To change this template, choose Tools | Templates
+ * and open the template in the editor.
+ */
+ob_start();
+class ApiInboundWebhookAction extends CAction
+{
+    public function run()
+    {
+       $this->inbound();
+    }
+
+    public function inbound()
+    {
+       if ($json = json_decode(file_get_contents("php://input"),true)) {
+            $data = $json;
+            print_r($data);
+        } else {
+            $data = $_POST;
+            print_r($data);
+        }
+        
+
+        if ($data['webhookEvent'] == 'App.BookingCreatedOrUpdated') {
+            $bookingNumber = $data['data']['bookingNumber'];
+            $facility = $data['data']['facility'];
+            $depot = 0;
+            switch($facility) {
+                case 'Top Logistics Bankstown':
+                    $depot = 106;
+                    break;
+                case 'Top Logistics Sunshine':
+                    $depot = 218;
+                    break;
+                case 'Top Logistics Coopers Plains':
+                    $depot = 530;
+                    break;
+            }
+            $bookingDate = $data['data']['bookingDate'];
+            $bookingTime = $data['data']['startTimeWindow'];
+            $status = PickupBooking::NEW;
+            switch($data['data']['status']) {
+                case 'Open':
+                    $status = PickupBooking::SCHEDULED;
+                    break;
+                case 'Completed':
+                    $status = PickupBooking::DONE;
+                    break;
+                case 'CancelledByFacility':
+                case 'CancelledByTransporter':
+                case 'CancelledBySystem':
+                    $status = PickupBooking::CANCELLED;
+                    break;
+            }
+            $fields = $data['data']['fields'];
+            $rego = '';
+            $containerNo = '';
+            $hbn = '';
+            $specialInstructions = '';
+
+            foreach($fields as $field) {
+                switch($field['field']) {
+                    case 'Vehicle Rego':
+                        $rego = $field['value'];
+                        break;
+                    case 'Container No.':
+                        $containerNo = $field['value'];
+                        break;
+                    case 'House BL':
+                        $hbn = $field['value'];
+                        break;
+                    case 'Special Instructions':
+                        $specialInstructions = $field['value'];
+                        break;
+                }
+            }
+            $driverName = !empty($data['data']['guestName'])?$data['data']['guestName']:'inbound generate';
+            $companyName = !empty($data['data']['transporter'])?$data['data']['transporter']:'inbound generate';
+            $companyEmail = !empty($data['data']['guestEmail'])?$data['data']['guestEmail']:'inbound generate';
+            echo 'hbn: ' . $hbn;
+            echo "\ncontainer no: " . $containerNo;
+            $sql = 'SELECT * FROM shipment WHERE `hbn` = "' . $hbn . '" AND consol_id IN (SELECT id FROM consol WHERE `container_no` = "' . $containerNo . '" AND `dpt_id` = ' . $depot . ') AND `status` != 100';
+            $shipment = ImParcel::model()->findBySql($sql);
+            $booking = PickupBooking::model()->findByAttributes(['booking_number' => $bookingNumber]);
+            if (!empty($shipment)) {
+                if (empty($booking)) {
+                    $booking = new PickupBooking();
+                    $booking->create_date = date('Y-m-d H:i:s');
+                    $booking->booking_time = date('Y-m-d H:i:s', strtotime($bookingDate . ' ' . $bookingTime));
+                    $booking->status = $status;
+                    $booking->driver_name = $driverName;
+                    $booking->rego = $rego;
+                    $booking->company_name = $companyName;
+                    $booking->company_email = $companyEmail;
+                    $booking->note = $specialInstructions;
+                    $booking->fee = round(floatval($data['data']['baseAmount']), 2);
+                    $booking->booking_number = $bookingNumber;
+                    $booking->shipment_id = $shipment->id;
+					$booking->ref = $shipment->ref;
+                    //echo "\nHey" . $bookingNumber;
+                    $booking->depot_id = $depot;
+                    $shipment->mdata['pickup_booking_time'] = $booking->booking_time;
+			        $shipment->mdata['pickup_booking_number'] = $booking->booking_number;
+                    $shipment->updateMeta();
+                    $booking->save();
+                    //print_r($booking);
+
+                    // Save DO files
+                    $attachments = $data['data']['attachments'];
+                    foreach($attachments as $attachment) {
+                        $fileName = $attachment['fileName'];
+                        $fileURL = $attachment['url'];
+                        FileRepo::storeUrlFile($fileURL, $fileName, FileRepo::BOOKING_DO_FILE, $booking->shipment_id);
+                    }
+                } else {
+                    $booking->booking_time = date('Y-m-d H:i:s', strtotime($bookingDate . ' ' . $bookingTime));
+                    $booking->status = $status;
+                    $booking->driver_name = $driverName;
+                    $booking->rego = $rego;
+                    $booking->company_name = $companyName;
+                    $booking->company_email = $companyEmail;
+                    $booking->note = $specialInstructions;
+                    $booking->fee = round(floatval($data['data']['baseAmount']), 2);
+                    $booking->booking_number = $bookingNumber;
+                    $booking->shipment_id = $shipment->id;
+                    $shipment->mdata['pickup_booking_time'] = $booking->booking_time;
+			        $shipment->mdata['pickup_booking_number'] = $booking->booking_number;
+                    $shipment->updateMeta();
+                    $booking->save();
+                }
+            } else {
+                if (empty($booking)) {
+                    $booking = new PickupBooking();
+                    $booking->create_date = date('Y-m-d H:i:s');
+                    $booking->booking_time = date('Y-m-d H:i:s', strtotime($bookingDate . ' ' . $bookingTime));
+                    if ($status == PickupBooking::CANCELLED) {
+                        $booking->status = PickupBooking::CANCELLED;
+                    } else {
+                        $booking->status = PickupBooking::INBOUND_ERROR;
+                    }
+                    $booking->driver_name = $driverName;
+                    $booking->rego = $rego;
+                    $booking->company_name = $companyName;
+                    $booking->company_email = $companyEmail;
+                    $booking->note = $specialInstructions;
+                    $booking->fee = round(floatval($data['data']['baseAmount']), 2);
+                    $booking->booking_number = $bookingNumber;
+                    $booking->shipment_id = 0;
+                    $booking->depot_id = $depot;
+                    $booking->ref = $hbn;
+                    $booking->save();
+
+                    // Save DO files
+                    $attachments = $data['data']['attachments'];
+                    foreach($attachments as $attachment) {
+                        $fileName = $attachment['fileName'];
+                        $fileURL = $attachment['url'];
+                        FileRepo::storeUrlFile($fileURL, $fileName, FileRepo::INBOUND_ERROR_BOOKING_DO_FILE, $booking->id);
+                    }
+                    // TODO: send email to someone
+                    $emailService = new EmailService();
+                    $emailService->sendInboundAlertEmail($booking, $containerNo);
+                } else {
+                    $booking->booking_time = date('Y-m-d H:i:s', strtotime($bookingDate . ' ' . $bookingTime));
+                    if ($status == PickupBooking::CANCELLED) {
+                        $booking->status = PickupBooking::CANCELLED;
+                    } else {
+                        $booking->status = PickupBooking::INBOUND_ERROR;
+                    }
+                    $booking->driver_name = $driverName;
+                    $booking->rego = $rego;
+                    $booking->company_name = $companyName;
+                    $booking->company_email = $companyEmail;
+                    $booking->note = $specialInstructions;
+                    $booking->fee = round(floatval($data['data']['baseAmount']), 2);
+                    $booking->booking_number = $bookingNumber;
+                    $booking->shipment_id = 0;
+                    $booking->depot_id = $depot;
+                    $booking->ref = $hbn;
+                    $booking->save();
+                    // TODO: send email to someone
+                    $emailService = new EmailService();
+                    $emailService->sendInboundAlertEmail($booking, $containerNo);
+                }
+            }
+        }
+    }
+}

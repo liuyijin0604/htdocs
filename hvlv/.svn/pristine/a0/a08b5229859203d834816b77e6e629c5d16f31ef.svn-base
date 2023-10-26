@@ -1,0 +1,106 @@
+<?php if(empty($isDaily)):?>
+<?php
+/* @var $this ShipmentScanController */
+/* @var $model ShipmentScan */
+/* @var $form CActiveForm */
+$scanned = @$totalInfo['total_packs']-@$totalInfo['today_left_packs'];
+?>
+<br />
+<p><b>Total:</b><?=@$totalInfo['total_packs']?>&nbsp;&nbsp;&nbsp; <b>scaned:</b><?=@$scanned;?>&nbsp;&nbsp;&nbsp; <b>Left:</b><?=@$totalInfo['today_left_packs']?>&nbsp;&nbsp;&nbsp; <b>Percent:</b><?=@$totalInfo['packs_percent']?>%</p>
+<br />
+<div style="width: 50%">
+<?php $this->widget('zii.widgets.grid.CGridView', array(
+	'id'=>'im-scan-report-grid',
+	'cssFile' => false,
+	'dataProvider'=>$dataProvider[0],     //$model->search(),
+	'filter'=>$dataProvider[1],
+	'columns'=>array(
+   array('name'=>'user','header'=>'User'),
+		array('name'=>'packs','header'=>'Packs'),
+		array('name'=>'weight','header'=>'Weight'),
+		array('name'=>'rate_packs','header'=>'Packs Rate'),
+		array('name'=>'rate_weight','header'=>'Weight Rate'),
+		array('name'=>'figure','value'=>'empty($data["figure"])?"":$data["figure"]."%"'),
+		array('name'=>'time','header'=>'time(hours)'),
+		),
+	)
+	);
+?>
+
+<?php else:?>
+
+</br><p><b>Total Packs:</b><?=@$totalInfo['total_packs']?>&nbsp;&nbsp;&nbsp; <b>Total Weight:</b><?=@$totalInfo['total_weight']?></p>
+<br />
+<div style="width: 50%">
+	<h1>Air Scan Daily Report</h1>
+<?php $this->widget('zii.widgets.grid.CGridView', array(
+	'id'=>'im-scan-report-grid',
+	'cssFile' => false,
+	'dataProvider'=>$dataProvider[0],     //$model->search(),
+	'filter'=>$dataProvider[1],
+	'columns'=>array(
+   array('name'=>'date','header'=>'Date'),
+		array('name'=>'packs','header'=>'Packs'),
+		array('name'=>'weight','header'=>'Weight'),
+		array('name'=>'out_packs','header'=>'Out Packs'),
+		array('name'=>'out_weight','header'=>'Out Weight'),
+		array('name'=>'rate_packs','header'=>'Packs Rate'),
+		array('name'=>'rate_weight','header'=>'Weight Rate'),
+		array('name'=>'time','header'=>'time(hours)',"type"=>'raw',"value"=>'CHtml::textfield("workTime".$data["date"], @$data["time"], array("value"=>$data["date"],"onchange"=>"return quickWorkTimeInput(\"".$data["date"]."\")","style"=>"width:40px;"))'),
+		array('name'=>'resorting_packs','header'=>'Resorting Packs'),
+		array('name'=>'resorting_weight','header'=>'Resorting Weight'),
+		),
+	)
+	);
+?>
+</div>
+<div style="width: 50%">
+	<h1>Sea Scan Daily Report</h1>
+<?php $this->widget('zii.widgets.grid.CGridView', array(
+	'id'=>'im-scan-report-grid',
+	'cssFile' => false,
+	'dataProvider'=>$seaDataProvider[0],     //$model->search(),
+	'filter'=>$seaDataProvider[1],
+	'columns'=>array(
+   array('name'=>'date','header'=>'Date'),
+		array('name'=>'packs','header'=>'Packs'),
+		array('name'=>'weight','header'=>'Weight'),
+		array('name'=>'out_packs','header'=>'Out Packs'),
+		array('name'=>'out_weight','header'=>'Out Weight'),
+		array('name'=>'rate_packs','header'=>'Packs Rate'),
+		array('name'=>'rate_weight','header'=>'Weight Rate'),
+		array('name'=>'time','header'=>'time(hours)',"type"=>'raw',"value"=>'CHtml::textfield("workTime".$data["date"], @$data["time"], array("value"=>$data["date"],"onchange"=>"return quickWorkTimeInput(\"".$data["date"]."\")","style"=>"width:40px;"))'),
+		array('name'=>'resorting_packs','header'=>'Resorting Packs'),
+		array('name'=>'resorting_weight','header'=>'Resorting Weight'),
+		),
+	)
+	);
+?>
+
+<?php endif?>
+  </div>
+
+  <script type="text/javascript">
+  	function quickWorkTimeInput(date)
+    {
+        var workTime= $("#workTime"+date).val();
+        $.ajax({
+                url: '<?=$this->createUrl("shipmentScan/workTimeChange")?>',
+                type: "post",
+                data: {"workTime":workTime,"date":date},
+                success: function(r) {
+                    if(r=='done')
+                     {
+                        myApp.notice('Done', 5000);
+                     }else
+                     {
+                        myApp.alert(r, false);   
+                     }
+                 },
+                error: function(e) {
+                    console.log(e);
+                }
+            });     
+    }
+
+  </script>

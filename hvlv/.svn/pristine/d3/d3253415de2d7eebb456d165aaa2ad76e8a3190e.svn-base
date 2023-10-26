@@ -1,0 +1,45 @@
+<?php
+
+require_once 'protected/modules/REST/src/SmsNotice/ModalRealTimeSmsNotice.php';
+
+class ModalRealTimeSmsNoticeCollection{
+    private $listModalSmsNotice = [];
+    
+    public function funcGetNotProcessed($isCheck){
+        $service = new Service();
+        $results=!empty($service->getCacheData('smscode'))?$service->getCacheData('smscode'):[];
+        if(empty($isCheck))
+        {
+            $service->setCacheData('smscode',[]);
+        }
+
+        foreach($results as $i=>$orm){
+            $objModal = new ModalRealTimeSmsNotice;
+            $objModal->CreateFromORM($orm);
+            $this->listModalSmsNotice[]=$objModal;
+            
+        }
+        
+    }
+    
+    public function getCollection(){
+        return $this->listModalSmsNotice;
+    }
+    
+    public function funcCollection2StdClass(){
+        $array = [];
+        foreach ( $this->listModalSmsNotice as $i=> $objModalSmsNotice){
+            $array[] = $objModalSmsNotice->funcOrm2StdClass();
+        }
+        return $array;
+    }
+    
+    public function funcBatchSetIsPricessedTrue(){
+        foreach ( $this->listModalSmsNotice as $i=> $objModalSmsNotice){
+            $objModalSmsNotice->funcSetIsProceddedTrue();
+        }
+    }
+    
+    
+}
+

@@ -1,0 +1,988 @@
+<?php
+
+// for import client or agent we use different price template
+if ( $model->type == 30 || $model->type == 50  ) {
+	// 30 - import client
+	// 50 - import agent
+
+
+$ss = new OrgRate('search');
+$ss->org_id = $model->id;
+$sys_service_plans = OrgRate::getServiceTypes();
+$cus_services = $ss->getCustomerServicePlans($ss->org_id);
+if ( $cus_services['vto'] == '0000-00-00') $cus_services['vto'] = '';
+
+
+?>
+
+	<input type="hidden" name="org_rate_id" value="<?php echo $cus_services['id']; ?>">
+
+	<div class="xpanel xpanel-default" style="width: 95%;float:left;" >
+		<div class="xpanel-heading">Selected Service</div>
+		<div class="xpanel-body">
+			<div class="xpanel-body-item row rowcol rowleft">
+				<?php echo CHtml::label('Currency', 'currency');?>
+				<?php echo CHtml::dropDownList('currency',$cus_services['currency'], Invoice::$currencies, array('empty' => $this->t('Select One'))); ?>
+			</div>
+			<div class="xpanel-body-item">
+				<?php echo CHtml::label('From:','for-price-tpl'); ?>
+				<?php echo CHtml::textField('valid-from-date',$cus_services['vfrom'],['class' => 'date_input']); ?>
+			</div>
+			<div class="xpanel-body-item">
+				<?php echo CHtml::label('To:','for-price-tpl'); ?>
+				<?php echo CHtml::textField('valid-to-date',$cus_services['vto'],['class' => 'date_input']); ?>
+			</div>
+			<div class="xpanel-body-item" style="display:inline-block;">
+				<?php foreach($sys_service_plans as $plan_code => $plan_name) : ?>
+				<?php if ( $plan_code == 'DR') : ?>
+					<div class="xpanel xpanel-default services" data-code="<?php echo $plan_code; ?>" style="width:680px;float:left;margin-right:10px;" >
+						<div class="xpanel-heading"><?php echo $plan_name; ?><span style="float:right;">
+							<input type="checkbox" name="customer_cost_selected" class="customer-service-selected"  value="<?php echo $plan_code; ?>"
+								<?php if ( $cus_services['services']->$plan_code->selected == 1 ) : ?> checked  <?php endif; ?>></span></div>
+				<?php else : ?>
+						<div class="xpanel xpanel-default services" data-code="<?php echo $plan_code; ?>" style="width:300px;float:left;margin-right:10px;" >
+							<div class="xpanel-heading"><?php echo $plan_name; ?><span style="float:right;">
+							<input type="checkbox" name="customer_cost_selected" class="customer-service-selected"  value="<?php echo $plan_code; ?>"
+								<?php if ( $cus_services['services']->$plan_code->selected == 1 ) : ?> checked  <?php endif; ?>></span>
+							</div>
+				<?php endif; ?>
+
+						<?php if ( $plan_code == 'DR') : ?>
+							<div class="xpanel-body" style="height:580px;">
+								<div class="xpanel-body-item" style="float:left;">
+									<div class="xpanel xpanel-default"  style="width:260px;margin-right:10px;" >
+										<div class="xpanel-heading">计价方案A<span style="float:right;">
+											<input type="radio" name="dr_service_selected" class="dr-service-selected"  value="1"
+														<?php if ( $cus_services['services']->$plan_code->tracking_mode == 1 ) : ?> checked  <?php endif; ?>></span>
+										</div>
+										<div class="xpanel-body">
+											<div class="xpanel-body-item">
+												eParcel add extra : <input style="width:50px;" type="number" name="extra_eparcel" value="<?php echo  $cus_services['services']->$plan_code->eparcel_extra_rate; ?>"> %<br><br>
+												BPA add extra : &nbsp;&nbsp;&nbsp;&nbsp;<input style="width:50px;" type="number" name="extra_bpa" value="<?php echo  $cus_services['services']->$plan_code->bpa_extra_rate; ?>"> %<br><br>
+												Letters add extra : <input style="width:50px;" type="number" name="extra_letters" value="<?php echo  $cus_services['services']->$plan_code->letters_extra_rate; ?>"> %<br>
+											</div>
+										</div>
+									</div>
+								</div>
+
+								<div class="xpanel-body-item" style="float:left;">
+									<div class="xpanel xpanel-default"  style="width:320px;margin-right:10px;" >
+										<div class="xpanel-heading">计价方案B<span style="float:right;">
+											<input type="radio" name="dr_service_selected" class="dr-service-selected"  value="2"
+												<?php if ( $cus_services['services']->$plan_code->tracking_mode == 2 ) : ?> checked  <?php endif; ?>></span>
+										</div>
+										<div class="xpanel-body">
+											<div class="xpanel-body-item" id="full-tracking-price">
+												<div class="xpanel-body-item"> <span> <b>Full Tracking : </b></span>
+												 </div>
+												<div class="xpanel-body-item">
+													<span>Price Rate:</span> <input style="width: 80px;" type="number" name="ft_rate" value="<?php echo  $cus_services['services']->$plan_code->ft_rate; ?>">&nbsp;/kg
+												</div>
+												<div class="xpanel-body-item">
+													<span>Piece Price:</span> <input style="width: 80px;" type="number" name="ft_prate"  value="<?php echo  $cus_services['services']->$plan_code->ft_prate; ?>">&nbsp;/pc
+												</div>
+											</div>
+
+											<br>
+											<div class="xpanel-body-item" id="semi-tracking-price">
+												<div class="xpanel-body-item"> <span><b>Semi Tracking :</b></span>
+												</div>
+												<div class="xpanel-body-item">
+													<span>Price Rate:</span> <input style="width: 80px;" type="number" name="st_rate" value="<?php echo  $cus_services['services']->$plan_code->st_rate; ?>">&nbsp;/kg
+												</div>
+												<div class="xpanel-body-item">
+													<span>Piece Price:</span> <input style="width: 80px;" type="number" name="st_prate"  value="<?php echo  $cus_services['services']->$plan_code->st_prate; ?>">&nbsp;/pc
+												</div>
+											</div>
+
+										</div>
+									</div>
+								</div>
+
+								<div class="xpanel-body-item" style="float:left;">
+									<div class="xpanel xpanel-default"  style="width:320px;margin-right:10px;" >
+										<div class="xpanel-heading">计价方案C<span style="float:right;">
+											<input type="radio" name="dr_service_selected" class="dr-service-selected"  value="3"
+												<?php if ( $cus_services['services']->$plan_code->tracking_mode == 3 ) : ?> checked  <?php endif; ?>></span>
+										</div>
+										<div class="xpanel-body">
+											<div class="xpanel-body-item">
+
+												<?php
+													$dlMode = 1;
+													if ( isset($cus_services['services']->$plan_code->dl_mode) ) $dlMode = $cus_services['services']->$plan_code->dl_mode;
+													$courierRateLink = '<a class="jqm_link" data-win-class="XL" href="org/zonerate/'.$model->id.'.app?cid=101"  target="_blank"><div style="background-position:-16px 0" class="icon"></div>'.$this->t('Flex Rate By Zone').'</a>';
+												?>
+
+												<input type="radio" name="customer_dl_service" class="customer-dl-service" value="1" <?php if ( $dlMode == 1 ) : ?> checked  <?php endif; ?> > eParcel(<?php echo $courierRateLink; ?>) <br/>
+												<!--
+												<input type="radio" name="customer_dl_service" class="customer-dl-service" value="2" <?php if ( $dlMode == 2 ) : ?> checked  <?php endif; ?> > BPA <br/>
+												<input type="radio" name="customer_dl_service" class="customer-dl-service" value="3" <?php if ( $dlMode == 3 ) : ?> checked  <?php endif; ?> > BPA + Tracking <br/>
+												<input type="radio" name="customer_dl_service" class="customer-dl-service" value="4" <?php if ( $dlMode == 4 ) : ?> checked  <?php endif; ?> > Mixed( eParcel Or BPA+Tracking)<br/><br/>
+-->
+
+												<?php
+											   /*
+												// get all availabel courier
+												$allCouriers = Org::model()->findAll('type = 15');
+												$dlmodeValue = 5;
+												foreach ( $allCouriers as $courier ) {
+													if ( $courier->id != 114 ) continue; // show PCA Express price
+
+													$zoneRate = OrgRate::getOrgZoneRate($courier->id); // if not exiting create it
+
+													$courierRateLink = '<a class="jqm_link" data-win-class="XL" href="org/zonemap/'.$zoneRate->id.'.app?cid='. $courier->id .'"><div style="background-position:-16px 0" class="icon"></div>'.$this->t('Import Zone Map').'</a>';
+													$courierRateLink .= '<a style="margin-left:20px;" class="jqm_link" data-win-class="XL" href="org/zonerate/'.$model->id.'.app?cid='. $courier->id .'"><div style="background-position:-16px 0" class="icon"></div>'.$this->t('Flex Rate By Zone').'</a>';
+													$oneOut = '<input type="radio" name="customer_dl_service" class="customer-dl-service" value="'.$dlmodeValue.'"' .( ( $dlMode == $dlmodeValue ) ? ' checked ' : ' ')  .'>' . $courier->name . '('. $courierRateLink .')';
+												   echo $oneOut . '<br/>';
+													$dlmodeValue++;
+												}
+*/
+												?>
+
+												<?php
+
+												$chargecodeId = 0;
+												if ( isset($cus_services['services']->$plan_code->dl_chargecode) ) $chargecodeId = $cus_services['services']->$plan_code->dl_chargecode;
+													// list all charge codes
+												$chargecodes = ImportChargeCode::model()->findAll('org_id = :oid',[':oid' => $model->id]);
+												foreach ( $chargecodes as $chargecode ) {
+
+													echo CHtml::radioButton('chargecode',($chargecodeId == $chargecode->id),['value' => $chargecode->id]), '<a title="'.$chargecode->chargecode.'" class="tab_link" href="import/update/' . $chargecode->id . '">' . $chargecode->chargecode . '</a>';
+
+                                                }
+                                                
+                                                ?>
+                                            </div>
+                                            
+                                        </div>
+                                    </div>
+                                </div>
+
+							</div>
+						 <?php else : ?>
+							<div class="xpanel-body">
+								<div class="xpanel-body-item"><span>Air Price Rate:</span> <input style="width: 80px;" type="number" name="rate" value="<?php echo  $cus_services['services']->$plan_code->rate; ?>">&nbsp;/kg
+								</div>
+
+								<div class="xpanel-body-item"><span>Sea Price Rate:</span> <input style="width: 80px;" type="number" name="sea_rate" value="<?php echo  @$cus_services['services']->$plan_code->sea_rate; ?>">&nbsp;/kg
+
+								</div>
+								<?php if ( $plan_code == 'AU' ) : ?>
+									<div class="xpanel-body-item">
+									<?php
+
+									echo '<a class="jqm_link" data-win-class="XXL" href="org/orgFlexibleRate/' . $model->id . '.app"><div style="background-position:-16px 0" class="icon"></div>' . $this->t('Org Flexible Rate') . '</a>';
+									
+									?>
+
+									</div>
+
+                                    <?php
+                                    $docRate =$rtsDiscardRate=$awbDiffRate=$awbDiffBuffer=$consolLooseRate= $thcRate = $dlvRate = $sacRate = $sacPrate 
+                                            = $strRate = $strTerms=$strOthTerms = $rtsRate=$rtsRateFastway=$rtsRateStarTrack= $rtsModRate =$csdcRate=$csdclRate=$csdcapRate=$caInvoiceServiceFee=
+                                            $rtsStrRate = $rtsStrTerms = $showDetails=$cusDcRate=$crmRate=$airbkRate=$delRate=$seaStRatePl=$seaStFeeCR=$seaStFeeKR=$seaStFeePS=$seaStBefTerm=$seaStAftTerm=$seaStRateWt=$dgFee=$emppFee=$aqisFee=$thcRateAkePmcMinimum=$thcRateMinimum=$thcRateAkePmc =$bbPickupRate=$tlaSRate=$lvhRate=$lvcRate=$wsRate=$bbCusRate=$thcRateOt=$thcRateAkePmcMinimumOt=$thcRateMinimumOt=$thcRateAkePmcOt=$bbCusRateOt=$airPickupPmcRate=$airPickupAkeRate=$airPickupPmcRateOt=$airPickupAkeRateOt=$airPickupLooseRate=$airPickupLooseRateOt=$bbPickupRateMinumim=$sSplitRate= 0;
+									$nameValidationRate = 0.00;
+//                                    if (isset($cus_services['services']->$plan_code->seaStRatePl)) $seaStRatePl = $cus_services['services']->$plan_code->seaStRatePl;
+//                                    if (isset($cus_services['services']->$plan_code->seaStRateWt)) $seaStRateWt = $cus_services['services']->$plan_code->seaStRateWt;
+                                    if (isset($cus_services['services']->$plan_code->showdetails)) $showDetails = $cus_services['services']->$plan_code->showdetails;
+                                    if (isset($cus_services['services']->$plan_code->doc_rate)) $docRate = $cus_services['services']->$plan_code->doc_rate;
+                                    if (isset($cus_services['services']->$plan_code->thc_rate)) $thcRate = $cus_services['services']->$plan_code->thc_rate;
+                                    if (isset($cus_services['services']->$plan_code->thc_rate_minimum)) $thcRateMinimum = $cus_services['services']->$plan_code->thc_rate_minimum;
+                                    if (isset($cus_services['services']->$plan_code->thc_rate_ake_pmc)) $thcRateAkePmc = $cus_services['services']->$plan_code->thc_rate_ake_pmc;
+                                    if (isset($cus_services['services']->$plan_code->thc_rate_ake_pmc_minimum)) $thcRateAkePmcMinimum = $cus_services['services']->$plan_code->thc_rate_ake_pmc_minimum;
+
+                                    if (isset($cus_services['services']->$plan_code->air_pickup_pmc_rate)) $airPickupPmcRate = $cus_services['services']->$plan_code->air_pickup_pmc_rate;
+                                    if (isset($cus_services['services']->$plan_code->air_pickup_loose_rate)) $airPickupLooseRate = $cus_services['services']->$plan_code->air_pickup_loose_rate;
+                                    if (isset($cus_services['services']->$plan_code->air_pickup_ake_rate)) $airPickupAkeRate = $cus_services['services']->$plan_code->air_pickup_ake_rate;
+                                    if (isset($cus_services['services']->$plan_code->air_pickup_pmc_rate_ot)) $airPickupPmcRateOt = $cus_services['services']->$plan_code->air_pickup_pmc_rate_ot;
+                                    if (isset($cus_services['services']->$plan_code->air_pickup_ake_rate_ot)) $airPickupAkeRateOt = $cus_services['services']->$plan_code->air_pickup_ake_rate_ot;
+                                    if (isset($cus_services['services']->$plan_code->air_pickup_loose_rate_ot)) $airPickupLooseRateOt = $cus_services['services']->$plan_code->air_pickup_loose_rate_ot;
+
+                                    if (isset($cus_services['services']->$plan_code->shipment_split_rate)) $sSplitRate = $cus_services['services']->$plan_code->shipment_split_rate;
+                                    
+
+
+                                    if (isset($cus_services['services']->$plan_code->thc_rate_ot)) $thcRateOt = $cus_services['services']->$plan_code->thc_rate_ot;
+                                    if (isset($cus_services['services']->$plan_code->thc_rate_minimum_ot)) $thcRateMinimumOt = $cus_services['services']->$plan_code->thc_rate_minimum_ot;
+                                    if (isset($cus_services['services']->$plan_code->thc_rate_ake_pmc_ot)) $thcRateAkePmcOt = $cus_services['services']->$plan_code->thc_rate_ake_pmc_ot;
+                                    if (isset($cus_services['services']->$plan_code->thc_rate_ake_pmc_minimum_ot)) $thcRateAkePmcMinimumOt = $cus_services['services']->$plan_code->thc_rate_ake_pmc_minimum_ot;
+
+
+
+                                    if (isset($cus_services['services']->$plan_code->bb_pickup_rate)) $bbPickupRate = $cus_services['services']->$plan_code->bb_pickup_rate;
+                                    if (isset($cus_services['services']->$plan_code->bb_pickup_rate_minimum)) $bbPickupRateMinumim = $cus_services['services']->$plan_code->bb_pickup_rate_minimum;
+
+                                    if (isset($cus_services['services']->$plan_code->tla_service_rate)) $tlaSRate = $cus_services['services']->$plan_code->tla_service_rate;
+                                    if (isset($cus_services['services']->$plan_code->lvh_rate)) $lvhRate = $cus_services['services']->$plan_code->lvh_rate;
+                                    if (isset($cus_services['services']->$plan_code->lvc_rate)) $lvcRate = $cus_services['services']->$plan_code->lvc_rate;
+                                    if (isset($cus_services['services']->$plan_code->ws_rate)) $wsRate = $cus_services['services']->$plan_code->ws_rate;
+                                    if (isset($cus_services['services']->$plan_code->bb_cus_rate)) $bbCusRate = $cus_services['services']->$plan_code->bb_cus_rate;
+                                    if (isset($cus_services['services']->$plan_code->bb_cus_rate_ot)) $bbCusRateOt = $cus_services['services']->$plan_code->bb_cus_rate_ot;
+
+                                    if (isset($cus_services['services']->$plan_code->cusdcrate)) $cusDcRate = $cus_services['services']->$plan_code->cusdcrate;
+                                    if (isset($cus_services['services']->$plan_code->crmrate)) $crmRate = $cus_services['services']->$plan_code->crmrate;
+                                    if (isset($cus_services['services']->$plan_code->airbkrate)) $airbkRate = $cus_services['services']->$plan_code->airbkrate;
+                                    if (isset($cus_services['services']->$plan_code->delrate)) $delRate = $cus_services['services']->$plan_code->delrate;
+                               
+                                    if (isset($cus_services['services']->$plan_code->csdcRate))  $csdcRate = $cus_services['services']->$plan_code->csdcRate;
+                                    if (isset($cus_services['services']->$plan_code->csdclRate)) $csdclRate = $cus_services['services']->$plan_code->csdclRate;
+                                    if (isset($cus_services['services']->$plan_code->csdcapRate)) $csdcapRate = $cus_services['services']->$plan_code->csdcapRate;
+                                    if (isset($cus_services['services']->$plan_code->caInvoiceServiceFee)) $caInvoiceServiceFee = $cus_services['services']->$plan_code->caInvoiceServiceFee;
+
+                                    if (isset($cus_services['services']->$plan_code->dlv_rate)) $dlvRate = $cus_services['services']->$plan_code->dlv_rate;
+                                    if (isset($cus_services['services']->$plan_code->sac_rate)) $sacRate = $cus_services['services']->$plan_code->sac_rate;
+                                    if (isset($cus_services['services']->$plan_code->sac_prate)) $sacPrate = $cus_services['services']->$plan_code->sac_prate;
+                                    if (isset($cus_services['services']->$plan_code->str_rate)) $strRate = $cus_services['services']->$plan_code->str_rate;
+                                    if (isset($cus_services['services']->$plan_code->str_terms)) $strTerms = $cus_services['services']->$plan_code->str_terms;
+                                    if (isset($cus_services['services']->$plan_code->str_oth_terms)) $strOthTerms = $cus_services['services']->$plan_code->str_oth_terms;
+                                    if (isset($cus_services['services']->$plan_code->rts_rate)) $rtsRate = $cus_services['services']->$plan_code->rts_rate;
+                                    if (isset($cus_services['services']->$plan_code->rts_rate_fast)) $rtsRateFastway = $cus_services['services']->$plan_code->rts_rate_fast;
+                                    if (isset($cus_services['services']->$plan_code->rts_rate_star)) $rtsRateStarTrack = $cus_services['services']->$plan_code->rts_rate_star;
+                                    if (isset($cus_services['services']->$plan_code->rts_modrate)) $rtsModRate = $cus_services['services']->$plan_code->rts_modrate;
+                                    if (isset($cus_services['services']->$plan_code->rts_strrate)) $rtsStrRate = $cus_services['services']->$plan_code->rts_strrate;
+                                    if (isset($cus_services['services']->$plan_code->rts_strterms)) $rtsStrTerms = $cus_services['services']->$plan_code->rts_strterms;
+                                    if (isset($cus_services['services']->$plan_code->awb_diff_rate)) $awbDiffRate = $cus_services['services']->$plan_code->awb_diff_rate;
+                                    if (isset($cus_services['services']->$plan_code->awb_diff_buffer)) $awbDiffBuffer = $cus_services['services']->$plan_code->awb_diff_buffer;
+                                    if (isset($cus_services['services']->$plan_code->consol_loose_rate)) $consolLooseRate = $cus_services['services']->$plan_code->consol_loose_rate;
+                                    if (isset($cus_services['services']->$plan_code->dg_fee)) $dgFee = $cus_services['services']->$plan_code->dg_fee;
+                                    if (isset($cus_services['services']->$plan_code->rts_discard_rate)) $rtsDiscardRate = $cus_services['services']->$plan_code->rts_discard_rate;
+									if (isset($cus_services['services']->$plan_code->seaStFeePS)) $seaStFeePS = $cus_services['services']->$plan_code->seaStFeePS;
+									if (isset($cus_services['services']->$plan_code->seaStFeeCR)) $seaStFeeCR = $cus_services['services']->$plan_code->seaStFeeCR;
+									if (isset($cus_services['services']->$plan_code->seaStFeeKR)) $seaStFeeKR = $cus_services['services']->$plan_code->seaStFeeKR;
+									if (isset($cus_services['services']->$plan_code->seaStBefTerm)) $seaStBefTerm = $cus_services['services']->$plan_code->seaStBefTerm;
+									if (isset($cus_services['services']->$plan_code->seaStAftTerm)) $seaStAftTerm = $cus_services['services']->$plan_code->seaStAftTerm;
+									if (isset($cus_services['services']->$plan_code->empp_fee)) $emppFee = $cus_services['services']->$plan_code->empp_fee;
+									if (isset($cus_services['services']->$plan_code->aqis_fee)) $aqisFee = $cus_services['services']->$plan_code->aqis_fee;
+									if (isset($cus_services['services']->$plan_code->name_validation_rate)) $nameValidationRate = $cus_services['services']->$plan_code->name_validation_rate;
+
+                                    ?>
+
+									<br/><input type="checkbox" name="showdetails" value="0" <?php if ( $showDetails == 1) : ?> checked <?php endif; ?> > Show Items
+									<div class="xpanel-body-item"><span>Piece Price:</span> <input style="width: 80px;" type="number" name="prate"  value="<?php echo  $cus_services['services']->$plan_code->prate; ?>">&nbsp;/pc</div>
+
+                                                                        <div style="border: 1px solid black">
+									<div class="xpanel-body-item"><span>Doc Fee:</span> <input style="width: 80px;" type="number" name="docrate"  value="<?php echo $docRate; ?>">&nbsp;/AWB</div>
+									<div class="xpanel-body-item"><span>THC Loose Fee:</span> <input style="width: 40px;" type="number" name="thcrate"  value="<?php echo  $thcRate; ?>">&nbsp;/kg <input style="width: 40px;" type="number" name="thcrateminimum"  value="<?php echo  $thcRateMinimum; ?>">minimum</div>
+
+									<div class="xpanel-body-item"><span>THC AKE/PMC Fee:</span> <input style="width: 40px;" type="number" name="thcrateakepmc"  value="<?php echo  $thcRateAkePmc; ?>">&nbsp;/kg <input style="width: 40px;" type="number" name="thcrateakepmcminimum"  value="<?php echo  $thcRateAkePmcMinimum; ?>">&nbsp;minimum</div>
+									<div class="xpanel-body-item"><span>Airport pickup(Loose/PMC/AKE) Fee:</span> <input style="width: 40px;" type="number" name="airpickuplooserate"  value="<?php echo  $airPickupLooseRate; ?>">&nbsp;/kg <input style="width: 40px;" type="number" name="airpickuppmcrate"  value="<?php echo  $airPickupPmcRate; ?>">&nbsp;/sp<input style="width: 40px;" type="number" name="airpickupakerate"  value="<?php echo  $airPickupAkeRate; ?>">&nbsp;/sp</div>
+
+									<div class="xpanel-body-item"><span>Other Branch THC Loose Fee:</span> <input style="width: 40px;" type="number" name="thcrateot"  value="<?php echo  $thcRateOt; ?>">&nbsp;/kg <input style="width: 40px;" type="number" name="thcrateminimumot"  value="<?php echo  $thcRateMinimumOt; ?>">minimum</div>
+
+									<div class="xpanel-body-item"><span>Other Branch THC AKE/PMC Fee:</span> <input style="width: 40px;" type="number" name="thcrateakepmcot"  value="<?php echo  $thcRateAkePmcOt; ?>">&nbsp;/kg <input style="width: 40px;" type="number" name="thcrateakepmcminimumot"  value="<?php echo  $thcRateAkePmcMinimumOt; ?>">&nbsp;minimum</div>
+
+
+									<div class="xpanel-body-item"><span>Other Airport pickup(Loose/PMC/AKE) Fee:</span> <input style="width: 40px;" type="number" name="airpickuplooserateot"  value="<?php echo  $airPickupLooseRateOt; ?>">&nbsp;/kg <input style="width: 40px;" type="number" name="airpickuppmcrateot"  value="<?php echo  $airPickupPmcRateOt; ?>">&nbsp;/sp<input style="width: 40px;" type="number" name="airpickupakerateot"  value="<?php echo  $airPickupAkeRateOt; ?>">&nbsp;/sp</div>
+
+								        <div class="xpanel-body-item"><span>Customs DS Fee:</span> <input style="width: 80px;" type="number" name="cusdcrate"  value="<?php echo  $cusDcRate; ?>">&nbsp;/AWB</div>
+									<div class="xpanel-body-item"><span>CMR Fee:</span> <input style="width: 80px;" type="number" name="crmrate"  value="<?php echo  $crmRate; ?>">&nbsp;/AWB</div>
+									<div class="xpanel-body-item"><span>Airline BK Fee:</span> <input style="width: 80px;" type="number" name="airbkrate"  value="<?php echo  $airbkRate; ?>">&nbsp;/kg</div>
+
+
+                                                                        </div>
+                                                                        <div style="border: 1px solid black;">
+                                                                           <div class="xpanel-body-item"><span>Custom Dec Base(10):</span> <input style="width: 80px;" type="number" name="csdcRate"  value="<?php echo $csdcRate; ?>"></div>
+                                                                           <div class="xpanel-body-item"><span>Rate(10 to n):</span> <input style="width: 80px;" type="number" name="csdclRate"  value="<?php echo $csdclRate; ?>">&nbsp;/line</div>
+                                                                           <div class="xpanel-body-item"><span>CAP FEE</span> <input style="width: 80px;" type="number" name="csdcapRate"  value="<?php echo $csdcapRate; ?>">&nbsp;$</div>
+                                                                        </div>
+                                                                        <div style="border: 1px solid black;">
+                                                                           <div class="xpanel-body-item"><span>CA Invoice Service Fee:</span> <input style="width: 80px;" type="number" name="caInvoiceServiceFee"  value="<?php echo $caInvoiceServiceFee; ?>"></div>
+                                                                        </div>
+<!--                                                                          <div style="border: 1px solid black;">
+                                                                           <div class="xpanel-heading">Sea Storage Rate</div>
+                                                                           <div class="xpanel-body-item"><span>Pallet Rate:</span> <input style="width: 80px;" type="number" name="seaStRatePl"  value="<?php echo $seaStRatePl; ?>">/Pl</div>
+                                                                           <div class="xpanel-body-item"><span>Weight Rate:</span> <input style="width: 80px;" type="number" name="seaStRateWt"  value="<?php echo $seaStRateWt; ?>">/Kg</div>
+                                                                        </div>-->
+                                                                        <div style="border: 1px solid black;">
+                                                                           <div class="xpanel-heading">Sea Storage Fee</div>
+                                                                           <div class="xpanel-body-item"><span>Per Shipment:</span> <input style="width: 80px;" type="number" name="seaStFeePS"  value="<?php echo $seaStFeePS; ?>">AUD</div>
+                                                                           <div class="xpanel-body-item"><span>CBM Rate:</span> <input style="width: 80px;" type="number" name="seaStFeeCR"  value="<?php echo $seaStFeeCR; ?>">/CBM/day</div>
+                                                                           <div class="xpanel-body-item"><span>KG Rate:</span> <input style="width: 80px;" type="number" name="seaStFeeKR"  value="<?php echo $seaStFeeKR; ?>">/KG/day</div>
+                                                                            <div class="xpanel-body-item"><span>Before Term:</span> <input style="width: 80px;" type="number" name="seaStBefTerm"  value="<?php echo $seaStBefTerm; ?>">days</div>
+                                                                             <div class="xpanel-body-item"><span>After Term:</span> <input style="width: 80px;" type="number" name="seaStAftTerm"  value="<?php echo $seaStAftTerm; ?>">days</div>
+
+                                                                        </div>
+
+                                                                        <div class="xpanel-body-item"><span>DLV Fee:</span> <input style="width: 80px;" type="number" name="dlvrate"  value="<?php echo  $dlvRate; ?>">&nbsp;/kg</div>
+									<div class="xpanel-body-item"><span>SAC Fee:</span> <input style="width: 80px;" type="number" name="sacrate"  value="<?php echo  $sacRate; ?>">&nbsp;/kg</div>
+									<div class="xpanel-body-item"><span style="padding-left:65px;"></span> <input style="width: 80px;" type="number" name="sacprate"  value="<?php echo  $sacPrate; ?>">&nbsp;/pc</div>
+									<br>
+									<div class="xpanel-body-item"><span>Storage Fee:</span> <input style="width: 80px;" type="number" name="strrate"  value="<?php echo  $strRate; ?>">&nbsp;/kg</div>
+									<div class="xpanel-body-item"><span>Our Warehouse Free Terms:</span> <input style="width: 80px;" type="number" name="strterms"  value="<?php echo  $strTerms; ?>">&nbsp;day(s)</div>
+									<div class="xpanel-body-item"><span>Other Warehouse Free Terms:</span> <input style="width: 80px;" type="number" name="strOthTerms"  value="<?php echo  $strOthTerms; ?>">&nbsp;day(s)</div>
+									<br>
+
+									<div class="xpanel-body-item"><span>RTS eParcel Fee:</span> <input style="width: 80px;" type="number" name="rtsrate"  value="<?php echo  $rtsRate; ?>">&nbsp;/pc</div>
+									<div class="xpanel-body-item"><span>RTS Fastway Fee:</span> <input style="width: 80px;" type="number" name="rtsratefast"  value="<?php echo $rtsRateFastway; ?>">&nbsp;/pc</div>
+									<div class="xpanel-body-item"><span>RTS StarTrack Fee:</span> <input style="width: 80px;" type="number" min="0" max="100" name="rtsratestar"  value="<?php echo $rtsRateStarTrack; ?>">&nbsp;%</div>
+									<div class="xpanel-body-item"><span>RTS Mod Fee:</span> <input style="width: 80px;" type="number" name="rtsmodrate"  value="<?php echo  $rtsModRate; ?>">&nbsp;/pc</div>
+									<div class="xpanel-body-item"><span>RTS Storage Fee:</span> <input style="width: 80px;" type="number" name="rtsstrrate"  value="<?php echo  $rtsStrRate; ?>">&nbsp;/kg</div>
+									<div class="xpanel-body-item"><span>RTS Storage Terms:</span> <input style="width: 80px;" type="number" name="rtsstrterms"  value="<?php echo  $rtsStrTerms; ?>">&nbsp;day(s)</div>
+                                    <div class="xpanel-body-item"><span>RTS Discard Fee:</span> <input style="width: 80px;" type="number" name="rtsdiscardrate"  value="<?php echo  $rtsDiscardRate; ?>">&nbsp;/pc</div>
+                                    <br/>
+                                    
+                                    <div>
+                                    <div class="xpanel-body-item"><span>AWB diff Fee:</span> <input style="width: 80px;" type="number" name="awb_diff_rate"  value="<?php echo $awbDiffRate; ?>">&nbsp;/kg</div>
+                                    <div class="xpanel-body-item"><span>AWB diff Buffer:</span> <input style="width: 80px;" type="number" name="awb_diff_buffer" min="0" max="100" value="<?php echo $awbDiffBuffer; ?>">&nbsp;%</div>  
+                                    <div class="xpanel-body-item"><span>Loose rate:</span> <input style="width: 80px;" type="number" name="consol_loose_rate"  value="<?php echo $consolLooseRate; ?>">&nbsp;/kg</div>
+                                    <div class="xpanel-body-item"><span>Dangerous Goods Fee:</span> <input style="width: 80px;" type="number" name="dg_fee"  value="<?php echo $dgFee; ?>">&nbsp;AUD</div>
+                                    <div class="xpanel-body-item"><span>Empp Fee:</span> <input style="width: 80px;" type="number" name="empp_fee" value="<?php echo $emppFee ?>">&nbsp;AUD/shipment
+
+									</div>
+									<div class="xpanel-body-item"><span>Aqis Fee:</span> <input style="width: 80px;" type="number" name="aqis_fee" value="<?php echo  $aqisFee; ?>">&nbsp;AUD/shipment
+										
+
+									</div>
+
+									<div class="xpanel-body-item"><span>BB&PICKUP:</span> <input style="width: 40px;" type="number" name="bbpickuprate"  value="<?php echo  $bbPickupRate; ?>">&nbsp;/kg<input style="width: 40px;" type="number" name="bbpickuprateminumim"  value="<?php echo  $bbPickupRateMinumim; ?>">&nbsp;Minumum</div>
+									<div class="xpanel-body-item"><span>TLA Service Fee:</span> <input style="width: 40px;" type="number" name="tlasrate"  value="<?php echo  $tlaSRate; ?>">&nbsp;/kg</div>
+
+									<div class="xpanel-body-item"><span>Low Value Handling Fee:</span> <input style="width: 40px;" type="number" name="lvhrate"  value="<?php echo  $lvhRate; ?>">&nbsp;/kg</div>
+									<div class="xpanel-body-item"><span>Low Value Clearance Fee:</span> <input style="width: 40px;" type="number" name="lvcrate"  value="<?php echo  $lvcRate; ?>">&nbsp;/sp</div>
+
+									<div class="xpanel-body-item"><span>Warehouse Scanning Fee:</span> <input style="width: 40px;" type="number" name="wsrate"  value="<?php echo  $wsRate; ?>">&nbsp;/sp</div>
+									<div class="xpanel-body-item"><span>BB&Customs Fee:</span> <input style="width: 40px;" type="number" name="bbcusrate"  value="<?php echo  $bbCusRate; ?>">&nbsp;/kg</div>
+									<div class="xpanel-body-item"><span>Other Branch BB&Customs Fee:</span> <input style="width: 40px;" type="number" name="bbcusrateot"  value="<?php echo  $bbCusRateOt; ?>">&nbsp;/sp</div>
+
+									<div class="xpanel-body-item"><span>Shipment Split Fee:</span> <input style="width: 40px;" type="number" name="ssplitrate"  value="<?php echo  $sSplitRate; ?>">&nbsp;/kg</div>
+									<div class="xpanel-body-item"><span>Name Validation Rate:</span> <input style="width: 40px;" type="number" name="name_validation_rate" value="<?php echo $nameValidationRate; ?>">&nbsp; /change</div>
+
+                                    </div>
+
+								<?php endif; ?>
+							</div>
+						<?php endif; ?>
+					</div>
+				<?php endforeach; ?>
+			</div>
+
+			<div class="xpanel-body-item" style="text-align:left;">
+				<?php echo CHtml::button($this->t('Save'),array('onclick' => 'service_save();','id'=>'service-btn-save')); ?>
+			</div>
+
+		</div>
+	</div>
+
+	<script type="application/javascript">
+
+		var tab = $('#<?=$_GET["tabid"];?>');
+		var panel = tab.data('panel');
+
+		// Expect input as Y-m-d
+		function isValidDate(s) {
+			var bits = s.split('-');
+			var d = new Date(bits[0], bits[1] - 1, bits[2]);
+			return d && (d.getMonth() + 1) == bits[1] && d.getDate() == Number(bits[2]);
+		}
+
+		function service_save(){
+
+			var currency = ($('#currency',panel).val());
+
+			if ( currency.length <= 0 ) {
+				alert('please select at least one currency');
+				return;
+			}
+
+			var from_date = $('#valid-from-date',panel).val();
+			var to_date = $('#valid-to-date',panel).val();
+
+			if ( !isValidDate(from_date) ) {
+				alert('validate from date is invalid!');
+				$('#valid-from-date',panel).focus();
+				return;
+			}
+
+			if ( to_date.length > 0 &&  !isValidDate(to_date) ) {
+				alert('validate to date is invalid!');
+				$('#valid-to-date',panel).focus();
+				return;
+			}
+
+			var fromDate = new Date(from_date);
+			var toDate = new Date(to_date);
+			if ( fromDate && toDate && fromDate >= toDate ) {
+				alert ( 'validate to date must be more than from date!');
+				return;
+			}
+
+			var services = {};
+			$('.services',panel).each(function(e){
+				var scode = $(this).data('code');
+				services[scode] = {};
+				if ( $(this).find('.customer-service-selected').prop('checked') ) {
+					services[scode]['selected'] = 1;
+				} else {
+					services[scode]['selected'] = 0;
+				}
+				var obj = $(this).find('input[name="rate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['rate'] = obj.val();
+				}
+
+				obj = $(this).find('input[name="sea_rate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['sea_rate'] = obj.val();
+				}
+
+				obj = $(this).find('input[name="empp_fee"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['empp_fee'] = obj.val();
+				}
+
+				obj = $(this).find('input[name="aqis_fee"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['aqis_fee'] = obj.val();
+				}
+				
+				obj = $(this).find('input[name="prate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['prate'] = obj.val();
+				}
+				obj = $(this).find('input[name="extra_eparcel"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['eparcel_extra_rate'] = obj.val();
+				}
+                                
+                                obj = $(this).find('input[name="csdcRate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['csdcRate'] = obj.val();
+				}
+                                obj = $(this).find('input[name="csdclRate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['csdclRate'] = obj.val();
+				}
+                                obj = $(this).find('input[name="csdcapRate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['csdcapRate'] = obj.val();
+				}
+                                obj = $(this).find('input[name="caInvoiceServiceFee"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['caInvoiceServiceFee'] = obj.val();
+				}
+                                obj = $(this).find('input[name="extra_bpa"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['bpa_extra_rate'] = obj.val();
+				}
+				obj = $(this).find('input[name="extra_letters"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['letters_extra_rate'] = obj.val();
+				}
+                                
+				obj = $(this).find('input[name="docrate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['doc_rate'] = obj.val();
+				}
+                                obj = $(this).find('input[name="cusdcrate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['cusdcrate'] = obj.val();
+				}
+                                obj = $(this).find('input[name="crmrate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['crmrate'] = obj.val();
+				}
+                               obj = $(this).find('input[name="airbkrate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['airbkrate'] = obj.val();
+				}
+                               obj = $(this).find('input[name="delrate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['delrate'] = obj.val();
+				}
+				obj = $(this).find('input[name="showdetails"]');
+				if ( typeof  obj != 'undefined' ) {
+					if ( obj.prop('checked') ) {
+						services[scode]['showdetails'] = 1;
+					} else {
+						services[scode]['showdetails'] = 0;
+					}
+				}
+
+
+				obj = $(this).find('input[name="thcrate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['thc_rate'] = obj.val();
+				}
+
+				obj = $(this).find('input[name="ssplitrate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['shipment_split_rate'] = obj.val();
+				}
+
+				obj = $(this).find('input[name="name_validation_rate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['name_validation_rate'] = obj.val();
+				}
+
+				obj = $(this).find('input[name="airpickuppmcrate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['air_pickup_pmc_rate'] = obj.val();
+				}
+
+				obj = $(this).find('input[name="airpickuplooserate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['air_pickup_loose_rate'] = obj.val();
+				}
+
+				obj = $(this).find('input[name="airpickuplooserateot"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['air_pickup_loose_rate_ot'] = obj.val();
+				}
+
+				obj = $(this).find('input[name="airpickupakerate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['air_pickup_ake_rate'] = obj.val();
+				}
+
+				obj = $(this).find('input[name="airpickuppmcrateot"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['air_pickup_pmc_rate_ot'] = obj.val();
+				}
+
+				obj = $(this).find('input[name="airpickupakerateot"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['air_pickup_ake_rate_ot'] = obj.val();
+				}
+
+				obj = $(this).find('input[name="thcrateminimum"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['thc_rate_minimum'] = obj.val();
+				}
+				obj = $(this).find('input[name="thcrateakepmcminimum"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['thc_rate_ake_pmc_minimum'] = obj.val();
+				}
+				obj = $(this).find('input[name="thcrateakepmc"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['thc_rate_ake_pmc'] = obj.val();
+				}
+				obj = $(this).find('input[name="bbpickuprate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['bb_pickup_rate'] = obj.val();
+				}
+				obj = $(this).find('input[name="bbpickuprateminumim"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['bb_pickup_rate_minimum'] = obj.val();
+				}
+				obj = $(this).find('input[name="tlasrate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['tla_service_rate'] = obj.val();
+				}
+				obj = $(this).find('input[name="lvhrate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['lvh_rate'] = obj.val();
+				}
+				obj = $(this).find('input[name="lvcrate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['lvc_rate'] = obj.val();
+				}
+				obj = $(this).find('input[name="wsrate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['ws_rate'] = obj.val();
+				}
+				obj = $(this).find('input[name="bbcusrate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['bb_cus_rate'] = obj.val();
+				}
+				obj = $(this).find('input[name="thcrateot"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['thc_rate_ot'] = obj.val();
+				}
+
+				obj = $(this).find('input[name="thcrateakepmcminimumot"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['thc_rate_ake_pmc_minimum_ot'] = obj.val();
+				}
+
+				obj = $(this).find('input[name="thcrateminimumot"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['thc_rate_minimum_ot'] = obj.val();
+				}
+
+				obj = $(this).find('input[name="thcrateakepmcot"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['thc_rate_ake_pmc_ot'] = obj.val();
+				}
+
+				obj = $(this).find('input[name="bbcusrateot"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['bb_cus_rate_ot'] = obj.val();
+				}
+
+
+
+				obj = $(this).find('input[name="dlvrate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['dlv_rate'] = obj.val();
+				}
+				obj = $(this).find('input[name="sacrate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['sac_rate'] = obj.val();
+				}
+				obj = $(this).find('input[name="sacprate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['sac_prate'] = obj.val();
+				}
+                                
+
+                obj = $(this).find('input[name="strrate"]');
+                if ( typeof  obj != 'undefined' ) {
+                    services[scode]['str_rate'] = obj.val();
+                }
+/*              obj = $(this).find('input[name="seaStRatePl"]');
+                if ( typeof  obj != 'undefined' ) {
+                    services[scode]['seaStRatePl'] = obj.val();
+                }
+                obj = $(this).find('input[name="seaStRateWt"]');
+                if ( typeof  obj != 'undefined' ) {
+                    services[scode]['seaStRateWt'] = obj.val();
+                }*/
+                obj = $(this).find('input[name="seaStFeePS"]');
+                if ( typeof  obj != 'undefined' ) {
+                    services[scode]['seaStFeePS'] = obj.val();
+                }
+                obj = $(this).find('input[name="seaStFeeCR"]');
+                if ( typeof  obj != 'undefined' ) {
+                    services[scode]['seaStFeeCR'] = obj.val();
+                }
+                obj = $(this).find('input[name="seaStFeeKR"]');
+                if ( typeof  obj != 'undefined' ) {
+                    services[scode]['seaStFeeKR'] = obj.val();
+                }
+                obj = $(this).find('input[name="seaStBefTerm"]');
+                if ( typeof  obj != 'undefined' ) {
+                    services[scode]['seaStBefTerm'] = obj.val();
+                }
+                obj = $(this).find('input[name="seaStAftTerm"]');
+                if ( typeof  obj != 'undefined' ) {
+                    services[scode]['seaStAftTerm'] = obj.val();
+                }
+
+                obj = $(this).find('input[name="strterms"]');
+                if ( typeof  obj != 'undefined' ) {
+                    services[scode]['str_terms'] = obj.val();
+                }
+                 obj = $(this).find('input[name="strOthTerms"]');
+                if ( typeof  obj != 'undefined' ) {
+                    services[scode]['str_oth_terms'] = obj.val();
+                }
+                obj = $(this).find('input[name="rtsrate"]');
+                if ( typeof  obj != 'undefined' ) {
+                    services[scode]['rts_rate'] = obj.val();
+                }
+                 obj = $(this).find('input[name="awb_diff_rate"]');
+                if ( typeof  obj != 'undefined' ) {
+                    services[scode]['awb_diff_rate'] = obj.val();
+                }
+                  obj = $(this).find('input[name="awb_diff_buffer"]');
+                if ( typeof  obj != 'undefined' ) {
+                    services[scode]['awb_diff_buffer'] = obj.val();
+                }
+                 obj = $(this).find('input[name="consol_loose_rate"]');
+                if ( typeof  obj != 'undefined' ) {
+                    services[scode]['consol_loose_rate'] = obj.val();
+                }
+                 obj = $(this).find('input[name="dg_fee"]');
+                if ( typeof  obj != 'undefined' ) {
+                    services[scode]['dg_fee'] = obj.val();
+                }
+                 obj = $(this).find('input[name="rtsratefast"]');
+                if ( typeof  obj != 'undefined' ) {
+                    services[scode]['rts_rate_fast'] = obj.val();
+                }
+                obj=$(this).find('input[name="rtsdiscardrate"]');
+                if(typeof obj !='undefined'){
+                    services[scode]['rts_discard_rate'] = obj.val();
+                }
+                 obj = $(this).find('input[name="rtsratestar"]');
+                if ( typeof  obj != 'undefined' ) {
+                    services[scode]['rts_rate_star'] = obj.val();
+                }
+
+				obj = $(this).find('input[name="rtsmodrate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['rts_modrate'] = obj.val();
+				}
+
+				obj = $(this).find('input[name="rtsstrrate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['rts_strrate'] = obj.val();
+				}
+				obj = $(this).find('input[name="rtsstrterms"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['rts_strterms'] = obj.val();
+				}
+
+				var drService = 2;
+				$(this).find('input[name="dr_service_selected"]').each(function(){
+					if ( $(this).prop('checked') ) {
+						drService = $(this).val();
+						return false;
+					}
+				});
+				services[scode]['tracking_mode'] = drService;
+
+				var dlMode = 1 ; // default as eParcel
+				dlMode = $('input[name="customer_dl_service"]:checked',panel).val();
+				services[scode]['dl_mode'] = dlMode;
+				services[scode]['dl_chargecode'] =  $('input[name="chargecode"]:checked',panel). val();;
+				//console.log('dl mode is : ' + dlMode);
+
+				var obj = $(this).find('input[name="ft_rate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['ft_rate'] = obj.val();
+				}
+				obj = $(this).find('input[name="ft_prate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['ft_prate'] = obj.val();
+				}
+
+				var obj = $(this).find('input[name="st_rate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['st_rate'] = obj.val();
+				}
+				obj = $(this).find('input[name="st_prate"]');
+				if ( typeof  obj != 'undefined' ) {
+					services[scode]['st_prate'] = obj.val();
+				}
+
+
+			});
+
+			var org_rate_id = $('input[name="org_rate_id"]',panel).val();
+			var data = {
+				'orid' : org_rate_id,
+				'oid': <?php echo json_encode($model->id); ?>,
+				'vfrom' : from_date,
+				'vto' : to_date,
+				'currency' : currency,
+				'services' : services
+			};
+
+			$.ajax({
+				type : 'POST',
+				url : '<?php echo Yii::app()->createAbsoluteUrl("Org/ajaxSaveService") ;?>',
+				data: data,
+				dataType: 'json',
+				success:function(resp){
+					if ( resp.success == 1 ) {
+						alert('saved succesfully!')
+					} else {
+						alert(resp.err);
+					}
+
+				}
+			});
+		}
+
+		$(document).ready(function(e){
+			$('input[type="number"]',panel).on('change',function(e){
+				var val = parseFloat($(this).val());
+				if ( isNaN( val)  ||val < 0) {
+					$(this).val(0);
+				}
+			});
+		});
+	</script>
+
+
+<?php
+
+
+}
+
+if ( ($model->type == Org::TYPE_SUPPLIER && empty($model->extra['is_cbm_courier'] )) || $model->type == Org::TYPE_COURIER_AU) {
+
+	// try to get existing org rates
+	$orgRates = OrgRate::model()->findAll('org_id = :oid AND type = 5 AND zone_id > 0',[':oid' => $model->id]);
+	foreach ( $orgRates as $orgRate ) {
+
+		// for Courier in Australia we should set cost price details here
+		// get latest uploaded zone map file
+		$filerepo = FileRepo::model()->find('fid = :oid and type = 55 order by id desc', [':oid' => $orgRate->id]);
+		$latestFileLink = '';
+		if (isset($filerepo)) {
+			$latestFileLink = '(latest uploaded <a href="' . $filerepo->getUrl() . '" target="_blank">' . $filerepo->name . '</a>)';
+		}
+
+		$filerepo2 = FileRepo::model()->find('fid = :oid and type = 61 order by id desc', [':oid' => $orgRate->id]);
+		$latestFileLink2 = '';
+		if (isset($filerepo2)) {
+			$latestFileLink2 = '(latest uploaded <a href="' . $filerepo2->getUrl() . '" target="_blank">' . $filerepo2->name . '</a>)';
+		}
+
+		$filerepo3 = FileRepo::model()->find('fid = :oid and type = 62 order by id desc', [':oid' => $orgRate->id]);
+		$latestFileLink3 = '';
+		if (isset($filerepo3)) {
+			$latestFileLink3 = '(latest uploaded <a href="' . $filerepo3->getUrl() . '" target="_blank">' . $filerepo3->name . '</a>)';
+		}
+
+
+		?>
+
+
+
+		<div class="xpanel xpanel-default" style="max-width:400px;float:left;" >
+			<div class="xpanel-heading"><?php echo $orgRate->name; ?></div>
+			<div class="xpanel-body">
+				<div class="xpanel-body-item row rowcol rowleft">
+					<a class="jqm_link" data-win-class="L" href="org/zonemap/<?php echo $orgRate->id; ?>">
+						<div style="background-position:-16px 0" class="icon"></div>
+						Import Zone Map</a>
+					<br><?php echo $latestFileLink; ?>
+					<br>
+					<a class="jqm_link" data-win-class="XXL" href="org/costzonerate/<?php echo $orgRate->id; ?>">
+						<div style="background-position:-16px 0" class="icon"></div>
+						Flex Rate By Zone</a>
+					<br>
+					<br>
+					<a class="jqm_link" data-win-class="L" href="org/remoteChargeRate/<?php echo $orgRate->id; ?>">
+						<div style="background-position:-16px 0" class="icon"></div>
+						Import Remote Cost Rate</a>
+					<br><?php echo $latestFileLink2; ?>
+					<br>
+					<a class="jqm_link" data-win-class="XXL" href="org/orgSurcharge/<?php echo $orgRate->id; ?>">
+						<div style="background-position:-16px 0" class="icon"></div>
+						Configure Surcharge Range</a>
+					<br>
+				</div>
+			 </div>
+		 </div>
+	<?php
+	}
+
+	if ($model->id == Org::ORGID_COURIER_AUPOST) { ?>
+
+		<div class="xpanel xpanel-default" style="max-width:400px;float:left;" >
+			<div class="xpanel-heading"><?php echo 'Fuel Surcharge Rate' ?></div>
+			<div class="xpanel-body">
+				<div class="xpanel-body-item row rowcol rowleft">
+					<a class="jqm_link" data-win-class="XXL" href="org/getFuelSurcharge/<?php echo $orgRate->id; ?>">
+						<div style="background-position:-16px 0" class="icon"></div>
+						Update</a>
+					<br>
+					<br>
+					<br>
+				</div>
+			 </div>
+		 </div>
+
+	<?php
+	}
+
+}
+else if( $model->type == 70 && !empty($model->extra['is_cbm_courier'] )) {
+
+	// try to get existing org rates
+	$orgRates = OrgRate::model()->findAll('org_id = :oid AND type = 90 AND zone_id > 0',[':oid' => $model->id]);
+	foreach ( $orgRates as $orgRate ) {
+
+		// for Courier in Australia we should set cost price details here
+		// get latest uploaded zone map file
+		$filerepo = FileRepo::model()->find('fid = :oid and type = 55 order by id desc', [':oid' => $orgRate->id]);
+		$latestFileLink = '';
+		if (isset($filerepo)) {
+			$latestFileLink = '(latest uploaded <a href="' . $filerepo->getUrl() . '" target="_blank">' . $filerepo->name . '</a>)';
+		}
+		?>
+
+		<div class="xpanel xpanel-default" style="max-width:400px;float:left;" >
+			<div class="xpanel-heading"><?php echo $orgRate->name; ?></div>
+			<div class="xpanel-body">
+				<div class="xpanel-body-item row rowcol rowleft">
+					<a class="jqm_link" data-win-class="L" href="org/zonemap/<?php echo $orgRate->id; ?>">
+						<div style="background-position:-16px 0" class="icon"></div>
+						Import Zone Map</a>
+					<br><?php echo $latestFileLink; ?>
+					<br>
+					<a class="jqm_link" data-win-class="XXL" href="org/costzonerate/<?php echo $orgRate->id; ?>">
+						<div style="background-position:-16px 0" class="icon"></div>
+						Flex Rate By Zone</a>
+				</div>
+			 </div>
+		 </div>
+	<?php
+	}
+
+	if ($model->id == Org::ORGID_COURIER_AUPOST) { ?>
+
+		<div class="xpanel xpanel-default" style="max-width:400px;float:left;" >
+			<div class="xpanel-heading"><?php echo 'Fuel Surcharge Rate' ?></div>
+			<div class="xpanel-body">
+				<div class="xpanel-body-item row rowcol rowleft">
+					<a class="jqm_link" data-win-class="XXL" href="org/getFuelSurcharge/<?php echo $orgRate->id; ?>">
+						<div style="background-position:-16px 0" class="icon"></div>
+						Update</a>
+					<br>
+					<br>
+					<br>
+				</div>
+			 </div>
+		 </div>
+
+	<?php
+	}
+}
+else {
+
+	// $ss = new SellRate('search');
+	// $ss->org_id = $model->id;
+	// $ss->type = 20;
+
+	// $this->widget('application.extensions.editablegrid.CEditableGridView', array(
+	// 	'id' => $_GET['tabid'] . '_exrates-grid',
+	// 	'cssFile' => false,
+	// 	'dataProvider' => $ss->search(),
+	// 	'formUrl' => $this->createUrl('org/exRatesGrid', array('id' => $model->id)),
+	// 	'summaryText' => '',
+	// 	'afterSave' => "function(r){
+	// 	if(r.done == true){
+	// 		myApp.notice(r.msg, 5000);
+	// 	}else{
+	// 		myApp.alert(r.msg, false);
+	// 	}
+	// 	return r.done;
+	// }",
+	// 	'columns' => array(
+	// 		array('name' => 'code', 'class' => 'CEditableColumn', 'type' => 'list', 'filter' => array('R0' => 'Rate (R0)', 'V0' => 'Premium Service (V0)', 'R1' => 'Baby Formula Step 1/2 (R1)', 'R2' => 'Baby Formula Step 3/4 (R2)', 'R3' => 'Milk Powder (R3)', 'SR1' => 'Baby Formula Mixed (SR1)', 'SR2' => 'BC 6 Tins (SR2)', 'SR3' => 'UGG/Scarf (SR3)', 'SR4' => '3 Tins Step 3/4 (SR4)', 'SR5' => 'BC 3 Tins Step 1/2 (SR5)', 'SR6' => 'Wine (SR6)', 'T1' => 'Quilt Rate (T1)', 'T2' => 'UGG Rate (T2)', 'T3' => 'Jewellery (T3)', 'T4' => 'Clarisonic (T4)', 'M1' => 'Mixed Rate @ Mel (M1)', 'M2' => 'Flat Rate 6 Tins @ Mel (M2)', 'M3' => 'UGG Rate @ Mel (M3)', 'M4' => 'Quilt Rate @ Mel (M4)', 'B1' => 'Milk Bag Rate @ Bne (B1)', 'EC' => 'EC Rate (EC)', 'D1' => 'GC 1L Milk (D1)','C1' => 'CG Box (C1)','C2' => 'CG Tape (C2)')),
+	// 		array('name' => 'perkg', 'class' => 'CEditableColumn'),
+	// 		array('name' => 'item', 'class' => 'CEditableColumn'),
+	// 		array('name' => 'vfrom', 'class' => 'CEditableColumn', 'inputOptions' => array('class' => 'date_input', 'id' => '')),
+	// 		array('name' => 'vto', 'class' => 'CEditableColumn', 'inputOptions' => array('class' => 'date_input', 'id' => '')),
+	// 		array('class' => 'CEditableButtonColumn', 'template' => '{edit} {cancel} {save}'),
+	// 	),
+	// ));
+
+
+	$ss = new SellRate('search');
+	$ss->org_id = $model->id;
+	$ss->type = 10;
+
+	$this->widget('application.extensions.editablegrid.CEditableGridView', array(
+		'id' => $_GET['tabid'] . '_exdiscount-grid',
+		'cssFile' => false,
+		'dataProvider' => $ss->search(),
+		'formUrl' => $this->createUrl('org/imDiscountGrid', array('id' => $model->id)),
+		'summaryText' => '',
+		'afterSave' => "function(r){
+		if(r.done == true){
+			myApp.notice(r.msg, 5000);
+		}else{
+			myApp.alert(r.msg, false);
+		}
+		return r.done;
+	}",
+		'columns' => array(
+			array('name' => 'code', 'header' => 'Code'),
+			array('name' => 'item', 'header' => 'Discount %', 'class' => 'CEditableColumn', 'type' => 'list', 'filter' => array('0.0000' => '0%','0.0250' => '2.5%', '0.0500' => '5%', '0.0750' => '7.5%', '0.1000' => '10%', '0.2000' => '20%', '0.3000' => '30%', '0.4000' => '40%', '0.5000' => '50%', '0.7500' => '75%', '1.0000' => '100%')),
+			array('name' => 'vfrom', 'class' => 'CEditableColumn', 'inputOptions' => array('class' => 'date_input', 'id' => '')),
+			array('name' => 'vto', 'class' => 'CEditableColumn', 'inputOptions' => array('class' => 'date_input', 'id' => '')),
+			array('class' => 'CEditableButtonColumn', 'template' => '{edit} {cancel} {save}'),
+		),
+	));
+
+
+}
+?>
+

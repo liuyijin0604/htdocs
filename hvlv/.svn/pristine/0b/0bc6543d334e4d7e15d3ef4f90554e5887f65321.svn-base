@@ -1,0 +1,1672 @@
+<?php 
+class ReportService extends Service
+{
+
+		//for zone report
+	public function getWeightDataForDash($courierId,$filtersForm)
+	{
+		$pt = ['',date("Y-m-01"),date("Y-m-d"),10,'','',$courierId,''];
+		$lastMonth = date("Y-m", strtotime("-1 month",strtotime(date("Y-m-d"))));
+		$lastMonthWorkingDay = date("Y-m-d",strtotime("-1 month",strtotime(date("Y-m-d"))));
+		$pt[4] = 'we';
+		$pt[8] = 2;
+		$provide = $this->_plWeightQuery($pt, '', 'weight', 'rev DESC');
+		$sortAttributes = ["Weight_Step"=>"Weight_Step","Shipments"=>"shipments","Total Weight(KG)"=>"weight","Dispersion_Percentage"=>"Dispersion_Percentage"];
+
+		$dataprovider= $this->preDataProvider($filtersForm, $provide, $sortAttributes);
+		return [$dataprovider,$sortAttributes];
+	}
+
+
+
+	//for zone report
+	public function getZoneDataForDash($courierId,$filtersForm1)
+	{
+		$pt = ['',date("Y-m-01"),date("Y-m-d"),10,'','',$courierId,''];
+		$lastMonth = date("Y-m", strtotime("-1 month",strtotime(date("Y-m-d"))));
+		$lastMonthWorkingDay = date("Y-m-d",strtotime("-1 month",strtotime(date("Y-m-d"))));
+		$pt[4] = 'zo';
+		$provideThisMonth = $this->_plWeightQuery($pt, '', 'zone', 'zone DESC');
+		$pt[1] = $lastMonth."-01";
+		$pt[2] = $lastMonthWorkingDay;
+		$provideLastMonth = $this->_plWeightQuery($pt, '', 'zone', 'zone DESC');
+
+		$categoryProvideThisMonth = [];
+		$categoryProvideThisMonth = $this->sumZoneData($provideThisMonth,1);
+		$categoryProvideLastMonth = [];
+		$categoryProvideLastMonth = $this->sumZoneData($provideLastMonth,1);
+		$categoryProvide = [];
+		$sum = [];
+		foreach ($categoryProvideThisMonth as $key => $value) {
+			$categoryProvideThisMonth[$key]['category'] = 'This month-'.$categoryProvideThisMonth[$key]['category'];
+			$categoryProvideLastMonth[$key]['category'] = 'Last month-'.$categoryProvideLastMonth[$key]['category'];
+			$categoryProvide[] = $categoryProvideLastMonth[$key];
+			$categoryProvide[] = $categoryProvideThisMonth[$key];
+			$categoryProvide[] = ['category'=>'This month vs Last Month','shipments'=>round($categoryProvideThisMonth[$key]['shipments']*100/($categoryProvideLastMonth[$key]['shipments']+0.00001),0)."%",
+			'weight'=>round($categoryProvideThisMonth[$key]['weight']*100/($categoryProvideLastMonth[$key]['weight']+0.00001),0)."%",
+			'Dispersion_Percentage'=>round($categoryProvideThisMonth[$key]['Dispersion_Percentage']*100/($categoryProvideLastMonth[$key]['Dispersion_Percentage']+0.00001),0)."%"];
+			$categoryProvide[] = ['category'=>'','shipments'=>"",'weight'=>"",'Dispersion_Percentage'=>100];
+		}
+
+
+		$sortAttributes1 = ["Category"=>"category","Shipments"=>"shipments","Total Weight(KG)"=>"weight","Dispersion_Percentage"=>"Dispersion_Percentage"];
+
+		$dataprovider1= $this->preDataProvider($filtersForm1, $categoryProvide, $sortAttributes1);
+		return [null,$dataprovider1,null,$sortAttributes1];
+	}
+
+	private function sumZoneData($provide,$type = 0)
+	{
+		$categories = SystemSetting::getAupostZoneCategorySetting();
+		$categoryProvide = [];
+		$categoryResult = [];
+		$categoryProvideId = 0;
+		$cate="123";
+		$totalShipment = 0;
+		$totalWeight = 0;
+		foreach ($provide as $key => $data) {//fitting all the data into categories
+			if(!isset($categories[$data['Zone']])) continue;
+			$cate = $categories[$data['Zone']];
+			if(!empty($categoryResult[$cate]))
+			{
+				$categoryResult[$cate]["Dispersion_Percentage"] += $data['Dispersion_Percentage'];
+				$categoryResult[$cate]["shipments"] += $data['shipments'];
+				$categoryResult[$cate]["weight"] += $data['weight'];
+			}else
+			{
+				$categoryResult[$cate] =  ["id"=>$categoryProvideId,"category"=>$cate,"Dispersion_Percentage"=>$data['Dispersion_Percentage'],"shipments"=>$data['shipments'],"weight"=>$data['weight']];
+				$categoryProvideId++;
+			}
+			$totalShipment+=$data['shipments'];
+			$totalWeight+=$data['weight'];
+		}
+
+		foreach ($categoryResult as $key => $value) {
+			$value["Dispersion_Percentage"] = $value["Dispersion_Percentage"]."%";
+			$categoryProvide[$value['id']] = $value;
+		}
+		if($type!=1)
+		{
+			$categoryProvide[] = ["id"=>999,"category"=>"Total","Dispersion_Percentage"=>"","shipments"=>$totalShipment,"weight"=>$totalWeight];
+		}
+		return $categoryProvide;
+	}
+
+
+	//for zone report
+	public function getZoneData($pt,&$filtersForm,&$filtersForm1)
+	{
+		$pt[4] = 'zo';
+		$provide = $this->_plWeightQuery($pt, '', 'zone');
+		$sortAttributes = ["Zone"=>"Zone","Shipments"=>"shipments","Total Weight"=>"weight","Dispersion_Percentage"=>"Dispersion_Percentage"];
+		$sortNumberAttributes = ["Total Weight"=>"weight"];
+		$categoryProvide = $this->sumZoneData($provide);
+
+		$sortAttributes1 = ["Category"=>"category","Shipments"=>"shipments","Total Weight(KG)"=>"weight","Dispersion_Percentage"=>"Dispersion_Percentage"];
+		$sortNumberAttributes1 = ["Total Weight(KG)"=>"weight"];
+
+		$dataprovider= $this->preDataProvider($filtersForm, $provide, $sortAttributes,$sortNumberAttributes);
+		$dataprovider1= $this->preDataProvider($filtersForm1, $categoryProvide, $sortAttributes1,$sortNumberAttributes1);
+		return [$dataprovider,$dataprovider1,$sortAttributes,$sortAttributes1];
+	}
+	//for zone and weight report
+	public function _plWeightQuery($pt, $c = '', $g = '', $o = false)
+	{
+		$cacheKey = "_plWeightQuery".json_encode($pt);
+		$provide = Yii::app()->cache->get($cacheKey);
+		if(!empty($provide))
+		{
+			return json_decode($provide,true);
+		}
+
+		$dptStr = " AND p.dpt_id = ".$pt[0];
+		$dpmtStr = "";
+		if(empty($pt[0]))
+		{
+			$dptStr = "";
+		}
+		if (!empty($pt[3])) {
+			$dpmtStr = ' AND p.dpmt = '.$pt[3].' ';
+		}
+
+		$clientStr ="";
+		$courierStr = "";
+		$consolStr = ' AND c.no not like "3PL%" ';
+
+		if (!empty($pt[5])) {
+			$clientStr = ' AND p.org_id = '.$pt[5].' ';
+		}
+
+		if (!empty($pt[6])) {
+			$courierStr = ' AND p.grp2 = '.$pt[6].' ';
+		}
+
+		$end = 23;
+		if (!empty($pt[8])) {
+			$end = $pt[8];
+		}
+
+		if (!empty($pt[7])) {
+			$consol = ImcoConsol::model()->find(" no = :no ",[":no"=>$pt[7]]);
+			$consol_id = empty($consol)?9999999999:$consol->id;
+			$consolStr .= ' AND p.grp1 = '.$consol_id.' ';
+		}
+
+		$sql = "SELECT p.* from pl_ledger p join consol c on p.grp1=c.id join mani_map ma on ma.fid = p.fid and ma.model='ImParcel' join manifest m on m.id = ma.mani_id and m.type=90  where p.gl = 101 and p.model='ImP_Manifest' ".$dptStr.$dpmtStr.$clientStr.$courierStr.$consolStr." AND m.created >= '".$pt[1]." 00:00:00' AND m.created <= '".$pt[2]." 23:00:00' AND weight >0 group by p.fid ";
+
+		$sqlAll = "SELECT sum(weight) as sumAll from (select p.* from pl_ledger p join consol c on p.grp1=c.id join mani_map ma on ma.fid = p.fid and ma.model='ImParcel' join manifest m on m.id = ma.mani_id and m.type=90 where p.gl = 101 and p.model='ImP_Manifest' ".$dptStr.$dpmtStr.$clientStr.$courierStr.$consolStr." AND m.created >= '".$pt[1]." 00:00:00' AND m.created <= '".$pt[2]." 23:00:00' group by p.fid ) as t";
+		
+		$all = Yii::app()->db->createCommand($sqlAll)->queryAll();
+		$all = $all[0]['sumAll'];
+		$all = empty($all)?100:$all;
+		$provice = [];
+		$data = [];
+
+		if($g=="zone")
+		{
+			if(empty($o))
+			{
+				$o = 'Dispersion_Percentage desc';
+			}
+			$sql = " SELECT zone as Zone,concat(round(sum(weight)*100/{$all},2),'%') as Dispersion_Percentage,count(1) as shipments,sum(weight) as weight from ( {$sql} ) as t GROUP by zone order by {$o} ";
+		}
+
+		if($g=="weight")
+		{
+			$concatStr = "";
+			$i = 0;
+			$round = 0;
+			while($i<=$end) { 
+				if($i ==0)
+				{
+					$provide[]=["Weight_Step"=>"Up to 250g","Dispersion_Percentage"=>0,"shipments"=>0,"weight"=>0];
+				}
+				if($i ==0.25)
+				{
+					$provide[]=["Weight_Step"=>"250g to 500g","Dispersion_Percentage"=>0,"shipments"=>0,"weight"=>0];
+				}
+				if($i ==0.5)
+				{
+					$provide[]=["Weight_Step"=>"0.51kg to 1kg","Dispersion_Percentage"=>0,"shipments"=>0,"weight"=>0];
+				}
+				if($i ==23)
+				{
+					$provide[]=["Weight_Step"=>">22kg","Dispersion_Percentage"=>0,"shipments"=>0,"weight"=>0];
+				}
+				
+				if($i !=23)
+				{
+					$checkWeight = $i;
+					if($i ==0||$i==0.25)
+					{
+						$checkWeight = $i+0.25;
+					}
+					else if($i==0.5)
+					{
+						$checkWeight = $i+0.5;
+					}else
+					{
+						$checkWeight = $i+1;
+					}
+
+					$concatStr .=' concat(round(SUM(IF(weight > '.$i.' and weight<='.$checkWeight.', weight, 0) )/SUM(weight)*100,2),"%") AS weight'.$round.", ";
+
+					$concatStr .=' SUM(IF(weight > '.$i.' and weight<='.$checkWeight.', weight, 0) ) AS total_weight'.$round.", ";
+					$concatStr .=' SUM(IF(weight > '.$i.' and weight<='.$checkWeight.', 1, 0) ) AS shipments'.$round;
+					if($i<$end)
+					{
+						$concatStr .=" , ";
+					}
+				}
+
+				if($i != 0&&$i!=23&&$i !=0.5&&$i !=0.25)
+				{
+					$provide[]=["Weight_Step"=>($i+0.01)."kg to ".(($i+1)."kg"),"Dispersion_Percentage"=>0];
+				}
+
+				if($i==23)
+				{
+					$concatStr .=' concat(round(SUM(IF(weight > '.$i.' , weight, 0) )/SUM(weight)*100,2),"%") AS weight'.$round.", ";
+					$concatStr .=' SUM(IF(weight > '.$i.' , weight, 0) ) AS total_weight'.$round.", ";
+					$concatStr .=' SUM(IF(weight > '.$i.' , 1, 0) ) AS shipments'.$round;
+				}
+				if($i ==0||$i==0.25)
+				{
+					$i+=0.25;
+				}else if($i==0.5)
+				{
+					$i+=0.5;
+				}else
+				{
+					$i+=1;
+				}
+				$round++;
+				
+			}
+			$sql = "SELECT {$concatStr} from ( {$sql} ) as t ";
+			$data = Yii::app()->db->createCommand($sql)->queryAll();
+		}
+
+		if($g=="zone")
+		{
+			$provide = Yii::app()->db->createCommand($sql)->queryAll();
+			Yii::app()->cache->set($cacheKey,json_encode($provide),3000);
+			return $provide;
+		}
+
+		if($g=="weight")
+		{
+			foreach ($provide as $key => $value) {
+				$provide[$key]['id'] = $key;
+				$provide[$key]['Dispersion_Percentage'] = $data[0]['weight'.$key];
+				$provide[$key]['weight'] = $data[0]['total_weight'.$key];
+				$provide[$key]['shipments'] = $data[0]['shipments'.$key];
+			}
+			Yii::app()->cache->set($cacheKey,json_encode($provide),3000);
+			return $provide;
+		}
+	}
+
+	//Gero at 2019-08-12; move at 2019-12-11
+	
+	/**
+	 * Sort WD By Consols,Client,Courier
+	 * @param array $consols,$type
+	 * @return array of data provide
+	 */
+	public function sortWD($consols,$type = 0,$selectedClientType=null)
+	{
+		$provide=[];
+		$consolIdArr = array_column($consols, 'id');
+		$consolIdStr = join($consolIdArr,",");
+		$courierWeight = 0;
+		$clientChargeWeight = 0;
+		$weightDiff = 0;
+		if($type == 1)//sort by consol
+		{
+			$criteria = new CDbCriteria();
+			$criteria->addInCondition('t.consol_id',$consolIdArr);
+			if(!empty($selectedClientType))
+			{
+				$criteria->addCondition(" parent.client_type = {$selectedClientType}");
+			}
+			$reconciliationLines = ReconciliationLine::model()->with('parent')->findAll($criteria);
+			if (!empty($reconciliationLines)) 
+			{
+				$trans = Yii::app()->db->beginTransaction();
+				try
+				{
+					foreach ($consols as $key => $con) 
+					{
+						$exist = false;
+						$courierWeight = 0;
+						$clientChargeWeight = 0;
+						$weightDiff = 0;
+						foreach ($reconciliationLines as $reconciliationLine) 
+						{
+							if($reconciliationLine->consol_id == $con->id)
+							{
+								$exist = true;
+								$thisCourierWeight=$reconciliationLine->getCdeadwtOrWeight();
+								$thisClientChargeWeight=$reconciliationLine->getCustomerWeight();
+								if($thisCourierWeight>0&&$thisClientChargeWeight>0)
+								{
+									$courierWeight+=$thisCourierWeight;
+									$clientChargeWeight+=$thisClientChargeWeight;
+								}
+							}
+						}
+						$weightDiff=$courierWeight-$clientChargeWeight;
+						if($exist&&$courierWeight!=0&&$clientChargeWeight!=0)
+						{
+							$provide[] = ['id' => $con->id,'no' => $con->no, 'eta' => $con->eta,
+								'courierWeight' => number_format($courierWeight, 2),'customerChargeWeight' => number_format($clientChargeWeight, 2),
+								'weightDiff' => number_format($weightDiff, 2),'weightDiffRate'=>number_format(($weightDiff/$courierWeight)*100)."%",'type'=>$con->type];
+						}
+					}
+					$trans->commit();
+				} catch (Exception $ex) 
+				{
+					$trans->rollback();
+					throw $ex;
+				}
+			}
+		}else if ($type == 2)// sort by client
+		{
+			$sql="select s.agent_id,t.id,t.parent_id,c.no from reconciliation re join reconciliation_line t on re.id = t.parent_id join shipment s on s.ref = t.shipment_no join consol c on s.consol_id = c.id where t.consol_id in ({$consolIdStr}) ";
+			if(!empty($selectedClientType))
+			{
+				$sql.=" and re.client_type = {$selectedClientType}";
+			}
+
+
+			$agentReconArr=Yii::app()->db->createCommand($sql)->queryAll();
+			$agentIds = array_column($agentReconArr, 'agent_id');
+			$agentIds = array_unique($agentIds);
+			if (!empty($agentIds)) 
+			{
+				$trans = Yii::app()->db->beginTransaction();
+				try
+				{
+					foreach ($agentIds as $agentId) 
+					{
+						$agent = Org::model()->findByPk($agentId);
+						$courierWeight = 0;
+						$clientChargeWeight = 0;
+						$weightDiff = 0;
+						foreach ($agentReconArr as $key => $agentRecon) 
+						{
+							if($agentRecon["agent_id"] == $agentId)
+							{
+								//echo $agentRecon['id'].",";
+								$reconciliationLine = ReconciliationLine::model()->find("id = :id and parent_id = :parent_id",["id"=>$agentRecon['id'],"parent_id"=>$agentRecon['parent_id']]);
+								// $courierWeight+=$reconciliationLine->getWeight();
+								// $clientChargeWeight+=$reconciliationLine->getCSChargeWeight();
+								// $weightDiff+=$reconciliationLine->getChargeWeightDiff();
+								$thisCourierWeight=$reconciliationLine->getCdeadwtOrWeight();
+								$thisClientChargeWeight=$reconciliationLine->getCustomerWeight();
+								if($thisCourierWeight>0&&$thisClientChargeWeight>0)
+								{
+									$courierWeight+=$thisCourierWeight;
+									$clientChargeWeight+=$thisClientChargeWeight;
+								}
+							}
+						}
+						$weightDiff=$courierWeight-$clientChargeWeight;
+						if($courierWeight!=0&&$courierWeight!=0&&$clientChargeWeight!=0)
+						{
+							$provide[] = ['id'=>$agent->id,'owner' => $agent->name,'courierWeight' => number_format($courierWeight, 2), 
+							'customerChargeWeight' => number_format($clientChargeWeight, 2),'weightDiff' => number_format($weightDiff, 2),'weightDiffRate'=>number_format(($weightDiff/$courierWeight)*100)."%"];
+						}
+						//echo "</br>";
+					}
+					$trans->commit();
+				} catch (Exception $ex) 
+				{
+					$trans->rollback();
+					throw $ex;
+				}
+			}
+		}else if ($type == 3)
+		{
+			$sql="select re.client_type,t.id,t.parent_id from reconciliation_line t join reconciliation re on re.id = t.parent_id where t.consol_id in ({$consolIdStr}) ";
+
+			if(!empty($selectedClientType))
+			{
+				$sql.=" and re.client_type = {$selectedClientType}";
+			}
+			$clientReconArr=Yii::app()->db->createCommand($sql)->queryAll();
+			$clientTypes = array_column($clientReconArr, 'client_type');
+			$clientTypes = array_unique($clientTypes);
+			if (!empty($clientTypes)) 
+			{
+				$trans = Yii::app()->db->beginTransaction();
+				try
+				{
+					foreach ($clientTypes as $clientType) 
+					{
+						$clientTypeName = Reconciliation::$types[$clientType];
+						$courierWeight = 0;
+						$clientChargeWeight = 0;
+						$weightDiff = 0;
+						foreach ($clientReconArr as $key => $clientRecon) 
+						{
+							if($clientRecon["client_type"] == $clientType)
+							{
+								$reconciliationLine = ReconciliationLine::model()->find("id = :id and parent_id = :parent_id",["id"=>$clientRecon['id'],"parent_id"=>$clientRecon['parent_id']]);
+								// $courierWeight+=$reconciliationLine->getWeight();
+								// $clientChargeWeight+=$reconciliationLine->getCSChargeWeight();
+								// $weightDiff+=$reconciliationLine->getChargeWeightDiff();
+								$thisCourierWeight=$reconciliationLine->getCdeadwtOrWeight();
+								$thisClientChargeWeight=$reconciliationLine->getCustomerWeight();
+								if($thisCourierWeight>0&&$thisClientChargeWeight>0)
+								{
+									$courierWeight+=$thisCourierWeight;
+									$clientChargeWeight+=$thisClientChargeWeight;
+								}
+							}
+						}
+						$weightDiff=$courierWeight-$clientChargeWeight;
+						
+						if($courierWeight!=0&&$courierWeight!=0&&$clientChargeWeight!=0)
+						{
+							$provide[] = ['id'=>$clientType,'courier' => $clientTypeName,'courierWeight' => number_format($courierWeight, 2), 
+							'customerChargeWeight' => number_format($clientChargeWeight, 2),'weightDiff' => number_format($weightDiff, 2),'weightDiffRate'=>number_format(($weightDiff/$courierWeight)*100)."%"];
+						}
+					}
+					$trans->commit();
+				} catch (Exception $ex) 
+				{
+					$trans->rollback();
+					throw $ex;
+				}
+			}
+		}
+
+		return $provide;
+	}
+	public function getFbaReport($ddptId,$type,$datefrom,$dateto,$filtersForm,$export=false,$swid)
+	{
+		if($ddptId==Org::TLA_DEPARTMENT_PERTH)
+		{
+			$provide1 = $this->getFbaReportProvide(Org::TLA_DEPARTMENT_PERTH,$type,$datefrom,$dateto,$filtersForm,$export,$swid);
+			$provide2 = $this->getFbaReportProvide(Org::TLA_DEPARTMENT_FREMANTLE,$type,$datefrom,$dateto,$filtersForm,$export,$swid);
+			$provide = $provide1+$provide2;
+		}else
+		{
+			$provide = $this->getFbaReportProvide($ddptId,$type,$datefrom,$dateto,$filtersForm,$export,$swid);
+		}
+		$dataProvider =  $this->preNormalDataProvider($filtersForm, $provide);
+		if($type ==1)
+		{
+			$attributes = ["Id"=>"id","Est. Delivery Date"=>"eta","Amazon Booking Time"=>"abt","TLA HBN No"=>"hbnsOnly","TLA HBN No. + Customs Status"=>"hbns","TLA Ref No. + Customs Status"=>"refs","Amazon PO"=>"amazonPos","Amazon Shipment Id"=>"amazonShipmentIds",'Total CBM'=>'totalCBM','Pallet'=>'pallet','Ctn'=>'pkg','Unit'=>'pls'];
+		}else if($type == 2)
+		{
+			$attributes = ["Id"=>"id","Amazon Booking Time"=>"eta","TLA HBN No"=>"hbnsOnly","TLA HBN No. + Customs Status"=>"hbns","TLA Ref No. + Customs Status"=>"refs","Amazon PO"=>"amazonPos","Amazon Shipment Id"=>"amazonShipmentIds",'Total CBM'=>'totalCBM','Pallet'=>'pallet','Ctn'=>'pkg','Unit'=>'pls'];
+		}else if($type == 3)
+		{
+			$attributes = ["Id"=>"id","Eta"=>"eta","TLA HBN No"=>"hbnsOnly","TLA HBN No. + Customs Status"=>"hbns","TLA Ref No. + Customs Status"=>"refs","Amazon PO"=>"amazonPos","Amazon Shipment Id"=>"amazonShipmentIds",'Total CBM'=>'totalCBM','Pallet'=>'pallet','Ctn'=>'pkg','Unit'=>'pls'];
+		}else if($type == 4)
+		{
+			$attributes = ["Id"=>"id","Ref"=>"ref","Package"=>"pkg",'Total CBM'=>'totalCBM','Pallet count'=>'pallet',"Amazon PO"=>"amazonPos","Amazon Shipment Id"=>"amazonShipmentIds"];
+		}
+		return [$dataProvider,$filtersForm,$attributes];
+	}
+	public function getFbaReportProvide($ddptId,$type,$datefrom,$dateto,$filtersForm,$export=false,$swid)
+	{
+		// $airDate = HolidayHelper::getDateByBusinessDays($ddptId,$dateto,2,false);
+		// echo $airDate;
+		// $seaDate = HolidayHelper::getDateByBusinessDays($ddptId,$dateto,7,1);
+		$palletRate = 1;
+		if(strtotime($dateto)<strtotime($datefrom)&&$type == 1)
+		{
+			$dataTemp = $dateto;
+			$dateto = $datefrom;
+			$datefrom = $dataTemp;
+		}
+		if($export)
+		{
+			$symbol = ',';
+		}else
+		{
+			$symbol = "</br>";
+		}
+		// if(strtotime($airDate)<strtotime($datefrom))
+		// {
+		// 	$dateto1 = $datefrom;
+		// 	$datefrom1 = $airDate;
+		// }else
+		// {
+		// 	$dateto1 =$dateto;
+		// 	$datefrom1 =$datefrom;
+		// }
+
+		// if(strtotime($seaDate)<strtotime($datefrom))
+		// {
+		// 	$dateto2 = $datefrom;
+		// 	$datefrom2 = $seaDate;
+		// }else
+		// {
+		// 	$dateto2 =$dateto;
+		// 	$datefrom2 =$datefrom;
+		// }
+		if($ddptId !=null)
+		{
+			$pod = SystemSetting::getCargoProcessPodSetting($ddptId);
+			$state = @$pod["postcode"];
+			$selectStateStr = "postcode like ";
+			$subWidStr = "";
+			$subWidStr2 = "";
+			$sql ="";
+			if(empty($state))
+			{
+				$state = @$pod["state"];
+				$selectStateStr = "state = ";
+			}
+
+			$state = "'".$state."'";
+			$checkSuburb = "";
+			$checkPostcode ="";
+			$equals = true;
+			if(!empty($swid))
+			{
+				switch ($ddptId) {
+					case Org::TLA_DEPARTMENT_MELBOURNE:
+						$checkSuburb = "RAVENHALL";
+						$checkPostcode = "3023";
+						$equals = true;
+						if($swid=='218-1')
+						{
+							$subWidStr .= ' and ( cnee.suburb!="'.$checkSuburb.'" and cnee.postcode!="'.$checkPostcode.'" ) ';
+							$subWidStr2 .= ' and ( ad.suburb!="'.$checkSuburb.'" and ad.postcode!="'.$checkPostcode.'" ) ';
+							$equals = false;
+						}elseif ($swid=='218-5') {
+							$subWidStr .= '  and ( cnee.suburb="'.$checkSuburb.'" and cnee.postcode="'.$checkPostcode.'" ) ';
+							$subWidStr2 .= ' and ( ad.suburb="'.$checkSuburb.'" and ad.postcode="'.$checkPostcode.'" ) ';
+						}
+						break;
+					case Org::TLA_DEPARTMENT_SYDNEY:
+						$checkSuburb = 'KEMPS CREEK';
+						$checkPostcode = '2178';
+						$equals = true;
+						if($swid=='106-1')
+						{
+							$subWidStr .= ' and ( cnee.suburb!="'.$checkSuburb.'" and cnee.postcode!="'.$checkPostcode.'" ) ';
+							$subWidStr2 .= ' and ( ad.suburb!="'.$checkSuburb.'" and ad.postcode!="'.$checkPostcode.'" ) ';
+							$equals = false;
+						}elseif ($swid=='106-2') {
+							$subWidStr .= '  and ( cnee.suburb="'.$checkSuburb.'" and cnee.postcode="'.$checkPostcode.'" ) ';
+							$subWidStr2 .= ' and ( ad.suburb="'.$checkSuburb.'" and ad.postcode="'.$checkPostcode.'" ) ';
+						}
+						break;
+					
+					default:
+						# code...
+						break;
+				}
+			}
+		}
+
+		if($type==1)
+		{
+			$model = new ImParcel('search');
+			$model->unsetAttributes();
+
+			$model->cargoProcessPreAlert = ["podId"=>$ddptId,"cargoType"=>CargoProcess::FBA_CARGO];
+			$allFBAShipments = $model->search(false,false)->data;
+			if(!empty($checkSuburb))
+			{
+				foreach ($allFBAShipments as $key => $p)
+				{
+					if(!$equals)
+					{
+						if(strtoupper($p->cnee->suburb)==$checkSuburb&&$p->cnee->postcode==$checkPostcode)
+						{
+							unset($allFBAShipments[$key]);
+						}
+					}else
+					{
+						if(strtoupper($p->cnee->suburb)!=$checkSuburb&&$p->cnee->postcode!=$checkPostcode)
+						{
+							unset($allFBAShipments[$key]);
+						}
+					}
+				}
+			}
+
+
+
+			$shipmentIds = array_column($allFBAShipments, 'id');
+
+
+			// $cargos = CargoProcess::model()->with(['shipment','shipment.cnee'])->findAll("t.type = :type and shipment.status !=:status and t.status !=".CargoProcess::DELETED." and ((cnee.{$selectStateStr} ".$state.$subWidStr." )or json_value(t.meta,'$.goods_state') = ".$state.")",[":type"=>CargoProcess::FBA_CARGO,":status"=>ImParcel::DELIVERED]);
+			// $cargosShipmentIds = array_column($cargos, 'shipment_id');
+			// $shipmentIds = array_merge($shipmentIds,$cargosShipmentIds);
+			$shipmentIdStr = join("','",$shipmentIds);
+			$sql =" SELECT s.*,json_value(s.meta,'$.amazon_po') as amazonPo, json_value(s.meta,'$.amazon_shipment_ids') as amazonShipmentIds,json_value(s.meta,'$.amzon_pallet') as amzon_pallet, c.eta, json_value(cp.meta,'$.left_packages') as left_packages,json_value(cp.meta,'$.pallet') as pallet,
+			(case  
+			    when am2.amazon_booking_time is not null then am2.amazon_booking_time
+				else am.amazon_booking_time
+			end) as amazon_booking_time,
+			(case  
+			    when json_value(cp.meta,'$.caref') is not null then json_value(cp.meta,'$.caref')
+				else s.ref 
+			end) as caref
+			,c.service from shipment s join consol c on s.consol_id = c.id left join amazon_info am on am.fid = s.id and am.model ='ImParcel' left join cargo_process cp on cp.shipment_id = s.id left join amazon_info am2 on am2.fid = cp.id and am2.model='CargoProcess' where ((cp.id is null or cp.status=100) or cp.status<90) and s.id in ('{$shipmentIdStr}') order by c.eta";
+			$shipments = Yii::app()->db->createCommand($sql)->queryAll();
+		}else if($type ==2)
+		{
+
+			$sql =" SELECT s.*,json_value(s.meta,'$.amazon_po') as amazonPo, json_value(s.meta,'$.amazon_shipment_ids') as amazonShipmentIds,json_value(s.meta,'$.amzon_pallet') as amzon_pallet,
+				json_value(cp.meta,'$.left_packages') as left_packages,json_value(cp.meta,'$.pallet') as pallet,
+				(case  
+			    when am2.amazon_booking_time is not null then am2.amazon_booking_time
+				else am.amazon_booking_time
+				end) as amazon_booking_time,
+				(case  
+				    when json_value(cp.meta,'$.caref') is not null then json_value(cp.meta,'$.caref')
+					else s.ref 
+				end) as caref 
+
+				from cargo_process cp join shipment s on cp.shipment_id = s.id join addr ad on s.cnee_id = ad.id left join amazon_info am on am.fid = s.id and am.model ='ImParcel' left join amazon_info am2 on am2.fid = cp.id and am2.model='CargoProcess' where cp.status >= ".CargoProcess::WAITINGDELIVERY." and cp.status < 100 and s.status!=".ImParcel::DELIVERED." and cp.type = ".CargoProcess::FBA_CARGO." and ((ad.{$selectStateStr} ".$state.$subWidStr." ) or json_value(cp.meta,'$.goods_state') = ".$state.") order by am.amazon_booking_time";
+			$shipments = Yii::app()->db->createCommand($sql)->queryAll();
+		}else if($type ==3)
+		{
+			$sql =" SELECT s.*,json_value(s.meta,'$.amazon_po') as amazonPo, json_value(s.meta,'$.amazon_shipment_ids') as amazonShipmentIds,json_value(s.meta,'$.amzon_pallet') as amzon_pallet,json_value(cp.meta,'$.left_packages') as left_packages,json_value(cp.meta,'$.pallet') as pallet,
+			(case  
+			    when am2.amazon_booking_time is not null then am2.amazon_booking_time
+				else am.amazon_booking_time
+				end) as amazon_booking_time,
+				(case  
+				    when json_value(cp.meta,'$.caref') is not null then json_value(cp.meta,'$.caref')
+					else s.ref 
+				end) as caref 
+			,c.eta from cargo_process cp join shipment s on cp.shipment_id = s.id join addr ad on s.cnee_id = ad.id join consol c on c.id = s.consol_id left join amazon_info am on am.fid = s.id and am.model ='ImParcel' left join amazon_info am2 on am2.fid = cp.id and am2.model='CargoProcess' where cp.status =".CargoProcess::COLLECTINFO." and cp.type = ".CargoProcess::FBA_CARGO." and ((ad.{$selectStateStr} ".$state.$subWidStr." ) or json_value(cp.meta,'$.goods_state') = ".$state.") order by c.eta";
+			$shipments = Yii::app()->db->createCommand($sql)->queryAll();
+		}else if($type ==4)
+		{
+			$sql ="SELECT * from (SELECT s.*,cp.id as cpid, json_value(s.meta,'$.amazon_po') as amazonPo, json_value(s.meta,'$.amazon_shipment_ids') as amazonShipmentIds,json_value(s.meta,'$.amzon_pallet') as amzon_pallet,json_value(cp.meta,'$.left_packages') as left_packages,json_value(cp.meta,'$.pallet') as pallet,
+			(case  
+			    when am2.amazon_booking_time is not null then am2.amazon_booking_time
+				else am.amazon_booking_time
+				end) as amazon_booking_time,
+			(case  
+			    when am2.booking_ref is not null then am2.booking_ref
+				else am.booking_ref
+				end) as booking_ref,
+				(case  
+				    when json_value(cp.meta,'$.caref') is not null then json_value(cp.meta,'$.caref')
+					else s.ref 
+				end) as caref 
+			,c.eta from cargo_process cp join shipment s on cp.shipment_id = s.id join addr ad on s.cnee_id = ad.id join consol c on c.id = s.consol_id left join amazon_info am on am.fid = s.id and am.model ='ImParcel' left join amazon_info am2 on am2.fid = cp.id and am2.model='CargoProcess' where cp.type = ".CargoProcess::FBA_CARGO." and ((ad.{$selectStateStr} ".$state.$subWidStr." ) or json_value(cp.meta,'$.goods_state') = ".$state.")) result where amazon_booking_time >= '{$datefrom}' and amazon_booking_time <= '{$dateto}' order by amazon_booking_time ";
+			$shipments = Yii::app()->db->createCommand($sql)->queryAll();
+		}
+
+
+		$provide = [];
+		foreach($shipments as $key => $shipment)
+		{
+			if($type==1)
+			{
+				if($shipment['service']==Consol::SEACONSOL)
+				{
+					$etaPlusDate = HolidayHelper::getDateByBusinessDays($ddptId,$shipment['eta'],4,1);
+				}else
+				{
+					$etaPlusDate = HolidayHelper::getDateByBusinessDays($ddptId,$shipment['eta'],1,1);
+				}
+				if(!empty($shipment['amazon_booking_time'])&&$shipment['amazon_booking_time']!='0000-00-00 00:00:00')
+				{
+					$thisKey = "AM".$shipment['amazon_booking_time'];
+					$abt = $shipment['amazon_booking_time'];
+					$etaPlusDate = "";
+				}else
+				{
+					if(!($etaPlusDate<=$dateto)) continue;
+					$thisKey = $etaPlusDate;
+					$abt = '';
+				}
+
+				if(!empty($provide[$thisKey]))
+				{
+					$hbns = $provide[$thisKey]['hbns'].$symbol.$shipment['hbn'].":".ImParcel::$states[$shipment['status']]."/".@Consol::$services[$shipment['service']];
+					$hbnsOnly = $provide[$thisKey]['hbnsOnly'].$symbol.$shipment['hbn'];
+					$refs = $provide[$thisKey]['refs'].$symbol.$shipment['caref'].":".ImParcel::$states[$shipment['status']]."/".@Consol::$services[$shipment['service']];
+					$amazonPos = $provide[$thisKey]['amazonPos'].$symbol.$shipment['amazonPo'];
+					$amazonShipmentIds = $provide[$thisKey]['amazonShipmentIds'].$symbol.$shipment['amazonShipmentIds'];
+					$totalCBM = $provide[$thisKey]['totalCBM']+ ($shipment['pkg']*$shipment['cbm']);
+					if(!empty($shipment['pallet']))
+					{
+						$thisPallet = $shipment['pallet'];
+					}else
+					{
+						if(empty($shipment['amzon_pallet']))
+						{
+							$thisPallet = ($shipment['pkg']*$shipment['cbm'])/$palletRate;
+						}else
+						{
+							$thisPallet = $shipment['amzon_pallet'];
+						}
+					}
+					$thisPallet = $this->calculateWithRate($shipment['pkg'],$shipment['left_packages'],$thisPallet);
+					$pallet = $provide[$thisKey]['pallet']+$thisPallet;
+					$quantities = json_decode($shipment['items'],'true')['q'];
+					if(!empty($quantities))
+					{
+						$pls = array_sum($quantities);
+					}else
+					{
+						$pls = 0;
+					}
+					$shipment['pkg'] = $this->calculateWithRate($shipment['pkg'],$shipment['left_packages'],$shipment['pkg']);
+					$pls = $this->calculateWithRate($shipment['pkg'],$shipment['left_packages'],$pls);
+					$pkg =  $provide[$thisKey]['pkg']+ $shipment['pkg'];
+					$pls =  $provide[$thisKey]['pls']+ $pls;
+				}else
+				{
+					$hbns = $shipment['hbn'].":".ImParcel::$states[$shipment['status']]."/".@Consol::$services[$shipment['service']];
+					$hbnsOnly = $shipment['hbn'];
+					$refs = $shipment['caref'].":".ImParcel::$states[$shipment['status']]."/".@Consol::$services[$shipment['service']];
+					$amazonPos = $shipment['amazonPo'];
+					$amazonShipmentIds = $shipment['amazonShipmentIds'];
+					$totalCBM = $shipment['pkg']*$shipment['cbm'];
+					if(!empty($shipment['pallet']))
+					{
+						$thisPallet = $shipment['pallet'];
+					}else
+					{
+						if(empty($shipment['amzon_pallet']))
+						{
+							$thisPallet = ($shipment['pkg']*$shipment['cbm'])/$palletRate;
+						}else
+						{
+							$thisPallet = $shipment['amzon_pallet'];
+						}
+					}
+					$thisPallet = $this->calculateWithRate($shipment['pkg'],$shipment['left_packages'],$thisPallet);
+					$pallet = $thisPallet;
+					$quantities = json_decode($shipment['items'],'true')['q'];
+					if(!empty($quantities))
+					{
+						$pls = array_sum($quantities);
+					}else
+					{
+						$pls = 0;
+					}
+					$shipment['pkg'] = $this->calculateWithRate($shipment['pkg'],$shipment['left_packages'],$shipment['pkg']);
+					$pls = $this->calculateWithRate($shipment['pkg'],$shipment['left_packages'],$pls);
+					$pkg =  $shipment['pkg'];
+				}
+				$provide[$thisKey] = ["id" => $shipment['consol_id'],"eta"=>$etaPlusDate,"abt"=>$abt,"hbns"=>$hbns,"hbnsOnly"=>$hbnsOnly,"refs"=>$refs,"amazonPos"=>$amazonPos,"amazonShipmentIds"=>$amazonShipmentIds,"totalCBM"=>round($totalCBM,3),"pallet"=>$pallet,"pkg"=>$pkg,"pls"=>$pls];
+			}else if($type == 2)
+			{
+				$amazonBookingTime =$shipment['amazon_booking_time'];
+				if(!empty($provide[$amazonBookingTime]))
+				{
+					$hbns = $provide[$amazonBookingTime]['hbns'].$symbol.$shipment['hbn'].":".ImParcel::$states[$shipment['status']];
+					$hbnsOnly = $provide[$amazonBookingTime]['hbnsOnly'].$symbol.$shipment['hbn'];
+					$refs = $provide[$amazonBookingTime]['refs'].$symbol.$shipment['caref'].":".ImParcel::$states[$shipment['status']];
+					$amazonPos = $provide[$amazonBookingTime]['amazonPos'].$symbol.$shipment['amazonPo'];
+					$amazonShipmentIds = $provide[$amazonBookingTime]['amazonShipmentIds'].$symbol.$shipment['amazonShipmentIds'];
+					$totalCBM = $provide[$amazonBookingTime]['totalCBM']+ ($shipment['pkg']*$shipment['cbm']);
+					if(!empty($shipment['pallet']))
+					{
+						$thisPallet = $shipment['pallet'];
+					}else
+					{
+						if(empty($shipment['amzon_pallet']))
+						{
+							$thisPallet = ($shipment['pkg']*$shipment['cbm'])/$palletRate;
+						}else
+						{
+							$thisPallet = $shipment['amzon_pallet'];
+						}
+					}
+					$thisPallet = $this->calculateWithRate($shipment['pkg'],$shipment['left_packages'],$thisPallet);
+					$pallet = $provide[$amazonBookingTime]['pallet']+$thisPallet;
+					$quantities = json_decode($shipment['items'],'true')['q'];
+					if(!empty($quantities))
+					{
+						$pls = array_sum($quantities);
+					}else
+					{
+						$pls = 0;
+					}
+					$shipment['pkg'] = $this->calculateWithRate($shipment['pkg'],$shipment['left_packages'],$shipment['pkg']);
+					$pls = $this->calculateWithRate($shipment['pkg'],$shipment['left_packages'],$pls);
+					$pkg =  $provide[$amazonBookingTime]['pkg']+ $shipment['pkg'];
+					$pls =  $provide[$amazonBookingTime]['pls']+ $pls;
+				}else
+				{
+					$hbns = $shipment['hbn'].":".ImParcel::$states[$shipment['status']];
+					$hbnsOnly = $shipment['hbn'];
+					$refs = $shipment['caref'].":".ImParcel::$states[$shipment['status']];
+					$amazonPos = $shipment['amazonPo'];
+					$amazonShipmentIds = $shipment['amazonShipmentIds'];
+					$totalCBM = $shipment['pkg']*$shipment['cbm'];
+					if(!empty($shipment['pallet']))
+					{
+						$thisPallet = $shipment['pallet'];
+					}else
+					{
+						if(empty($shipment['amzon_pallet']))
+						{
+							$thisPallet = ($shipment['pkg']*$shipment['cbm'])/$palletRate;
+						}else
+						{
+							$thisPallet = $shipment['amzon_pallet'];
+						}
+					}
+					$thisPallet = $this->calculateWithRate($shipment['pkg'],$shipment['left_packages'],$thisPallet);
+					$pallet = $thisPallet;
+					$quantities = json_decode($shipment['items'],'true')['q'];
+					if(!empty($quantities))
+					{
+						$pls = array_sum($quantities);
+					}else
+					{
+						$pls = 0;
+					}
+
+					$shipment['pkg'] = $this->calculateWithRate($shipment['pkg'],$shipment['left_packages'],$shipment['pkg']);
+					$pls = $this->calculateWithRate($shipment['pkg'],$shipment['left_packages'],$pls);
+					$pkg =  $shipment['pkg'];
+				}
+				$provide[$amazonBookingTime] = ["id" => $shipment['consol_id'],"eta"=>$amazonBookingTime,"hbns"=>$hbns,"hbnsOnly"=>$hbnsOnly,"refs"=>$refs,"amazonPos"=>$amazonPos,"amazonShipmentIds"=>$amazonShipmentIds,"totalCBM"=>round($totalCBM,3),"pallet"=>$pallet,"pkg"=>$pkg,"pls"=>$pls];
+
+			}else if($type == 3)
+			{
+				$thisKey =$shipment['eta'];
+				if(!empty($provide[$thisKey]))
+				{
+					$hbns = $provide[$thisKey]['hbns'].$symbol.$shipment['hbn'].":".ImParcel::$states[$shipment['status']];
+					$hbnsOnly = $provide[$thisKey]['hbnsOnly'].$symbol.$shipment['hbn'];
+					$refs = $provide[$thisKey]['refs'].$symbol.$shipment['caref'].":".ImParcel::$states[$shipment['status']];
+					$amazonPos = $provide[$thisKey]['amazonPos'].$symbol.$shipment['amazonPo'];
+					$amazonShipmentIds = $provide[$thisKey]['amazonShipmentIds'].$symbol.$shipment['amazonShipmentIds'];
+					$totalCBM = $provide[$thisKey]['totalCBM']+ ($shipment['pkg']*$shipment['cbm']);
+					if(!empty($shipment['pallet']))
+					{
+						$thisPallet = $shipment['pallet'];
+					}else
+					{
+						if(empty($shipment['amzon_pallet']))
+						{
+							$thisPallet = ($shipment['pkg']*$shipment['cbm'])/$palletRate;
+						}else
+						{
+							$thisPallet = $shipment['amzon_pallet'];
+						}
+					}
+					$thisPallet = $this->calculateWithRate($shipment['pkg'],$shipment['left_packages'],$thisPallet);
+					$pallet = $provide[$thisKey]['pallet']+$thisPallet;
+					$quantities = json_decode($shipment['items'],'true')['q'];
+					if(!empty($quantities))
+					{
+						$pls = array_sum($quantities);
+					}else
+					{
+						$pls = 0;
+					}
+
+					$shipment['pkg'] = $this->calculateWithRate($shipment['pkg'],$shipment['left_packages'],$shipment['pkg']);
+					$pls = $this->calculateWithRate($shipment['pkg'],$shipment['left_packages'],$pls);
+					$pkg =  $provide[$thisKey]['pkg']+ $shipment['pkg'];
+					$pls =  $provide[$thisKey]['pls']+ $pls;
+				}else
+				{
+					$hbns = $shipment['hbn'].":".ImParcel::$states[$shipment['status']];
+					$hbnsOnly =$shipment['hbn'];
+					$refs = $shipment['caref'].":".ImParcel::$states[$shipment['status']];
+					$amazonPos = $shipment['amazonPo'];
+					$amazonShipmentIds = $shipment['amazonShipmentIds'];
+					$totalCBM = $shipment['pkg']*$shipment['cbm'];
+					if(!empty($shipment['pallet']))
+					{
+						$thisPallet = $shipment['pallet'];
+					}else
+					{
+						if(empty($shipment['amzon_pallet']))
+						{
+							$thisPallet = ($shipment['pkg']*$shipment['cbm'])/$palletRate;
+						}else
+						{
+							$thisPallet = $shipment['amzon_pallet'];
+						}
+					}
+					$thisPallet = $this->calculateWithRate($shipment['pkg'],$shipment['left_packages'],$thisPallet);
+					$pallet = $thisPallet;
+					$quantities = json_decode($shipment['items'],'true')['q'];
+					if(!empty($quantities))
+					{
+						$pls = array_sum($quantities);
+					}else
+					{
+						$pls = 0;
+					}
+
+					$shipment['pkg'] = $this->calculateWithRate($shipment['pkg'],$shipment['left_packages'],$shipment['pkg']);
+					$pls = $this->calculateWithRate($shipment['pkg'],$shipment['left_packages'],$pls);
+					$pkg =  $shipment['pkg'];
+				}
+				$provide[$thisKey] = ["id" => $shipment['consol_id'],"eta"=>$thisKey,"hbns"=>$hbns,"hbnsOnly"=>$hbnsOnly,"refs"=>$refs,"amazonPos"=>$amazonPos,"amazonShipmentIds"=>$amazonShipmentIds,"totalCBM"=>round($totalCBM,3),"pallet"=>$pallet,"pkg"=>$pkg,"pls"=>$pls];
+			}else if($type == 4)
+			{
+				$thisKey =$shipment['cpid'];
+				$ref = $shipment['caref'];
+				$amazonPos = $shipment['amazonPo'];
+				$amazonShipmentIds = $shipment['amazonShipmentIds'];
+				if(!empty($shipment['pallet']))
+				{
+					$thisPallet = $shipment['pallet'];
+				}else
+				{
+					if(empty($shipment['amzon_pallet']))
+					{
+						$thisPallet = 0;
+					}else
+					{
+						$thisPallet = $shipment['amzon_pallet'];
+					}
+				}
+				$thisPallet = $this->calculateWithRate($shipment['pkg'],$shipment['left_packages'],$thisPallet);
+				$pallet = $thisPallet;
+				$shipment['pkg'] = $this->calculateWithRate($shipment['pkg'],$shipment['left_packages'],$shipment['pkg']);
+				$pkg =  $shipment['pkg'];
+				$totalCBM = $shipment['pkg']*$shipment['cbm'];
+			
+				$provide[$thisKey] = ["id" => $shipment['cpid'],"ref"=>$ref,"amazonPos"=>$amazonPos,"amazonShipmentIds"=>$amazonShipmentIds,"totalCBM"=>round($totalCBM,3),"pallet"=>$pallet,"pkg"=>$pkg,"amazon_booking_time"=>$shipment['amazon_booking_time'],"booking_ref"=>$shipment['booking_ref']];
+			}
+
+		}
+		$id =0;
+		$finalProvide = [];
+		if($type ==4)
+		{
+			$provide = $this->processingWeeklyReport($provide);
+		}
+		foreach ($provide as $key => $value) {
+			$amazonPo = $value['amazonPos'];
+			$amazonShipmentIds = $value['amazonShipmentIds'];
+			$thisPos = preg_split('/[.,;\s]+/', trim($amazonPo));
+			$amazonShipmentIds = preg_split('/[.,;\s]+/', trim($amazonShipmentIds));
+			array_filter($thisPos);
+			array_filter($amazonShipmentIds);
+			$provide[$key]['amazonPos'] = join(',',$thisPos);
+			$provide[$key]['amazonShipmentIds'] = join(',',$amazonShipmentIds);
+			if(is_numeric($provide[$key]['pallet']))
+			{
+				$provide[$key]['pallet'] = round($provide[$key]['pallet'],2);
+			}else
+			{
+				$provide[$key]['pallet'] = $provide[$key]['pallet'];
+			}
+			$finalProvide[] =$provide[$key];
+		}
+		$provide = $finalProvide;
+		
+		return $provide;
+	}
+	public function preNormalDataProvider(&$filtersForm, &$provide)
+	{
+		$filteredData=$filtersForm->filter($provide);
+		$dataprovider=new CArrayDataProvider($filteredData);
+		$dataprovider->pagination=['pageSize' => 200];
+			
+		return $dataprovider;
+	}
+
+	public function exportReport($report,$extraTitle=[])
+	{
+		$xls = new oExcel;
+		$attributes = $report[2];
+		$i = 1;
+		foreach ($extraTitle as $key => $value) {
+			$xls->addRow($i++,$value);
+		}
+		$keys = array_keys($attributes);
+		unset($keys[0]);
+		$xls->addRow($i++,$keys );
+		$datas = $report[0]->data;
+
+			foreach ($datas as $data) 
+			{
+				$row = [];
+				foreach ($data as $key => $value) 
+				{
+					$row[] = $value;
+				}
+				unset($row[0]);
+				$xls->addRow($i++, $row);
+			}
+
+		$tempfile = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.'fba_report.xlsx';
+
+		$xls->output($tempfile, null, false);
+		return $tempfile;
+	}
+
+	public function preDataProvider(&$filtersForm, &$provide, &$sortAttributes,&$sortNumberAttributes = false)
+	{
+		$filteredData=$filtersForm->filter($provide);
+		$dataprovider=new CArrayDataProvider($filteredData);
+		$dataprovider->pagination=['pageSize' => 200];
+		$sort=new CSort();
+		$sortAttr=[];
+		foreach ($sortAttributes as $tempAttribute) {
+			if(is_array($tempAttribute))
+			{
+				$sortAttr[$tempAttribute[0]]=['asc'=>$tempAttribute[0]." ASC", 'desc'=>$tempAttribute[0].' DESC'];
+			}else
+			{
+				$sortAttr[$tempAttribute]=['asc'=>$tempAttribute." ASC", 'desc'=>$tempAttribute.' DESC'];
+			}
+			
+		}
+		$sort->attributes=$sortAttr;
+		$sort->defaultOrder = "eta DESC";
+		$dataprovider->sort=$sort;
+			
+		return $dataprovider;
+	}
+
+	private function calculateWithRate($pkg,$left_packages,$total)
+	{
+		if(empty($left_packages))
+		{
+			return $total;
+		}
+		return $total*($left_packages/$pkg);	
+	}
+
+	public function getImparcelsNeedAddressModefiedReport($isExport = false)
+	{
+		$o = new stdClass();
+		$model=new ImParcel('search');
+		$model->unsetAttributes();
+		$model->created = ">2020-04-27";
+		$model->cbwf = 16;
+		if(isset($_GET['FiltersForm']['created']))
+		{
+			$model->created = $_GET['FiltersForm']['created'];
+		}
+		if(isset($_GET['ImParcel'])) {
+			$model->attributes=$_GET['ImParcel'];
+		}
+
+		if(isset($_GET['ImParcel']['is_diff'])) {
+			$model->is_diff=$_GET['ImParcel']['is_diff'];
+		}
+
+		if(isset($_GET['ImParcel']['editStreetCode'])) {
+			$model->editStreetCode=$_GET['ImParcel']['editStreetCode'];
+		}
+
+		$ec=new CDbcriteria;
+		// $ec->addCondition('(t.cbwf & 16) > 0');
+		if(!$isExport)
+		{
+			$ec->addCondition('json_value(t.meta,"$.is_diff") is null');
+		}
+		$ec->addCondition('json_value(t.meta,"$.cm_address_confirm") is null');
+		$result=$model->search(false, '', $ec);
+		$shipments = $result->data;
+		$fastwayJson= Yii::app()->cache->get('fastwayArea');
+		$transaction=Yii::app()->db->beginTransaction();
+		$resultData = [];
+		try {
+			foreach ($shipments as $key => $p) {
+				$nowConsignee = $p->cnee;
+				if(!empty($p->mdata['newAddress']['suggest_suburb']))
+				{
+					$resultObj = [];
+					$resultObj['id'] = $key;
+					$resultObj['p'] = $p;
+					if($p->mdata['newAddress']['suggest_suburb']=="1")
+					{
+						$resultObj['isDiff'] = 'without suburb for suggest';
+					}elseif ($p->mdata['newAddress']['suggest_suburb']=="2") 
+					{
+						$resultObj['isDiff'] = 'without postcode for suggest';
+					}elseif ($p->mdata['newAddress']['suggest_suburb']!=$nowConsignee->suburb)
+					{
+						$resultObj['isDiff'] = 'yes';
+					}else
+					{
+						$resultObj['isDiff'] = 'no';
+					}
+					$p->mdata['is_diff'] = $resultObj['isDiff'];
+					$p->save();
+					$resultData[] = $resultObj;
+					continue;
+				}
+				$consignee = $p->cnee;
+				if(empty($consignee))
+				{
+					$resultObj = [];
+					$resultObj['id'] = $key;
+					$resultObj['p'] = $p;		
+					$resultObj['isDiff'] = 'without consignee';
+					$p->mdata['is_diff'] = $resultObj['isDiff'];
+					$p->save();
+					$resultData[] = $resultObj;
+					continue; 
+				}
+				
+				$situation = 0;
+				if(Postcode::validateAddress($consignee->suburb, $consignee->state, $consignee->postcode, $consignee->country))
+				{
+					$status = $this->checkAddressInCourier($p);
+					$situation = 1;
+					if($status)
+					{
+						$p->mdata['newAddress']['suggest_suburb'] = $consignee->suburb;
+						$resultObj = [];
+						$resultObj['id'] = $key;
+						$resultObj['p'] = $p;	
+						$resultObj['isDiff'] = 'no';
+						$p->mdata['is_diff'] = $resultObj['isDiff'];
+						$p->save();
+						$resultData[] = $resultObj;
+						continue;
+					}else
+					{
+						$this->getNewPostcode($p,$consignee,$fastwayJson);
+					}
+				}else
+				{
+					if(!empty($p->mdata['editStreetCode'])&&($p->mdata['editStreetCode']&512)>0)
+					{
+						ChooseShipment::modifyAddress($consignee,$o,'Australia',"8917");
+					}else
+					{
+						$checkType=$consignee->checkPostcode(false,true);
+					}
+
+					if($nowConsignee->suburb!=$consignee->suburb)
+					{
+						$status = $this->checkAddressInCourier($p);
+						if($status)
+						{
+							$p->mdata['newAddress']['suggest_suburb']=$consignee->suburb;
+						}else
+						{
+							$this->getNewPostcode($p,$consignee,$fastwayJson);
+						}
+					}else
+					{
+						$this->getNewPostcode($p,$consignee,$fastwayJson);
+					}
+				}
+				$resultObj = [];
+				if(!empty($p->mdata['newAddress']['suggest_suburb']))
+				{		
+					$resultObj['id'] = $key;
+					$resultObj['p'] = $p;		
+					if($p->mdata['newAddress']['suggest_suburb']=="1")
+					{
+						$resultObj['isDiff'] = 'without suburb for suggest';
+					}elseif ($p->mdata['newAddress']['suggest_suburb']=="2") 
+					{
+						$resultObj['isDiff'] = 'without postcode for suggest';
+					}elseif ($p->mdata['newAddress']['suggest_suburb']!=$nowConsignee->suburb)
+					{
+						$resultObj['isDiff'] = 'yes';
+					}else
+					{
+						$resultObj['isDiff'] = 'no';
+					}
+					$resultData[] = $resultObj;
+				}else
+				{
+					$resultObj['id'] = $key;
+					$resultObj['p'] = $p;		
+					$resultObj['isDiff'] = 'without suggest';
+					$resultData[] = $resultObj;
+				}
+
+				$p->mdata['is_diff'] = $resultObj['isDiff'];
+				$p->save();
+			}
+			$transaction->commit();
+		} catch (Exception $ex) {
+			$transaction->rollback();
+			throw $ex;
+		}
+		if($isExport)
+		{
+			return $model->search(false)->data;
+		}else
+		{
+			return $model;
+		}
+		
+	}
+	private function getNewPostcode(&$p,$consignee,$fastwayJson)
+	{
+		if(isset($fastwayJson[$consignee->postcode]))
+		{
+			$suburb = $fastwayJson[$consignee->postcode][0];
+			$p->mdata['newAddress']['suggest_suburb']=$suburb;
+			return true;
+		}else
+		{
+			$auZoneMap = ZoneMap::model()->find('org_id = 101 AND zone_id = 0 AND pc_lo <= :p AND pc_hi >= :p', [':p' => $consignee->postcode]);
+			if(!empty($auZoneMap))
+			{
+				$postcodeData = Postcode::model()->find('postcode = :postcode',[":postcode"=>$consignee->postcode]);
+				if(empty($postcodeData))
+				{
+					$p->mdata['newAddress']['suggest_suburb']="1";
+					return false;
+				}else
+				{
+					$p->mdata['newAddress']['suggest_suburb']=$postcodeData->suburb;
+					return true;
+				}
+			}else
+			{
+				$p->mdata['newAddress']['suggest_suburb']="2";//"courier don't delivery";
+				return false;
+			}
+		}
+		$p->save();
+	}
+	private function checkAddressInCourier($p)
+	{
+		$courierid = 0;
+		if(preg_match('/^(AMQ|333UF|33EVH|33EVJ|33A8Y)\d{7}/', $p->ref)||preg_match('/^(33MBQ)\d{7}/', $p->ref)) {
+			$courierid = Org::ORGID_COURIER_AUPOST;
+		} elseif (!empty($p->mdata['etower_shipment_orderid'])) {
+			$courierid = Org::ORGID_COURIER_UBI;
+		}else
+		{
+			$courierid = Org::ORGID_COURIER_FASTWAY;
+		}
+		return ChooseShipment::courierCanDelivery($courierid, $p);
+	}
+
+	private function processingWeeklyReport($provide)
+	{
+		$result = [];
+		foreach ($provide as $key => $provide) {
+			$abt = $provide['amazon_booking_time'];
+			$bf = $provide['booking_ref'];
+			if(!empty($abt))
+			{
+				if(empty($result[$abt][$bf]))
+				{
+					$result[$abt][$bf] = [$provide];
+				}else
+				{
+					$result[$abt][$bf][] = $provide;
+				}
+			}else
+			{
+				$result[''][''][] = $provide;
+			}
+		}
+		$finalResult = [];
+		$i = 1;
+		foreach ($result as $k1 => $r1)
+		{
+			foreach ($r1 as $k2 => $r2)
+			{
+				$header =  ["id" => $i++,"ref"=>'Date:'.$k1,"pkg"=>"","totalCBM"=>"Time slot:".$k2,"amazonPos"=>"","amazonShipmentIds"=>"","pallet"=>""];
+				$finalResult[] = $header;
+				$finalResult[] = ["id"=>$i++,"ref"=>"Ref","pkg"=>"Package",'totalCBM'=>'Total_CBM','pallet'=>'Pallet_Count',"amazonPos"=>"Amazon_PO","amazonShipmentIds"=>"Amazon_Shipment_Id"];
+				$totalPallet = 0;
+				foreach ($r2 as $k3 => $r3)
+				{
+					$finalResult[]  =  ["id" => $i++,"ref"=>$r3['ref'],"pkg"=>$r3['pkg'],"totalCBM"=>$r3['totalCBM'],"pallet"=>$r3['pallet'],"amazonPos"=>$r3['amazonPos'],"amazonShipmentIds"=>$r3['amazonShipmentIds']];
+					if(!empty($r3['pallet']))
+					{
+						$totalPallet += $r3['pallet'];
+					}
+				}
+				$total = ["id" => $i++,"ref"=>'',"pkg"=>"","totalCBM"=>"Total plt","pallet"=>$totalPallet,"amazonPos"=>"","amazonShipmentIds"=>""];
+				$finalResult[] = $total;
+
+			}
+		}
+
+		return $finalResult;
+	}
+
+	public function getClientConsolReport($wid,$type,$dateFrom,$dateTo,$clientId,$consol_no)
+	{
+		$wid = 0;
+		$filtersForm = new FiltersForm;
+		$criteria = new CDbCriteria;
+
+		$criteria->addCondition("t.eta >= '" . $dateFrom . "'");
+		$criteria->addCondition("t.eta <= '" . $dateTo . "'");
+		if (!empty($wid)) {
+			$criteria->addCondition("t.dpt_id = '" . $wid . "'");
+		}
+		$criteria->with = ['shipments'];
+		$criteria->addCondition("t.status < 100");
+		$criteria->addCondition("t.owner_id != 114");
+		$criteria->addCondition("shipments.agent_id = ".$clientId);
+		if(!empty($consol_no))
+		{
+			$criteria->addCondition("t.no = '{$consol_no}' or t.awb = '{$consol_no}' or json_value(t.meta,'container_no') = '{$consol_no}'");
+		}
+		$criteria->addInCondition('t.type', [15, 70, 80]);
+		$consols = Consol::model()->findAll($criteria);
+		return $this->_funGetClientConsolReport($consols,$clientId);
+	}
+
+	public function _funImClientConsolReport()
+	{
+		$wid = 0;
+		if (!empty($_GET['wid'])) {
+			$wid = $_GET['wid'];
+		}
+		$type = isset($_GET['type']) ? $_GET['type'] : 1;
+		$dateFrom = isset($_GET['datefrom']) ? $_GET['datefrom'] : '';
+		$dateTo = isset($_GET['dateto']) ? $_GET['dateto'] : '';
+		$clientId = isset($_GET['org_id']) ? $_GET['org_id'] : 0;
+		$consol_no = isset($_GET['consol']) ? $_GET['consol'] : 0;
+		return $this->getClientConsolReport($wid,$type,$dateFrom,$dateTo,$clientId,$consol_no);
+	}
+
+	public function _funGetClientConsolReport($consols,$clientId)
+	{
+		$provide = [];
+		foreach ($consols as $key => $consol)
+		{
+			$ata = '';
+			if($consol->mdata['ubmsent']==9)
+			{
+				$ata = $consol->eta;
+			}
+			$cc = $consol->customsClearTime();
+			$customsCleared = empty($cc)?"":$cc;
+			$rd = $consol->recoveryTime();
+			$recoveryDate = empty($rd)?"":$rd;
+			if(!empty($recoveryDate))
+			{
+				$hour = date("H",strtotime($recoveryDate));
+				if($hour>=22||$hour<6)
+				{
+					$recoveryDate = date("Y-m-d",strtotime('+ 12 hours',strtotime($recoveryDate)));
+				}else
+				{
+					$recoveryDate = date("Y-m-d",strtotime($recoveryDate));
+				}
+			}
+
+			$provide[$key] = ['id'=>$consol->id,'dest'=>$consol->getDest(),'mawb'=>!empty($consol->mdata['container_no'])?$consol->mdata['container_no']:$consol->awb,'pkg'=>$consol->totPacks(),'eta'=>$consol->eta,'ata'=>$ata,'customs_cleared'=>$customsCleared,"recovery_date"=>$recoveryDate];
+			if($clientId==3025||$clientId==ORG::ORGID_CLIENT_ZTO)
+			{
+				$hoa = $this->_funcConsolAUP($consol);
+				$handOverAup = empty($hoa)?"":$hoa;
+				//$hop = $this->_funcConsolPp($consol);
+				//$handOverPp = empty($hop)?"":$hop;
+				$provide[$key]["hand_over_aup"]=$handOverAup;
+				//$provide[$key]["hand_over_pp"]=$handOverPp;
+			}
+		}
+		$sortAttributes = ["MAWB/Container No."=>"mawb","Dest"=>"dest","Parcel Count"=>"pkg","ETA"=>"eta","ATA"=>"ata","Customs Cleared"=>"customs_cleared","Recovery Date"=>"recovery_date"];
+
+		if($clientId==3025||$clientId==ORG::ORGID_CLIENT_ZTO)
+		{
+			$hoa = $this->_funcConsolAUP($consol);
+			$handOverAup = empty($hoa)?"":$hoa;
+			//$hop = $this->_funcConsolPp($consol);
+			//$handOverPp = empty($hop)?"":$hop;
+			$sortAttributes["Hand Over AUP"]="hand_over_aup";
+			//$sortAttributes["Hand Over PP"]="hand_over_pp";
+		}
+
+		return [$provide,$sortAttributes,[]];
+	}
+
+	private function _funcConsolAUP($consol)
+	{
+		$sql = "SELECT t.gate_pass_time FROM `gatepass_shipment` t join (select id,agent_id,ref,hbn,meta from shipment where consol_id = {$consol->id}) imparcel on t.fid = imparcel.id where json_value(imparcel.meta,'$.UBI_edit_to_clear') = 1 or t.connote_no like 'F3X%' or t.connote_no like '33XHE%' or t.connote_no like '33XJM%' or t.connote_no like '33G7K%' or json_value(imparcel.meta,'$.org_id') = 101  and parent_id != 0 order by gate_pass_time limit 1";
+		$c = Yii::app()->db->createCommand($sql);
+		return $c->queryScalar();
+	}
+
+	private function _funcConsolPp($consol)
+	{
+		$sql = "SELECT t.gate_pass_time FROM `gatepass_shipment` t join (select id,agent_id,ref,hbn from shipment where consol_id = {$consol->id}) imparcel on t.fid = imparcel.id where t.courier_id = 114 and imparcel.agent_id = 3025 and hbn like '001934%'  and parent_id != 0 order by gate_pass_time limit 1";
+		$c = Yii::app()->db->createCommand($sql);
+		return $c->queryScalar();
+	}
+
+
+
+	public function getOrgTLDWithoutPackages($agentId)
+	{
+		$ps = ImParcel::model()->findAll('(ref like "SKP%" or ref like "MKP%" or ref like "BKP%" or ref like "PKP%") and agent_id = :agentId and consol_id = 0 and status <42 and (packages = "" or packages="[]" or packages="{}")',[":agentId"=>$agentId]);
+		$finalData = [];
+		foreach ($ps as $key => $p) {
+			$finalData[] = [(empty($p->ddpt_id)?"":Org::$warehouse_list[$p->ddpt_id]),$p->hbn,$p->ref,$p->cref,$p->weight,$p->cbm*$p->pkg,$p->pkg];
+		}
+
+		return $finalData;
+	}
+
+	public function getCargoProcessDetailByCJobID($id)
+	{
+		$cargoprocessRelations = CargoProcessJob::model()->findByPk($id)->job_relations;
+		$finalData = [];
+		foreach ($cargoprocessRelations as $cargoprocessRelation){
+			$cargoprocessModel = $cargoprocessRelation->cargo_process;
+			$strConnote = $cargoprocessModel->shipment->hbn;
+			$strDeliveryAddress = $cargoprocessModel->shipment->getCneeAddress(true);
+			$strCbm = $cargoprocessModel->shipment->cbm;
+			$strWeight = $cargoprocessModel->getWeight(true)."kg";
+			$strDistance = $cargoprocessModel->shipment->getDeliveryDistance()."km";
+			$strPkg = $cargoprocessModel->shipment->pkg;
+			$strNote = $cargoprocessModel->getNote(true);
+			$strDriver = $cargoprocessModel->mdata["tony_assign_driver"];
+			$strName = $cargoprocessModel->shipment->cnee->name;
+			$strTel = $cargoprocessModel->shipment->cnee->tel;
+
+			$finalData[] = [$strConnote,$strDeliveryAddress,$strName,$strTel,$strCbm,$strWeight,$strDistance,$strPkg,$strNote,$strDriver];
+		}
+		return $finalData;
+	}
+
+	public function getCargoProcessJobRelationInvoiceDetail($week){
+		$modelCargoProcessJobRelations = new CargoProcessJobRelations('search');
+		$modelCargoProcessJobRelations->driverId = User::getCurrentUser()->org_id;
+		$modelCargoProcessJobRelations->week = $week;
+		$dataProviders = $modelCargoProcessJobRelations->search(true, 100);
+		$rs = CargoProcessJobRelations::model()->findAll($dataProviders->getCriteria());
+		$xls = new oExcel;
+		$i = 1;
+		$xls->setColWidth(array(60,50, 50, 50, 50, 50));
+		$xls->addRow($i++, array('Supplier Id:',User::getCurrentUser()->org_id,'','','',''));
+		$xls->addRow($i++, array(' ',' ',' ',' ',' ',' '));
+		$xls->addRow($i++, array('Consignment No','Description','Freight fee','Surcharge','Surcharge fee','Gst'));
+		$total=0;
+		if(!empty($rs)){
+			foreach($rs as $r){
+				$hbn = $r->cargo_process->shipment->hbn;
+				$fee = $r->getCargoCost();
+				$total += $fee;
+				$xls->addRow($i++, [$hbn,'',$fee,'','','']);
+			}	
+		}
+		$xls->addRow($i++, array('SUBTOTAL','',$total,'','',''));
+		$xls->addRow($i++, array('TOTAL','','','','',''));
+		return $xls;
+	}
+
+	public static function getPutAwayReminder($depot_id){
+		$recordPutAway['today'] = self::getSortHeldTodayReminder();
+		$recordPutAway['left'] = self::getSortHeldReminder();
+		//$recordPutAway = ReportCache::model()->findAll('type = 7 and status = 1',['order'=>'create_time desc'])->one();
+		if(!empty($recordPutAway)){
+			if($depot_id==Org::TLA_DEPARTMENT_SYDNEY){
+				return [$recordPutAway['today']['SYDcount'],$recordPutAway['left']['SYDcount']];
+			}elseif($depot_id==Org::TLA_DEPARTMENT_MELBOURNE){
+				return [$recordPutAway['today']['MELcount'],$recordPutAway['left']['MELcount']];
+			}elseif($depot_id==Org::TLA_DEPARTMENT_BRISBANE){
+				return [$recordPutAway['today']['BNEcount'],$recordPutAway['left']['BNEcount']];
+			}
+		}
+		return "";
+	}
+
+	public static function recordSortHeldReminder(){
+		$recordSummary = self::getSortHeldReminder();
+		$temp = json_encode($recordSummary);
+		$modelReportCachePutAway = new ReportCache();
+		$modelReportCachePutAway->type = ReportCache::PutAwayReminder;
+		$modelReportCachePutAway->status = ReportCache::Active;
+		$modelReportCachePutAway->meta = $temp;
+		$modelReportCachePutAway->create_time = date('Y-m-d H:i:s');
+		$modelReportCachePutAway->creater = 1;
+		$modelReportCachePutAway->modify_time = date('Y-m-d H:i:s');
+		$modelReportCachePutAway->modifyer = 1;
+		$modelReportCachePutAway->save();
+	}
+
+	public static function getSortHeldReminder($type=0,$refreshCache = false){
+		$cacheKey = "getSortHeldReminder".$type;
+		$arrSummary = Yii::app()->cache->get($cacheKey);
+		if(!empty($arrSummary)&&$refreshCache===false)
+		{
+			return json_decode($arrSummary,true);
+		}
+
+		$arrSummary = $arrSyd = $arrMel = $arrBne = [];
+		$modelImparcels = ImParcel::model()->findAllBySql('select * from shipment where status <90 and status !=62 and agent_id != 3013 and scan!="" and scan!="{\"50\":[]}" and JSON_UNQUOTE(JSON_EXTRACT(meta, "$.scan_time")) >= "'.date("Y-m-d",strtotime("-30 day")).'" and (ref like "SKP%" or ref like "MKP%" or ref like "BKP%" or ref like "PICKUP%" or status=55 or ( (JSON_UNQUOTE(JSON_EXTRACT(meta,"$.cargo_delivery"))=1 or JSON_UNQUOTE(JSON_EXTRACT(meta,"$.cargo_pickup"))=1) and JSON_UNQUOTE(JSON_EXTRACT(meta, "$.scan_time"))>="2022-08-24"))');
+		if(!empty($modelImparcels)){
+			foreach ($modelImparcels as $modelImparcel){
+				if($modelImparcel->consol->dpt_id == Org::TLA_DEPARTMENT_SYDNEY){
+					if(date("Y-m-d", strtotime($modelImparcel->getScanTime())) >= date("Y-m-d",strtotime("-30 day"))){
+						$tempSyd = $modelImparcel->getRackParentNumber($type);
+						if(!empty($tempSyd)){
+							//$arrSyd[$modelImparcel->ref] = $tempSyd;
+						}else{
+							$arrSyd[$modelImparcel->ref] = [];
+						}
+					}
+				}elseif($modelImparcel->consol->dpt_id == Org::PCAE_DEPARTMENT_MELBOURNE){
+					if(date("Y-m-d", strtotime($modelImparcel->getScanTime())) >= date("Y-m-d",strtotime("-30 day"))){
+						$tempMel = $modelImparcel->getRackParentNumber($type);
+						if(!empty($tempMel)){
+							//$arrMel[$modelImparcel->ref] = $tempMel;
+						}else{
+							$arrMel[$modelImparcel->ref] = [];
+						}
+					}
+				}elseif($modelImparcel->consol->dpt_id == Org::PCAE_DEPARTMENT_BRISBANE){
+					if(date("Y-m-d", strtotime($modelImparcel->getScanTime())) >= date("Y-m-d",strtotime("-30 day"))){
+						$tempBne = $modelImparcel->getRackParentNumber($type);
+						if(!empty($tempBne)){
+							//$arrBne[$modelImparcel->ref] = $tempBne;
+						}else{
+							$arrBne[$modelImparcel->ref] = [];
+						}
+					}
+				}
+			}
+		}
+		$arrSummary['SYD']=$arrSyd;
+		$arrSummary['SYDcount']=count($arrSyd);
+		$arrSummary['MEL']=$arrMel;
+		$arrSummary['MELcount']=count($arrMel);
+		$arrSummary['BNE']=$arrBne;
+		$arrSummary['BNEcount']=count($arrBne);
+
+		Yii::app()->cache->set($cacheKey,json_encode($arrSummary),3600);
+		return $arrSummary;
+	}
+
+	public static function getSortHeldTodayReminder($type=0,$refreshCache = false){
+		$cacheKey = "getSortHeldTodayReminder".$type;
+		$arrSummary = Yii::app()->cache->get($cacheKey);
+		if(!empty($arrSummary)&&$refreshCache===false)
+		{
+			return json_decode($arrSummary,true);
+		}
+
+		$arrSummary = $arrSyd = $arrMel = $arrBne = [];
+		// $modelRack = WmsRackShipment::model()->findAllBySql('select ');
+		// $modelImparcels = ImParcel::model()->findAllBySql('select * from shipment where status <90 and scan!="" and JSON_UNQUOTE(JSON_EXTRACT(meta, "$.scan_time")) like "'.date("Y-m-d").'%" and (ref like "SKP%" or ref like "MKP%" or ref like "BKP%" or ref like "PICKUP%")');
+		$modelImparcels = ImParcel::model()->findAllBySql('select * from shipment where status <90 and status !=62 and agent_id != 3013  and scan!="" and scan!="{\"50\":[]}" and JSON_UNQUOTE(JSON_EXTRACT(meta, "$.scan_time")) like "'.date("Y-m-d").'%" and (ref like "SKP%" or ref like "MKP%" or ref like "BKP%" or ref like "PICKUP%" or status=55)');
+		if(!empty($modelImparcels)){
+			foreach ($modelImparcels as $modelImparcel){
+				if($modelImparcel->consol->dpt_id == Org::TLA_DEPARTMENT_SYDNEY){
+					if(date("Y-m-d", strtotime($modelImparcel->getScanTime())) == date("Y-m-d")){
+						$tempSyd = $modelImparcel->getRackParentNumber($type);
+						if(!empty($tempSyd)){
+							//$arrSyd[$modelImparcel->ref] = $tempSyd;
+						}else{
+							$arrSyd[$modelImparcel->ref] = [];
+						}
+					}
+				}elseif($modelImparcel->consol->dpt_id == Org::PCAE_DEPARTMENT_MELBOURNE){
+					if(date("Y-m-d", strtotime($modelImparcel->getScanTime())) == date("Y-m-d")){
+						$tempMel = $modelImparcel->getRackParentNumber($type);
+						if(!empty($tempMel)){
+							//$arrMel[$modelImparcel->ref] = $tempMel;
+						}else{
+							$arrMel[$modelImparcel->ref] = [];
+						}
+					}
+				}elseif($modelImparcel->consol->dpt_id == Org::PCAE_DEPARTMENT_BRISBANE){
+					if(date("Y-m-d", strtotime($modelImparcel->getScanTime())) == date("Y-m-d")){
+						$tempBne = $modelImparcel->getRackParentNumber($type);
+						if(!empty($tempBne)){
+							//$arrBne[$modelImparcel->ref] = $tempBne;
+						}else{
+							$arrBne[$modelImparcel->ref] = [];
+						}
+					}
+				}
+			}
+		}
+		$arrSummary['SYD']=$arrSyd;
+		$arrSummary['SYDcount']=count($arrSyd);
+		$arrSummary['MEL']=$arrMel;
+		$arrSummary['MELcount']=count($arrMel);
+		$arrSummary['BNE']=$arrBne;
+		$arrSummary['BNEcount']=count($arrBne);
+
+		Yii::app()->cache->set($cacheKey,json_encode($arrSummary),1800);
+
+		return $arrSummary;
+	}
+
+	public static function getSortHeldAll($type=0,$refreshCache = false){
+		$cacheKey = "getSortHeldAll".$type;
+		$arrSummary = Yii::app()->cache->get($cacheKey);
+		if(!empty($arrSummary)&&$refreshCache===false)
+		{
+			return json_decode($arrSummary,true);
+		}
+
+		$arrSummary = $arrSyd = $arrMel = $arrBne = [];
+		$modelImparcels = ImParcel::model()->with('rack_record')->findAll('t.status <90 and t.status !=62 and t.agent_id != 3013 and t.scan!="" and t.scan!="{\"50\":[]}" and JSON_UNQUOTE(JSON_EXTRACT(t.meta, "$.scan_time")) >= "'.date("Y-m-d",strtotime("-30 day")).'" and (t.ref like "SKP%" or t.ref like "MKP%" or t.ref like "BKP%" or t.ref like "PICKUP%" or t.status=55) and rack_record.created>"'.date('Y-m-d 00:00:00').'"');
+		if(!empty($modelImparcels)){
+			foreach ($modelImparcels as $modelImparcel){
+				if($modelImparcel->consol->dpt_id == Org::TLA_DEPARTMENT_SYDNEY){
+					if(date("Y-m-d", strtotime($modelImparcel->getScanTime())) >= date("Y-m-d",strtotime("-30 day"))){
+						$tempSyd = $modelImparcel->getRackParentNumber($type);
+						if(!empty($tempSyd)){
+							$arrSyd[$modelImparcel->ref] = [];
+						}
+					}
+				}elseif($modelImparcel->consol->dpt_id == Org::PCAE_DEPARTMENT_MELBOURNE){
+					if(date("Y-m-d", strtotime($modelImparcel->getScanTime())) >= date("Y-m-d",strtotime("-30 day"))){
+						if(!empty($tempMel)){
+							$arrMel[$modelImparcel->ref] = [];
+						}
+					}
+				}elseif($modelImparcel->consol->dpt_id == Org::PCAE_DEPARTMENT_BRISBANE){
+					if(date("Y-m-d", strtotime($modelImparcel->getScanTime())) >= date("Y-m-d",strtotime("-30 day"))){
+						$tempBne = $modelImparcel->getRackParentNumber($type);
+						if(!empty($tempBne)){
+							$arrBne[$modelImparcel->ref] = [];
+						}
+					}
+				}
+			}
+		}
+		$arrSummary['SYD']=$arrSyd;
+		$arrSummary['SYDcount']=count($arrSyd);
+		$arrSummary['MEL']=$arrMel;
+		$arrSummary['MELcount']=count($arrMel);
+		$arrSummary['BNE']=$arrBne;
+		$arrSummary['BNEcount']=count($arrBne);
+
+		Yii::app()->cache->set($cacheKey,json_encode($arrSummary),1800);
+		return $arrSummary;
+	}
+
+	public static function getSeasonProfit($refresh = false)
+	{
+		Yii::app()->name="TLA";
+		$cache = Service::getCacheData('SeasonProfit');
+		if(!isset($cache)||$refresh){
+			$sql = 'SELECT * FROM invoice WHERE `date` >= "2022-10-01" AND `date` <= "2023-01-31" AND `status` != 10';
+			$invoices = Invoice::model()->findAllBySql($sql);
+			$income = 0.00;
+			foreach($invoices as $invoice){
+				$income += $invoice->total - $invoice->gst;
+			}
+			$sql = 'SELECT * FROM payment WHERE `date` >= "2022-10-01" AND `date` <= "2023-01-31" AND `type` = 5 AND "status" != 9';
+			$payments = Payment::model()->findAllBySql($sql);
+			$creditNote = 0.00;
+			foreach($payments as $payment){
+				$creditNote += $payment->amount;
+			}
+			$profit = $income - $creditNote;
+			Service::setCacheData('SeasonProfit', '{"profit":"' . $profit . '"}', 86400);
+			$cache = Service::getCacheData('SeasonProfit');
+			return $cache;
+		} else {
+			return $cache;
+		}
+	}
+}
+?>

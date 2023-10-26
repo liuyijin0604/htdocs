@@ -1,0 +1,60 @@
+<div class="form">
+    <?php
+    $form=$this->beginWidget('CActiveForm', array(
+        'id'=>'import-add-more-shipments-form',
+        'enableAjaxValidation'=>false,
+//        'action' => $this->createUrl('import/AjaxAddConsoleShipments'),
+    ));
+    ?>
+    <div class="row">
+        <?php echo CHtml::label('Shipments(multiple separate with ;Space Enter ):','for-import-addc-shipment'); ?>
+        <?php echo CHtml::textArea('shipments','',array('id'=>'shipments','cols'=>80, 'rows' => 30)); ?>
+    </div>
+
+    <div class="row">
+        <?php echo CHtml::label('Console No.:','for-import-addc-shipment'); ?>
+        <?php echo CHtml::textField('consolno','',array('id'=>'consol_no')); ?>
+    </div>
+
+    <div class="row">
+        <?php echo CHtml::label('Skip Duplicate Shipments','skip_duplicate_shipments'); ?>
+        <?php echo CHtml::checkbox('skip_duplicate','',array('id'=>'skip_duplicate')); ?>
+    </div>
+
+    <div class="row">
+    <input id="imort_addc_shippment_btn" type="submit" value="Add" />
+    </div>
+    <?php $this->endWidget(); ?>
+</div>
+
+<div id="import_addc_shipments_result" style="margin: 10px 0; border: 1px solid;padding:20px; font-weight: bold; font-size: 20px;">
+</div>
+
+
+<script type="text/javascript">
+    $(function(){
+        var tab = $('#<?=$_GET["tabid"];?>');
+        var panel = tab.data('panel');
+         $('form#import-add-more-shipments-form', panel).on('submit',function(r){
+          var  shipmentNo=$('#shipments',panel).val();
+          var  consolNo=$('#consol_no',panel).val();
+          $.post('import/checkShipments',{shipment:shipmentNo},function(r){
+              if(r.success==1){
+              $.post('import/AjaxAddConsoleShipments',{shipments:shipmentNo,consolno:consolNo,skip_duplicate:$("#skip_duplicate").prop("checked")},function(r){
+                   $('#import_addc_shipments_result', panel).empty().prepend($('<p>'+r.msg+'</p>').fadeIn());
+                     $('#imort_addc_shippment_btn', panel).attr('disabled', false);
+               },"json");
+              }else{
+                 if(confirm('shipments: '+r.msg +'already have consol, Are you sure to add it to the new consol?')){
+                   $.post('import/AjaxAddConsoleShipments',{shipments:shipmentNo,consolno:consolNo},function(r){
+                         $('#import_addc_shipments_result', panel).empty().prepend($('<p>'+r.msg+'</p>').fadeIn());
+                        $('#imort_addc_shippment_btn', panel).attr('disabled', false);
+                     },"json");
+                }else{
+                        $('#imort_addc_shippment_btn', panel).attr('disabled', false);
+                   };
+             }
+          },"json");
+    });
+  });
+</script>

@@ -1,0 +1,173 @@
+<h1><?=$this->t('Upload Manifest');?></h1>
+<?php if(Yii::app()->name != 'PEP'): ?>
+<div style="position:absolute; right:20px;">
+<p align="right"><a href="manifest/eps.app" class="tab_link" title="EPS Manif.">EPS Manifest</a></p>
+<p align="right"><a href="manifest/fastway.app" class="tab_link" title="Fastway Manif.">Fastway Manifest</a></p>
+<!-- <p align="right"><a href="manifest/toll.app" class="tab_link" title="Toll Manif.">Toll Manifest</a></p> -->
+<p align="right"><a href="manifest/currencyLog.app" class="jqm_link" title="Exchange Rates">Exchange Rates</a></p>
+</div>
+<?php endif; ?>
+<?php if(in_array(Yii::app()->user->id, [3166, 3181, 3157])): ?>
+	<br />
+	<br />
+	<br />
+	<div style="position:absolute; right:20px;">
+		<p align="right"><a href="manifest/updateShipment.app" class="jqm_link" title="Update Shipment">Update Shipment</a></p>
+	</div>
+<?php endif; ?>	
+<div class="form">
+
+<?php $form=$this->beginWidget('CActiveForm', array(
+	'id'=>'manifest-form',
+	'enableAjaxValidation'=>false,
+)); ?>
+
+	<p class="note"><?=$this->t('Fields with');?> <span class="required">*</span> <?=$this->t('are required.');?></p>
+	<div class="row">
+		<?php echo $form->labelEx($model,'fwd_id'); ?>
+		<?php echo $form->hiddenField($model,'fwd_id');
+			$acname = empty($_GET["tabid"])? 'agent_ac' : $_GET["tabid"].'_agent_ac';
+			$this->widget('zii.widgets.jui.CJuiAutoComplete', array(
+				'name' => $acname,
+				'sourceUrl' => array('org/clientSuggest'),
+				'value' => '',
+				'options' => array(
+						'showAnim' => 'fold',
+						'minLength' => 2,
+						'delay' => 200,
+						'select' => 'js:function(event, ui){ $(this).val(ui.item["label"]); $(this).prevAll("input[type=hidden]").val(ui.item["value"]).data("ov",ui.item["value"]); return false; }',
+						'change' => 'js:function(event, ui){ if(ui.item == null) $(this).prevAll("input[type=hidden]").val($(this).prevAll("input[type=hidden]").data("ov")); return false; }',
+				),
+				'htmlOptions' => array(
+					'class' => 'required',
+					'size' => '30',
+				),
+		));
+		?>
+	</div>
+
+	<div class="row rowcol rowleft">
+		<?php echo $form->labelEx($model,'type'); ?>
+		<?php echo $form->dropDownList($model,'type', Manifest::$types, array('empty' => 'Select One')); ?>
+	</div>
+
+	<div class="row dpt_row">
+		<?php echo $form->labelEx($model,'dpt_id'); ?>
+		<?php echo $form->dropDownList($model,'dpt_id', Org::dptList(), array('empty' => 'Select One')); ?>
+	</div>
+
+    <div class="row">
+        <div class="col">
+    <div class="rowcol rowleft">
+        <?php echo CHtml::label('currency','manifest'); ?>
+        <?php echo CHtml::dropDownList('currency','1', Currency::$currency_type, array('empty' => 'Select One')); ?>
+    </div>
+        <div class="rowcol">
+            <?php echo CHtml::label('exchange('.Currency::getExrate()[1].')','manifest'); ?>
+            <?php
+                $exchange_rate = empty(Currency::getExrate()[0])?0.750:Currency::getExrate()[0];
+                if ( isset($model->mdata['exchange_rate']) ) {
+                    $exchange_rate = $model->mdata['exchange_rate'];
+                }
+            ?>
+            <?php echo CHtml::textField('exchange_rate',$exchange_rate,['id' => 'exchange-rate']); ?>
+        </div>
+
+    </div>
+    </div>
+
+
+
+	<div class="row">
+		<label for="manifest">Manifest - <small>.csv/.xls/.xlsx File</small></label>
+		<input type="file" name="manifest" id="manifest" />
+	</div>
+	<div class="row">
+		<a href="ims/Automation Template-no-chargecode.xlsx" target="_blank">get Template</a>
+	</div>
+	<div class="row">
+		<a href="ims/TLA_Import_Template_for_3PL_for_backend.xlsx" target="_blank">get Template for 3PL sub shipments</a>
+	</div>
+	<div class="row">
+		<a href="ims/Update Packages.xlsx" target="_blank">get Packages Template</a>
+	</div>
+	
+	<div class="row">
+		<a href="ims/3rd party manifest template.xlsx" target="_blank">get 3rd party manifest template</a>
+	</div>
+
+	<div class="row">
+		<a href="ims/3rd barcode template.xlsx" target="_blank">get 3rd barcode template</a>
+	</div>
+
+	<div class="row">
+		<a href="ims/AUK_Manifest_template.xlsx" target="_blank">get AUK Manifest Template</a>
+	</div>
+
+	<div class="row">
+		<a href="ims/cargo_wise_manifest.xlsx" target="_blank">get cargo wise manifest</a>
+	</div>
+	<div class="row">
+		<a href="ims/FAK_simple_manifest_template.xlsx" target="_blank">get FAK simple manifest template</a>
+	</div>
+
+	<div class="row">
+		<div class="rowcol">
+			<?php echo CHtml::label('Create','Create'); ?>
+			<?php echo CHtml::checkbox('imCover',0); ?>
+		</div>
+			<div class="rowcol">
+			<?php echo CHtml::label('For Bag Tag(identify the destination of bag and concat (SYD/MEL/BNE/ADL) to ref)','Create'); ?>
+			<?php echo CHtml::checkbox('bagTagIdentify',0); ?>
+		</div>
+		<div class="row">
+			<?php echo CHtml::label('No Address Verification','No Address Verification'); ?>
+			<?php echo CHtml::checkbox('noAddrVeri',0); ?>
+		</div>
+	</div>
+
+	<div class="row buttons">
+		<?php echo CHtml::submitButton($this->t('Upload')); ?>
+	</div>
+
+<?php $this->endWidget(); ?>
+
+</div><!-- form -->
+<div id="result"></div>
+<script type="text/javascript">
+$(function(){
+	/*var win = $('#jqmw_<?=$_GET["tabid"];?>');
+	$('form#manifest-form', win).on('success', function(e, r){
+		win.data('opener').trigger('onOpen');
+		win.jqmHide();
+	});*/
+	var tab = $('#<?=$_GET["tabid"];?>');
+	var panel = tab.data('panel');
+	$('form#manifest-form', panel).data('custom_success', function(r){
+		var rdiv = $('#result', panel);
+		rdiv.empty();
+		if(r.done == true){
+			$('form#manifest-form', panel).resetForm();
+			myApp.notice(r.msg, 5000);
+		}else{
+			rdiv.append('<h3>Errors:</h3><p class="red" style="font-weight:bold;">'+r.msg+'</p>');
+		}
+		if(r.warns && r.warns.length > 0){
+			rdiv.append('<h3>Warns:</h3><p class="warn">'+r.warns.join('<br />')+'</p>');
+		}
+		$('input[type=submit]', panel).attr('disabled', false);
+	});
+
+
+
+    $('#Manifest_type',panel).change(function(e){
+        var selectedType = $(this).val();
+        if ( selectedType == 10 || selectedType == 20 ) {
+            $('#currency').val(2);
+        } else {
+            $('#currency').val(1);
+        }
+
+    });
+});
+</script>

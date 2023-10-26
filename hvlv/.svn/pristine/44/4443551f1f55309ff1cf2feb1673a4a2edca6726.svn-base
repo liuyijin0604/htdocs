@@ -1,0 +1,40 @@
+<?php
+echo '<h1>Shipment RTS Received List</h1>';
+?>
+
+
+<?php $this->widget('zii.widgets.grid.CGridView',array(
+    'cssFile' => false,
+    'id'=>'rts_received_grid_view',
+    'filter'=>$model,
+    'dataProvider'=>$model->search(true,50,false,true,true),
+    'template' => "{summary}\n{items}\n{pager}",
+    'columns'=>array(
+            array('name' => 'hbn'),
+            array('name' => 'ref'),
+            array('name'=>'barcode','header' => 'RTS Barcodes','type'=>'raw','value'=>'$data->getRTSBarcodes(true)'),
+            ['header' => 'status', 'value' => '$data->getStatus()'],
+            ['class'=>'oButtonColumn',
+                'template'=>'{Start RTS}',
+                'buttons'=>[
+                    'Start RTS' => [
+                        'url'=>'Yii::app()->createURL("rtsProcess/rtsOperate")."?id=".$data->id',
+                        'imageUrl'=>false,
+                        'visible'=>'true',
+                        'options' => ['class' => 'jqm_link grid_edit_btn', 'title' => '$data->id'],
+                        'label'=>$this->t('Start RTS')
+                    ]
+                ],
+            ]
+        ),
+    )
+    
+);
+?>
+
+<script type="text/javascript">
+$(function() {
+    
+
+});
+</script>

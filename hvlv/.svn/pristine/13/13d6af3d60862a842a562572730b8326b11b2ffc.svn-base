@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+	<meta name="description" content="">
+	<meta name="author" content="">
+	<link rel="stylesheet" href="<?php echo Yii::app()->request->baseUrl; ?>/css/bootstrap.min.css" type="text/css"/>
+	<script type="text/javascript" src="<?php echo Yii::app()->request->baseUrl; ?>/js/jquery.min.js"></script>
+	<script type="text/javascript" src="<?php echo Yii::app()->request->baseUrl; ?>/js/jquery-ui.min.js"></script>
+	<script type="text/javascript" src="<?php echo Yii::app()->request->baseUrl; ?>/js/bootstrap.min.js"></script>
+	<script type="text/javascript" src="<?php echo Yii::app()->request->baseUrl; ?>/js/signature_pad.min.js"></script>
+	<script type='text/javascript' src='<?php echo Yii::app()->request->baseUrl; ?>/js/jquery.combo.js'></script>
+	<script type='text/javascript' src='<?php echo Yii::app()->request->baseUrl; ?>/js/jquery.yiigridview.js'></script>
+	<link rel="icon" href="<?php echo Yii::app()->request->baseUrl; ?>/favicon.ico">
+	<title>Top Express</title>
+<style type="text/css">
+.header,.marketing,.footer {padding-right: 1rem;padding-left: 1rem;}.header {padding-bottom: 1rem;border-bottom: .05rem solid #e5e5e5;}
+/* Make the masthead heading the same height as the navigation */
+.header h3 {margin-top: 0; margin-bottom: 0; line-height: 3rem;}
+.footer {padding-top: 1.5rem;color: #777;border-top: .05rem solid #e5e5e5; }
+
+/* Customize container */
+@media (min-width: 48em) {
+	.container {
+		max-width: 80rem;
+	}
+}
+.jumbotron{
+		margin-top: 2em;
+		padding-top: 2em;
+}
+
+/* Responsive: Portrait tablets and up */
+@media screen and (min-width: 48em) {
+	/* Remove the padding we set earlier */
+	.header,
+	.marketing,
+	.footer {
+		padding-right: 0;
+		padding-left: 0;
+	}
+	/* Space out the masthead */
+	.header {
+		margin-bottom: 2rem;
+	}
+}
+</style> 
+</head>
+<body>
+	<nav class="navbar  navbar-inverse bg-inverse ">
+		<a class="navbar-brand" href="https://www.toplogistics.com.au/">Top Logistics</a>
+	</nav>
+<?php
+	$reason='';
+	$showLOA = false;
+	if (($model->bwf&64)>0||($model->bwf&128)>0) 
+	{
+		$showLOA =true;
+	}
+
+
+	if ($_GET['r']=='sed') {
+		$document="Invoice;Packing List";
+	} elseif ($_GET['r']=='rec') {
+		$document="LOA";
+	} elseif ($_GET['r']=='inv') {
+		$document="Payment Receipt";
+	} elseif ($_GET['r']=='empp') {
+		$document='<ul><li>Commercial Invoice </li><li>Sales Contract</li><li>Purchase link or Purchase order, Payment receipt, goods description and photos</li></ul>';
+	} elseif ($_GET['r']=='aqis') {
+		$document='<ul><li>Commercial Invoice(which should include products`s photo and material</li></ul>';
+	} else {
+		$document='';
+	}
+	if ($_GET['r']=='rec'||$_GET['r']=='sed'||$_GET['r']=='empp'||$_GET['r']=='aqis') {
+		if (($model->bwf&4)>0) {
+			$reason.='Collect Documents for Custom High Value declaration';
+		} elseif (($model->bwf&32)>0) {
+			$reason.='Collect Documents for Custom AQIS declaration';
+		} elseif (($model->bwf&512)>0) {
+			$reason.='Collect Documents for Custom EMPP declaration';
+		}
+	} elseif ($_GET['r']=='inv') {
+		$reason.='Collect receipt for payment for the duty';
+	}
+?>
+	<div class="container">
+		<div class="jumbotron">
+			<h3 >Parcel Number:<?= $model->ref ?></h3>
+			<hr>
+			<div class="row">
+				<div class="col-md-12"> 
+					<h3><b>Reason:</b>&nbsp;&nbsp;<?=$reason?></h3>
+					<h3><b>Status:</b>&nbsp&nbsp<?=$model->getStatus()?></h3>
+					<h3><b>Document Required:</b><?=$document?></h3>
+				</div>
+			</div>
+		</div>
+		<div class="row"></div>
+<?php
+	$tabs=[];
+	$goods=$this->renderPartial('goods_list', ['model'=>$model], true);
+	if ($_GET['r']=='sed'||$_GET['r']=='inv'||$_GET['r']=='empp'||$_GET['r']=='aqis') {
+		$isActive=true;
+		if ($_GET['r']=='inv'&&$model->process->status<ShipmentProcess::PAYMENT_RECEIVED&&$model->process->status>= ShipmentProcess::INFORM_BROKER_PAY) {
+			$tab_payment= $this->renderPartial('online_payment', ['model'=>$model], true);
+			$tabs[]=  ['label'=>'Online Payment','content'=>$tab_payment,'active' => true];
+			$isActive=false;
+		}
+		$main=$this->renderPartial('main_tab', ['model'=>$model], true);
+		$tabs[]=  [ 'label' => 'Upload Documents','content' => $main,'active' => $isActive];
+		$tabs[]=  ['label'=>'Goods Information','content'=>$goods];
+
+		if($showLOA)
+		{
+			$loa_tab=$this->renderPartial('tab_loa', ['model'=>$model], true);
+			$tabs[]=  [ 'label' => 'Sign LOA','content' => $loa_tab];
+		}
+
+	// } elseif ($_GET['r']!='rec') {
+	} else if ($_GET['r'] == 'eny') {
+		$sub=$this->renderPartial('op_tab', ['model'=>$model], true);
+		$tabs[]= ['label' => 'Download Documents', 'content' => $sub,'active'=>true];
+		$tabs[]=  ['label'=>'Goods Information','content'=>$goods];
+		$loa_tab=$this->renderPartial('tab_loa', ['model'=>$model], true);
+		$tabs[]=  [ 'label' => 'Sign LOA','content' => $loa_tab];
+	} else if ($_GET['r']=='rec') {
+		$loa_tab=$this->renderPartial('tab_loa', ['model'=>$model], true);
+		$tabs[]=  [ 'label' => 'Sign LOA','content' => $loa_tab,'active' => true];
+		$tabs[]=  ['label'=>'Goods Information','content'=>$goods];
+		$main=$this->renderPartial('main_tab', ['model'=>$model], true);
+		$tabs[]=  [ 'label' => 'Upload Documents','content' => $main];
+	}
+	$this->widget('application.extensions.booster.TbTabs', [
+		'id'=>'viw-task-'.$model->id,
+		'type'=>'tabs',
+		'tabs'=> $tabs,
+	]);
+?>
+		<footer class="footer">
+				<p style="margin: auto 320px">&copy; Top Logistics 2018</p>
+		</footer>
+	</div>
+</body>
+</html>

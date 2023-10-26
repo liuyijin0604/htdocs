@@ -1,0 +1,669 @@
+<h3>Documentation Operation-<?=$model->no?></h3>
+<h3><?= $model->type==15?"Consol":"Direct Consol"?>
+<div class="form">
+
+</br>
+<?php
+	$form=$this->beginWidget('CActiveForm', array(
+	'id'=>'sea-process-operation-form',
+	'enableClientValidation'=>true,
+		'action'=> $this->createURL('consolProcess/seaOperationUpdate',array('id'=>$model->id)),
+	'clientOptions'=>array(
+		'validateOnSubmit'=>true,
+	),
+));
+
+
+	switch ($processType)
+	{
+		case ConsolProcess::DU_SCR:
+			if(!empty($model->mdata['acr_stat'])){
+				 $acrtext="Resend SCR";
+			}else{
+					 $acrtext="Send SCR";
+			}			if(!empty($model->mdata['acr_stat'])&&$model->mdata['acr_stat']==1){
+					 echo '<b style="color:#221cb4">SCR Sent</b>';
+			}else{
+					echo CHtml::button($acrtext, array('class' => 'send_scr',"style"=>"font-size:1.5em;"));
+			}
+			break;
+
+
+		case ConsolProcess::DU_UB:
+			echo $this->renderPartial('//imcoConsol/ubm', array('model'=>$model));
+			break;
+
+
+
+		case ConsolProcess::DU_PORTCHARGE:
+			
+			echo "<p>Invoice No:".CHtml::textField('port_charge[invoice_no]',@$model->process->mdata['port_charge']['invoice_no'])."</p>";
+			echo "<p>Invoice Date:".CHtml::textField('port_charge[invoice_date]',@$model->process->mdata['port_charge']['invoice_date'],['class' => 'date_input'])."</p>";
+			echo "<p>Port Charge:".CHtml::textField('port_charge[price]',@$model->process->mdata['port_charge']['price'])."</p>";
+			echo "<p>GST:".CHtml::dropDownList('port_charge[gst]',empty($model->process->mdata['port_charge']['gst'])?"free":$model->process->mdata['port_charge']['gst'],['on'=>'on','free'=>'free'])."</p>";
+			echo "<p>Supplier ID:".CHtml::numberField('port_charge[supplier_id]',@$model->process->mdata['port_charge']['supplier_id'])."</p>";
+			echo "</br>";
+			if(!empty($model->process->mdata['port_charge_ge']))
+			{
+				echo CHtml::button('Regenerate Port Charge', array('class' => 'create_portcharge'))."&nbsp;&nbsp;";
+			}else
+			{
+				echo CHtml::button('Generate Port Charge', array('class' => 'create_portcharge'))."&nbsp;&nbsp;";
+			}
+			break;
+
+
+
+		case ConsolProcess::DU_DO:
+			$fr = new FileRepo('search');
+			$fr->unsetAttributes();
+			if (empty($_GET['FileRepo'])) {
+				$fr->status = 20;
+				$fr->type = [81,FileRepo::CONTAINER_PHOTO];
+			} else {
+				$fr->attributes=$_GET['FileRepo'];
+				if (empty($fr->type)) {
+					$fr->type = [81,FileRepo::CONTAINER_PHOTO];
+				}
+			}
+			$fr->fid = $model->id;
+			$fr->non_status=[0];
+			
+			$this->widget('zii.widgets.grid.CGridView', [
+				'id'=>$_GET['tabid'].'_imcofile-grid',
+				'cssFile' => false,
+				'summaryText'=>'',
+				'dataProvider'=> $fr->search(),
+				'filter'=>$fr,
+				'columns'=>[
+					['name' => 'name', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->baseUrl."/filerepo/".$data->hash."/".$data->name."\" 		target=\"_blank\">".$data->name."</a>"'],
+					[
+						'name'=>'size',
+						'value'=>'$data->formatSize()',
+						'filter' => false,
+					],
+					'date',
+					['name' => 'status', 'type'=>'raw', 'value' => '$data->getStatus()',
+						'filter'=>CHtml::dropDownList('FileRepo[status]', $fr->status, FileRepo::$states, ['prompt'=>$this->t('All')]) ],
+					[
+						'class'=>'oButtonColumn',
+						'template'=>'{update}',
+						'buttons'=>[
+							'update' => [
+								'url'=>'Yii::app()->createUrl("imParcel/fileUpdate",array("id"=>$data->id))',
+								'imageUrl'=>false,
+								'visible'=>'true',
+								'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Update'), 'title' => '$data->name'],
+							],
+						],
+					],
+				],
+			]);
+
+
+			echo '<br />', CHtml::label($this->t('Upload Files'), 'uploader');
+			$pphash = FileRepo::uploadHash($model, 81);
+			$this->widget('application.extensions.plupload.PluploadWidget', [
+				'config' => [
+					'url' => $this->createUrl('filerepo/upload/'.$pphash),
+					'max_file_size' => Yii::app()->params['maxFileSize'],
+					'unique_names' => true,
+					'file_list_height' => 60,
+					'visible_header' => false,
+					'filters' => [
+						['title' => Yii::t('app', 'JPG, PDF, Word, Html, Excel files'), 'extensions' => 'pdf,doc,docx,xls,xlsx,jpg,txt,eml,htm,html'],
+					],
+					//'resize' => array('width' => 800, 'height' => 800, 'quality' => 80),
+					'language' => Yii::app()->language,
+					'max_file_number' => 2,
+					'autostart' => true,
+					'jquery_ui' => false,
+					'reset_after_upload' => true,
+				],
+				'callbacks' => [
+					'FileUploaded' => 'function(up,file,response){$("#'.$_GET["tabid"].'").trigger("reload_imcofile_grid");$("#'.$_GET["tabid"].'").trigger("check_consol_do");}',
+				],
+				'id' => $_GET['tabid'].'_imcofile_uploader',
+			]);
+
+			break;
+
+
+
+
+
+		case ConsolProcess::DU_CARTAGE:
+			echo CHtml::button('Edit Cartage Email', array('class' => 'edit_cartage_email',"style"=>"font-size:1.5em;"));
+			echo CHtml::link('',$this->createUrl('consolProcess/editCartageEmail')."?id=".$model->id, array('id'=>'cartageLink','class' => 'jqm2_link',"style"=>"font-size:1.5em;display:none","data-win-class"=>"L"));
+			break;
+
+		case ConsolProcess::DU_RECEIPTO:
+			echo CHtml::label('Arrive Time: ', 'spr'),
+			CHtml::textField('mdata[ctn_receipt_time]', @$model->mdata['ctn_receipt_time'], ['class' => 'datetime_input', 'id' => 'ctn_receipt_time_'.$_GET["tabid"]]), ' ',
+			CHtml::button('Outturn Receipt', ['class' => 'seaout_btn']),
+			CHtml::button('Pass', ['class' => 'seaout_pass_btn']),
+			'<br />';
+			break;
+
+		case ConsolProcess::DU_UNPACKS:
+			echo CHtml::label('Unpacking Team','Unpacking Team');
+			echo CHtml::dropDownList('unpacking_team',@$model->process->mdata['unpacking_team'],SeaConsolService::getUnpackingTeam($model),array('prompt'=>'Select'));
+			echo CHtml::button('updateUnpackingTeam', array('class' => 'updateUnpackingTeam'));
+
+			break;
+
+		case ConsolProcess::DU_UNPACKINGO:
+			echo $this->renderPartial('//imcoConsol/unpacking_outturn', array('model'=>$model));
+			break;
+
+		case ConsolProcess::DU_MANIFEST:
+			echo CHtml::button('All Manifest', ['class' => 'mani_btn','style'=> 'margin-left:20px;']);
+			break;
+
+		case ConsolProcess::DU_INVOICE:
+			echo CHtml::label('Select Invoice Client.','inv_client_select');
+			echo CHtml::dropDownList('inv_client_select','', CHtml::listData($model->getOrgsInfo(),'id','name'), array('prompt' => 'All','style'=>"width:100px;",));
+			echo CHtml::checkBox('gen_inv')," Create Invoice";
+			echo '<div class="row buttons">';
+			echo CHtml::button('Create Invoice',array('class'=>'create_invoice','style'=>'margin-right:20px;'));
+			echo '</div>';
+			break;
+
+			
+		default:
+			// code...
+			break;
+	}
+		
+
+
+?>
+<?php $this->endWidget(); ?>
+</br>
+
+<div class="row">
+	<div class="row rowcol rowleft">
+	<?php
+		echo "</br></br>";
+		echo CHtml::button('Process Done', array('class' => 'process_done'))."&nbsp;&nbsp;";
+		echo CHtml::checkbox('ignore', false) . 'ignore';
+	?>
+	</div>
+</div>
+
+
+<br>
+<br>
+
+</div>
+<script type="text/javascript">
+$(function(){
+	var win = $('#jqmw_<?=$_GET["tabid"];?>');
+
+	var tab = $('#<?=$_GET["tabid"];?>');
+	var pane = $('#<?=$_GET["tabid"];?>').data('panel');
+
+	tab.unbind('reload_imcofile_grid').bind('reload_imcofile_grid', function(){
+		$('#<?=$_GET["tabid"];?>_imcofile-grid', win.data('panel')).yiiGridView('update');
+		return false;
+	});
+
+	const maniResult = function(r){
+		if(r == 'done'){
+			myApp.notice('Done', 5000);
+		}else{
+			myApp.alert(r, false);
+		}
+		tab.trigger('reload_consol_process_grid');
+	};
+
+	tab.unbind('check_consol_do').bind('check_consol_do', function(){
+		$.get('<?=$this->createUrl("consolProcess/checkConsolDO",["id"=>$process->fid]);?>',function(r){
+			r = JSON.parse(r);
+			if(r.done){
+					myApp.notice('Done', 5000);
+			}else{
+					myApp.alert(r, false);
+			}
+			tab.trigger('reload_consol_process_grid');
+		});
+		return false;
+	});
+
+
+
+	tab.unbind('reload_consol_process_grid').bind('reload_consol_process_grid', function(){
+		$('#<?=$_GET["tabid"];?>_consol_process_grid', tab.data('panel')).yiiGridView('update');
+		return false;
+	});
+
+	tab.data('panel').off('change', 'select.pfile_status').on('change', 'select.pfile_status', function(){
+		$.post('files/status', {'id': $(this).data('id'), 'status': $(this).val() });
+	});
+
+	win.unbind('reload_consol_invoice_grid').bind('reload_consol_invoice_grid',function(){
+			$('#consol_invoice_grid_<?=$_GET['tabid']?>',win).yiiGridView('update');
+	});
+
+	$('.edit_cartage_email',win).on('click',function(){
+		$('#cartageLink',win).click();
+	});
+			 
+	$('.updateStatus',win).click(function(){
+		 var selected=$("#consol_process_status").val();
+		 if(confirm('Are you sure to update status?')){
+				 $.get('<?=$this->createUrl("consolProcess/process",["id"=>$process->id]);?>'+"?status="+selected,function(r){
+							if(r == 'done'){
+										myApp.notice('Done', 5000);
+								}else{
+										myApp.alert(r, false);
+								}
+								 tab.trigger('reload_consol_process_grid');
+				 });
+		 }
+	});
+	$('.create_portcharge',win).on('click',function()
+	{
+		var form = new FormData(document.getElementById("sea-process-operation-form"));
+		$.ajax({
+		    url: '<?= $this->createUrl('consolProcess/generatePortCharge')."?id=".$model->id?>',
+		    type: "post",
+		    data: form,
+		    processData: false,
+		    contentType: false,
+		    success: function(r) {
+		    	r = JSON.parse(r);
+		        if(r.done)
+		         {
+					myApp.notice('Done', 5000);
+					win.jqmHide();
+				 }else
+				 {
+					myApp.alert(r.msg, false);   
+		         }
+
+		       
+		        tab.trigger('reload_consol_process_grid');
+		     },
+		    error: function(e) {
+		        console.log(e);
+		    }
+		});
+			 
+	});
+
+
+	$('.process_done',win).on('click',function(){
+		isIgnore = $('#ignore').prop('checked');
+		data = {"id":<?=$model->id?>,"processType":<?=$processType?>,"isIgnore":isIgnore};
+		console.log(data);
+		$.ajax({
+		    url: '<?= $this->createUrl('consolProcess/seaDocumentationUpdate')?>',
+		    type: "post",
+		    data: data,
+		    processData: true,
+		    contentType: 'application/x-www-form-urlencoded',
+		    success: function(r) {
+		    	r = JSON.parse(r);
+		        if(r.done)
+		         {
+					myApp.notice('Done', 5000);
+					win.jqmHide();
+				 }else
+				 {
+					myApp.alert(r.msg, false);   
+		         }
+
+		       
+		        tab.trigger('reload_consol_process_grid');
+		     },
+		    error: function(e) {
+		        console.log(e);
+		    }
+		});
+			 
+	});
+
+	$('.updateUnpackingTeam',win).on('click',function(){
+		unpackingTeam = $('#unpacking_team').val();
+		data = {"id":<?=$model->id?>,"processType":<?=$processType?>,"unpackingTeam":unpackingTeam};
+		console.log(data);
+		$.ajax({
+		    url: '<?= $this->createUrl('consolProcess/seaDocumentationUpdate')?>',
+		    type: "post",
+		    data: data,
+		    processData: true,
+		    contentType: 'application/x-www-form-urlencoded',
+		    success: function(r) {
+		    	r = JSON.parse(r);
+		        if(r.done)
+		         {
+					myApp.notice('Done', 5000);
+					win.jqmHide();
+				 }else
+				 {
+					myApp.alert(r.msg, false);   
+		         }
+
+		       
+		        tab.trigger('reload_consol_process_grid');
+		     },
+		    error: function(e) {
+		        console.log(e);
+		    }
+		});
+			 
+	});
+
+		
+		
+		$('.send_scr',win).on('click',function(){
+			 if(confirm('Are you sure to send SCR?')){
+					 $.get('<?=$this->createURL($model->type==15?"imcoConsol/acr":"dmawbConsol/acr", ["id" => $model->id,"fromProcess"=>1]);?>', function(r){
+			if(r.done){
+				myApp.notice(r.msg);
+				tab.trigger('reload_consol_process_grid');
+			}else{
+				myApp.alert(r.msg);
+			}
+		}, 'json');
+								
+				}
+			 
+		});
+				
+		$('.update_note',win).on('click',function(){
+			var data={};
+		 if($("#airport",win).val()!=undefined){
+				var airport=$("#airport",win).val();
+				var pmc_for_pickup=$("#pmc_for_pickup",win).val();
+				var deadtime_for_pickup=$('#deadtime_for_pickup',win).val();
+				
+				if(!airport){
+						myApp.alert("Please Choose the airport");
+						return false;
+				}else  if(!pmc_for_pickup){
+						myApp.alert("Please Choose the PMC");
+						 return false;
+				}else if(!deadtime_for_pickup){
+						myApp.alert("Please Choose the deadtime");
+						 return false;
+				}
+				 data['airport']=airport;
+				 data['pmc_for_pickup']=pmc_for_pickup;
+				 data['deadtime_for_pickup']=deadtime_for_pickup;
+				}
+				var process_note=$('#process_note').val();
+				data['process_note']=process_note;
+//        console.log(data);
+				$.ajax({
+						url:'<?=Yii::app()->createURL("consolProcess/update",array("id"=>$process->id))?>',
+						method:"POST",
+						data:data,
+						success:function(r){
+							 if(r == 'done'){
+										myApp.notice('Done', 3000);
+								}else{
+										myApp.alert(r, false);
+								}
+								 tab.trigger('reload_consol_process_grid');
+							}
+				});
+		});
+		
+	$('.check_done',win).click(function(){
+		 if(confirm('Are you sure to check done?')){
+				 $.get('<?=$this->createUrl("consolProcess/processCheckDone",["id"=>$process->id]);?>',function(r){
+							if(r == 'done'){
+										myApp.notice('Done', 5000);
+								}else{
+										myApp.alert(r, false);
+								}
+							tab.trigger('reload_consol_process_grid');
+				 });
+		 } 
+		});
+		$('.notify_driver',win).click(function(){
+		 if(confirm('Are you sure to already notify driver to pick up?')){
+				 $.get('<?=$this->createUrl("consolProcess/notifyDriver",["id"=>$process->id]);?>',function(r){
+							if(r == 'done'){
+										myApp.notice('Done', 5000);
+								}else{
+										myApp.alert(r, false);
+								}
+								 tab.trigger('reload_consol_process_grid');
+				 });
+		} 
+		});
+			$('.send_whscan',win).click(function(){
+		 if(confirm('Are you sure to Send To Warehouse to Scan?')){
+				 $.get('<?=$this->createUrl("consolProcess/sendToWarehouseScan",["id"=>$process->id]);?>',function(r){
+							if(r == 'done'){
+										myApp.notice('Done', 5000);
+								}else{
+										myApp.alert(r, false);
+								}
+								 tab.trigger('reload_consol_process_grid');
+				 });
+		} 
+		});
+
+		$('.aupost_btn', win).click(function(){
+				if(confirm('Are you sure to send AuPost lodgement?')){
+						$(this).hide();
+						$.get('<?=$this->createUrl("imcoConsol/aupost", ["id" => $model->id]);?>', function(r){
+								if(r == 'done'){
+										myApp.notice('Done', 5000);
+								}else{
+										myApp.alert(r, false);
+								}
+						});
+				}
+				return false;
+		});
+
+
+		$('.toll_btn', win).click(function(){
+				if(confirm('Are you sure to send Toll lodgement?')){
+						$(this).hide();
+						$.get('<?=$this->createUrl("imcoConsol/tollpost", ["id" => $model->id]);?>', function(r){
+								if(r == 'done'){
+										myApp.notice('Done', 5000);
+								}else{
+										myApp.alert(r, false);
+								}
+						});
+				}
+				return false;
+		});
+
+		$('.startrack_btn', win).click(function(){
+				if(confirm('Are you sure to send StarTrack lodgement?')){
+						$(this).hide();
+						$.get('<?=$this->createUrl("imcoConsol/startrack", ["id" => $model->id]);?>', function(r){
+								if(r == 'done'){
+										myApp.notice('Done', 5000);
+								}else{
+										myApp.alert(r, false);
+								}
+						});
+				}
+				return false;
+		});
+		
+		$('.letter_btn', win).click(function(){
+				if(confirm('Are you sure to send Letter lodgement?')){
+						$(this).hide();
+						$.get('<?=$this->createUrl("imcoConsol/emps", ["id" => $model->id]);?>', function(r){
+								if(r == 'done'){
+										myApp.notice('Done', 5000);
+								}else{
+										myApp.alert(r, false);
+								}
+						});
+				}
+				return false;
+		});
+		
+		$('.manifest_done').on('click',function(){
+			if( confirm('Are you sure to confirm Manifest Done')){
+					$.get('<?=$this->createUrl("consolProcess/processManifestDone",array('id'=>$process->id))?>',function(r){
+							if(r=='done'){
+									myApp.notice('Done', 5000);
+							 }else{
+									myApp.alert(r, false);   
+						 }
+						 tab.trigger('reload_consol_process_grid');
+				 });
+					
+				}
+		});
+		 $('.invoice_done').on('click',function(){
+			if( confirm('Are you sure to Invoice Done')){
+					$.get('<?=$this->createUrl("consolProcess/invoiceDone",array('id'=>$process->id))?>',function(r){
+							if(r=='done'){
+									myApp.notice('Done', 5000);
+							 }else{
+									myApp.alert(r, false);   
+						 }
+							tab.trigger('reload_consol_process_grid');
+				 });
+			
+				}
+		});
+		
+		$('.airout_btn', win).click(function(){
+			if(confirm('Are you sure to send Outturn report to ICS?')){
+				$(this).hide();
+				var time = '';
+				if($('#ctn_comp_time_<?=$_GET["tabid"];?>', win).length>0)
+				{
+					time = $('#ctn_comp_time_<?=$_GET["tabid"];?>', win).val();
+				}
+				$.get('<?=$this->createUrl("imcoConsol/airout", ["id" => $model->id]);?>' + '?to_cus=' + $('#to_cus', win).prop('checked') + '&time='+time , maniResult);
+			}
+			return false;
+		});
+
+		$('.scan_all_and_send_outturn', win).click(function(){
+			if(confirm('Are you sure to scan all and sent outturn to customer?')){
+				$(this).hide();
+				$.get('<?=$this->createUrl("imcoConsol/scanAllAndSendOutturn", ["id" => $model->id]);?>' , maniResult);
+			}
+			return false;
+		});
+
+		$('.seaout_btn', win).click(function(){
+			if(confirm('Are you sure to send Outturn report to ICS?')){
+				$(this).hide();
+				$.get('<?=$this->createUrl("imcoConsol/seaoutReceipt", ["id" => $model->id]);?>' + '?time=' + $('#ctn_receipt_time_<?=$_GET["tabid"];?>', win).val(), maniResult);
+			}
+			return false;
+		});
+		$('.seaout_pass_btn', win).click(function(){
+			if(confirm('Are you sure to send Outturn report to ICS?')){
+				$(this).hide();
+				$.get('<?=$this->createUrl("imcoConsol/seaoutReceipt", ["id" => $model->id,"pass"=>1]);?>' + '&&time=' + $('#ctn_receipt_time_<?=$_GET["tabid"];?>', win).val(), maniResult);
+			}
+			return false;
+		});
+
+		$('.ctn_btn', win).click(function(){
+			if(confirm('Are you sure to save complete time?')){
+				$(this).hide();
+				var time = '';
+				var sctime = '';
+				if($('#ctn_comp_time2_<?=$_GET["tabid"];?>', win).length>0)
+				{
+					time = $('#ctn_comp_time2_<?=$_GET["tabid"];?>', win).val();
+				}
+
+				if($('#ctn_scstart_time2_<?=$_GET["tabid"];?>', win).length>0)
+				{
+					sctime = $('#ctn_scstart_time2_<?=$_GET["tabid"];?>', win).val();
+				}
+				$.get('<?=$this->createUrl("imcoConsol/saveCompleteTime", ["id" => $model->id]);?>' + '?time=' + time+'&&sctime='+sctime, maniResult);
+			}
+			return false;
+		});
+
+
+		<?php if($model->type==15):?>
+		$('.create_invoice', win).off('click').on('click',function(){
+		var data={};
+		var air_type=$('input:radio[name="mdata[air_type]"]:checked',win).val();
+		if(air_type!=undefined){
+				data['mdata[air_type]']=air_type;
+		}
+		if(($('input[name="gen_air_type_inv"]',win).is(':checked'))){
+				data['gen_air_type_inv']=1;
+		}
+		if($('input[name="gen_inv"]',win).is(':checked')){
+				data['gen_inv']=1;
+		}
+		if($('input[name="gen_awb_inv"]',win).is(':checked')){
+				data['gen_awb_inv']=1;
+		}
+		if($('input[name="gen_clearance_inv"]',win).is(':checked')){
+				data['gen_clearance_inv']=1;
+		}
+		data['inv_client_select']=$('select[name="inv_client_select"]',win).val();
+	 // console.log(data);       
+			if(confirm('Are you sure to Create Invoice')){
+				$(this).prop('disabled', true);
+				 $.ajax({
+						method:"POST",
+						url:'<?=Yii::app()->createUrl("consolProcess/createInvoice",array('id'=>$process->id))?>',
+						data:data,
+						success:function(r){
+							 if(r == 'done'){
+										myApp.notice('Done', 3000);
+										 win.trigger('reload_consol_invoice_grid');
+								}else{
+										myApp.alert(r, false);
+								}
+								$('.create_invoice', win).removeProp('disabled');
+							}
+					});
+			 }
+		});
+		$(".air_type",win).hide();
+		var awb="<?=$model->awb?>";
+		if(awb.match(/\d{3}\-\d{8}/i)){
+		$(".air_type",win).show();
+		 }
+	 <?php endif;?>
+	 <?php if($model->type==70):?>
+			 $('.create_invoice', win).off('click').on('click',function(){
+		var data={};
+		if($('input[name="gen_inv"]',win).is(':checked')){
+				data['gen_inv']=1;
+		}
+			if(confirm('Are you sure to Create Invoice')){
+				$(this).prop('disabled', true);
+				 $.ajax({
+						method:"POST",
+						url:'<?=Yii::app()->createUrl("consolProcess/genDirectConsolInvoice",array('id'=>$process->id))?>',
+						data:data,
+						success:function(r){
+							 if(r == 'done'){
+										myApp.notice('Done', 3000);
+										win.trigger('reload_consol_invoice_grid');
+								}else{
+										myApp.alert(r, false);
+								}
+								$('.create_invoice', win).removeProp('disabled');
+							}
+					});
+			 }
+		});
+	<?php endif;?>
+
+		
+		$('.theclick',win).click(function(){
+				 win.jqmHide();
+		});
+		
+		
+});
+</script>

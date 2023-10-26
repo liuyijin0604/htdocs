@@ -1,0 +1,120 @@
+<h2>Cargo Process</h2>
+<div class="row buttons">
+     <div class="rowleft">
+     <?php   echo CHtml::button('Load Cargo Process',array('class'=>'load_cargo_process','id'=>'load_cargo_process'));?>
+    </div>
+    <div class="rowright">
+     <?php if(User::checkIsNotTruckUser()):?>
+        <?php if(Acl::hasAccess("C:systemSetting/cargoProcessSetting")):?>
+            <div class="rowleft">
+             <?php   echo "<a href=\"".Yii::app()->createUrl("systemSetting/cargoProcessSetting")."\" class=\"tab_link\" title=\"cargoProcessSetting\"><h2>Cargo Process Setting</h2></a>";?>
+            </div>
+        <?php endif;?>
+        <div class="rowleft">
+         <?php   echo "<a href=\"".Yii::app()->createUrl("cargoProcess/viewAllAgent")."\" class=\"tab_link\" title=\"viewAllReport\"><h2>View All Report</h2></a>";?>
+        </div>
+    <?php endif;?>
+
+        <div class="rowleft">
+         <?php  echo "<a href=\"".Yii::app()->createUrl("cargoProcess/viewDriverJobs")."\" class=\"tab_link\" title=\"viewDriverJobs\"><h2>View Driver Delivery Jobs</h2></a>";?>
+        </div>
+
+     <?php 
+     echo CHtml::link("<h2>Cargo Process Summary</h2>",Yii::app()->createUrl("cargoProcess/summary"), array('class'=>'tab_link','title'=>'Cargo Process Summary'));
+     ?>
+     <?php 
+     echo CHtml::link("<h2>FBA Report</h2>",Yii::app()->createUrl("cargoProcess/fbaReport"), array('class'=>'tab_link','title'=>'FBA Report'));
+     ?>
+    </div>
+</div>
+<h3>Overview</h3>
+<style>
+   .cloumn_red_1{
+        color:red;
+        font-weight: bold;
+    }
+   #cargo_process_dp_view .type_row,#cargo_main_process_type_id .type_row {
+        color:rgb(119, 119, 218);
+        text-align: center;
+        font-size: 20px;
+        font-weight: bold;
+    }
+</style>
+
+
+<div style="width:50%">
+    <?php  
+    $this->widget('zii.widgets.grid.CGridView',array(
+            'id'=>'cargo_main_menue2'.$_GET['tabid'],
+            'cssFile' => false,
+            'dataProvider'=>$dataProvider[0],
+            'filter'=>$dataProvider[1],
+            'columns'=>array(
+           array('name'=>'status','headerHtmlOptions' => array('style' => 'display:none'),'filterHtmlOptions' => array('style' => 'display:none'),
+                'htmlOptions' => array('style' => 'display:none'),'type'=>'raw'),
+           array('name'=>'status','value'=>'@CargoProcess::$processTypes[$data["status"]]'),
+            'number',
+            array('name'=>'day1','header'=>'<=1 days'),
+            array('name'=>'day2','header'=>'2 days'),
+            array('name'=>'day3','header'=>'>=3 days','cssClassExpression' => '$data>0? "cloumn_red_1" : ""'),
+          
+        ),
+    ));?>
+</div>
+<div class="pane" id="cargo_process_dp_view" style="width:200px">
+    <?php 
+    $column=[];
+    $column[]=array('name'=>'pod_id','headerHtmlOptions' => array('style' => 'display:none'), 'filterHtmlOptions' => array('style' => 'display:none'),
+                        'htmlOptions' => array('style' => 'display:none'), 'type' => 'raw');
+    $column[]=array('name'=>'pod','type'=>'raw','cssClassExpression'=>'"type_row"');
+//    $process=ConsolProcess::$states;
+//    unset($process[80]);
+//    foreach($process as $key=>$value){
+//        $column[]=array('name'=>$key,'header'=>$value);
+//    }
+    $this->widget('zii.widgets.grid.CGridView',array(
+            'id'=>'cargo_main_menue'.$_GET['tabid'],
+            'cssFile' => false,
+            'dataProvider'=>$dataProvider1[0],
+            'columns'=>$column,
+    ));?>
+</div>
+
+<div  class="pane" id="cargo_process_dp_view_type">
+<?=$this->render('sub_type_list',array('dataProvider2'=>$dataProvider2,'dataProvider3'=>$dataProvider3,'name'=>$name));?>
+</div>
+<script>
+    $(function(){
+       var tab=$("<?=$_GET['tabid']?>");
+       var panel=tab.data('panel');
+       $("#cargo_process_dp_view",panel).on('click',"table tbody td",function(){
+         var podId=parseInt($(this).parent().children(':nth-child(1)').html());
+         var data = {};
+        data['pod_id'] = podId;
+        $.ajax({
+            type : 'GET',
+            url : '<?php echo Yii::app()->createAbsoluteUrl("cargoProcess/typeList",array('tabid'=>$_GET['tabid'])) ;?>',
+            data: data,
+            dataType: 'html',
+            success:function(resp){
+                $('#cargo_process_dp_view_type').html(resp);
+            },
+        });
+       })
+
+       $("#load_cargo_process",panel).on('click',function(){
+                if( confirm('Are you sure to load cargo process?')){
+                    $(this).prop('disabled', 'disabled');
+                    $.get('<?=$this->createUrl("cargoProcess/loadCargoProcess")?>',function(r){
+                        $("#load_cargo_process",panel).removeProp('disabled');
+                                if(r=='done'){
+                                        myApp.notice('Done', 5000);
+                                 }else{
+                                        myApp.alert(r, false);   
+                                 }
+                     });    
+                }
+            })
+   })
+</script>
+

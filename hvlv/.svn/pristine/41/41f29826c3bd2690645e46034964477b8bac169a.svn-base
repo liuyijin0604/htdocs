@@ -1,0 +1,185 @@
+<?php
+
+/**
+ * This is the model class for table "salesfunnel_requirements_submission".
+ *
+ * The followings are the available columns in table 'salesfunnel_requirements_submission':
+ * @property integer $id
+ * @property string $company_name
+ * @property string $first_name
+ * @property string $last_name
+ * @property string $email
+ * @property integer $contact_number
+ * @property integer $status
+ */
+class SalesfunnelRequirementsSubmission extends CActiveRecord
+{
+	const STATUSSUBMITTED = 1;
+	const STATUSNOTBUBMITED = 0;
+	/**
+	 * @return string the associated database table name
+	 */
+
+	public static $statusType = [
+		1  => 'Submitted',
+		0  => 'Not Submitted yet'
+	];
+
+	public function tableName()
+	{
+		return 'salesfunnel_requirements_submission';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('first_name, last_name, email, contact_number', 'required'),
+			array('contact_number, status', 'numerical', 'integerOnly'=>true),
+			array('company_name, first_name, last_name, email', 'length', 'max'=>200),
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, company_name, first_name, last_name, email, contact_number, status', 'safe', 'on'=>'search'),
+		);
+	}
+
+	public function showStatusType()
+	{
+		$statusTypeStr = '';
+		switch ($this->status) {
+			case self::STATUSSUBMITTED:
+				$statusTypeStr.=$this->status.":[Submitted]";
+				break;
+			case self::STATUSNOTBUBMITED:
+				$statusTypeStr.=$this->status.":[Not Submitted yet]";
+				break;
+			
+			default:
+				// code...
+				break;
+		}
+		return $statusTypeStr;
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+		);
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return array(
+			'id' => 'ID',
+			'company_name' => 'Company Name',
+			'first_name' => 'First Name',
+			'last_name' => 'Last Name',
+			'email' => 'Email',
+			'contact_number' => 'Contact Number',
+			'status' => 'Status',
+		);
+	}
+
+	public function auTel()
+	{
+		return self::auTelValid($this->contact_number);
+	}
+	
+	public static function auTelValid($no)
+	{
+		$tel = preg_replace('/[^\d]+/', '', $no);
+		$tel = trim($tel);
+		$realTel = $tel;
+		if (preg_match('/^1300(\d{6})$/', $tel, $m)) {
+			// in order to avoid error
+			// "message":"Phone number longer than 10 characters: 01300255533.","field":"shipments[0].to.phone"}
+			$realTel = $tel;
+		} elseif (preg_match('/61(\d{10})$/', $tel, $m)) {
+			// in case +61 04 3274 3955
+			$realTel = $m[1];
+		} elseif (preg_match('/61(\d{9})$/', $tel, $m)) {
+			$realTel = '0'.$m[1];
+		} elseif (preg_match('/^0\d{9}$/', $tel)) {
+			$realTel = $tel;
+		} elseif (preg_match('/^\d{9}$/', $tel, $m)) {
+			$realTel = '0'.$tel;
+		} else {
+			return '';
+		}
+		if (strlen($realTel) > 10) {
+			$realTel = substr($realTel, 0, 10);
+		}
+		return $realTel;
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search($pgn = true, $ps = 30, $ec = false)
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('id',$this->id);
+		$criteria->compare('company_name',$this->company_name,true);
+		$criteria->compare('first_name',$this->first_name,true);
+		$criteria->compare('last_name',$this->last_name,true);
+		$criteria->compare('email',$this->email,true);
+		$criteria->compare('contact_number',$this->contact_number);
+		$with = [];
+
+		if($this->status==null)
+		{
+			$criteria->compare('status',self::STATUSSUBMITTED);
+		}else
+		{
+			$criteria->compare('status',$this->status);
+		}
+		
+
+		$criteria->with = $with;
+		$criteria->together = true;
+		$sort = new CSort(get_called_class());
+		$sort->defaultOrder = 't.id DESC';
+		return new CActiveDataProvider($this, [
+			'criteria' => $criteria,
+			'sort' => $sort,
+			'pagination' => [
+			'pageSize' => 30,
+			],
+		]);
+	}
+
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return SalesfunnelRequirementsSubmission the static model class
+	 */
+	public static function model($className=__CLASS__)
+	{
+		return parent::model($className);
+	}
+}

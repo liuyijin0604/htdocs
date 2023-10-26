@@ -1,0 +1,3725 @@
+<?php
+
+/**
+ * This is the model class for table "invoice".
+ *
+ * The followings are the available columns in table 'invoice':
+ * @property string $id
+ * @property string $to_id
+ * @property string $dpt_id
+ * @property string $cg_order_id
+ * @property string $pid    parcel id
+ * @property integer $dpmt
+ * @property integer $type
+ * @property integer $currency
+ * @property integer $sent
+ * @property string $no
+ * @property string $ref
+ * @property string $date
+ * @property string $due
+ * @property string $posted
+ * @property string $total
+ * @property integer $bflag
+ * @property string $gst
+ * @property integer $status
+ * @property string $meta
+ */
+class Invoice extends oActiveRecord
+{
+	// define some flags as bit flag
+	// currently use 2 flag for an invoice has been closed , client can't changed anymore
+	const INVOICE_FLAG_CLOSED = 2;
+	const INVOICE_FLAG_PAYPAL = 4;
+	public $toids;
+	public $invtypes;
+	public $consol_awb;
+	public $model_no;
+	public $model_awb;
+	public $no_include_status;
+	public $is_paypal;
+	const PAYLINK_KEY = 'fhwerweo42ADEEFF389kdkjhvne33nwr';
+	const POLI_MERCHCODE = 'S6102066';
+	const POLI_AUTHCODE = 'IYPTMKBBHM';
+
+	const CURRENCY_AUD = 1;
+	const CURRENCY_USD = 2;
+	public static $currencies = array(
+		0=>'',
+		1 => 'AUD',
+		2 => 'USD',
+		3 => 'CNY',
+		4 => 'HKD',
+		5 => 'EUR',
+		6 => 'GBP',
+		7 => 'NZD',
+	);
+
+	public static $currencies_s = array(
+		1 => 'AUD',
+		2 => 'USD',
+		3 => 'CNY',
+		4 => 'HKD',
+		5 => 'EUR',
+		6 => 'GBP',
+		7 => 'NZD',
+	);
+
+
+	// define invoice type
+	const INVOICE_TYPE_IMPORT = 10;
+	const INVOICE_TYPE_EXPORT = 20;
+	const INVOICE_TYPE_DIRECT = 30;
+	const INVOICE_TYPE_DISCARD = 34;
+	const INVOICE_TYPE_STORAGE_FEE = 35;
+	const INVOICE_TYPE_RTS_FEE = 36;
+	const INVOICE_TYPE_RTS_RESEND_FEE = 37;
+	const INVOICE_TYPE_RTS_STORAGE_FEE = 38;
+	const INVOICE_TYPE_DIRECT_MAWB = 39;
+	const INVOICE_TYPE_OTHERS = 40;
+	const INVOICE_TYPE_CASUAL=41;
+	const INVOICE_TYPE_SEA_STORAGE=42;
+	const INVOICE_TYPE_DDU_STORAGE=45;
+	const INVOICE_TYPE_EDI_INVOICE = 50;
+	const INVOICE_TYPE_WMS = 60;
+	const INVOICE_TYPE_WMS_SERVICE = 65;
+	const INVOICE_TYPE_WMS_INVOICE = 70;
+	const INVOICE_TYPE_WMS_OTHER = 75;
+	const INVOICE_TYPE_CREDIT_NOTE = 90;
+	const INVOICE_TYPE_CG_DELIVERY = 100;
+	const INVOICE_TYPE_SHIPMENT_INSURANCE = 101;
+	const INVOICE_TYPE_WEIGHT_DIFF = 102;
+	const INVOICE_TYPE_WEIGHT_AQIS = 103;
+	const INVOICE_TYPE_WDT = 104;
+	const INVOICE_TYPE_PICKUPBOOKING = 120;
+	const INVOICE_TYPE_INBOUNDBOOKING = 121;
+	const INVOICE_TYPE_CG_STORAGE = 122;
+	const INVOICE_TYPE_NAME_VALIDATION = 123;
+	const INVOICE_TYPE_CUSTOMS_SEIZURE = 124;
+	public static $types = array(
+		10 => 'Import',
+		20 => 'Export',
+		30 => 'Direct',
+		31 => 'AWB DIFF FEE',
+		32 => 'WTD Fee',//eparcel weight diff fee
+		33 => 'LOOSE FEE',
+		34 => 'RTS Discard FEE',
+		35 => 'Storage',
+		36 => 'RTS Fee',
+		37 => 'RTS Resend Fee',
+		38 => 'RTS Storage Fee',
+		39 => 'Direct MAWB Invoice',
+		40 => 'Other',
+		41 => 'Casual Import',
+		42 => 'Storage Sea',
+		45 => 'Storage DDU',
+		50 => 'EDI Invoice',
+		60 => 'WMS Storage',
+		65 => 'WMS Service',
+		70 => 'WMS Service',
+		75 => 'WMS Service',
+		90 => 'Credit Note',
+		100 => 'CG Delivery',
+		101 => 'Shipment Insurance',
+		102 => 'WD',
+		103 => 'AQIS',
+		104 => 'DT',
+		120 => 'Pickup Booking',
+		121 => 'Inbound Booking',
+		122 => 'Storage Cargo',
+		123 => 'Name Validation',
+		124 => 'Customs Seizure',
+	);
+	public static $types2 = array(
+		10 => 'Import',
+		20 => 'Export',
+		30 => 'Direct',
+		31 => 'AWB DIFF FEE',
+		32 => 'WTD Fee',//eparcel weight diff fee
+		33 => 'LOOSE FEE',
+		34 => 'RTS Discard FEE',
+		35 => 'Storage',
+		36 => 'RTS Fee',
+		37 => 'RTS Resend Fee',
+		38 => 'RTS Storage Fee',
+		39 => 'Direct MAWB Invoice',
+		40 => 'Other',
+		41 => 'Casual Import',
+		42 => 'Storage Sea',
+		45 => 'Storage DDU',
+		50 => 'EDI Invoice',
+		60 => 'WMS Storage',
+		70 => 'WMS Service',
+		90 => 'Credit Note',
+		100 => 'CG Delivery',
+		101 => 'Shipment Insurance',
+		102 => 'WD',
+		103 => 'AQIS',
+		104 => 'DT',
+		120 => 'Pickup Booking',
+		121 => 'Inbound Booking',
+		122 => 'Storage Cargo',
+		123 => 'Name Validation',
+		124 => 'Customs Seizure',
+	);
+
+
+	//define departments
+	const DPMT_IMPORT = 10;
+	const DPMT_EXPORT = 20;
+	const DPMT_AIRSEA = 30;
+	const DPMT_3PL = 40;
+	const DPMT_COURIER_SERVICE = 50;
+
+	public static $dpmts = [
+		10 => 'Import',
+		20 => 'Export',
+		30 => 'Air/Sea',
+		40 => '3PL',
+		50 => 'TopCourierService',
+	];
+
+	public static $delivery_charge_code = [
+		self::DPMT_IMPORT=>Consol::AU_LOCAL_DELIVERY_COST_GL_CODE,
+		self::DPMT_3PL=>Consol::DELIVERY_3PL_COST_GL_CODE,
+		self::DPMT_COURIER_SERVICE=>Consol::DELIVERY_COURIER_SERVCE_COST_GL_CODE
+
+	];
+
+
+	// define invoice all status
+	const INVOICE_STATUS_PENDING = 1;
+	const INVOICE_STATUS_POSTED = 2;
+	const INVOICE_STATUS_OVERDUE = 3;
+	const INVOICE_STATUS_PARTIALLY_PAID = 7;
+	const INVOICE_STATUS_PAID_PARTLY_CREDIT=6;
+	const INVOICE_STATUS_FULLY_CREDITED=8;
+	const INVOICE_STATUS_PAID = 9;
+	const INVOICE_STATUS_CACELLED = 10;
+	const INVOICE_STATUS_PENDING_PAID = 11;
+	const INVOICE_STATUS_SYSTEM_CREDIT = 12;
+	const INVOICE_STATUS_HOLDING = 99;
+	public static $states = array(
+		'1' => 'Pending',
+		'2' => 'Posted',
+		'3' => 'Overdue',
+		'6' => 'Paid with Partly Credit',
+		'7' => 'Partially Paid',
+		'8' => 'Fully Credited',
+		'9' => 'Paid',
+		'10' => 'Cancelled',
+		'11' => 'Paid Pending',
+		'12' => 'System Credit',
+		'99' => 'Holding'
+	);
+
+	// define tax type
+	public static $InvoiceTaxType = array(
+		'1' => 'Tax Exclusive',
+		'2' => 'Tax Inclusive',
+		'0' => 'No Tax'
+	);
+	const INVOICE_TAX_TYPE_EXCLUSIVE = 1;
+	const INVOICE_TAX_TYPE_INCLUSIVE = 2;
+	const INVOICE_TAX_TYPE_NOTAX = 0;
+
+	const Tax_Rate_Output = 'OUTPUT';
+	const QS_PREFIX = "QS";
+
+
+	// from xero
+	// refer to : https://developer.xero.com/documentation/api/types/#title23
+	public static $InvoiceTaxRate = array(
+		'OUTPUT' => 'GST on Income',
+		'INPUT' => 'GST on Expenses',
+		'CAPEXINPUT' => 'GST on Capital',
+		'EXEMPTEXPORT' => 'GST Free Exports',
+		'EXEMPTEXPENSES' => 'GST Free Expenses',
+		'EXEMPTCAPITAL' => 'GST Free Capital',
+		'EXEMPTOUTPUT' => 'GST Free Income',
+		'INPUTTAXED' => 'Input Taxed',
+		'BASEXCLUDED' => 'BAS Excluded',
+		'GSTONCAPIMPORTS' => 'GST on Capital Imports',
+		'GSTONIMPORTS' => 'GST on Imports',
+	);
+
+	public static $InvoiceCostTaxRate = array(
+		'INPUT' => 'GST on Expenses',
+		//'CAPEXINPUT' => 'GST on Capital',
+		//'EXEMPTEXPORT' => 'GST Free Exports',
+		'EXEMPTEXPENSES' => 'GST Free Expenses',
+		//'EXEMPTCAPITAL' => 'GST Free Capital',
+	//	'INPUTTAXED' => 'Input Taxed',
+	//	'BASEXCLUDED' => 'BAS Excluded',
+		//'GSTONCAPIMPORTS' => 'GST on Capital Imports',
+		//'GSTONIMPORTS' => 'GST on Imports',
+	);
+
+	public static $InvoiceCostTaxRateSimple = array(
+		'on'=>'INPUT',
+		'free'=>'EXEMPTEXPENSES',
+	);
+
+	public static $InvoiceRevenueTaxRate = array(
+		'OUTPUT' => 'GST on Income',
+		// 'EXEMPTEXPORT' => 'GST Free Exports',
+		'EXEMPTOUTPUT' => 'GST Free Income',
+		// 'BASEXCLUDED' => 'BAS Excluded',
+	);
+
+	// define edi invoice common items
+	public static $DefItems = array(
+		'1349.10.00' => 'Air Freight',
+		'1349.20.00' => 'Documentation Fee',
+		'1349.30.00' => 'Transportation Fee',
+		'1349.40.00' => 'Container & Pallet',
+		'1349.50.00' => 'Packing & Labels'
+	);
+
+	// define edi invoice common items
+	public static $storageInvoiceStates = array(
+		0 => 'Need Generate',
+		-1 => 'Don\'t need',
+		1 => 'Pending',
+		2 => 'Posted',
+		3 => 'Overdue',
+		6 => 'Paid with Partly Credit',
+		7 => 'Partially Paid',
+		8 => 'Fully Credited',
+		9 => 'Paid',
+		10 => 'Cancelled',
+		11 => 'Paid Pending',
+		12 => 'Paid via Inbound',
+		13 => 'Inbound Storage UnPaid',
+	);
+
+	public $mdata = array();
+	
+	public $balance, $to_name, $suborg_name, $pay_type, $item_model, $item_fid;
+
+	public $nolog = false;
+	public $custom_log_note = '';
+	
+	/**
+	 * Returns the static model of the specified AR class.
+	 * @param string $className active record class name.
+	 * @return Invoice the static model class
+	 */
+	public static function model($className=__CLASS__)
+	{
+		return parent::model($className);
+	}
+	
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName()
+	{
+		return 'invoice';
+	}
+
+	// for TLA
+	public function getDbConnection(){
+		// create, then change eta to 2020-08-01
+		// if (!empty($this->id) && $this->id < 500000) return parent::getDbConnection();
+
+		// if(isset($this->consol_id) && isset($this->dpmt) && $this->consol_id > 0 && $this->dpmt == 10){
+		// 	$con = Consol::model()->findByPk($this->consol_id);
+		// 	if(empty($con)||strtotime($con->eta) >= strtotime('2020-08-01')) return self::getTlaConnection();
+		// }
+		// return parent::getDbConnection();
+		//2021-09-13 Gero 
+		//return isset($this->id) && $this->id >= 500000? self::getTlaConnection() : parent::getDbConnection();
+		//2022-06-17 gero
+		return self::getTlaConnection();
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('to_id, type, date, due, dpt_id', 'required', 'on'=>'create'),
+			array('no, dpmt, ref, due, posted, currency, sent, dpt_id, total, gst, bflag,status, meta', 'safe'),
+			array('type, status, currency, bflag', 'numerical', 'integerOnly'=>true),
+			array('no', 'length', 'max'=>50),
+			// The following rule is used by search().
+			// Please remove those attributes that should not be searched.
+			array('type, currency,pid, to_id, no, ref, date, status, sent,no_include_status, to_name,consol_awb, gst,cg_order_id, dpt_id, idpmt, tem_model, bflag,item_fid, meta, pay_type,sync_xero,toids,invtypes, model_no, model_awb,suborg_name, is_paypal', 'safe', 'on'=>'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+			'cust' => array(self::BELONGS_TO, 'Org', 'to_id'),
+			'lines' => array(self::HAS_MANY, 'InvLine', 'inv_id', 'order'=>'lines.id ASC'),
+			'lines2' => array(self::HAS_MANY, 'InvLine', 'inv_id', 'order' => 'lines2.fid ASC'),
+			'payments' => array(self::HAS_MANY, 'PayInv', 'inv_id'),
+			'branch' => array(self::BELONGS_TO, 'Org', 'dpt_id'),
+			'consol' => array(self::BELONGS_TO,'Consol','consol_id'),
+			'shipment' => array(self::BELONGS_TO,'Shipment','pid'),
+			'job' => array(self::BELONGS_TO, 'Job', 'job_id'),
+			'subcust' => array(self::BELONGS_TO, 'Org', 'JSON_VALUE(meta, "$.suborg")'),
+			'credit_note' => array(self::HAS_MANY, 'CreditNoteFromInvoice', 'invoice_id'),
+		);
+	}
+
+	public function getCreditNote()
+	{
+		$nos = [];
+		foreach ($this->credit_note as $i => $crn) {
+			$nos[] = @$crn->payment->no;
+		}
+
+		return implode("\n", $nos);
+	}
+	public function isInvoiceClosed()
+	{
+		return ((int)$this->bflag) & self::INVOICE_FLAG_CLOSED;
+	}
+		
+	public static function genNewInvoiceNo($oldNo)
+	{
+		if (preg_match("/-(\d*)$/i", $oldNo, $match)) {
+			return substr($oldNo, 0, -(strlen($match[1])+1)).'-'.($match[1]+1);
+		} else {
+			return $oldNo."-1";
+		}
+	}
+		 
+	public static function checkNewInvoiceNo($oldNo)
+	{
+		if (preg_match("/(.*)-1$/i", $oldNo, $match)) {
+			return $match[1];
+		} elseif (preg_match("/(.*)-([2-9])$/i", $oldNo, $match)) {
+			return $match[1] . '-' . ($match[2] - 1);
+		}
+		return '';
+	}
+
+	/**
+	 * close last months invoices
+	 */
+	public static function closeLastMonthInvoices()
+	{
+		$lastMonthLastDate= date('Y-m-d', strtotime("last day of -1 month"));
+		$sql = 'Update invoice set bflag = bflag | ' . Invoice::INVOICE_FLAG_CLOSED .' WHERE bflag & '. Invoice::INVOICE_FLAG_CLOSED . ' = 0 AND posted <= "' .$lastMonthLastDate .'"';
+		$command = Yii::app()->db->createCommand($sql);
+		$rowCount = $command->execute();
+		return $rowCount;
+	}
+
+	public function subOrgName($short = 0){
+		if(empty($this->mdata['suborg'])) return '';
+		$subo = Org::model()->findByPk($this->mdata['suborg']);
+		if(empty($subo)) return '';
+		return $short > 0 ? $subo->shortName($short) : $subo->name;
+	}
+
+	/**
+	 * close all invoices which are old from now
+	 */
+	public static function closeInvoicesFromNow()
+	{
+		$lastMonthLastDate= date('Y-m-d');
+		$sql = 'Update invoice set bflag = bflag | ' . Invoice::INVOICE_FLAG_CLOSED .' WHERE bflag & '. Invoice::INVOICE_FLAG_CLOSED . ' = 0 AND posted <= "' .$lastMonthLastDate .'"';
+		$command = Yii::app()->db->createCommand($sql);
+		$rowCount = $command->execute();
+		return $rowCount;
+	}
+
+	/**
+	 * close current invoice avoiding modified again
+	 * @throws CDbException
+	 */
+	public function closeInvoice($update = true)
+	{
+		$this->bflag = ((int)$this->bflag) | self::INVOICE_FLAG_CLOSED;
+		if($update) $this->update('bflag');
+	}
+
+
+	/**
+	 * get occurring invoice amount based on month last date
+	 * @param $monthLastDate
+	 * @return int
+	 */
+	public static function getOccurringAmountByMonth($monthLastDate)
+	{
+		// based on month last date get first date
+		$monthFirstDate = date('Y-m-01', strtotime($monthLastDate));
+		$sql = 'SELECT SUM(total) AS t FROM invoice WHERE status in (2,3,7,9)' ;
+		$sql .= ' AND dpt_id = '. Org::PCAE_DEPARTMENT_SYDNEY ;
+		$sql .= " AND posted >= '" . $monthFirstDate . "' AND posted <= '" . $monthLastDate . "'";
+		$c = Yii::app()->db->createCommand($sql);
+		return $c->queryScalar();
+	}
+
+	/**
+	 * @param $fromDate
+	 * @param $endDate
+	 * @return mixed
+	 */
+	public static function getOccurringAmountByDateSpan($fromDate, $endDate)
+	{
+		$sql = 'SELECT SUM(total) AS t FROM invoice WHERE status in (2,3,7,9)' ;
+		$sql .= ' AND dpt_id = '. Org::PCAE_DEPARTMENT_SYDNEY ;
+		$sql .= " AND posted > '" . $fromDate . "' AND posted <= '" . $endDate . "'";
+		$c = Yii::app()->db->createCommand($sql);
+		return $c->queryScalar();
+	}
+
+	/**
+	 * @param $fromDate
+	 * @param $endDate
+	 * @return mixed
+	 */
+	public static function getOccurringAmountByDateSpanByOrg($fromDate, $endDate, $orgId)
+	{
+		$sql = 'SELECT SUM(total) AS t FROM invoice WHERE status in (2,3,7,9)' ;
+		$sql .= ' AND dpt_id = '. Org::PCAE_DEPARTMENT_SYDNEY ;
+		$sql .= " AND posted > '" . $fromDate . "' AND posted <= '" . $endDate . "'";
+		$sql .= " AND to_id = " . $orgId;
+		$c = Yii::app()->db->createCommand($sql);
+		return $c->queryScalar();
+	}
+
+
+	/**
+	 * get total occurred amount end of specified month
+	 * @param $monthLastDate
+	 * @return mixed
+	 */
+	public static function getAmountByMonth($monthLastDate)
+	{
+		// based on month last date get first date
+		$sql = 'SELECT SUM(total) AS t FROM invoice WHERE  status in (2,3,7,9)';
+		$sql .= ' AND dpt_id = '. Org::PCAE_DEPARTMENT_SYDNEY ;
+		$sql .= " AND posted <= '" . $monthLastDate . "'";
+		$c = Yii::app()->db->createCommand($sql);
+		return $c->queryScalar();
+	}
+
+	public function ifPaypal()
+	{
+		if (($this->bflag & Invoice::INVOICE_FLAG_PAYPAL) == 0) {
+			return 'No';
+		} else {
+			return 'Yes';
+		}
+	}
+
+	public function getType()
+	{
+		return Yii::t(strtolower(__CLASS__), self::$types[$this->type]);
+	}
+
+	public function getCurrency()
+	{
+		return Yii::t(strtolower(__CLASS__), self::$currencies[$this->currency]);
+	}
+	public static function getCurrencyId($cur)
+	{
+		foreach (self::$currencies as $id => $currency) {
+			if (strtoupper($cur) == $currency) {
+				return $id;
+			}
+		}
+		return -1; // not found
+	}
+
+	public function getPayType()
+	{
+		return empty($this->mdata['paytype'])? '' : Yii::t(strtolower(__CLASS__), Payment::$types[$this->mdata['paytype']]);
+	}
+
+	public function isFullyPaid()
+	{
+		return $this->status == self::INVOICE_STATUS_PAID;
+	}
+
+	public function getDpmt()
+	{
+		if (isset(self::$dpmts[$this->dpmt])) {
+			return Yii::t(strtolower(__CLASS__), self::$dpmts[$this->dpmt]);
+		} else {
+			return 0;
+		}
+	}
+	
+	public function getStatus()
+	{
+		if (isset(self::$states[$this->status])) {
+			return Yii::t(strtolower(__CLASS__), self::$states[$this->status]);
+		} else {
+			return '';
+		}
+	}
+		
+	public function getMdata($k)
+	{
+		return isset($this->mdata[$k])? $this->mdata[$k] : '';
+	}
+	
+	public function getBillto()
+	{
+		return empty($this->cust)? '' : $this->cust->shortName();
+	}
+
+	public function getBranch()
+	{
+		return empty($this->dpt_id)? '' : $this->branch->shortName(1);
+	}
+	
+	public function setAttributes($values, $safeOnly=true)
+	{
+		if (isset($values['mdata'])) {
+			$this->mdata = $values['mdata'];
+			unset($values['mdata']);
+		}
+		parent::setAttributes($values, $safeOnly);
+	}
+	
+	public static function calcDue($date, $term)
+	{
+		if (preg_match('/(\d+) days/i', $term, $m)) {
+			return date('Y-m-d', strtotime($date.' +'.$m[1].' day'));
+		} else {
+			return date('Y-m-d', strtotime($date.' +2 day'));
+		}
+	}
+	
+	protected function beforeSave()
+	{
+		if (empty($this->status)) {
+			$this->status = 1;
+		}
+		if (empty($this->posted)) {
+			$this->posted = date('Y-m-d');
+		}
+		if (empty($this->date) || $this->date == '0000-00-00') {
+			$this->date = date('Y-m-d');
+		}
+		if (empty($this->due) || $this->due == '0000-00-00') {
+			$this->due = date('Y-m-d');
+		}
+		if(empty($this->dpt_id)) $this->dpt_id = 106; //default to sydney branch
+		if ($this->gst == 0 &&  !empty($this->lines)) {
+			$gst = 0;
+			foreach ($this->lines as $il) {
+				$gst += $il->gst * $il->qty;
+			}
+			$this->gst = $gst;
+		}
+
+		if(!empty($this->cust->extra['currency_2nd']) && $this->currency == 1){
+			$exr = Currency::rbaExrate(self::$currencies[$this->cust->extra['currency_2nd']]);
+			if($exr !== false){
+				$this->mdata['exrate'] = $exr[1];
+				$this->mdata['exrate_date'] = $exr[2];
+				$this->mdata['currency_2nd'] = $exr[0];
+			}
+		}
+
+		//sub org
+		if($this->to_id > 0){
+			$org = Org::model()->findByPk($this->to_id);
+			if(!empty($org)){
+				if($org->by > 1){
+					$this->to_id = $org->by;
+					$this->mdata['suborg'] = $org->id;
+					$this->mdata['name'] = $org->owner->name;
+					$this->mdata['address'] = $org->owner->getAddress();
+				}else{
+					if(empty($this->mdata['name'])) $this->mdata['name'] = $org->name;
+					if(empty($this->mdata['address'])) $this->mdata['address'] = $org->getAddress();
+				}
+			}
+		}
+
+		// 2020-05-25 import invoice display suborg
+		if ($this->type == Invoice::INVOICE_TYPE_DIRECT_MAWB && !empty($this->mdata['suborg'])) {
+			$suborg = Org::model()->findByPk($this->mdata['suborg']);
+			$this->mdata['name'] = $suborg->name;
+			$this->mdata['address'] = $suborg->getAddress();
+		}
+
+		if (!empty($this->mdata)) {
+			$this->meta = json_encode($this->mdata);
+		}
+
+		if ($this->type != Invoice::INVOICE_TYPE_INBOUNDBOOKING) {
+			if (Yii::app()->name != 'PEP' && (strtotime($this->date) < strtotime(date('Y-m-01', strtotime('-1 month'))) || (date('j') > 15 && strtotime($this->date) < strtotime(date('Y-m-01')))) && $this->isNewRecord && Yii::app()->user->grp != 0) {
+				$this->addError('date', 'No back date invoice after 5th');
+				return false;
+			}
+		}
+		
+
+		// if ($this->isNewRecord && in_array($this->type, [50])) {
+		// 	$dpmts = User::model()->getDeparts();
+		// 	if (empty($dpmts)) {
+		// 		$this->addError('dpmt', 'Please contact IT to set department for you');
+		// 		return false;
+		// 	} else {
+		// 		foreach ($dpmts as $dpmt => $v) {
+		// 			$this->dpmt = $dpmt;
+		// 			break;
+		// 		}
+		// 	}
+		// }
+
+		if (empty($this->currency)) {
+			$this->currency = 1;
+		}
+
+		return true;
+	}
+
+	public function isRevert(){
+		if($this->status != 8) return false;
+
+		foreach ($this->payments as $p) {
+			if (isset($p->payment) && $p->payment->type == 5 && $p->payment->bank == 90) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 *  in case invoice has been frozen, we need to call this function to create credit note for the invoice
+	 *  return payment list
+	 */
+	public function createCreditForMe()
+	{
+		$oldPayments = $this->payments;
+
+		$amount = $this->total;
+		$payment = new Payment();
+		$payment->org_id = $this->to_id;
+		$payment->amount = $amount;
+		$payment->ata = 0;
+
+		// please don't change this reference format
+		// otherwise for consol related invoice showing logic will get the problem
+		$payment->ref = 'Revert Invoice : ' . $this->no;
+
+		$payment->date = date('Y-m-d');
+		$payment->type = Payment::PAYMENT_TYPE_CREDIT_NOTE; // default credit note
+		$payment->bank = 90; // credit note
+		$payment->currency = $this->currency; // relate to invoice's currency
+		$payment->status = Payment::PAYMENT_STATUS_POSTED; // post status
+		$payment->save();
+
+		// allocate the payment to the invoice
+		$payInv = new PayInv();
+		$payInv->pay_id = $payment->id;
+		$payInv->inv_id = $this->id;
+		$payInv->amount = $amount;
+		$payInv->save();
+
+		// in case invoice is pending
+		// when change to paid , we need change post date as well
+		if ($this->status == self::INVOICE_STATUS_PENDING) {
+			$this->posted = date('Y-m-d');
+		}
+		$this->status = self::INVOICE_STATUS_SYSTEM_CREDIT;
+		$this->update('status', 'posted');
+
+		// sync with xero , if there are payments we should delete payment with invoice in xero
+		// ... TODO
+
+		return $oldPayments;
+	}
+
+	public function applyPayments($payments)
+	{
+		$leftTotal = $this->total;
+		if (!empty($payments)) {
+			foreach ($payments as $payline) {
+				if ($leftTotal - $payline->amount >= 0) { // new invoice is equal to old one
+					$payline->inv_id = $this->id;
+					$payline->update('inv_id');
+				} else {
+					// new invoice amount is less than old one
+					if ($leftTotal > 0) {
+						$payline->amount = $leftTotal;
+						$payline->payment->ata += ($payline->amount - $leftTotal);
+						$payline->inv_id = $this->id;
+						$payline->update(['amount','inv_id']);
+						$payline->payment->update('ata');
+					} else {
+						$payline->payment->ata += $payline->amount;
+						$payline->payment->update('ata');
+						$payline->delete();
+					}
+				}
+				$leftTotal -= $payline->amount;
+			}
+			$this->checkPaid();
+			$this->save();
+		}
+
+		// invoice in xero has been reconciled
+		// if ($this->sync_xero == 0) {
+		// 	$no = explode('-', $this->no)[0];
+		// 	$xero_inv = $xero->get('Accounting\Invoice', ['Type' => 'ACCREC', 'InvoiceNumber' => $no]);
+		// 	if (!empty($xero_inv[0]['Total'])) {
+		// 		$total = $xero_inv[0]['Total'];
+		// 		if ($total > $leftTotal) {
+		// 			// credit note
+		// 		} else if ($total < $leftTotal) {
+		// 			// invoice
+		// 		}
+		// 	}
+		// }
+	}
+
+	public function revoke()
+	{
+		$this->status = 10;
+		foreach ($this->lines as $l) {
+			if ($l->hasPosted()) {
+				continue;
+			}
+			if ($l->model == 'Manifest') {
+				$m = $l->mm();
+				$m->bwf = $m->bwf & (~ 1);
+				$m->save();
+			}
+		}
+		$this->save();
+		if ($this->sync_xero != 0) {
+			$this->delete2xero();
+		}
+	}
+
+	public function checkPaid()
+	{
+		if ($this->total == 0) {
+			return;
+		}
+		$paid = $this->paid();
+		$credit= $this->getCredit();
+		$realPaid= $this->realPaid();
+		//var_dump($paid);
+		if ($paid >= $this->total || abs($paid - $this->total) < 0.01) {
+			if ($credit<=0) {
+				$this->status = self::INVOICE_STATUS_PAID;
+			} elseif ($realPaid>0) {
+				$this->status = self::INVOICE_STATUS_PAID_PARTLY_CREDIT;
+			} else {
+				$this->status = self::INVOICE_STATUS_FULLY_CREDITED;
+			}
+		} elseif ($paid > 0) {
+			$this->status = self::INVOICE_STATUS_PARTIALLY_PAID;
+		} else if ($this->status != self::INVOICE_STATUS_PENDING) {
+			$this->status = strtotime($this->due) < time()? self::INVOICE_STATUS_OVERDUE : self::INVOICE_STATUS_POSTED;
+		}
+	}
+	
+	public function getTotal()
+	{
+		if ($this->id > 500000) {
+			[$app_name, Yii::app()->name] = [Yii::app()->name, 'TLA'];
+			$this->lines = InvLine::model()->findAll('inv_id = :inv_id', [':inv_id' => $this->id]);
+			Yii::app()->name = $app_name;
+		}
+		
+		// for invoice line , line amount including gst already
+		$t = 0;
+		$gst = 0;
+		foreach ($this->lines as $l) {
+			if($l->qty==0)
+			{
+				$l->qty =1;
+				$l->update(["qty"]);
+			}
+			$t += $l->amount * $l->qty;
+			$gst += $l->gst * $l->qty;
+		}
+
+		if ($this->type == 70) {
+			$subt = 0;
+			$gstsubt = 0;
+			foreach ($this->lines as $l) {
+				$subt += ($l->amount - $l->gst) * $l->qty;
+				if ($l->gst > 0) {
+					$gstsubt += ($l->amount - $l->gst) * $l->qty;
+				}
+			}
+			$gst = number_format(round($gstsubt * 10) / 100, 2, '.', '');
+			$t = $subt + $gst;
+		}
+
+		$this->total = number_format(round($t * 1000) / 1000, 2, '.', '');
+		$this->gst = number_format($gst, 2, '.', '');
+		return $this->total;
+	}
+
+	/**
+	 * @param $rs
+	 * @return int
+	 */
+	public function getTotalByInvoices($rs)
+	{
+		$t = 0;
+		foreach ($rs as $r) {
+			$t += $r->total;
+		}
+		return $t;
+	}
+
+	/**
+	 * get invoice paid amount based on specified date
+	 * @param $endDate
+	 */
+	public function getPaidAmountByDate($endDate)
+	{
+		$amt = 0;
+		foreach ($this->payments as $p) {
+			if (in_array($p->payment->status,Payment::$postedStatus)) {
+				// in order to support old data, we need to take care NULL transaction date
+				if (empty($p->transaction_date) || $p->transaction_date <= $endDate) {
+					$amt += $p->amount;
+					// $amt += $p->amount * (!empty($p->payment->mdata['rate']) ? $p->payment->mdata['rate'] : 1);
+				}
+			}
+		}
+		return round($amt * 1000)/1000;
+	}
+
+	public function paid($pending = false)
+	{
+		$amt = 0;
+		foreach ($this->payments as $p) {
+			if (in_array($p->payment->status,Payment::$postedStatus)) {
+				$amt += $p->amount;
+				/*if ($this->currency == array_search('AUD', Invoice::$currencies)) {
+					$amt += $p->amount / (!empty($p->payment->mdata['rate']) ? $p->payment->mdata['rate'] : 1);
+				} else {
+					$amt += $p->amount * (!empty($p->payment->mdata['rate']) ? $p->payment->mdata['rate'] : 1);
+				}*/
+			}
+		}
+		return round($amt * 1000)/1000;
+	}
+
+	public function paidBefore($date)
+	{
+		$amt = 0;
+		foreach ($this->payments as $p) {
+			// if (strtotime($p->payment->date) <= strtotime($date) && $p->payment->status == 6) {
+			if (strtotime($p->transaction_date) <= strtotime($date) && in_array($p->payment->status,[Payment::PAYMENT_STATUS_POSTED,Payment::PAYMENT_STATUS_PARTIALLY_USED,Payment::PAYMENT_STATUS_USED])) {
+				$amt += $p->amount;
+				// if ($this->currency == array_search('AUD', Invoice::$currencies)) {
+				//     $amt += $p->amount / (!empty($p->payment->mdata['rate']) ? $p->payment->mdata['rate'] : 1);
+				// } else {
+				//     $amt += $p->amount * (!empty($p->payment->mdata['rate']) ? $p->payment->mdata['rate'] : 1);
+				// }
+			}
+		}
+		return round($amt * 1000)/1000;
+	}
+
+	public function realPaid()
+	{
+		$amt=0;
+		foreach ($this->payments as $p) {
+			if (isset($p->payment)&&($p->payment->type==5)) {//this is credit;
+				continue;
+			}
+			if (isset($p->payment)&&$p->payment->status==6) {
+				$amt += $p->amount;
+				// if ($this->currency == array_search('AUD', Invoice::$currencies)) {
+				//     $amt += $p->amount / (!empty($p->payment->mdata['rate']) ? $p->payment->mdata['rate'] : 1);
+				// } else {
+				//     $amt += $p->amount * (!empty($p->payment->mdata['rate']) ? $p->payment->mdata['rate'] : 1);
+				// }
+			}
+		}
+		return round($amt * 1000)/1000;
+	}
+
+	public function getCredit()
+	{
+		$amt=0;
+		foreach ($this->payments as $p) {
+			// if (isset($p->payment)&&($p->payment->type==5)&&($p->payment->status==6)&&empty($p->payment->mdata['consol'])) {
+			if (isset($p->payment)&&($p->payment->type==5)&&($p->payment->status==6)) {
+				$amt += $p->amount;
+				//this is credit;
+				// if ($this->currency == array_search('AUD', Invoice::$currencies)) {
+				//     $amt += $p->amount / (!empty($p->payment->mdata['rate']) ? $p->payment->mdata['rate'] : 1);
+				// } else {
+				//     $amt += $p->amount * (!empty($p->payment->mdata['rate']) ? $p->payment->mdata['rate'] : 1);
+				// }
+			}
+		}
+		return round($amt * 1000)/1000;
+	}
+
+	public function getCreditByConsol()
+	{
+		$amt = 0;
+		foreach ($this->payments as $p) {
+			if (isset($p->payment) && ($p->payment->type == 5) && ($p->payment->status == 6) && empty($p->payment->mdata['consol'])) {
+				$amt += $p->amount;
+			}
+		}
+		return round($amt * 1000) / 1000;
+	}
+
+	public function getCreditBefore($date)
+	{
+		$amt = 0;
+		foreach ($this->payments as $p) {
+			if (isset($p->payment) && ($p->payment->type == 5) && ($p->payment->status == 6) && strtotime($p->transaction_date) <= strtotime($date)) {
+				$amt += $p->amount;
+			}
+		}
+		return round($amt * 1000) / 1000;
+	}
+	
+	public function getBalance($currency = null, $rate = null)
+	{
+		if (!empty($currency) && $this->currency != $currency) {
+			if (!empty($rate)) {
+				if ($this->currency == array_search('AUD', Invoice::$currencies)) {
+					return sprintf('%.02f', ($this->total - $this->paid()) * $rate);
+				} elseif ($this->currency != array_search('AUD', Invoice::$currencies)) {
+					return sprintf('%.02f', ($this->total - $this->paid()) / $rate);
+				}
+			} elseif (!empty($currency) && $this->currency == array_search('USD', Invoice::$currencies) && $currency == array_search('AUD', Invoice::$currencies)) {
+				$currency = Currency::model()->find('valid = 1 AND type = 0 AND date >= :date', array(':date' => $this->date));
+				Yii::log($currency, 'error');
+				return sprintf('%.02f', ($this->total - $this->paid()) / $currency);
+			}
+		}
+		return sprintf('%.02f', $this->total - $this->paid());
+	}
+
+	// public function getBalance($currency = null){
+	// 	if ($this->currency == array_search('USD', Invoice::$currencies) && (empty($currency) || $currency == array_search('AUD', Invoice::$currencies))) {
+	// 		$currency = Currency::model()->find('valid = 1 AND type=0 AND date >= :date', array(':date' => $this->date));
+	// 		$currency = !empty($currency) ? $currency->currency : 1;
+	// 		return sprintf('%.02f', ($this->total - $this->paid()) / $currency);
+	// 	} else {
+	// 		return sprintf('%.02f', $this->total - $this->paid());
+	// 	}
+	// }
+
+	public function getBalanceBefore($date, $currency = null, $rate = null)
+	{
+		if (!empty($currency) && $this->currency != $currency) {
+			if (!empty($rate)) {
+				return sprintf('%.02f', ($this->total - $this->paidBefore($date)) / $rate);
+			} elseif ($this->currency == array_search('USD', Invoice::$currencies) && $currency == array_search('AUD', Invoice::$currencies)) {
+				$currency = Currency::model()->find('valid = 1 AND type = 0 AND date >= :date', array(':date' => $this->date));
+				return sprintf('%.02f', ($this->total - $this->paidBefore($date)) / $currency);
+			}
+		}
+		return sprintf('%.02f', $this->total - $this->paidBefore($date));
+	}
+
+	// for 7 day allocate
+	public function getBalanceBefore2($date, $currency = null, $rate = null)
+	{
+		if (!empty($currency) && $this->currency != $currency) {
+			if (!empty($rate)) {
+				return sprintf('%.02f', ($this->total - $this->paidBefore2($date)) / $rate);
+			} elseif ($this->currency == array_search('USD', Invoice::$currencies) && $currency == array_search('AUD', Invoice::$currencies)) {
+				$currency = Currency::model()->find('valid = 1 AND type = 0 AND date >= :date', array(':date' => $this->date));
+				return sprintf('%.02f', ($this->total - $this->paidBefore2($date)) / $currency);
+			}
+		}
+		return sprintf('%.02f', $this->total - $this->paidBefore2($date));
+	}
+
+	public function paidBefore2($date)
+	{
+		$amt = 0;
+		foreach ($this->payments as $p) {
+			if (strtotime($p->transaction_date) <= strtotime($date . ' + 7 day') && strtotime($p->payment->date) <= strtotime($date) && $p->payment->status == 6) {
+				$amt += $p->amount;
+			}
+		}
+		return round($amt * 1000)/1000;
+	}
+
+	// public function getBalanceBefore($date, $currency = null) {
+	// 	if ($this->currency == array_search('USD', Invoice::$currencies) && (empty($currency) || $currency == array_search('AUD', Invoice::$currencies))) {
+	// 		$currency = Currency::model()->find('valid = 1 AND type=0 AND date >= :date', array(':date' => $this->date));
+	// 		$currency = !empty($currency) ? $currency->currency : 1;
+	// 		return sprintf('%.02f', ($this->total - $this->paidBefore($date)) / $currency);
+	// 	} else {
+	// 		return sprintf('%.02f', $this->total - $this->paidBefore($date));
+	// 	}
+	// }
+
+	public function mayReissue()
+	{
+		return false;
+		$mr = true;
+		foreach ($this->lines as $l) {
+			if ($l->hasPosted()) {
+				$mr = false;
+				break;
+			}
+		}
+		return $mr;
+	}
+	
+	public function getGST()
+	{
+		return $this->gst;
+	}
+
+	public function totWeight()
+	{
+		if (!in_array($this->type, [10,20])) {
+			return 'N/A';
+		}
+		$w = 0;
+		foreach ($this->lines as $l) {
+			if (empty($l->fid)) {
+				continue;
+			}
+			$m = $l->mm();
+			$w += $m->totWeight();
+		}
+		return $w;
+	}
+
+	public static function createExInv($aid, $bd, $rs, $reuse = false)
+	{
+		if (empty($rs[0])) {
+			return;
+		}
+		$owner = $rs[0]->owner;
+				
+		if ($owner->type == 65) {
+			$aid = $owner->by;
+			$owner = clone $owner->owner;
+		}
+		
+		if (empty($owner) || empty($owner->getAddress())) {
+			$inv = new Invoice;
+			$inv->addError('id', 'Billing party missing or missing address');
+			return $inv;
+		}
+
+		if ($reuse) {
+			$inv= Invoice::model()->find('type = 20 AND to_id = :aid AND status = 10 AND date > DATE_SUB(:d, INTERVAL 10 DAY) AND date < DATE_ADD(:d, INTERVAL 10 DAY)', [':aid' => $aid, ':d' => $bd]);
+		}
+		if (empty($inv)) {
+			$inv= new Invoice;
+		}
+		$inv->type = 20;
+		$inv->dpmt = Invoice::DPMT_EXPORT;
+		$inv->currency = 1;
+		$inv->to_id = $aid;
+		$inv->status = 2;
+		$inv->date = $bd;
+		$inv->mdata['name'] = $owner->name;
+		$inv->mdata['address'] = $owner->getAddress();
+		$inv->mdata['payterm'] = empty($owner->extra['payterm'])? 'COD' : $owner->extra['payterm'].' days';
+		$inv->mdata['paytype'] = empty($owner->extra['paytype'])? '' : $owner->extra['paytype'];
+		$inv->due = $inv->date;//Invoice::calcDue($inv->date, $inv->mdata['payterm']);
+		$inv->total = 0;
+		$inv->save();
+		$inv->afterFind();
+
+		if ($reuse) {
+			foreach ($inv->lines as $l) {
+				$l->delete();
+			}
+		}
+		$tot = 0;
+		foreach ($rs as $r) {
+			$items = array();
+			$stot = 0;
+			foreach ($r->lines as $l) {
+				$p = $l->mm();
+				if (in_array($p->status, [12, 100, 104])) {
+					continue;
+				}
+				$rate = $p->getAgentRate();
+				$weight = $p->chargeWeight();
+				$typ = $p->goodsType();
+				/*if($p->status == 102){
+					$rate[2] == 0;
+					$items[] = array($p->hbn, $p->cnor->name, $weight, $p->getStatus(), '', '', '', 0);
+				}else{*/
+				$duty = $rate[0] == 'EC'? round($p->calTariff() / 4.75 * 1000) / 1000 : 0;
+				$items[] = array($p->hbn, $p->cnor->name, $weight, $p->cnee->state, $typ, $rate[0], $rate[1]->perkg, $rate[2], $duty);
+				$stot += $rate[2] + $duty;
+				//}
+			}
+			if (empty($items)) {
+				continue;
+			}
+
+			$il = new InvLine;
+			$il->inv_id = $inv->id;
+			$il->amount = sprintf('%0.2f', $stot);
+			$il->mdata['items'] = $items;
+			$il->mdata['rlno'] = $r->ref;
+			$il->model = 'Manifest';
+			$il->fid = $r->id;
+			if ($il->save()) {
+				$tot += $stot;
+				$r->bwf = $r->bwf | 1;
+				$r->save();
+			} else {
+				Yii::log(json_encode($il->getErrors()), 'error');
+			}
+		}
+		$inv->dpt_id = $r->dpt_id;
+		$inv->total = $tot;
+		$inv->save();
+		return $inv;
+	}
+
+	public function primaryKey()
+	{
+		return 'id';
+	}
+
+	public function afterFind()
+	{
+		if (!empty($this->meta)) {
+			$this->mdata = json_decode($this->meta, true);
+		}
+		if ($this->status == 2 && strtotime($this->due) < strtotime(date('Y-m0d'))) {
+			$this->status = 3;
+		}
+		if (empty($this->no)) {
+			if ($this->type == self::INVOICE_TYPE_OTHERS && $this->dpmt == self::DPMT_COURIER_SERVICE) {
+				$this->no = 'KP'.$this->id;
+			}elseif (!empty($this->mdata['prefix'])) {
+				$this->no = $this->mdata['prefix'].$this->id;
+			} else {
+				$this->no = strtoupper(substr($this->getType(), 0, 2)).$this->id;
+			}
+			if (!$this->isNewRecord) {
+				$this->saveAttributes(['no']);
+			}
+		}
+
+		if ($this->id > 500000) {
+			[$app_name, Yii::app()->name] = [Yii::app()->name, 'TLA'];
+			// $this->lines = InvLine::model()->findAll(['condition' => 'inv_id = :inv_id', 'params' => [':inv_id' => $this->id], 'order' => 'id ASC']);
+			// $this->payments = PayInv::model()->findAll('inv_id = :inv_id', [':inv_id' => $this->id]);
+			Yii::app()->name = $app_name;
+		} else {
+			[$app_name, Yii::app()->name] = [Yii::app()->name, 'HVLV APP'];
+			// $this->lines = InvLine::model()->findAll(['condition' => 'inv_id = :inv_id', 'params' => [':inv_id' => $this->id], 'order' => 'id ASC']);
+			// $this->payments = PayInv::model()->findAll('inv_id = :inv_id', [':inv_id' => $this->id]);
+			Yii::app()->name = $app_name;
+		}
+
+		parent::afterFind();
+	}
+	
+	public function afterSave()
+	{
+		if (!$this->nolog && !empty($this)) {
+			$extra = empty($this->custom_log_note)? array() : array('note' => $this->custom_log_note);
+			$opname = 'Cron Or API';
+			if (isset(Yii::app()->user)) {
+				$opname = Yii::app()->user->name;
+			}
+			if ($this->isNewRecord) {
+				Log::add($this, Log::LOG_TYPE_CREATE, array_merge(['notes' => $opname . ' create'], $extra));
+			} else {
+				Log::add($this, Log::LOG_TYPE_UPDATE, array_merge(['notes' => $opname . ' update status is :' .$this->getStatus()], $extra));
+			}
+		}
+ 		
+ 		//check ddu paid, ddp already payment confirmed
+		if(!$this->isNewRecord && in_array($this->type, [41, 45]) && (!empty($this->shipment) && (($this->shipment->bwf & ImParcel::CUSTOM_DDU) > 0))) {
+			$paid = self::model()->count('pid = :pid AND type IN (41, 45) AND status IN (6, 8, 9)', [':pid' => $this->pid]);
+			$partially_paid = self::model()->count('pid = :pid AND type IN (41, 45) AND status IN (7)', [':pid' => $this->pid]);
+			$all = self::model()->count('pid = :pid AND type IN (41, 45) AND status NOT IN (10,12)', [':pid' => $this->pid]);
+			if (($paid == $all)&&$paid>0) {
+				$sp= ShipmentProcess::model()->find('pid=:pid', [':pid'=>$this->pid]);
+				if(!empty($sp) && $sp->status < ShipmentProcess::CONFIRM_PAYMENT){
+					$sp->changeStatus(ShipmentProcess::CONFIRM_PAYMENT);
+					ShipmentProcess::sendOpNotice($sp->shipment);
+				}
+			} else if ($partially_paid > 0) {
+				$sp= ShipmentProcess::model()->find('pid=:pid', [':pid'=>$this->pid]);
+				if(!empty($sp) && $sp->status < ShipmentProcess::PAYMENT_RECEIVED){
+					$sp->changeStatus(ShipmentProcess::PAYMENT_RECEIVED);
+					ShipmentProcess::sendOpNotice($sp->shipment);
+				}
+			}
+		}
+
+		/*if (!empty($this)) {
+			// push invoice details to p & l ledger table
+			$this->syncWithPlLedger();
+		}*/
+	}
+
+	/**
+	 * once invoice changed or new created
+	 * sync all details with P & L ledger table
+	 */
+	private function syncWithPlLedger()
+	{
+		switch ($this->type) {
+			case self::INVOICE_TYPE_IMPORT:
+				$this->syncWithPlLedgerForImport();
+				break;
+
+			case self::INVOICE_TYPE_DIRECT_MAWB:
+				$this->syncWithPlLedgerForImportDmawb();
+				break;
+
+			case self::INVOICE_TYPE_OTHERS:
+				if ($this->dpmt == self::DPMT_IMPORT) {
+					$this->syncWithPlLedgerForImportOthers();
+				}
+				break;
+
+			case self::INVOICE_TYPE_EDI_INVOICE:
+				$this->syncWithPlLedgerForEdiInvoice();
+				break;
+
+			case self::INVOICE_TYPE_EXPORT:
+				$this->syncWithPlLedgerForExport();
+				break;
+
+			default:
+				break;
+		}
+	}
+
+	// sync export invoice data with P & L ledger data center
+	private function syncWithPlLedgerForExport()
+	{
+		return;
+		foreach ($this->lines as $line) {
+			foreach ($line->mdata['items'] as $si => $sp) {
+				$ref = $sp[0];
+				// try to find ExParcel
+				$parcel = ExParcel::model()->find('hbn = :ref OR ref = :ref OR cref = :ref', [':ref' => $ref]);
+				if (!empty($parcel)) {
+					$d = [
+						'gl' => 18,
+						'fid' => $parcel->id,
+						'model' => 'ExParcel',
+						'dpt_id' => $this->dpt_id,
+						'lid' => $line->id,
+						'org_id' => $this->to_id,
+						'dpmt' => Invoice::DPMT_EXPORT,
+						'grp1' => $this->consol_id,
+						'date' => $this->date,
+						'amt' => $sp[7]+(empty($sp[8])? 0 : $sp[8]),
+						'gst' => 0,
+					];
+					//PlLedger::add($d, true, ['org_id', 'date', 'grp1', 'grp2']);
+				}
+			}
+		}
+	}
+
+	// sync import invoice data with P & L ledger data center
+	private function syncWithPlLedgerForImport()
+	{
+		$pl = null;
+		foreach ($this->lines as $line) {
+			foreach ($line->mdata['items'] as $si => $sp) {
+				$ref = $sp[0];
+				$amt = isset($sp[5]) ? $sp[5] : 0;
+				// try to find ImParcel
+				$parcel = ImParcel::model()->find('hbn = :ref OR ref = :ref OR cref = :ref', [':ref' => $ref]);
+
+				if (!empty($parcel)) {
+					$d = [
+						'gl' => 1,
+						'fid' => $parcel->id,
+						'model' => 'ImParcel',
+						'dpt_id' => $this->dpt_id,
+						'lid' => $line->id,
+						'org_id' => $this->to_id,
+						'dpmt' => Invoice::DPMT_IMPORT,
+						'grp1' => $this->consol_id,
+						'date' => $this->date,
+						'amt' => $amt,
+						'gst' => 0,
+					];
+				//$pl = PlLedger::add($d, true, ['org_id', 'date', 'grp1', 'grp2']);
+				} else {
+					// in case for not found maybe two cases:
+					// item is for chargeable weight  or really no found
+					// we still need to considerate the cost
+					// we just add to previous pl ledger object
+					if (!empty($pl)) {
+						$pl->amt += $amt;
+						$pl->update('amt');
+					}
+				}
+			}
+		}
+	}
+
+	/**
+	 *
+	 */
+	private function syncWithPlLedgerForImportDmawb()
+	{
+		foreach ($this->lines as $line) {
+			$d = [
+					'gl' => 1,
+					'fid' => $line->id,
+					'model' => $line->model,
+					'dpt_id' => $this->dpt_id,
+					'lid' => $line->id,
+					'org_id' => $this->to_id,
+					'dpmt' => Invoice::DPMT_IMPORT,
+					'grp1' => $this->consol_id,
+					'date' => $this->date,
+					'amt' => $line->amount - $line->gst,
+					'gst' => $line->gst,
+				];
+			//PlLedger::add($d, true, ['org_id', 'date', 'grp1', 'grp2']);
+		}
+	}
+
+	/**
+	 *
+	 */
+	private function syncWithPlLedgerForImportOthers()
+	{
+		foreach ($this->lines as $line) {
+			$d = [
+					'gl' => 1,
+					'fid' => $line->id,
+					'model' => 'InvLine',
+					'dpt_id' => $this->dpt_id,
+					'lid' => $line->id,
+					'org_id' => $this->to_id,
+					'dpmt' => Invoice::DPMT_IMPORT,
+					'grp1' => 'ImOther',
+					'date' => $this->date,
+					'amt' => $line->amount * $line->qty,
+					'gst' => $line->gst * $line->qty,
+				];
+			//PlLedger::add($d, true, ['org_id', 'date', 'grp1', 'grp2']);
+		}
+	}
+
+	private function syncWithPlLedgerForEdiInvoice()
+	{
+		foreach ($this->lines as $line) {
+
+			// try to get glcode index
+			$chargeItem = ChargeItemType::model()->find('code = :code', [':code' => $line->ccode]);
+			$chargeCodeIndex = 0;
+			if (!empty($chargeItem)) {
+				$chargecode = Chargecode::model()->find('status = 1 AND code = :code', [':code' => $chargeItem->charge_code]);
+				if (!empty($chargecode)) {
+					$chargeCodeIndex = $chargecode->id;
+				}
+			}
+
+			$job = EdiJob::model()->findByPk($this->job_id);
+			$d = [
+					'gl' => $chargeCodeIndex,
+					'fid' => $line->fid,
+					'model' => 'JobLine',
+					'dpt_id' => $this->dpt_id,
+					'lid' => $line->id,
+					'org_id' => $this->to_id,
+					'dpmt' => !empty($job) ? $job->dpmt : Invoice::DPMT_AIRSEA,
+					'grp1' => $this->job_id,
+					'date' => $this->date,
+					'amt' => ($line->amount - $line->gst) * $line->qty,
+					'gst' => $line->gst * $line->qty,
+				];
+			//PlLedger::add($d, true, ['org_id', 'date', 'grp1', 'grp2']);
+		}
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		$al = array(
+			'type' => 'Type',
+			'no' => 'Invoice No',
+			'ref' => 'Ref No',
+			'to_id' => 'Customer',
+			'to_name' => 'Client',
+			'suborg_name' => 'Sub A/C',
+			'dpt_id' => 'Branch',
+			'dpmt' => 'Department',
+			'date' => 'Date',
+			'sent' => 'Sent',
+			'posted' => 'Post Date',
+			'pay_type' => 'Pay Type',
+			'due' => 'Due Date',
+			'total' => 'Total',
+			'balance'=>'Balance',
+			'gst' => 'GST',
+			'bflag' => 'BFlag',
+			'status' => 'Status',
+		);
+		foreach ($al as $k=>$l) {
+			$al[$k] = Yii::t(strtolower(__CLASS__), $l);
+		}
+		return $al;
+	}
+
+	public function statementTotal($ignoreEdi = false)
+	{
+		if ($ignoreEdi) {
+			$rs = self::model()->findAll('status IN (2,3,7) AND to_id = :tid AND type != 50', [':tid' => $this->to_id]);
+		} else {
+			$rs = self::model()->findAll('status IN (2,3,7) AND to_id = :tid', [':tid' => $this->to_id]);
+		}
+
+		$t = 0;
+		foreach ($rs as $r) {
+			$t += $r->getBalance();
+		}
+
+		return $t;
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 * @return CActiveDataProvider the data provider that can return the models based on the search/filter conditions.
+	 */
+	public function search($pgn=true, $ps=30, $odr='t.id DESC', $ec=false)
+	{
+		// Warning: Please modify the following code to remove attributes that
+		// should not be searched.
+
+		$criteria=new CDbCriteria;
+
+		if ($this->type == 70) {
+			$criteria->addCondition('t.type in (65,70,75)');
+		} else {
+			$criteria->compare('t.type', $this->type);
+		}
+		if(preg_match('/,/i',$this->no))
+		{
+			$noarr = explode(",",$this->no);
+			foreach($noarr as $key =>$value)
+			{
+				$noarr[$key] = trim($value);
+			}
+			$criteria->compare('t.no', $noarr);	
+		}else
+		{
+			$criteria->compare('t.no', $this->no, true);
+		}
+		$criteria->compare('t.ref', $this->ref, true);
+		$criteria->compare('to_id', $this->to_id);
+		$criteria->compare('t.dpmt', $this->dpmt);
+		$criteria->compare('t.date', $this->date, true);
+		$criteria->compare('t.due', $this->due, true);
+		$criteria->compare('posted', $this->posted, true);
+		$criteria->compare('currency', $this->currency);
+		$criteria->compare('sent', $this->sent);
+		$criteria->compare('consol_id', $this->consol_id);
+		$criteria->compare('t.pid', $this->pid);
+		$criteria->compare('cg_order_id', $this->cg_order_id);
+		$criteria->compare('total', $this->total, true);
+		$criteria->compare('t.gst', $this->gst, true);
+		$criteria->compare('t.bflag', $this->bflag);
+		$criteria->compare('t.sync_xero', $this->sync_xero);
+		if (empty($this->status)) {
+			$criteria->addCondition('t.status != 10');
+		} else {
+			$criteria->compare('t.status', $this->status);
+		}
+		$criteria->compare('t.dpt_id', $this->dpt_id);
+
+		if (!empty($this->is_paypal)) {
+			if ($this->is_paypal == 1) {
+				$criteria->addCondition('t.bflag & 4 == 0');
+			} else if ($this->is_paypal == 2) {
+				$criteria->addCondition('t.bflag & 4 > 0');
+			}
+		}
+
+		$with = array();
+		if (!empty($this->to_name)) {
+			$with[] = 'cust';
+			//$criteria->compare('cust.name',$this->to_name,true);
+			$criteria->addCondition('cust.name LIKE :cust_name OR t.to_id = :to_id');
+			$criteria->params[':cust_name'] = '%'.$this->to_name.'%';
+			$criteria->params[':to_id'] = $this->to_name;
+		}
+
+		if(!empty($this->suborg_name)){
+			$criteria->addCondition('JSON_VALUE(t.meta, "$.suborg") = :suborg_id OR JSON_VALUE(t.meta, "$.suborg") IN (SELECT id FROM org WHERE name LIKE :suborg_name)');
+			$criteria->params[':suborg_name'] = '%'.$this->suborg_name.'%';
+			$criteria->params[':suborg_id'] = $this->suborg_name;
+		}
+
+		if (!empty($this->item_model)) {
+			$with[] = 'lines';
+			$criteria->compare('lines.model', $this->item_model);
+		}
+
+		if (!empty($this->no_include_status)) {
+			$criteria->addNotInCondition('t.status', $this->no_include_status);
+		}
+
+		if (!empty($this->pay_type)) {
+			$criteria->compare('t.meta', 's:7:"paytype";s:1:"'.$this->pay_type.'";', true);
+		}
+		if (!empty($this->consol_awb)) {
+			$with[]='consol';
+			$criteria->compare('consol.awb', $this->consol_awb, true);
+		}
+		if (!empty($this->model_awb)) {
+			$with[] = 'consol';
+			$with[] = 'job';
+			$criteria->addCondition('consol.awb = :awb OR job.awb = :awb');
+			$criteria->params[':awb'] = $this->model_awb;
+		}
+		if (!empty($this->model_no)) {
+			$with[] = 'consol';
+			$with[] = 'job';
+			$with[]='shipment';
+			$criteria->addCondition('consol.no like :no OR job.no like :no OR shipment.ref like :no');
+			$criteria->params[':no'] = '%' . $this->model_no . '%';
+		}
+		if (!empty($this->item_fid)) {
+			$with[] = 'lines';
+			$criteria->compare('lines.fid', $this->item_fid);
+		}
+
+		if (!empty($with)) {
+			$criteria->with = array_unique($with);
+			$criteria->together = true;
+		}
+		if (!empty($this->toids)) {
+			$criteria->addInCondition('t.to_id', $this->toids);
+		}
+		if (!empty($this->invtypes)) {
+			$criteria->addInCondition('t.type', $this->invtypes);
+		}
+
+		if ($ec) {
+			$criteria->mergeWith($ec);
+		}
+
+		return new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+			'sort'=>array(
+				'defaultOrder'=> $odr,
+			),
+			'pagination'=>$pgn? array(
+				'pageSize'=>$ps,
+			) : false,
+		));
+	}
+
+	public function statementSearch($pgn=true, $ps=30, $odr='t.date ASC', $ec=false)
+	{
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('date', $this->date, true);
+		$criteria->compare('t.dpt_id', $this->dpt_id);
+		$criteria->addCondition('t.dpt_id > 0 AND t.to_id > 0 AND t.status IN (3,7) AND total > 0');
+
+		$with = array();
+		if (!empty($this->to_name)) {
+			$with[] = 'cust';
+			$criteria->compare('cust.name', $this->to_name, true);
+		}
+
+		if (!empty($with)) {
+			$criteria->with = array_unique($with);
+			$criteria->together = true;
+		}
+
+		if ($ec) {
+			$criteria->mergeWith($ec);
+		}
+		$criteria->group='t.to_id';
+
+		return new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+			'sort'=>array(
+				'defaultOrder'=> $odr,
+			),
+			'pagination'=>$pgn? array(
+				'pageSize'=>$ps,
+			) : false,
+		));
+	}
+
+	public static function getCurID($s)
+	{
+		foreach (self::$currencies as $id => $c) {
+			if ($c == $s) {
+				return $id;
+			}
+		}
+		return false;
+	}
+	public static function getTrackingInfoForInvoice(&$data)
+	{
+		$def = array(
+				'name' => ['Region'],
+				'value'=>['']
+			);
+
+		$def['value'][0] = $data['region'];
+		return $def;
+	}
+
+
+	public static function getTrackingInfo(&$data, $dept = '')
+	{
+		$def = array(
+				'name' => ['Region','Segment'],
+				'value' => ['Sydney','','']
+			);
+
+		$def['value'][0] = $data['region'];
+		if (!empty($dept)) {
+			$def['value'][1] = $dept;
+		}
+
+		// in xero we don't set category tracking again , so comment the below
+		/*
+			// map invoice to related category
+			// invoice number format : IM***, EX****, OT****
+			$invNumberPrefix = strtoupper(substr($data->no,0,2));
+			switch ( $invNumberPrefix ) {
+				case 'IM':
+					$def['value'][1] = 'Import Parcel';
+					break;
+				case 'EX':
+					$def['value'][1] = 'Export Parcel';
+					break;
+				case 'OT':
+				default:
+					$def['value'][1] = 'Others';
+					break;
+			}
+		*/
+		return $def;
+	}
+
+	public static function getBillingXeroXmlData($data)
+	{
+
+			// invoice type in Xero
+		// ACCPAY	A bill – commonly known as a Accounts Payable or supplier invoice
+		// ACCREC	A sales invoice – commonly known as an Accounts Receivable or customer invoice
+		$invoice = new XeInvoice('ACCPAY');
+
+		$invoice->status = 'AUTHORISED'; // approved , waiting for pay
+		$invoice->invoiceNumber = $data->no;
+
+		$curIndex = $data->currency;
+		$curCode = 'AUD';
+		if (isset(Invoice::$currencies[$curIndex])) {
+			$curCode = Invoice::$currencies[$curIndex];
+		}
+		$invoice->currencyCode = $curCode;
+
+		$contact = new XeContact();
+		$contact->name = $data->orgName;
+		$contact->accountNumber = 'PORG-' . $data->orgId;
+		$invoice->contact = $contact;
+		$invoice->date = $data->date;
+		$invoice->dueDate = $data->due;
+
+		// Exclusive - exclude GST
+		// Inclusive - include GST
+		// NoTax
+		switch ($data->gstType) {
+				case 1:
+					$invoice->lineAmountTypes = 'Exclusive';
+					break;
+				case 2:
+					$invoice->lineAmountTypes = 'Inclusive';
+					break;
+				default:
+					$invoice->lineAmountTypes = 'NoTax';
+					break;
+			}
+
+		// get all items
+		foreach ($data->lines as $line) {
+			$itemData = array();
+			$itemData['quantity'] = $line['qty'];
+			$itemData['accountCode'] = $line['code'];
+			$itemData['description'] = $line['description'];
+			$itemData['unitAmount'] = $line['amount'];
+			$itemData['taxType'] = $line['taxType'];
+
+			$tracking = Invoice::getTrackingInfo($data, isset($line['dept']) ? $line['dept'] : '');
+			$itemData['trackingName'] = $tracking['name'];
+			$itemData['trackingValue'] = $tracking['value'];
+
+			$invoice->addLineItem($itemData);
+		}
+
+		return $invoice->getXmlData();
+	}
+
+	/**
+	 * get Xero xml data from single invoice object
+	 * @param $data
+	 * @return mixed
+	 */
+	public static function getXeroXmlData(&$data, $type = 'ACCREC')
+	{
+
+		// invoice type in Xero
+		// ACCPAY	A bill – commonly known as a Accounts Payable or supplier invoice
+		// ACCREC	A sales invoice – commonly known as an Accounts Receivable or customer invoice
+		$invoice = new XeInvoice($type);
+
+		$invoice->status = 'AUTHORISED'; // approved , waiting for pay
+		$invoice->invoiceNumber = $data->no;
+
+		$curIndex = $data->currency;
+		$curCode = 'AUD';
+		if (isset(Invoice::$currencies[$curIndex])) {
+			$curCode = Invoice::$currencies[$curIndex];
+		}
+		$invoice->currencyCode = $curCode;
+
+		$contact = new XeContact();
+		if (isset($data->cust)) {
+			$contact->name = $data->cust->name;
+			$contact->accountNumber = 'PORG-' . $data->cust->id;
+			$contact->contactNumber = $contact->accountNumber;
+		}
+		$invoice->contact = $contact;
+		$invoice->date = $data->date;
+		$invoice->dueDate = $data->due;
+
+		// Exclusive - exclude GST
+		// Inclusive - include GST
+		// NoTax
+		$hasGst =  ($data->gst > 0) ? true : false;
+		$invoice->lineAmountTypes = 'Exclusive';
+
+		// for xero tax rate . please refer to :
+		// https://developer.xero.com/documentation/api/types/#title23
+		$lineTaxRate = 'BASEXCLUDED';
+
+		// get related GL code
+		// default as import invoice
+		$invoiceAccountCode = AppHelper::getXeroSetting('import_invoice_glcode');
+		switch ($data->type) {
+			case 20: // Export
+			{
+				$invoiceAccountCode = AppHelper::getXeroSetting('export_invoice_glcode');
+				$invoice->lineAmountTypes = 'Inclusive';
+				$lineTaxRate = 'EXEMPTEXPORT';
+			} break;
+
+			case 50: // EDI invoice
+			{
+				$invoiceAccountCode = AppHelper::getXeroSetting('edi_invoice_glcode');
+				$invoice->lineAmountTypes = 'Exclusive';
+				$lineTaxRate = 'EXEMPTEXPORT';
+			} break;
+
+			case 10: // Import
+			case 40: // Others
+			{
+				if ($hasGst) {
+					$lineTaxRate = 'OUTPUT';
+				}
+			} break;
+
+			case 35: // storage
+			case 60: // WMS
+			{
+				// for storage invoice, always has GST
+				$lineTaxRate = 'OUTPUT';
+				if ($data->type == 60) {
+					$invoiceAccountCode = AppHelper::getXeroSetting('wms_invoice_glcode');
+				}
+			} break;
+
+		}
+
+
+		foreach ($data->lines as $line) {
+			if ($data->type == 40 || $data->type == 50) { // for others and edi
+				$itemData = array();
+				$itemData['quantity'] = $line->qty;
+				$itemData['accountCode'] = $invoiceAccountCode;
+				$itemData['description'] = '【' . $line->ccode . '】 ' . $line->det;
+				$itemData['unitAmount'] = $line->amount - $line->gst;
+				$tracking = Invoice::getTrackingInfo($data);
+				$itemData['trackingName'] = $tracking['name'];
+				$itemData['trackingValue'] = $tracking['value'];
+				if (($data->type == 50 || $data->type == 40) && !empty($line->tax)) { // for edi or others invoice , we have set the xero line tax rate in tax field
+					$itemData['taxType'] = $line->tax;
+				} else {
+					if ($line->gst <= 0) {
+						$lineTaxRate = 'EXEMPTOUTPUT';
+					}
+					$itemData['taxType'] = $lineTaxRate;
+				}
+				$invoice->addLineItem($itemData);
+			} elseif ($data->type == 60) { // wms storage invoice
+
+				// for wms invoice
+				$itemData = array();
+				$itemData['quantity'] = 1;
+				$itemData['accountCode'] = $invoiceAccountCode;
+				$itemData['description'] = $line->det;
+				$itemData['unitAmount'] =  round(($line->amount - $line->gst), 2);
+				$tracking = Invoice::getTrackingInfo($data);
+				$itemData['trackingName'] = $tracking['name'];
+				$itemData['trackingValue'] = $tracking['value'];
+				$itemData['taxType'] = $lineTaxRate;
+				$invoice->addLineItem($itemData);
+			} else {
+				if (isset($line->mdata['items'])) {
+
+					// for import and export we only push total amount
+					if ($data->type == self::INVOICE_TYPE_IMPORT || $data->type == self::INVOICE_TYPE_EXPORT) {
+						$itemData = array();
+						$itemData['quantity'] = 1;
+						$itemData['accountCode'] = $invoiceAccountCode;
+						$itemData['description'] = 'all items amount - ' . $line->fid;
+						$itemData['unitAmount'] = round($line->amount, 2);
+						$tracking = Invoice::getTrackingInfo($data);
+						$itemData['trackingName'] = $tracking['name'];
+						$itemData['trackingValue'] = $tracking['value'];
+						$itemData['taxType'] = $lineTaxRate;
+						$invoice->addLineItem($itemData);
+					} else {
+						foreach ($line->mdata['items'] as $item) {
+							// in item array($p->hbn, $p->getDesc(), $p->pkg, $p->weight, $p->cbm, $amt[0], $amt[1], $amt[2], $amt[3])
+							// we map quantity = 1 , amount = total
+							$itemData = array();
+							$itemData['quantity'] = 1;
+							$itemData['accountCode'] = $invoiceAccountCode;
+							if ($data->type == 30) { // for direct invoice
+								$itemData['description'] = '【' . $item[0] . '】 ' . $item[1];
+								$itemData['unitAmount'] = $item[2];
+							} elseif ($data->type == 20) { // export invoice
+								$duty = empty($item[8]) ? 0 : $item[8];
+								$amount = $item[7] + $duty;
+								$itemData['description'] = '【' . $item[0] . '】 ' . $item[1];
+								$itemData['unitAmount'] = $amount;
+							} elseif ($data->type == Invoice::INVOICE_TYPE_STORAGE_FEE) {
+
+								// for storage invoice
+								//$items[] = array($shipment->consol->awb,$shipment->hbn, $shipment->getDesc(), $shipment->pkg, $shipment->weight, $shipment->cbm, $rt[0], 0, 0, 0,$rt[1],$shipment->consol->eta,date('Y-m-d'));
+								$itemData['description'] = '【' . $item[1] . '】 ' . $item[2];
+								$itemData['unitAmount'] = $item[6];
+							} elseif ($data->type == Invoice::INVOICE_TYPE_RTS_RESEND_FEE) {
+
+							   // array($parcel->hbn,'Returned to Sender Reshipping Fee', $il->amount,$parcel->ref)
+								$itemData['description'] = '【' . $item[0] . '】 ' . $item[1];
+								$itemData['unitAmount'] = $item[2];
+							} elseif ($data->type == Invoice::INVOICE_TYPE_RTS_FEE) {
+
+								// array(  empty($parcel->cref) ? $parcel->hbn : $parcel->cref , $parcel->ref , date('Y-m-d') , 'Returned to Sender Receiving Fee', $il->amount
+								$itemData['description'] = '【' . $item[0] . '】 ' . $item[1];
+								$itemData['unitAmount'] = $item[4];
+							} else { // default for import invoice
+								$itemData['description'] = '【' . $item[0] . '】 ' . $item[1];
+								$itemData['unitAmount'] = $item[5];
+							}
+							$tracking = Invoice::getTrackingInfo($data);
+							$itemData['trackingName'] = $tracking['name'];
+							$itemData['trackingValue'] = $tracking['value'];
+							$itemData['taxType'] = $lineTaxRate;
+							$invoice->addLineItem($itemData);
+						}
+					}
+				}
+			}
+		}
+		if (count($invoice->lineItems) <= 0) {
+			return '';
+		}
+
+		return $invoice->getXmlData();
+	}
+
+	/**
+	 * sync and save local bill to xero
+	 * @param $data
+	 * {
+	 *   no -- invoice number unique id
+	 *   currency -- default 1 AUD
+	 *   orgName
+	 *   orgId
+	 *   date , due, gstType ( 1-Exclusive,2-Inclusive,others - NoTax)
+	 *   lines(qty,description,amount)
+	 * }
+	 */
+	public static function saveBill2Xero(&$data, $split = false)
+	{
+		// invoice type in Xero
+		// ACCPAY	A bill – commonly known as a Accounts Payable or supplier invoice
+		// ACCREC	A sales invoice – commonly known as an Accounts Receivable or customer invoice
+		$invoice = new XeInvoice('ACCPAY');
+
+		$invoice->status = 'AUTHORISED'; // approved , waiting for pay
+		$invoice->invoiceNumber = $data->no;
+
+		$curIndex = $data->currency;
+		$curCode = 'AUD';
+		if (isset(Billing::$currencies[$curIndex])) {
+			$curCode = Billing::$currencies[$curIndex];
+		}
+		$invoice->currencyCode = $curCode;
+
+		$contact = new XeContact();
+		$contact->name = $data->orgName;
+		$contact->accountNumber = 'PORG-' . $data->orgId;
+		$invoice->contact = $contact;
+		$invoice->date = $data->date;
+		$invoice->dueDate = $data->due;
+
+		// Exclusive - exclude GST
+		// Inclusive - include GST
+		// NoTax
+		switch ($data->gstType) {
+			case 1:
+				$invoice->lineAmountTypes = 'Exclusive';
+				break;
+			case 2:
+				$invoice->lineAmountTypes = 'Inclusive';
+				break;
+			default:
+				$invoice->lineAmountTypes = 'NoTax';
+				break;
+		}
+
+		// get all items
+		if (!$split) {
+			$itemDatas = [];
+			foreach ($data->lines as $line) {
+				$seg_acc_gst = (isset($line['dept']) ? $line['dept'] : '') . ' - ' . $line['code'] . ' - ' . $line['taxType'];
+				if (empty($itemDatas[$seg_acc_gst])) {
+					$itemData = array();
+					$itemData['quantity'] = 1;
+					$itemData['accountCode'] = $line['code'];
+					$itemData['description'] = $line['description'];
+					$itemData['unitAmount'] = $line['qty'] * $line['amount'];
+
+					// fix tax type issue
+					// in case GST free in come we set set GST free expenses
+					if (empty($line['taxType'])) {
+						$itemData['taxType'] = 'EXEMPTEXPENSES';
+					} else {
+						$itemData['taxType'] = $line['taxType'];
+					}
+
+					$tracking = Invoice::getTrackingInfo($data, isset($line['dept']) ? $line['dept'] : '');
+					$itemData['trackingName'] = $tracking['name'];
+					$itemData['trackingValue'] = $tracking['value'];
+
+					$itemDatas[$seg_acc_gst] = $itemData;
+				} else {
+					$itemDatas[$seg_acc_gst]['unitAmount'] += $line['qty'] * $line['amount'];
+				}
+			}
+			foreach ($itemDatas as $itemData) {
+				$invoice->addLineItem($itemData);
+			}
+		} else {
+			foreach ($data->lines as $line) {
+				$itemData = array();
+				$itemData['quantity'] = $line['qty'];
+				$itemData['accountCode'] = $line['code'];
+				$itemData['description'] = $line['description'];
+				$itemData['unitAmount'] = $line['amount'];
+
+				// fix tax type issue
+				// in case GST free in come we set set GST free expenses
+				if (empty($line['taxType'])) {
+					$itemData['taxType'] = 'EXEMPTEXPENSES';
+				} else {
+					$itemData['taxType'] = $line['taxType'];
+				}
+
+				$tracking = Invoice::getTrackingInfo($data, isset($line['dept']) ? $line['dept'] : '');
+				$itemData['trackingName'] = $tracking['name'];
+				$itemData['trackingValue'] = $tracking['value'];
+				$invoice->addLineItem($itemData);
+			}
+		}
+
+		try {
+			$rt = $invoice->save();
+			if ($rt) {
+				// done successfully
+				// if (($invoice->hasValidationErrors || $invoice->statusAttributeString == 'ERROR') && sizeof($invoice->hasValidationErrors) != 2 && $invoice->hasValidationErrors[1]['Message'] != 'This document cannot be edited as it has a payment or credit note allocated to it.') {
+				if ($invoice->hasValidationErrors || $invoice->statusAttributeString == 'ERROR') {
+					if (!empty($invoice->ValidationErrors) && sizeof($invoice->ValidationErrors) == 1 && $invoice->ValidationErrors[0]->Message == 'This document cannot be edited as it has a payment or credit note allocated to it.') {
+						return true;
+					} else {
+						Yii::app()->xero->log('failed to save bill to xero for : ' . $data->no, Xero::LOG_LEVEL_ERR);
+					}
+				} else {
+					return true;
+				}
+			} else {
+				// log error message
+				Yii::app()->xero->log('failed to save bill to xero for : ' . $data->no, Xero::LOG_LEVEL_ERR);
+			}
+		} catch (Exception $mye) {
+			$msg = 'failed to save bill - ' . $mye->getMessage();
+			$msg .= PHP_EOL;
+			$msg .= 'Bill Data : ' . json_encode($invoice, JSON_PRETTY_PRINT);
+			Yii::app()->xero->log($msg, Xero::LOG_LEVEL_ERR);
+			throw $mye;
+		}
+
+		return false;
+	}
+
+	public static function saveBillCreditNote2Xero(&$data, $split = false)
+	{
+		$creditNote = new XeCreditNote();
+
+		$creditNote->type = 'ACCPAYCREDIT';
+		$creditNote->status = 'AUTHORISED';
+		$creditNote->creditNoteNumber = $data->no;
+
+		$curIndex = $data->currency;
+		$curCode = 'AUD';
+		if (isset(Invoice::$currencies[$curIndex])) {
+			$curCode = Invoice::$currencies[$curIndex];
+		}
+		$creditNote->currencyCode = $curCode;
+
+		$contact = new XeContact();
+		$contact->name = $data->orgName;
+		$contact->accountNumber = 'PORG-' . $data->orgId;
+		$creditNote->contact = $contact;
+		$creditNote->date = $data->date;
+
+		// Exclusive - exclude GST
+		// Inclusive - include GST
+		// NoTax
+		switch ($data->gstType) {
+			case 1:
+				$creditNote->lineAmountTypes = 'Exclusive';
+				break;
+			case 2:
+				$creditNote->lineAmountTypes = 'Inclusive';
+				break;
+			default:
+				$creditNote->lineAmountTypes = 'NoTax';
+				break;
+		}
+
+		if (!$split) {
+			$itemDatas = [];
+			foreach ($data->lines as $line) {
+				$seg_acc_gst = (isset($line['dept']) ? $line['dept'] : '') . ' - ' . $line['code'] . ' - ' . $line['taxType'];
+				if (empty($itemDatas[$seg_acc_gst])) {
+					$itemData = array();
+					$itemData['quantity'] = 1;
+					$itemData['accountCode'] = $line['code'];
+					$itemData['description'] = $line['description'];
+					$itemData['unitAmount'] = - $line['qty'] * $line['amount'];
+
+					// fix tax type issue
+					// in case GST free in come we set set GST free expenses
+					if (empty($line['taxType'])) {
+						$itemData['taxType'] = 'EXEMPTEXPENSES';
+					} else {
+						$itemData['taxType'] = $line['taxType'];
+					}
+
+					$tracking = Invoice::getTrackingInfo($data, isset($line['dept']) ? $line['dept'] : '');
+					$itemData['trackingName'] = $tracking['name'];
+					$itemData['trackingValue'] = $tracking['value'];
+
+					$itemDatas[$seg_acc_gst] = $itemData;
+				} else {
+					$itemDatas[$seg_acc_gst]['unitAmount'] -= $line['qty'] * $line['amount'];
+				}
+			}
+
+			foreach ($itemDatas as $itemData) {
+				$creditNote->addLineItem($itemData);
+			}
+		} else {
+			foreach ($data->lines as $line) {
+				$itemData = array();
+				$itemData['quantity'] = $line['qty'];
+				$itemData['accountCode'] = $line['code'];
+				$itemData['description'] = $line['description'];
+				$itemData['unitAmount'] = - $line['amount'];
+
+				// fix tax type issue
+				// in case GST free in come we set set GST free expenses
+				if (empty($line['taxType'])) {
+					$itemData['taxType'] = 'EXEMPTEXPENSES';
+				} else {
+					$itemData['taxType'] = $line['taxType'];
+				}
+
+				$tracking = Invoice::getTrackingInfo($data, isset($line['dept']) ? $line['dept'] : '');
+				$itemData['trackingName'] = $tracking['name'];
+				$itemData['trackingValue'] = $tracking['value'];
+
+				$creditNote->addLineItem($itemData);
+			}
+		}
+
+		try {
+			$rt = $creditNote->save();
+			if ($rt) {
+				// done successfully
+				if ($creditNote->hasValidationErrors || $creditNote->statusAttributeString == 'ERROR') {
+					Yii::app()->xero->log('failed to save bill to xero for : ' . $data->no, Xero::LOG_LEVEL_ERR);
+				} else {
+					return true;
+				}
+			} else {
+				// log error message
+				Yii::app()->xero->log('failed to save bill to xero for : ' . $data->no, Xero::LOG_LEVEL_ERR);
+			}
+		} catch (Exception $mye) {
+			$msg = 'failed to save bill - ' . $mye->getMessage();
+			$msg .= PHP_EOL;
+			$msg .= 'Bill Data : ' . json_encode($creditNote, JSON_PRETTY_PRINT);
+			Yii::app()->xero->log($msg, Xero::LOG_LEVEL_ERR);
+		}
+
+		return false;
+	}
+
+	public function notSystemFullyCredit()
+	{
+		foreach ($this->payments as $payment) {
+			// any payment is not system credit note and not deleted
+			if ($payment->payment->bank != Payment::PAYMENT_BANK_SYSTEM_CREDIT_NOTE && $payment->payment->status != Payment::PAYMENT_STATUS_DELETED) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	public function prepXeroNo()
+	{
+		$prev_inv = Invoice::model()->find('no LIKE :no AND status IN (1,2,3,6,7,8,9) AND id != :id', [':id' => $this->id, ':no' => explode('-', $this->no)[0] . '%']);
+		if (!empty($prev_inv)) {
+			// prev invoice is 1,2,3,6,7,9
+			if ($prev_inv->status != self::INVOICE_STATUS_FULLY_CREDITED) {
+				$no = $this->no;
+			// prev invoice is fully credited, but credit manually
+			} else if ($prev_inv->notSystemFullyCredit()) {
+				$no = $this->no;
+			// prev invoice is fully credited, and by system
+			} else {
+				$no = explode('-', $this->no)[0];
+			}
+		} else {
+			// no prev invoice or prev invoice is deleted
+			$no = explode('-', $this->no)[0];
+		}
+
+		return $no;
+	}
+
+	public function prepXdata()
+	{
+		$xdata = new stdClass;
+		$xdata->no = $this->prepXeroNo();
+		$xdata->currency = $this->currency;
+		$xdata->cust = $this->cust;
+		$xdata->date = $this->date;
+		$xdata->due = $this->due;
+		$xdata->gst = 1;
+		$xdata->dpt_id = $this->dpt_id;
+		$costs = [];
+
+		foreach ($this->lines as $line) {
+			// xero account
+			if ($this->dpmt == 10) {
+				$code = 83000;
+			} else if ($this->dpmt == 20) {
+				$code = 81000;
+			} else if ($this->dpmt == 30) {
+				$code = 82000;
+			} else if ($this->dpmt == 40) {
+				if ($this->type == 60) {
+					$code = 85000;
+				} else {
+					$code = 85050;
+				}
+			}else if ($this->dpmt == 50) {
+				$code = 84000;
+			}
+
+			if($line->gst>0)
+			{
+				if ($this->dpmt == 10) {
+					$code = 83001;
+				}else if ($this->dpmt == 40) {
+					if ($this->type == 60) {
+						$code = 85001;
+					} else {
+						$code = 85051;
+					}
+				}else if ($this->dpmt == 50) {
+					$code = 84001;
+				}
+			}
+
+			$myDpmt = $this->dpmt;
+			$region = $this->getMyRegion();
+			if(!empty($line->ccode))
+			{
+				$myCode = ChargeItemType::model()->find("code = :code",[":code"=>$line->ccode]);
+				if(!empty($myCode))
+				{
+					if(!empty($myCode->charge_code))
+					{
+						$code = $myCode->charge_code;
+					}
+					if(!empty($myCode->dpmt))
+					{
+						$myDpmt = $myCode->dpmt;
+					}
+				}
+			}
+			if (empty($costs[$line->tax . $code . $myDpmt])) {
+				$costs[$line->tax . $code . $myDpmt] = array(
+					'qty' => 1,
+					'det' => '',
+					'ccode' => $code,
+					'taxType' => $line->tax,
+					'taxAmount'=>0,
+					'dept' => BillingLine::$xero_segments[$myDpmt / 10],
+					'amount' => 0,
+					'region' =>$region,
+				);
+			}
+			$costs[$line->tax . $code . $myDpmt]['amount'] += ($line->amount - $line->gst) * ($line->qty == 0 ? 1 : $line->qty);
+			$costs[$line->tax . $code . $myDpmt]['taxAmount'] += $line->gst* ($line->qty == 0 ? 1 : $line->qty);
+		}
+		return [$xdata, $costs];
+	}
+
+	/**
+	 * sync the specified invoice to Xero system
+	 * @param $data
+	 */
+	// public function saveInvoice2xero()
+	// {
+	// 	if (yii::app()->name == 'TLA') return;
+
+	// 	[$xdata, $costs] = $this->prepXdata();
+
+	// 	if (!empty($costs) && $this->total > 0) {
+	// 		$xdata->lines = array_values($costs);
+
+	// 		// invoice type in Xero
+	// 		// ACCPAY	A bill – commonly known as a Accounts Payable or supplier invoice
+	// 		// ACCREC	A sales invoice – commonly known as an Accounts Receivable or customer invoice
+	// 		$invoice = new XeInvoice('ACCREC');
+
+	// 		$invoice->status = 'AUTHORISED'; // approved , waiting for pay
+
+	// 		$invoice->invoiceNumber = $xdata->no;
+
+	// 		$curIndex = $xdata->currency;
+	// 		$curCode = 'AUD';
+	// 		if (isset(Invoice::$currencies[$curIndex])) {
+	// 			$curCode = Invoice::$currencies[$curIndex];
+	// 		}
+	// 		$invoice->currencyCode = $curCode;
+
+	// 		$contact = new XeContact();
+	// 		$contact->name = $xdata->cust->name;
+	// 		$contact->accountNumber = 'PORG-' . $xdata->cust->id;
+	// 		$invoice->contact = $contact;
+	// 		$invoice->date = $xdata->date;
+	// 		$invoice->dueDate = $xdata->due;
+
+	// 		// Exclusive - exclude GST
+	// 		// Inclusive - include GST
+	// 		// NoTax
+	// 		if ($xdata->gst > 0) {
+	// 			$invoice->lineAmountTypes = 'Exclusive';
+	// 		} else {
+	// 			$invoice->lineAmountTypes = 'NoTax';
+	// 		}
+
+	// 		// get all items
+	// 		foreach ($xdata->lines as $line) {
+	// 			$itemData = array();
+	// 			$itemData['quantity'] = $line['qty'];
+	// 			$itemData['accountCode'] = $line['ccode'];
+	// 			$itemData['description'] = '【' . $line['ccode'] . '】 ' . $line['det'];
+	// 			$itemData['unitAmount'] = $line['amount'];
+	// 			$itemData['taxType'] = $line['taxType'];
+
+	// 			$tracking = Invoice::getTrackingInfo($xdata, isset($line['dept']) ? $line['dept'] : '');
+	// 			$itemData['trackingName'] = $tracking['name'];
+	// 			$itemData['trackingValue'] = $tracking['value'];
+
+	// 			$invoice->addLineItem($itemData);
+	// 		}
+
+	// 		try {
+	// 			$rt = $invoice->save();
+	// 			if ($rt && $invoice->statusAttributeString == 'OK') {
+	// 				// set sync to Xero successful flag
+	// 				$this->sync_xero = 1;
+	// 				$this->xero_id = $invoice->getId();
+	// 				$this->update('sync_xero', 'xero_id');
+	// 			} else {
+	// 				// log error message
+	// 				Yii::app()->xero->log('failed to save invoice to xero for : ' . $xdata->no, Xero::LOG_LEVEL_ERR);
+	// 			}
+	// 		} catch (Exception $mye) {
+	// 			$msg = 'failed to save invoice - ' . $mye->getMessage();
+	// 			$msg .= PHP_EOL;
+	// 			$msg .= 'Invoice Data : ' . json_encode($invoice, JSON_PRETTY_PRINT);
+	// 			Yii::app()->xero->log($msg, Xero::LOG_LEVEL_ERR);
+	// 		}
+	// 	}
+	// }
+
+	public function saveInvoice2xero()
+	{
+		[$xdata, $costs] = $this->prepXdata();
+
+		// if (yii::app()->name != 'TLA') {
+		// 	$xero = new XeroAPI('xero_token_pcaex');
+		// } else {
+		// 	$xero = new XeroAPI('xero_token_toplog');
+		// }
+		$xero = new XeroAPI('xero_token_toplog');
+
+		if (!empty($costs) && $this->total > 0) {
+			$xdata->lines = array_values($costs);
+
+			// invoice type in Xero
+			// ACCPAY	A bill – commonly known as a Accounts Payable or supplier invoice
+			// ACCREC	A sales invoice – commonly known as an Accounts Receivable or customer invoice
+			$invoice = $xero->new('Accounting\Invoice');
+			$invoice->setType('ACCREC');
+
+			$invoice->setStatus('AUTHORISED'); // approved , waiting for pay
+
+			$invoice->setInvoiceNumber($xdata->no);
+
+			$curIndex = $xdata->currency;
+			$curCode = 'AUD';
+			if (isset(Invoice::$currencies[$curIndex])) {
+				$curCode = Invoice::$currencies[$curIndex];
+			}
+			$invoice->setCurrencyCode($curCode);
+
+			$contact = $xero->new('Accounting\Contact');
+			if (!empty($xdata->cust->extra[$xero->key])) {
+				$contact->setGUID($xdata->cust->extra[$xero->key]);
+			} else {
+				$contact->setName($xdata->cust->name);
+				$contact->setAccountNumber('PORG-' . $xdata->cust->id);
+			}
+			$invoice->setContact($contact);
+			$invoice->setDate(new DateTime($xdata->date));
+			$invoice->setDueDate(new DateTime($xdata->due));
+
+			// Exclusive - exclude GST
+			// Inclusive - include GST
+			// NoTax
+			if ($xdata->gst > 0) {
+				$invoice->setLineAmountType('Exclusive');
+			} else {
+				$invoice->setLineAmountType('NoTax');
+			}
+
+			// get all items
+			foreach ($xdata->lines as $line) {
+				$itemData = $xero->new('Accounting\LineItem');
+				$itemData->setQuantity($line['qty']);
+				$itemData->setAccountCode($line['ccode']);
+				$itemData->setDescription('【' . $line['ccode'] . '】 ' . $line['det']);
+				$itemData->setUnitAmount($line['amount']);
+				$itemData->setTaxType($line['taxType']);
+				$itemData->setTaxAmount($line['taxAmount']);
+				$t = Invoice::getTrackingInfoForInvoice($line);
+				foreach ($t['name'] as $k => $name) {
+					$tracking = $xero->new('Accounting\TrackingCategory');
+					$tracking->setName($t['name'][$k]);
+					$tracking->setOption($t['value'][$k]);
+					$itemData->addTracking($tracking);
+				}
+				$invoice->addLineItem($itemData);
+			}
+
+			try {
+				$guid = Invoice::model()->find('no = :no AND xero_id != ""', [':no' => $xdata->no]);
+				if (!empty($guid)) {
+					$invoice->setGUID($guid->xero_id);
+				}
+
+				$rt = $invoice->save();
+				Yii::app()->xero->log(json_encode($rt->getElements()), Xero::LOG_LEVEL_TRACE);
+				if ($invoice->hasGUID()) {
+					// set sync to Xero successful flag
+					$this->sync_xero = 1;
+					$this->xero_id = $invoice->getGUID();
+					$this->update('sync_xero', 'xero_id');
+				} else {
+					// log error message
+					Yii::app()->xero->log('failed to save invoice to xero for : ' . $xdata->no, Xero::LOG_LEVEL_ERR);
+				}
+			} catch (Exception $mye) {
+				if (preg_match('/cannot be edited/i', $mye->getMessage())) {
+					$msg = 'cannot be edited invoice - ' . $mye->getMessage();
+					$msg .= PHP_EOL;
+					$this->sync_xero = 1;
+					$this->xero_id = $invoice->getGUID();
+					$this->update('sync_xero', 'xero_id');
+					$msg .= 'Invoice Data : ' . json_encode($invoice, JSON_PRETTY_PRINT);
+					Yii::app()->xero->log('cannot be edited invoice to xero for : ' . $msg, Xero::LOG_LEVEL_ERR);
+				} else {
+					$msg = 'failed to save invoice - ' . $mye->getMessage();
+					$msg .= PHP_EOL;
+					$msg .= 'Invoice Data : ' . json_encode($invoice, JSON_PRETTY_PRINT);
+					Yii::app()->xero->log($msg, Xero::LOG_LEVEL_ERR);
+				}
+			}
+		}
+	}
+
+	public function delete2xero()
+	{
+		if (yii::app()->name != 'TLA') {
+			$xero = new XeroAPI('xero_token_pcaex');
+		} else {
+			$xero = new XeroAPI('xero_token_toplog');
+		}
+		$no = explode('-', $this->no)[0];
+		if($this->type == self::INVOICE_TYPE_INBOUNDBOOKING)
+		{
+			$no = $this->no;
+		}
+		$results = $xero->get('Accounting\Invoice', ['Type' => 'ACCREC', 'InvoiceNumber' => $no]);
+		try {
+			if (!empty($results) && count($results) == 1) {
+				$xero->delete('Accounting\Invoice', $results[0]['InvoiceID']);
+			} else {
+				// log error message
+				Yii::app()->xero->log('failed to delete invoice to xero for : ' . $this->no, Xero::LOG_LEVEL_ERR);
+			}
+		} catch (Exception $mye) {
+			$msg = 'failed to delete invoice - ' . $mye->getMessage();
+			$msg .= PHP_EOL;
+			Yii::app()->xero->log($msg, Xero::LOG_LEVEL_ERR);
+		}
+	}
+
+	public function getModelNo()
+	{
+		if (!empty($this->consol)) {
+			return $this->consol->no;
+		}
+		if (!empty($this->job)) {
+			return $this->job->no;
+		}
+		return '';
+	}
+
+	public function getModelAWB()
+	{
+		if (!empty($this->consol)) {
+			return $this->consol->awb;
+		}
+		if (!empty($this->job)) {
+			return $this->job->awb;
+		}
+		return '';
+	}
+
+	public function getModelUrl()
+	{
+		if (!empty($this->consol) && $this->type == Invoice::INVOICE_TYPE_IMPORT) {
+			return '<a href="'.Yii::app()->createURL("imcoConsol/update", array("id" => $this->consol->id)).'" class="tab_link" title="'.$this->consol->no.'"">'.$this->consol->no.'</a>';
+		}
+		if (!empty($this->consol) && $this->type == Invoice::INVOICE_TYPE_DIRECT_MAWB) {
+			return '<a href="'.Yii::app()->createURL(get_class($this->consol) . "/update", array("id" => $this->consol->id)).'" class="tab_link" title="'.$this->consol->no.'"">'.$this->consol->no.'</a>';
+		}
+		if (!empty($this->consol) && $this->type == Invoice::INVOICE_TYPE_EXPORT) {
+			return '<a href="'.Yii::app()->createURL("excoConsol/update", array("id" => $this->consol->id)).'" class="tab_link" title="'.$this->consol->no.'">'.$this->consol->no.'</a>';
+		}
+		if (!empty($this->pid)&& in_array($this->type, array(Invoice::INVOICE_TYPE_CASUAL, Invoice::INVOICE_TYPE_DDU_STORAGE, Invoice::INVOICE_TYPE_SEA_STORAGE))) {
+			return '<a href="'.Yii::app()->createURL("imParcel/update", array("id" => $this->pid)).'" class="tab_link" title="'.$this->shipment->ref.'">'.$this->shipment->ref.'</a>';
+		}
+		if (!empty($this->job) && $this->type == Invoice::INVOICE_TYPE_EDI_INVOICE) {
+			return '<a href="'.Yii::app()->createURL("ediJob/update", array("id" => $this->job->id)).'" class="tab_link" title="'.$this->job->no.'">'.$this->job->no.'</a>';
+		}
+		if (!empty($this->consol) && in_array($this->type,[Invoice::INVOICE_TYPE_OTHERS,Invoice::INVOICE_TYPE_WEIGHT_DIFF])) {
+			return '<a href="'.Yii::app()->createURL(get_class($this->consol) . "/update", array("id" => $this->consol->id)).'" class="tab_link" title="'.$this->consol->no.'"">'.$this->consol->no.'</a>';
+		}
+		if (!empty($this->pid)) {
+			return '<a href="'.Yii::app()->createURL("imParcel/update", array("id" => $this->pid)).'" class="tab_link" title="'.@$this->shipment->ref.'">'.@$this->shipment->ref.'</a>';
+		}
+		if (!empty($this->consol)) {
+			return '<a href="'.Yii::app()->createURL("imcoConsol/update", array("id" => $this->consol->id)).'" class="tab_link" title="'.$this->consol->no.'"">'.$this->consol->no.'</a>';
+		}
+		return '';
+	}
+
+	public function getCustomBrokerAmount()
+	{
+		if ($this->type == Invoice::INVOICE_TYPE_CASUAL) {
+			return [$this->id, $this->total - $this->gst, $this->gst];
+		} else if ($this->type == Invoice::INVOICE_TYPE_DIRECT_MAWB) {
+			$subtotal = 0;
+			$gst = 0;
+			foreach ($this->lines as $line) {
+				if (empty($line->mdata['items'])) continue;
+				foreach ($line->mdata['items'] as $item) {
+					if (preg_match('/Customs Declaration|Customs Duties & Fees/i', $item[1])) {
+						$subtotal += $item[4];
+						$gst += $line->gst > 0 ? round($item[4] * 10) / 100 : 0;
+					}
+				}
+			}
+			return [$this->id, $subtotal, $gst];
+		} else if ($this->type == Invoice::INVOICE_TYPE_OTHERS) {
+			$subtotal = 0;
+			$gst = 0;
+			foreach ($this->lines as $line) {
+				if (preg_match('/CUSTOMS DUTY\/GST|PROCESSING FEE|Declaration|Customs Duties & Fee|Customs Clearance|DUTY|LINE CHARGE|LINES CHARGE|CLEARANCE/i', $line->ccode)) {
+					$subtotal += $line->amount * $line->qty;
+					$gst += $line->gst;
+				}
+			}
+			return [$this->id, $subtotal, $gst];
+		}
+	}
+
+	public function getCRuleInvoice()
+	{
+		return "";
+	}
+
+	public static function generateReconciliationWeightDiffInvoice($id,$parentId,$consolIds = null,$refs = null)
+	{
+		$res = null;
+		$consolArr = [];
+		$refArr = [];
+		if(empty($id))
+		{
+			$consolArr = explode(',', $consolIds);
+		}
+
+		if(empty($id))
+		{
+			$refArr = explode(',', $refs);
+		}
+		$recon = Reconciliation::model()->findByPk($parentId);
+
+		$lineModel = null;
+		if(in_array($recon->getType(),Reconciliation::$declareCourier))
+	    {
+			$lineModel = ReconciliationLineDeclare::model();
+		}else
+		{
+			$lineModel = ReconciliationLine::model();
+		}
+
+		if(!empty($id))
+		{
+			$res = $lineModel->findAll(' id = :id and parent_id = :parent_id ',["id"=>$id,"parent_id"=>$parentId]);
+		}else
+		{
+			$res = $lineModel->findAll('parent_id = :parent_id ',["parent_id"=>$parentId]);
+		}
+		
+		$allWeightDiffAmount =empty($recon->mdata['allWeightDiffAmount'])?0:$recon->mdata['allWeightDiffAmount'];
+		$weightDiffInvoice = empty($recon->mdata['weightDiffInvoice'])?[]:$recon->mdata['weightDiffInvoice'];
+		$recon->mdata['allWeightDiffAmount'] = $allWeightDiffAmount;
+		$recon->mdata['weightDiffInvoice'] = $weightDiffInvoice;
+		if(empty($id))
+		{
+			$recon->mdata['generateAllWeightDiff'] = 1;
+		}
+
+		$ccode=InvLine::WEIGHTCCODEAUTO;
+		$oldRecord = new Invoice();
+		$model = null;
+		$consolReArr = [];
+		$shipment = null;
+		foreach ($res as $key => $re) 
+		{
+			if ($re->parent->client_type == Reconciliation::TNT_CLIENT && !empty($re->mdata['tnt_type']) && $re->mdata['tnt_type'] != 'Shipment') continue;
+			if(empty($id))
+			{
+				if(in_array($re->consol_id,$consolArr))
+				{
+					$consolReArr[$re->consol_id][]=$re;//getArrReToConsol, so that it can be dealed with together
+				} 
+			}else
+			{
+				$consolReArr[$re->consol_id][]=$re;//getArrReToConsol, so that it can be dealed with together
+			}
+		}
+
+		$transaction=Yii::app()->db->beginTransaction();
+		try
+		{
+			foreach ($consolReArr as $key => $reArr) 
+			{
+
+				$model = new Invoice();
+				$shipment = ImParcel::model()->find(' ref = :ref ',[":ref"=>$reArr[0]->shipment_no]);
+				$dpt_id = $shipment->ddpt_id;
+				$dpmt = Invoice::INVOICE_TYPE_IMPORT;
+				$to_id = $shipment->agent_id;
+				if($to_id==Org::ORGID_COURIER_D2Z_SUB||$to_id==Org::ORGID_COURIER_D2Z)
+				{
+					$to_id = Org::ORGID_COURIER_D2Z_CUSTOMER;
+				}
+				$currency = Invoice::CURRENCY_AUD;
+				$consol = $shipment->consol;
+				if(empty($consol))
+				{
+					continue;
+				}
+				$consolId = $shipment->consol_id;
+				$awb = $consol->awb;
+				$model->mdata['pid'] = [];
+				foreach ($reArr as $key => $re) 
+				{
+					if(empty($id))
+					{
+						if(!in_array($re->shipment_no,$refArr))
+						{
+							continue;
+						}
+					}
+
+					$shipment = ImParcel::model()->find(' ref = :ref ',[":ref"=>$re->shipment_no]);
+					$oldRecord = Invoice::model()->find("meta like '%pid{$shipment->id}%' and meta like '%{$ccode}%' and (type = :type or type= :typeo) and status != :status1 and status != :status3",[":type"=>Invoice::	INVOICE_TYPE_WEIGHT_DIFF,":typeo"=>Invoice::	INVOICE_TYPE_OTHERS,":status1"=>Invoice::INVOICE_STATUS_CACELLED,":status3"=>Invoice::INVOICE_STATUS_FULLY_CREDITED]);
+					if($oldRecord!=null)
+					{
+						if(!empty($id))
+						{
+							throw new Exception('recordExist');//if it is single generate, return the invoice
+						}else
+						{
+							continue;
+						}
+					}
+					$cicc = $re->getCourierWeightInvoiceByChargeCode();
+					$ci = $re->getChargedInvoice();
+					$amount = $cicc-$ci;
+					$cwcc = $re->getCourierWeightByChargeCode();
+					$ocw = $re->ourChargeWeight();
+					if($amount<=0.02)
+					{
+						continue;
+					}
+					$amount = round($amount,2);
+	
+					if(empty($model->id))
+					{
+						$model->type = Invoice::INVOICE_TYPE_WEIGHT_DIFF;
+						$model->dpt_id = $dpt_id;
+						$model->dpmt = $dpmt;
+						$model->to_id = $to_id;
+						$model->currency = $currency;
+						$model->consol_id = $consolId;
+						$model->status = 1;
+						$model->date=date('Y-m-d');
+						$model->due=date('Y-m-d');
+						$model->save();
+					}
+	
+					$il = new InvLine;
+					$il->inv_id = $model->id;
+					$il->ccode = InvLine::WEIGHTCCODE;
+					$il->det = $shipment->ref.'/actual weight '.$cwcc.'kg, was '.$ocw.'kg/Correct invoice $'.$cicc.', was inv. $'.$ci;
+					$il->tax = 'EXEMPTOUTPUT';
+					$il->amount = $amount;
+					$gst = 0;
+					$il->amount += $gst;
+					$il->gst = $gst;
+					$il->qty = 1;
+					$il->fid = $consol->id;
+					$il->model = $consol->getType();
+					// linked invoice line with related console if needed
+					if (!empty($consol)) {
+						$il->fid = $consol->id;
+						$il->model = $consol->getType();
+					}
+					$il->save();
+					$model->mdata['pid'][] = 'pid'.$shipment->id;
+				}
+				
+				if(!empty($model->id))
+				{
+					$model->getTotal();
+					$model->mdata['awb'] = $awb;
+					$model->mdata['name'] = $model->cust->name;
+					$model->mdata['address'] = $model->cust->getAddress();
+					$model->mdata['payterm'] = empty($model->cust->extra['payterm']) ? 'COD' : $model->cust->extra['payterm'] . ' days';
+					$model->mdata['ccode'] = $ccode;
+					$model->update(["total","gst","meta"]);
+					$allWeightDiffAmount+=$model->total;
+					$weightDiffInvoice[]=['invoiceId'=>$model->id,'amount'=>$model->total];
+				}
+			}
+			$recon->mdata['allWeightDiffAmount'] = $allWeightDiffAmount;
+			$recon->mdata['weightDiffInvoice'] = $weightDiffInvoice;
+			$recon->save();
+			$transaction->commit();
+		}
+		catch(Exception $ex)
+		{
+			$transaction->rollback();
+			Log::log2file("ReconciliationWeightDiffGenerateError".$shipment->ref."=>".$ex->getMessage(), "weightDiff_err_log", "transaction");
+		}
+
+
+		if(!empty($oldRecord))
+		{
+			return $oldRecord;
+		}else
+		{
+			return $model;
+		}
+	}
+
+	public function exportExcelInvoice($dir = null, $download = true)
+	{
+			$xls = new oExcel;
+			$mfn = 'Invoice_detail_' . $this->no. '.xlsx';
+			if (!empty($dir)) 
+			{
+				$mfn = $dir.$mfn;
+			}
+			$i = 1;
+			if (!empty($this->mdata['awb'])) {
+				$xls->addRow($i++, ['MAWB', $this->mdata['awb'],'','Inv. No',$this->no]);
+			}
+			switch ($this->type) {
+				case 10:
+				case self::INVOICE_TYPE_PICKUPBOOKING:
+				case self::INVOICE_TYPE_WDT:
+					$xls->addRow($i++, ['HBN', 'Detail', 'Packages', 'Weight', 'CBM', 'Postcode', 'Amount']);
+					$xls->setFont('A' . ($i - 1) . ':I' . ($i - 1), ['bold' => true]);
+					$qty = 0;
+					$wei = 0;
+					$cbm = 0;
+					$tot = 0;
+					foreach ($this->lines as $il) {
+						if (empty($il->mdata['items'])) {
+							continue;
+						}
+						foreach ($il->mdata['items'] as $si => $r) {
+							if (preg_match('/LET\d{7}/i', $r[0])) {
+								$p = ImParcel::model()->find('ref=:ref', [':ref' => $r[0]]);
+								if (!empty($p)) {
+									$r[0] .= '(' . $p->hbn . ')';
+								}
+							}
+							$charge_wei = round(empty($r[9]) ? $r[3] : $r[9], 2);
+							$xls->addRow($i++, [$r[0], $r[1], $r[2], $charge_wei, $r[4], $r[6], $r[5]]);
+							$tot += $r[5];
+							$qty += $r[2];
+							$wei += $charge_wei;
+							$cbm += $r[4];
+						}
+					}
+
+					if ($this->gst > 0) {
+						$gst = round($this->gst, 2);
+						$xls->addRow($i, ['', 'Sub Total:', $qty, $wei, $cbm, '', $this->total]);
+						$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+						$i++;
+						$xls->addRow($i, ['', '', '', '', '', 'GST 10.00%:', $gst]);
+						$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+						$i++;
+						$xls->addRow($i, ['', 'Total:', $qty, $wei, $cbm, '', $this->total]);
+						$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+					} else {
+						$xls->addRow($i, ['', 'Total:', $qty, $wei, $cbm, '', $this->total]);
+						$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+					}
+					break;
+				case 20:
+					// $xls->addRow($i++, ['HBN', 'Shipper', 'Packages', 'Weight', 'Type', 'Rate', 'Amount']);
+					// $xls->setFont('A1:G1', ['bold' => true]);
+					// $qty = 0;
+					// $wei = 0;
+					// $cbm = 0;
+					// $tot = 0;
+					// foreach ($this->lines as $il) {
+					// 	if (empty($il->mdata['items'])) {
+					// 		continue;
+					// 	}
+					// 	foreach ($il->mdata['items'] as $si => $r) {
+					// 		$xls->addRow($i++, [$r[0], $r[1], 1, $r[2], $r[4] . '(' . $r[5] . ')', $r[6], $r[7]]);
+					// 		$tot += $r[7];
+					// 		$qty++;
+					// 		$wei += $r[2];
+					// 	}
+					// }
+					// $xls->addRow($i, ['', 'Total:', $qty, $wei, '', '', $this->total]);
+					// $xls->setFont('A' . $i . ':G' . $i, ['bold' => true]);
+					// break;
+					$xls->addRow($i++, ['HBN', 'Detail', 'Packages', 'Weight', 'CBM', 'Postcode', 'Amount']);
+						$xls->setFont('A' . ($i - 1) . ':I' . ($i - 1), ['bold' => true]);
+						$qty = 0;
+						$wei = 0;
+						$cbm = 0;
+						$tot = 0;
+						foreach ($this->lines as $il) {
+							if (empty($il->mdata['items'])) {
+								continue;
+							}
+							foreach ($il->mdata['items'] as $si => $r) {
+								if (preg_match('/LET\d{7}/i', $r[0])) {
+									$p = ImParcel::model()->find('ref=:ref', [':ref' => $r[0]]);
+									if (!empty($p)) {
+										$r[0] .= '(' . $p->hbn . ')';
+									}
+								}
+								$charge_wei = round(empty($r[9]) ? $r[3] : $r[9], 2);
+								$xls->addRow($i++, [$r[0], $r[1], $r[2], $charge_wei, $r[4], $r[6], $r[5]]);
+								$tot += $r[5];
+								$qty += $r[2];
+								$wei += $charge_wei;
+								$cbm += $r[4];
+							}
+						}
+
+						if ($this->gst > 0) {
+							$gst = round($this->gst, 2);
+							$xls->addRow($i, ['', 'Sub Total:', $qty, $wei, $cbm, '', $this->total]);
+							$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+							$i++;
+							$xls->addRow($i, ['', '', '', '', '', 'GST 10.00%:', $gst]);
+							$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+							$i++;
+							$xls->addRow($i, ['', 'Total:', $qty, $wei, $cbm, '', $this->total]);
+							$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+						} else {
+							$xls->addRow($i, ['', 'Total:', $qty, $wei, $cbm, '', $this->total]);
+							$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+						}
+						break;
+				case 30:
+				case 102:
+				case 123:
+				case 124:
+				case 40:
+					$xls->addRow($i++, ['Code', 'Description', 'Amount', 'Qty', 'Sub Total(Excl. GST)','GST','Sub total(incl. GST)']);
+					$xls->setFont('A1:G1', ['bold' => true]);
+					$tot = 0;
+					$totalGst = 0;
+					$totalExGst = 0;
+					foreach ($this->lines as $il) {
+						$xls->addRow($i++, [$il->ccode, $il->det, AppHelper::money_format('%i', $il->amount), $il->qty, AppHelper::money_format('%i', ($il->amount-$il->gst) * $il->qty),AppHelper::money_format('%i',($il->gst * $il->qty)),AppHelper::money_format('%i',($il->amount * $il->qty))]);
+						$tot += $il->amount * $il->qty;
+						$totalGst+= $il->gst * $il->qty;
+						$totalExGst+= ($il->amount-$il->gst) * $il->qty;
+					}
+					$xls->addRow($i, ['', 'Total:', '', '', $totalExGst,$totalGst,$tot]);
+					$xls->setFont('A' . $i . ':G' . $i, ['bold' => true]);
+					break;
+				case 32:
+					$xls->addRow($i++, ['HBN', 'Description', 'postcode', 'Real Weight', 'Pre Charge Weight', 'Weight Gap', 'Sub Total']);
+					$xls->setFont('A1:G1', ['bold' => true]);
+					$tot = 0;
+					$rwei = 0;
+					$pwei = 0;
+					$gwei = 0;
+					foreach ($this->lines as $il) {
+						if (empty($il->mdata['items'])) {
+							continue;
+						}
+						foreach ($il->mdata['items'] as $si => $r) {
+							$charge_wei = round(empty($r[9]) ? $r[3] : $r[9], 2);
+							$xls->addRow($i++, [$r[0], $r[1], $r[2], $r[3], $r[4], $r[5], $r[6]]);
+							$tot += $r[6];
+							$rwei += $r[3];
+							$pwei += $r[4];
+							$gwei += $r[5];
+						}
+					}
+
+					if ($this->gst > 0) {
+						$gst = round($this->gst, 2);
+						$xls->addRow($i, ['', '', 'Sub Total:', $rwei, $pwei, $gwei, $this->total]);
+						$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+						$i++;
+						$xls->addRow($i, ['', '', '', '', '', 'GST 10.00%:', $gst]);
+						$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+						$i++;
+						$xls->addRow($i, ['', '', 'Total:', $rwei, $pwei, $gwei, $this->total]);
+						$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+					} else {
+						$xls->addRow($i, ['', '', 'Total:', $rwei, $pwei, $gwei, $this->total]);
+						$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+					}
+					break;
+				case self::INVOICE_TYPE_WMS:
+					$xls->addRow($i++, ['Description', 'Unit Price', 'Qty', 'Amount']);
+					$xls->setFont('A1:G1', ['bold' => true]);
+					$tot = 0;
+					$qty = 0;
+					foreach ($this->lines as $il) {
+						if (empty($il->mdata['items'])) {
+							continue;
+						}
+						foreach ($il->mdata['items'] as $si => $r) {
+							$xls->addRow($i++, [$r[0], $r[3], $r[2], $r[2] * $r[3]]);
+							$tot += $r[2] * $r[3];
+							$qty += $r[2];
+						}
+					}
+					$gst = round($this->gst, 2);
+					$xls->addRow($i, ['Sub Total:', '', $qty, $tot]);
+					$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+					$i++;
+					if ($this->gst > 0) {
+						$tot += $gst;
+						$xls->addRow($i, ['GST 10.00%:', $gst, '', '']);
+						$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+						$i++;
+					}
+					$xls->addRow($i, ['Total:', '', $qty, $tot]);
+					$xls->setFont('A' . $i . ':G' . $i, ['bold' => true]);
+					break;
+				case self::INVOICE_TYPE_WMS_INVOICE:
+					$xls->addRow($i++, ['Task No', 'Ref', 'Description', 'Unit Price', 'Qty', 'Amount']);
+					$xls->setFont('A1:G1', ['bold' => true]);
+					$tot = 0;
+					$qty = 0;
+					foreach ($this->lines as $il) {
+						if (empty($il->mdata['items'])) {
+							continue;
+						}
+						foreach ($il->mdata['items'] as $si => $r) {
+							$xls->addRow($i++, [$r[0], $r[1], $r[3], $r[4], $r[5], $r[6]]);
+							$tot += $r[6];
+							$qty += $r[5];
+						}
+					}
+					$xls->addRow($i, ['Sub Total:', '', '', '', $qty, $tot]);
+					$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+					$i++;
+					if ($this->gst > 0) {
+						$gst = round($this->gst, 2);
+						$tot += $gst;
+						$xls->addRow($i, ['GST 10.00%:', '', '', '', '', $gst]);
+						$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+						$i++;
+					}
+					$xls->addRow($i, ['Total:', '', '', '', $qty, $tot]);
+					$xls->setFont('A' . $i . ':G' . $i, ['bold' => true]);
+					break;
+				case Invoice::INVOICE_TYPE_DIRECT_MAWB:
+					$xls->addRow($i++, ['MAWB:', !empty($this->mdata['awb']) ? $this->mdata['awb'] : '']);
+					$xls->addRow($i++, ['No.', 'Description', 'Unit', 'Weight(KG)', 'Rate', 'Amount (AUD)']);
+					$xls->setFont('A1:F1', ['bold' => true]);
+					$tot = 0;
+					$index = 1;
+					foreach ($this->lines as $il) {
+						if (empty($il->mdata['items'])) {
+							continue;
+						}
+						foreach ($il->mdata['items'] as $si => $r) {
+							$xls->addRow($i++, [$index++, $r[1], $r[2], $r[3], $r[4], $r[5]]);
+							$tot += $r[5];
+						}
+					}
+					$xls->addRow($i, ['', '', '', '', 'Total:', $tot]);
+					$xls->setFont('A' . $i . ':F' . $i, ['bold' => true]);
+					break;
+
+				case Invoice::INVOICE_TYPE_RTS_FEE:
+					{
+						$xls->addRow($i++, ['Order #', 'Ref #', 'Date', 'Description', 'Amount']);
+						$xls->setFont('A1:I1', ['bold' => true]);
+						$qty = 0;
+						$wei = 0;
+						$cbm = 0;
+						$tot = 0;
+						foreach ($this->lines as $il) {
+							if (empty($il->mdata['items'])) {
+								continue;
+							}
+							foreach ($il->mdata['items'] as $si => $r) {
+								$xls->addRow($i++, [$r[0], $r[1], $r[2], $r[3], $r[4]]);
+								$tot += $r[4];
+							}
+						}
+
+						if ($this->gst > 0) {
+							$gst = round($this->gst, 2);
+							$xls->addRow($i, ['', '', '', 'Sub Total:', $tot]);
+							$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+							$i++;
+							$tot += $gst;
+							$xls->addRow($i, ['', '', '', 'GST 10.00%:', $gst]);
+							$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+							$i++;
+							$xls->addRow($i, ['', '', '', 'Total:', $this->total]);
+							$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+						} else {
+							$xls->addRow($i, ['', '', '', 'Total:', $this->total]);
+							$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+						}
+					}
+					break;
+				case Invoice::INVOICE_TYPE_WEIGHT_DIFF:	{
+						$xls->addRow($i++, ['No', 'Code', 'Description', 'Amount AUD', 'Qty', 'GST', 'Sub Total']);
+						$xls->setFont('A1:I1', ['bold' => true]);
+						$tot = 0;
+						foreach ($this->lines as $k => $il) {
+							$xls->addRow($i++, [$k+1, (!empty($il->getCCodeTypeDesc()) ? $il->getCCodeTypeDesc() : $il->ccode), nl2br($il->det), AppHelper::money_format('%i',$il->amount - $il->gst), $il->qty, $il->getTaxType(), AppHelper::money_format('%i',($il->amount - $il->gst) * $il->qty)]);
+						}
+
+						if ($this->gst > 0) {
+							$gst = round($this->gst, 2);
+							$xls->addRow($i, ['', '', '', '', '', 'Sub Total:', $this->total - $this->gst]);
+							$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+							$i++;
+							$tot += $gst;
+							$xls->addRow($i, ['', '', '', '', '', 'GST 10.00%:', $this->gst]);
+							$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+							$i++;
+							$xls->addRow($i, ['', '', '', '', '', 'Total:', $this->total]);
+							$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+						} else {
+							$xls->addRow($i, ['', '', '', '', '', 'Total:', $this->total]);
+							$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+						}
+					}
+					break;
+				default:
+					return "";
+					break;
+			}
+			$i++;
+			$xls->output($mfn,null,$download);
+
+			return $mfn;
+	}
+
+	public function exportExcelInvoiceB($dir = null, $download = true)
+	{
+		$xls = new oExcel;
+		$xls->setColWidth([30,15,15,15]);
+		$mfn = 'InvoiceB_detail_' . $this->no . '.xlsx';
+		if (!empty($dir)) {
+			$mfn = $dir . $mfn;
+		}
+		$i = 1;
+		switch ($this->type) {
+			case self::INVOICE_TYPE_WMS:
+				$quote = WmsOrgQuote::model()->find('org_id = :org_id and status = 1 and vfrom <= :fd and vto >= :td AND (JSON_VALUE(meta, "$.whole_sale") = 1)', [':org_id' => $this->mdata['suborg'], ':fd' => $this->mdata['billfrom'], ':td' => $this->mdata['billto']]);
+				$xls->addRow($i++, ['Description', 'Unit Price', 'Qty', 'Amount']);
+				$xls->setFont('A1:G1', ['bold' => true]);
+				$tot = 0;
+				$qty = 0;
+				foreach ($this->lines as $il) {
+					if (empty($il->mdata['items'])) {
+						continue;
+					}
+					foreach ($il->mdata['items'] as $si => $r) {
+						$rate = $quote->mdata[WmsOrgQuote::QUOTE_PALLET_STORAGE_WEEK];
+						$xls->addRow($i++, [$r[0], $rate, $r[2], $r[2] * $rate]);
+						$tot += $r[2] * $rate;
+						$qty += $r[2];
+					}
+				}
+				$gst = round($this->gst, 2);
+				$xls->addRow($i, ['Sub Total:', '', $qty, $tot]);
+				$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+				$i++;
+				if ($this->gst > 0) {
+					$tot += $gst;
+					$xls->addRow($i, ['GST 10.00%:', '', '', $gst]);
+					$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+					$i++;
+				}
+				$xls->addRow($i, ['Total:', '', '', $tot]);
+				$xls->setFont('A' . $i . ':G' . $i, ['bold' => true]);
+				break;
+			case self::INVOICE_TYPE_WMS_INVOICE:
+				$quote = WmsOrgQuote::model()->find('org_id = :org_id and status = 1 and vfrom <= :fd and vto >= :td AND (JSON_VALUE(meta, "$.whole_sale") = 1)', [':org_id' => $this->mdata['suborg'], ':fd' => $this->mdata['billfrom'], ':td' => $this->mdata['billto']]);
+				$xls->addRow($i++, ['Task No', 'Ref', 'Description', 'Unit Price', 'Qty', 'Amount']);
+				$xls->setFont('A1:G1', ['bold' => true]);
+				$tot = 0;
+				$qty = 0;
+				foreach ($this->lines as $il) {
+					if (empty($il->mdata['items'])) {
+						continue;
+					}
+					foreach ($il->mdata['items'] as $si => $r) {
+						if ($r[3] == 'Container Unload') {
+							$rate = $quote->mdata[WmsOrgQuote::QUOTE_UNLOAD_40FT_CONTAINER];
+						} else if ($r[3] == 'Pallets In') {
+							$rate = $quote->mdata[WmsOrgQuote::QUOTE_PALLET_IN];
+						} else if ($r[3] == 'Container Load') {
+							$rate = $quote->mdata[WmsOrgQuote::QUOTE_LOAD_40FT_CONTAINER];
+						} else if ($r[3] == 'Pallets Out') {
+							$rate = $quote->mdata[WmsOrgQuote::QUOTE_PALLET_OUT];
+						}
+
+						if ($invoice->mdata['suborg'] == Org::ORGID_AIRSEA_FARMLAND) {
+							$toOrg = 'Farmland Australia';
+						} else if ($invoice->mdata['suborg'] == Org::ORGID_AIRSEA_HHGROUP) {
+							if (preg_match('/Pallets In|Container Unload|Pallets Out|Container Load/i', $r[3])) {
+								$toOrg = 'Farmland Australia';
+							} else if (preg_match('/Pick Carton|Pallet Restack/i', $r[3])) {
+								$toOrg = 'HH Group China';
+							}
+						} else if ($invoice->mdata['suborg'] == Org::ORGID_AIRSEA_SWISSEAU) {
+							if (preg_match('/Pallets In|Container Unload|Pallets Out/i', $r[3])) {
+								$toOrg = 'Farmland Australia';
+							} else if (preg_match('/Container Load|Pick Carton|Pallet Restack/i', $r[3])) {
+								$toOrg = 'Swisse Australia';
+							}
+						}
+
+						$xls->addRow($i++, [$r[0], $r[1], $r[3], $rate, $r[5], $rate * $r[5], $toOrg]);
+						$tot += $rate * $r[5];
+						$qty += $r[5];
+					}
+				}
+				$xls->addRow($i, ['Sub Total:', '', '', '', $qty, $tot]);
+				$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+				$i++;
+				if ($this->gst > 0) {
+					$gst = round($this->gst, 2);
+					$tot += $gst;
+					$xls->addRow($i, ['GST 10.00%:', '', '', '', '', $gst]);
+					$xls->setFont('A' . $i . ':I' . $i, ['bold' => true]);
+					$i++;
+				}
+				$xls->addRow($i, ['Total:', '', '', '', '', $tot]);
+				$xls->setFont('A' . $i . ':G' . $i, ['bold' => true]);
+				break;
+		}
+		$i++;
+		$xls->output($mfn, null, $download);
+
+		return $mfn;
+	}
+
+	public static function bulkExportExcelInvoiceB1($from, $to, $dir = null, $download = true)
+	{
+		$xls = new oExcel;
+		$xls->setColWidth([30,15,15,15]);
+		$xls->setTitle('Farmland Australia Storage');
+
+		$xls->createSheet('Swisse Australia Storage');
+		$xls->goSheet(1);
+		$xls->setColWidth([30,15,15,15]);
+		$xls->setTitle('Swisse Australia Storage');
+
+		$xls->createSheet('HH Group China Storage');
+		$xls->goSheet(2);
+		$xls->setColWidth([30,15,15,15]);
+		$xls->setTitle('HH Group China Storage');
+
+		$xls->createSheet('Service');
+		$xls->goSheet(3);
+		$xls->setColWidth([30,15,15,15]);
+		$xls->setTitle('Service');
+
+		$mfn = 'InvoiceB_details.xlsx';
+		if (!empty($dir)) {
+			$mfn = $dir . $mfn;
+		}
+		$i = [Org::ORGID_AIRSEA_FARMLAND => 1, Org::ORGID_AIRSEA_SWISSEAU => 1, Org::ORGID_AIRSEA_HHGROUP => 1, 'Service' => 1];
+
+		$invoices = Invoice::model()->findAll('to_id = :to_id AND date >= :from AND date <= :to AND status NOT IN (8,10)', [':from' => $from, ':to' => $to, ':to_id' => Org::ORGID_AIRSEA_PW]);
+		foreach ($invoices as $invoice) {
+			switch ($invoice->type) {
+				case self::INVOICE_TYPE_WMS:
+					if ($invoice->mdata['suborg'] == Org::ORGID_AIRSEA_FARMLAND) {
+						$xls->goSheet(0);
+					} else if ($invoice->mdata['suborg'] == Org::ORGID_AIRSEA_SWISSEAU) {
+						$xls->goSheet(1);
+					} else if ($invoice->mdata['suborg'] == Org::ORGID_AIRSEA_HHGROUP) {
+						$xls->goSheet(2);
+					}
+					$quote = WmsOrgQuote::model()->find('org_id = :org_id and status = 1 and vfrom <= :fd and vto >= :td AND (JSON_VALUE(meta, "$.whole_sale") = 1)', [':org_id' => $invoice->mdata['suborg'], ':fd' => $invoice->mdata['billfrom'], ':td' => $invoice->mdata['billto']]);
+					$xls->addRow($i[$invoice->mdata['suborg']]++, [$invoice->no, $invoice->getType(), Org::getName($invoice->mdata['suborg'], false), 'Period: ' . $invoice->mdata['billfrom'] . ' ~ ' . $invoice->mdata['billto']]);
+					$xls->addRow($i[$invoice->mdata['suborg']]++, ['Description', 'SKU Code', 'Unit Price', 'Qty', 'Amount']);
+					$xls->setFont('A' . ($i[$invoice->mdata['suborg']]-2) . ':G' . ($i[$invoice->mdata['suborg']]-1), ['bold' => true]);
+					$tot = 0;
+					$qty = 0;
+					foreach ($invoice->lines as $il) {
+						if (empty($il->mdata['items'])) {
+							continue;
+						}
+						foreach ($il->mdata['items'] as $si => $r) {
+							$rate = $quote->mdata[WmsOrgQuote::QUOTE_PALLET_STORAGE_WEEK];
+							$model = '';
+							if (preg_match('/(.*) [\(Exp:]/', $r[0], $matches) || preg_match('/(.*) [\(Bat:]/', $r[0], $matches)) {
+								$prod = WmsProd::model()->find('name = :name', [':name' => $matches[1]]);
+								if (!empty($prod)) {
+									$model = $prod->model;
+								}
+							}
+							$xls->addRow($i[$invoice->mdata['suborg']]++, [$r[0], $model, $rate, $r[2], $r[2] * $rate]);
+							$tot += $r[2] * $rate;
+							$qty += $r[2];
+						}
+					}
+					$gst = round($invoice->gst, 2);
+					$xls->addRow($i[$invoice->mdata['suborg']], ['Sub Total:', '', '', $qty, $tot]);
+					$xls->setFont('A' . $i[$invoice->mdata['suborg']] . ':I' . $i[$invoice->mdata['suborg']], ['bold' => true]);
+					$i[$invoice->mdata['suborg']]++;
+					if ($invoice->gst > 0) {
+						$tot += $gst;
+						$xls->addRow($i[$invoice->mdata['suborg']], ['GST 10.00%:', '', '', '', $gst]);
+						$xls->setFont('A' . $i[$invoice->mdata['suborg']] . ':I' . $i[$invoice->mdata['suborg']], ['bold' => true]);
+						$i[$invoice->mdata['suborg']]++;
+					}
+					$xls->addRow($i[$invoice->mdata['suborg']], ['Total:', '', '', '', $tot]);
+					$xls->setFont('A' . $i[$invoice->mdata['suborg']] . ':G' . $i[$invoice->mdata['suborg']], ['bold' => true]);
+					$i[$invoice->mdata['suborg']]++;
+					$xls->addRow($i[$invoice->mdata['suborg']]++, []);
+					break;
+				case self::INVOICE_TYPE_WMS_INVOICE:
+					$xls->goSheet(3);
+					$quote = WmsOrgQuote::model()->find('org_id = :org_id and status = 1 and vfrom <= :fd and vto >= :td AND (JSON_VALUE(meta, "$.whole_sale") = 1)', [':org_id' => $invoice->mdata['suborg'], ':fd' => $invoice->mdata['billfrom'], ':td' => $invoice->mdata['billto']]);
+					$xls->addRow($i['Service']++, [$invoice->no, $invoice->getType(), Org::getName($invoice->mdata['suborg'], false)]);
+					$xls->addRow($i['Service']++, ['Task No', 'Ref', 'Description', 'Unit Price', 'Qty', 'Amount']);
+					$xls->setFont('A' . ($i['Service']-2) . ':G' . ($i['Service']-1), ['bold' => true]);
+					$tot = 0;
+					$qty = 0;
+					foreach ($invoice->lines as $il) {
+						if (empty($il->mdata['items'])) {
+							continue;
+						}
+						foreach ($il->mdata['items'] as $si => $r) {
+							if ($r[3] == 'Container Unload') {
+								$rate = $quote->mdata[WmsOrgQuote::QUOTE_UNLOAD_40FT_CONTAINER];
+							} else if ($r[3] == 'Pallets In') {
+								$rate = $quote->mdata[WmsOrgQuote::QUOTE_PALLET_IN];
+							} else if ($r[3] == 'Container Load') {
+								$rate = $quote->mdata[WmsOrgQuote::QUOTE_LOAD_40FT_CONTAINER];
+							} else if ($r[3] == 'Pallets Out') {
+								$rate = $quote->mdata[WmsOrgQuote::QUOTE_PALLET_OUT];
+							}
+
+							if ($invoice->mdata['suborg'] == Org::ORGID_AIRSEA_FARMLAND) {
+								$toOrg = 'Farmland Australia';
+							} else if ($invoice->mdata['suborg'] == Org::ORGID_AIRSEA_HHGROUP) {
+								if (preg_match('/Pallets In|Container Unload|Pallets Out|Container Load/i', $r[3])) {
+									$toOrg = 'Farmland Australia';
+								} else if (preg_match('/Pick Carton|Pallet Restack/i', $r[3])) {
+									$toOrg = 'HH Group China';
+								} else {
+									$toOrg = 'HH Group China';
+								}
+							} else if ($invoice->mdata['suborg'] == Org::ORGID_AIRSEA_SWISSEAU) {
+								if (preg_match('/Pallets In|Container Unload|Pallets Out/i', $r[3])) {
+									$toOrg = 'Farmland Australia';
+								} else if (preg_match('/Container Load|Pick Carton|Pallet Restack/i', $r[3])) {
+									$toOrg = 'Swisse Australia';
+								} else {
+									$toOrg = 'Swisse Australia';
+								}
+							}
+
+							$xls->addRow($i['Service']++, [$r[0], $r[1], $r[3], $rate, $r[5], $rate * $r[5], $toOrg]);
+							$tot += $rate * $r[5];
+							$qty += $r[5];
+						}
+					}
+					$xls->addRow($i['Service'], ['Sub Total:', '', '', '', $qty, $tot]);
+					$xls->setFont('A' . $i['Service'] . ':I' . $i['Service'], ['bold' => true]);
+					$i['Service']++;
+					if ($invoice->gst > 0) {
+						$gst = round($invoice->gst, 2);
+						$tot += $gst;
+						$xls->addRow($i['Service'], ['GST 10.00%:', '', '', '', '', $gst]);
+						$xls->setFont('A' . $i['Service'] . ':I' . $i['Service'], ['bold' => true]);
+						$i['Service']++;
+					}
+					$xls->addRow($i['Service'], ['Total:', '', '', '', '', $tot]);
+					$xls->setFont('A' . $i['Service'] . ':G' . $i['Service'], ['bold' => true]);
+					$i['Service']++;
+					$xls->addRow($i['Service']++, []);
+					break;
+			}
+		}
+		$xls->goSheet(0);
+
+		$creditnotes = Payment::model()->findAll('org_id = :org_id AND date >= :from AND date <= :to AND status != 9 AND ref = "Credit for WMS Storage"', [':from' => $from, ':to' => $to, ':org_id' => Org::ORGID_AIRSEA_PW]);
+		foreach ($creditnotes as $creditnote) {
+			if ($creditnote->mdata['suborg'] == Org::ORGID_AIRSEA_SWISSEAU) {
+				$xls->goSheet(1);
+			} else if ($creditnote->mdata['suborg'] == Org::ORGID_AIRSEA_HHGROUP) {
+				$xls->goSheet(2);
+			}
+
+			$quote = WmsOrgQuote::model()->find('org_id = :org_id and status = 1 AND (JSON_VALUE(meta, "$.whole_sale") = 1)', [':org_id' => $creditnote->mdata['suborg']]);
+			$xls->addRow($i[$creditnote->mdata['suborg']]++, [$creditnote->no, 'Credit', Org::getName($creditnote->mdata['suborg'], false)]);
+			$xls->addRow($i[$creditnote->mdata['suborg']]++, ['Description', 'Unit Price', 'Qty', 'Amount']);
+			$xls->setFont('A' . ($i[$creditnote->mdata['suborg']]-2) . ':G' . ($i[$creditnote->mdata['suborg']]-1), ['bold' => true]);
+			$tot = 0;
+			$qty = 0;
+			foreach ($creditnote->credit_lines as $il) {
+				$rate = $quote->mdata[WmsOrgQuote::QUOTE_PALLET_STORAGE_WEEK];
+				$xls->addRow($i[$creditnote->mdata['suborg']]++, [$il->description, $rate, $il->qty, $il->qty * $rate]);
+				$tot += $il->qty * $rate;
+				$qty += $il->qty;
+			}
+			$gst = round($creditnote->gst, 2);
+			$xls->addRow($i[$creditnote->mdata['suborg']], ['Sub Total:', '', $qty, $tot]);
+			$xls->setFont('A' . $i[$creditnote->mdata['suborg']] . ':I' . $i[$creditnote->mdata['suborg']], ['bold' => true]);
+			$i[$creditnote->mdata['suborg']]++;
+			if ($creditnote->gst > 0) {
+				$tot += $gst;
+				$xls->addRow($i[$creditnote->mdata['suborg']], ['GST 10.00%:', '', '', $gst]);
+				$xls->setFont('A' . $i[$creditnote->mdata['suborg']] . ':I' . $i[$creditnote->mdata['suborg']], ['bold' => true]);
+				$i[$creditnote->mdata['suborg']]++;
+			}
+			$xls->addRow($i[$creditnote->mdata['suborg']], ['Total:', '', '', $tot]);
+			$xls->setFont('A' . $i[$creditnote->mdata['suborg']] . ':G' . $i[$creditnote->mdata['suborg']], ['bold' => true]);
+			$i[$creditnote->mdata['suborg']]++;
+			$xls->addRow($i[$creditnote->mdata['suborg']]++, []);
+		}
+		$xls->goSheet(0);
+
+		$xls->output($mfn, null, $download);
+
+		return $mfn;
+	}
+
+	public static function bulkExportExcelInvoiceB2($from, $to, $dir = null, $download = true)
+	{
+		$data = [];
+		$stocks = WmsStock::model()->with('customer')->findAll('customer.by = :oid AND batch != ""', [':oid' => Org::ORGID_AIRSEA_PW]);
+		$from = date('Y-m-d', strtotime($from . ' -' . (date('N', strtotime($from)) + 1) . ' day'));
+		while (strtotime($from) < strtotime($to)) {
+			$temp_to = date('Y-m-d', strtotime($from . ' + 6 days'));
+			foreach ($stocks as $stock) {
+				if (empty($data[$from . ' ' . $temp_to][$stock->org_id]['prod'][$stock->stockName()])) {
+					$data[$from . ' ' . $temp_to][$stock->org_id]['prod'][$stock->stockName()] = ['id' => $stock->id, 'storage' => 0, 'pallet_in' => 0, 'pallet_out' => 0, 'credit' => []];
+				}
+			}
+
+			$ils = InvLine::model()->with('invoice')->findAll('invoice.to_id = :oid AND JSON_VALUE(invoice.meta, "$.billfrom") = :from AND JSON_VALUE(invoice.meta, "$.billto") = :to AND invoice.type = 60 AND invoice.status NOT IN (8,10)', [':oid' => Org::ORGID_AIRSEA_PW, ':from' => $from, ':to' => $temp_to]);
+			foreach ($ils as $il) {
+				foreach ($il->mdata['items'] as $item) {
+					$name = explode(' x ', $item[0])[0];
+					$data[$from . ' ' . $temp_to][$il->invoice->mdata['suborg']]['prod'][$name]['storage'] += floatval($item[2]);
+				}
+			}
+
+			$cl = CreditLine::model()->with('credit')->find('credit.status != 9 AND credit.org_id = :org_id AND description REGEXP "^T\\d{6,7}$"', [':org_id' => Org::ORGID_AIRSEA_PW]);
+			if (!empty($cl)) {
+				$task = WmsTask::model()->find('id = :id AND compl_time >= :from AND compl_time < :to', [':id' => ltrim($cl->description, 'T'), ':from' => $from, ':to' => date('Y-m-d', strtotime($temp_to . ' + 1 day'))]);
+				foreach ($task->items as $item) {
+					$loc = WmsStockLocation::model()->with('stock')->find('t.location_id = :location_id AND stock.org_id = :org_id', [':location_id' => $item->mdata['pli'], ':org_id' => $cl->credit->mdata['suborg']]);
+					if (!empty($loc->stock)) {
+						if (empty($data[$from . ' ' . $temp_to][$cl->credit->mdata['suborg']]['prod'][$loc->stock->stockName()]['credit'][$task->id])) {
+							$data[$from . ' ' . $temp_to][$cl->credit->mdata['suborg']]['prod'][$loc->stock->stockName()]['credit'][$task->id] = 0;
+						}
+						$data[$from . ' ' . $temp_to][$cl->credit->mdata['suborg']]['prod'][$loc->stock->stockName()]['credit'][$task->id] += 1;
+					}
+				}
+			}
+
+			$sql = 'SELECT stock_id, COUNT(location_id) as location_qty, wj.org_id, wt.id as task_id FROM wms_stock_ledger wsl JOIN wms_task_item wti ON wsl.ti_id = wti.id JOIN wms_task wt ON wti.task_id = wt.id JOIN wms_job wj ON wt.job_id = wj.id JOIN org ON wj.org_id = org.id JOIN wms_task main ON main.id = wt.link_id WHERE location_id > :location_id AND wsl.ts >= :from AND wsl.ts < :to AND qty_in > 0 AND main.bwf & 4 = 0 AND main.bwf & 16 = 0 AND org.id = :org_id GROUP BY stock_id';
+			$ins = Yii::app()->db->createCommand($sql)->bindValues([':from' => $from, ':to' => date('Y-m-d', strtotime($temp_to . ' + 1 day')), ':org_id' => Org::ORGID_AIRSEA_FARMLAND, ':location_id' => WmsLocation::WMS_LOCATION_MAX_MAGIC_ID])->queryAll();
+			foreach ($ins as $in) {
+				$in['org_id'] = Org::ORGID_AIRSEA_FARMLAND;
+				$stock = WmsStock::model()->findByPk($in['stock_id']);
+				$data[$from . ' ' . $temp_to][$in['org_id']]['prod'][$stock->stockName()]['pallet_in'] = $in['location_qty'];
+				$task = WmsTask::model()->findByPk($in['task_id']);
+				if ($task->type == 1030) {
+					$data[$from . ' ' . $temp_to][$in['org_id']]['container_unload'][$task->id] = $task->id;
+				}
+			}
+
+			$sql = 'SELECT stock_id, location_id, wj.org_id, wt.id AS task_id FROM wms_stock_ledger wsl JOIN wms_task_item wti ON wsl.ti_id = wti.id JOIN wms_task wt ON wti.task_id = wt.id JOIN wms_job wj ON wt.job_id = wj.id JOIN org ON wj.org_id = org.id JOIN wms_task main ON main.id = wt.link_id JOIN wms_location wl ON wl.id = location_id WHERE location_id > :location_id AND wsl.ts >= :from AND wsl.ts < :to AND qty_out > 0 AND main.bwf & 4 = 0 AND org.id = :org_id AND wti.del = 0';
+			$outs = Yii::app()->db->createCommand($sql)->bindValues([':from' => $from, ':to' => date('Y-m-d', strtotime($temp_to . ' + 1 day')), ':org_id' => Org::ORGID_AIRSEA_FARMLAND, ':location_id' => WmsLocation::WMS_LOCATION_MAX_MAGIC_ID])->queryAll();
+			foreach ($outs as $out) {
+				$stock = WmsStock::model()->findByPk($out['stock_id']);
+				if (empty($data[$from . ' ' . $temp_to][Org::ORGID_AIRSEA_FARMLAND]['prod'][$stock->stockName()]['pallet_out'])) {
+					$data[$from . ' ' . $temp_to][Org::ORGID_AIRSEA_FARMLAND]['prod'][$stock->stockName()]['pallet_out'] = 0;
+				}
+				$data[$from . ' ' . $temp_to][Org::ORGID_AIRSEA_FARMLAND]['prod'][$stock->stockName()]['pallet_out'] += 1;
+				$task = WmsTask::model()->findByPk($out['task_id']);
+				if ($task->type == 2030) {
+					if ($out['org_id'] == Org::ORGID_AIRSEA_HHGROUP) $out['org_id'] = Org::ORGID_AIRSEA_FARMLAND;
+					$data[$from . ' ' . $temp_to][$out['org_id']]['container_load'][$task->id] = $task->id;
+				}
+			}
+
+			$sql = 'SELECT wj.org_id, wt.id AS task_id FROM wms_task_item wti JOIN wms_task wt ON wti.task_id = wt.id JOIN wms_job wj ON wt.job_id = wj.id JOIN org ON wj.org_id = org.id JOIN wms_task main ON main.id = wt.link_id WHERE JSON_VALUE(wti.meta, "$.pli") > 100 AND wti.ts >= :from AND wti.ts < :to AND main.bwf & 4 = 0 AND org.by = :org_id AND wti.del = 0 AND wt.type = 2030 group by task_id';
+			$loads = Yii::app()->db->createCommand($sql)->bindValues([':from' => $from, ':to' => date('Y-m-d', strtotime($temp_to . ' + 1 day')), ':org_id' => Org::ORGID_AIRSEA_PW])->queryAll();
+			foreach ($loads as $load) {
+				$task = WmsTask::model()->findByPk($load['task_id']);
+				if ($load['org_id'] == Org::ORGID_AIRSEA_HHGROUP) $load['org_id'] = Org::ORGID_AIRSEA_FARMLAND;
+				$data[$from . ' ' . $temp_to][$load['org_id']]['container_load'][$task->id] = $task->id;
+			}
+
+			$sql = 'SELECT amount * qty AS amount, fid, det, JSON_VALUE(invoice.meta, "$.suborg") AS org_id FROM inv_line il JOIN invoice ON il.inv_id = invoice.id WHERE fid IN (SELECT wt.id FROM wms_task wt JOIN wms_job wj ON wj.id = wt.job_id JOIN org ON org.id = wj.org_id WHERE compl_time >= :from AND compl_time < :to AND wt.bwf & 4 = 0 AND wt.bwf & 16 = 0 AND org.by = :org_id) AND inv_id IN (SELECT id FROM invoice WHERE status not IN (8,10)) AND ccode = 9999';
+			$ils = Yii::app()->db->createCommand($sql)->bindValues([':from' => $from, ':to' => date('Y-m-d', strtotime($temp_to . ' + 1 day')), ':org_id' => Org::ORGID_AIRSEA_PW])->queryAll();
+			foreach ($ils as $il) {
+				if (empty($data[$from . ' ' . $temp_to][$il['org_id']]['other'][$il['fid']])) {
+					$data[$from . ' ' . $temp_to][$il['org_id']]['other'][$il['fid']] = [];
+				}
+				$data[$from . ' ' . $temp_to][$il['org_id']]['other'][$il['fid']][] = ['amount' => $il['amount'], 'desc' => $il['det']];
+			}
+
+			$from = date('Y-m-d', strtotime($from . ' + 7 days'));
+		}
+
+		$quotes = [];
+		$xls = new oExcel;
+		$sheet = 0;
+		foreach ($data as $period => $items) {
+			foreach ($items as $org_id => $sub_items) {
+				$empty = true;
+				foreach ($sub_items['prod'] as $values) {
+					if ($values['storage'] + $values['pallet_in'] + $values['pallet_out'] != 0) $empty = false;
+					if (!empty($values['credit'])) $empty = false;
+				}
+				if ($empty) continue;
+
+				$org = Org::model()->findByPk($org_id);
+				if ($sheet) {
+					$xls->createSheet($period . ' ' . $org_id);
+				}
+				$from = explode(' ', $period)[0];
+				$to = explode(' ', $period)[1];
+				$xls->goSheet($sheet);
+				$xls->setTitle(date('m-d', strtotime($from)) . '~' . date('m-d', strtotime($to)) . ' ' . $org->name);
+				$xls->leftAlignment('A1:Z300');
+				$sheet++;
+				$i = 1;
+				$xls->setColWidth([50,15,15,15,15,15,15,15,15,15,30,15,15]);
+				$xls->addRow($i++, ['Invoice Period', $from, 'to', $to, $org->name]);
+				$xls->addRow($i++, ['Description/Service', 'Batch', 'Container #', 'Pallet Qty', 'Storage', 'Credit Task', 'In Qty', 'Pallet In', 'Out Qty', 'Pallet Out', 'Container Loading / Unloading', 'Other', 'SubTotal']);
+
+				$total = 0;
+				foreach ($sub_items['prod'] as $values) {
+					$stock = WmsStock::model()->findByPk($values['id']);
+					if (empty($quotes[$stock->org_id])) {
+						$quotes[$stock->org_id] = WmsOrgQuote::model()->find('org_id = :org_id and status = 1 and (JSON_VALUE(meta, "$.whole_sale") = 1)', [':org_id' => $stock->org_id]);
+					}
+					if ($values['storage'] + $values['pallet_in'] + $values['pallet_out'] != 0) {
+						$xls->addRow($i++, [$stock->prod->name, $stock->batch, '', $values['storage'], $values['storage'] * $quotes[$stock->org_id]->mdata[WmsOrgQuote::QUOTE_PALLET_STORAGE_WEEK], '', $values['pallet_in'], $values['pallet_in'] * $quotes[$stock->org_id]->mdata[WmsOrgQuote::QUOTE_PALLET_IN], $values['pallet_out'], $values['pallet_out'] * $quotes[$stock->org_id]->mdata[WmsOrgQuote::QUOTE_PALLET_OUT], '', '', $values['storage'] * $quotes[$stock->org_id]->mdata[WmsOrgQuote::QUOTE_PALLET_STORAGE_WEEK] + $values['pallet_in'] * $quotes[$stock->org_id]->mdata[WmsOrgQuote::QUOTE_PALLET_IN] + $values['pallet_out'] * $quotes[$stock->org_id]->mdata[WmsOrgQuote::QUOTE_PALLET_OUT]]);
+						$total += $values['storage'] * $quotes[$stock->org_id]->mdata[WmsOrgQuote::QUOTE_PALLET_STORAGE_WEEK] + $values['pallet_in'] * $quotes[$stock->org_id]->mdata[WmsOrgQuote::QUOTE_PALLET_IN] + $values['pallet_out'] * $quotes[$stock->org_id]->mdata[WmsOrgQuote::QUOTE_PALLET_OUT];
+					}
+					if (!empty($values['credit'])) {
+						foreach ($values['credit'] as $task_id => $qty) {
+							$task = WmsTask::model()->findByPk($task_id);
+							$xls->addRow($i++, [$stock->prod->name, $stock->batch, '', -$qty, -$qty * $quotes[$stock->org_id]->mdata[WmsOrgQuote::QUOTE_PALLET_STORAGE_WEEK], $task->mainTask->getNo(), '', '', '', '', '', '', -$qty * $quotes[$stock->org_id]->mdata[WmsOrgQuote::QUOTE_PALLET_STORAGE_WEEK]]);
+							$total -= $qty * $quotes[$stock->org_id]->mdata[WmsOrgQuote::QUOTE_PALLET_STORAGE_WEEK];
+						}
+					}
+				}
+				if (!empty($sub_items['container_unload'])) {
+					foreach ($sub_items['container_unload'] as $task_id) {
+						$task = WmsTask::model()->findByPk($task_id);
+						if (empty($quotes[$task->job->org_id])) {
+							$quotes[$task->job->org_id] = WmsOrgQuote::model()->find('org_id = :org_id and status = 1 and (JSON_VALUE(meta, "$.whole_sale") = 1)', [':org_id' => $task->job->org_id]);
+						}
+						$xls->addRow($i++, ['Container Unload', '', $task->mainTask->ref, '', '', '', '', '', '', '', $quotes[$task->job->org_id]->mdata[WmsOrgQuote::QUOTE_UNLOAD_40FT_CONTAINER], '', $quotes[$task->job->org_id]->mdata[WmsOrgQuote::QUOTE_UNLOAD_40FT_CONTAINER]]);
+						$total += $quotes[$task->job->org_id]->mdata[WmsOrgQuote::QUOTE_UNLOAD_40FT_CONTAINER];
+					}
+				}
+				if (!empty($sub_items['container_load'])) {
+					foreach ($sub_items['container_load'] as $task_id) {
+						$task = WmsTask::model()->findByPk($task_id);
+						if (empty($quotes[$task->job->org_id])) {
+							$quotes[$task->job->org_id] = WmsOrgQuote::model()->find('org_id = :org_id and status = 1 and (JSON_VALUE(meta, "$.whole_sale") = 1)', [':org_id' => $task->job->org_id]);
+						}
+						$xls->addRow($i++, ['Container Load', '', $task->mainTask->ref, '', '', '', '', '', '', '', $quotes[$task->job->org_id]->mdata[WmsOrgQuote::QUOTE_LOAD_40FT_CONTAINER], '', $quotes[$task->job->org_id]->mdata[WmsOrgQuote::QUOTE_LOAD_40FT_CONTAINER]]);
+						$total += $quotes[$task->job->org_id]->mdata[WmsOrgQuote::QUOTE_LOAD_40FT_CONTAINER];
+					}
+				}
+				if (!empty($sub_items['other'])) {
+					foreach ($sub_items['other'] as $task_id => $items) {
+						$task = WmsTask::model()->findByPk($task_id);
+						foreach ($items as $values) {
+							$xls->addRow($i++, ['Other ' . $values['desc'], '', $task->mainTask->ref, '', '', '', '', '', '', '', '', $values['amount'], $values['amount']]);
+							$total += $values['amount'];
+						}
+					}
+				}
+				$xls->addRow($i++, ['', '', '', '', '', '', '', '', '', '', '', '', $total]);
+				$xls->addRow($i++, []);
+			}
+		}
+
+		$xls->output('InvoiceB_details.xlsx');
+	}
+
+	public function getInvoiceOrgName()
+	{
+		$orgName = !empty($this->cust)?$this->cust->name:"";
+		$subName = "";
+		if(!empty($this->mdata['suborg']))
+		{
+			$sorg = Org::model()->findByPk($this->mdata['suborg']);
+			$subName = !empty($sorg)?"|".$sorg->name:"";
+		}
+		return $orgName.$subName;
+	}
+
+	public function getTotalByConsol($consol_id, $gst = true)
+	{
+		if ($this->status == 8) {
+			foreach ($this->payments as $payInv) {
+				if ($payInv->payment->type == 5 && $payInv->payment->bank == 90 && $payInv->payment->status == 6) {
+					return 0;
+				}
+			}
+		}
+
+		if (!empty($this->consol_id) || !in_array($this->type, [36])) return $gst ? number_format($this->total, 2, '.', '') : number_format($this->total - $this->gst, 2, '.', '');
+
+		$total = 0;
+		foreach ($this->lines as $line) {
+			if ($line->model != "ImParcel") continue;
+
+			$p = ImParcel::model()->findByPk($line->fid);
+			if ($p->consol_id != $consol_id) continue;
+			$total += $line->amount + ($gst == true ? $line->gst : 0);
+		}
+
+		return number_format($total, 2, '.', '');
+	}
+
+	public function isTLA()
+	{
+		if (!empty($this->id) && $this->id < 500000) return false;
+
+		if(isset($this->consol_id) && isset($this->dpmt) && $this->consol_id > 0 && $this->dpmt == 10){
+			$con = Consol::model()->findByPk($this->consol_id);
+			if(strtotime($con->eta) >= strtotime('2020-08-01')) return 1;
+		}
+		return false;
+	}
+
+	private function getMyRegion()
+	{
+		$region = '';
+		$dpt_id = 0;
+		if(!empty($this->consol_id))
+		{
+			$consol = Consol::model()->findByPk($this->consol_id);
+			$dpt_id = $consol->dpt_id;
+		}else
+		{
+			if(!empty($this->job_id))
+			{
+				$job = WmsJob::model()->findByPk($this->job_id);
+				$task = $job->tasks[0];
+				$dpt_id = $task->dpt_id;
+			}
+		}
+
+		if(!empty($dpt_id))
+		{
+			$this->dpt_id = $dpt_id;
+		}
+
+		if(!empty($this->dpt_id))
+		{
+			$regions =  SystemSetting::getInvoiceRegions();
+			$region = $regions[$this->dpt_id];
+		}
+
+		return $region;
+	}
+
+	public function setPaypalRedirect($strUrl){
+		$this->mdata['paypal_redirect'] = $strUrl;
+	}
+	public function getPaypalRedirect(){
+		return $this->mdata['paypal_redirect'];
+	}
+	public function funcIsPaypalRedirect(){
+		return isset($this->mdata['paypal_redirect']);
+	}
+
+	public static function  funcChangeAddress($objInvoice){
+		if(isset($objInvoice->mdata['change_address'])){
+			$strAddress = $objInvoice->mdata['change_address']['address'];
+			$strSuburb = $objInvoice->mdata['change_address']['suburb'];
+			$strPostcode = $objInvoice->mdata['change_address']['postcode'];
+
+			$p = ImParcel::model()->findByPk($objInvoice->mdata['change_address']['shipment_id']);
+			$cargoProcess = CargoProcess::model()->findByPk($objInvoice->mdata['change_address']['cargo_process_id']);
+
+			$p->mdata['region'] = '';
+			$p->save();
+
+			$objCnee = $p->cnee;
+			$strOriginalAddress = 'Original Address: '.$objCnee->fullAddress();
+			$cargoProcess->mdata['customer_confirmed']['original_address'] = $strOriginalAddress;
+			$cargoProcess->mdata['region'] = '';
+			$cargoProcess->save();
+
+			// copy cnee to receiver
+			$objReceiver = $p->receiver;
+			if($objReceiver == null){
+				$objReceiver = new Addr;
+				$objReceiver->save();
+				$p->receiver_id = $objReceiver->id;
+			}
+			$objReceiver->setAttributes($objCnee->attributes);
+			$objReceiver->save();
+
+			// set cnee
+			$objCnee->address = $strAddress;
+			$objCnee->suburb = $strSuburb;
+			$objCnee->city = $strSuburb;
+			$objCnee->postcode = $strPostcode;
+			$objCnee->save();
+
+			// put note to shipment
+			$strIp = $objInvoice->mdata['change_address']['ip'];
+			$strNewAddress = $strAddress . ' ' . $strSuburb . ' ' . $strPostcode;
+			$p->note .= '[Changing Address By Confirmation Of Information][' . date('Y-m-d H:i:s') . '][' . $strIp . '][' . $strNewAddress . '][' . $strOriginalAddress . ']';
+			$p->save();
+		}
+	}
+
+	public function getPaypalUrl()
+	{
+		$url = 'https://ims.topLogistics.com.au/customerService/payByPaypal?no='.$this->no;
+		return $url;
+	}
+}

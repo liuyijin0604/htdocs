@@ -1,0 +1,317 @@
+<?php 
+class SeaConsolService extends Service
+{
+	private function __clone() 
+    { 
+    }
+
+     /** 
+     * CreateDTime: 2023/01/03 14:35 
+     * Function: "" 
+     * @return sigle|null 
+     */ 
+    public static function getInstance() 
+    { 
+        if (self::$ins==null){ 
+            self::$ins=new self(); 
+        } 
+        return self::$ins; 
+    }
+
+ 	public function updateSeaDocumentationStatus($consol,$processType,$isIgnore=false,$postData = null)
+ 	{
+ 		if($processType==ConsolProcess::DU_UNPACKS&&!$isIgnore)
+ 		{
+ 			if(!empty($postData['unpackingTeam']))
+ 			{
+ 				$consol->process->mdata['unpacking_team'] =$postData['unpackingTeam'];
+ 				$consol->mdata['ContainerUnloadDate'] =$postData['ContainerUnloadDate'];
+ 				$consol->updateMeta();
+ 				$this->updateUnpackingStatus($consol);
+
+ 				$consol->process->addOperationLog("Update Unpacking Team:".$postData['unpackingTeam']);
+
+ 				return  $this->getSuccessResult();
+ 			}
+ 		}
+
+		if(!empty($isIgnore))
+		{
+
+	 		$consol->process->sub_status = intval($consol->process->sub_status)|$processType;
+			$consol->process->sub_status_ignore = intval($consol->process->sub_status_ignore)|$processType;
+
+	 		$consol->process->save();
+	 		return  $this->getSuccessResultWithWarns();
+		}else
+		{
+			return  $this->getFailResult("Failure");
+		}
+
+ 	}
+
+ 	public static function updateSCRProcessStatus($consol,$om)
+	{
+		if($consol->service==Consol::SEACONSOL)
+		{
+			$newScrStat = -1;
+			if($om->status==Edimsg::STATUSLGD)
+			{
+				$newScrStat = 5;
+			}elseif($om->status==Edimsg::STATUSRJT)
+			{
+				$newScrStat = 0;
+			}
+
+			if((isset($consol->mdata['scr_stat'])&&$consol->mdata['scr_stat']!=$newScrStat)||!isset($consol->mdata['scr_stat']))
+			{
+				$consol->mdata['scr_stat'] = $newScrStat;
+				$consol->updateMeta();
+				if($newScrStat==5)
+				{
+					$consol->process->sub_status = intval($consol->process->sub_status)|ConsolProcess::DU_SCR;//update SCR pass
+					$consol->process->sub_status_ignore = (intval($consol->process->sub_status_ignore)|ConsolProcess::DU_SCR)-ConsolProcess::DU_SCR;
+
+				}else
+				{
+					$consol->process->sub_status = (intval($consol->process->sub_status)|ConsolProcess::DU_SCR) - ConsolProcess::DU_SCR;//update SCR failure
+				}
+
+				$consol->process->update(["sub_status","sub_status_ignore"]);
+			}
+		}
+	}
+
+
+	public static function updateUBMProcessStatus($process)
+	{
+		if($process->consol->service==Consol::SEACONSOL)
+		{
+			if(!empty($process->consol->mdata['ubmsent'])&&$process->consol->mdata['ubmsent']==9)
+			{
+				$process->sub_status = intval($process->sub_status)|ConsolProcess::DU_UB;
+				$process->update('sub_status');
+			}elseif(($process->sub_status&ConsolProcess::DU_UB)>0&&(empty($process->consol->mdata['ubmsent'])||!empty($process->consol->mdata['ubmsent'])&&$process->consol->mdata['ubmsent']!=9))
+			{
+				$process->sub_status = (intval($process->sub_status)|ConsolProcess::DU_UB)-ConsolProcess::DU_UB;
+				$process->update('sub_status');
+			}
+		}
+	}
+
+	public static function updateDOProcessStatus($consol)
+	{
+		$check = FileRepo::model()->count("type = :type and fid = :fid and name like '%EDO%' and status != :status ",[":fid"=>$consol->id,":type"=>FileRepo::CONSOL_ATTACHMENT,":status"=>FileRepo::DELETED]);
+		if($check>0)
+		{
+			$consol->process->sub_status = intval($consol->process->sub_status)|ConsolProcess::DU_DO;
+			$consol->process->update('sub_status');
+		}else
+		{
+			$consol->process->sub_status = (intval($consol->process->sub_status)|ConsolProcess::DU_DO)- ConsolProcess::DU_DO;
+			$consol->process->update('sub_status');
+		}
+		return self::getSuccessResult();
+	}
+
+	public static function updateCartageProcessStatus($consol)
+	{
+		if(!empty($consol->process->mdata['send_cartage_email']))
+		{
+			$consol->process->sub_status = intval($consol->process->sub_status)|ConsolProcess::DU_CARTAGE;
+			$consol->process->sub_status_ignore = (intval($consol->process->sub_status_ignore)|ConsolProcess::DU_CARTAGE)-ConsolProcess::DU_CARTAGE;
+			$consol->process->update(['meta','sub_status','sub_status_ignore']);
+		}else
+		{
+			$consol->process->sub_status = (intval($consol->process->sub_status)|ConsolProcess::DU_CARTAGE) - ConsolProcess::DU_CARTAGE;
+			$consol->process->update(['meta','sub_status']);
+		}
+	}
+
+	public static function updatePortChargeProcessStatus($consol)
+	{
+		if(!empty($consol->process->mdata['port_charge_ge']))
+		{
+			$consol->process->sub_status = intval($consol->process->sub_status)|ConsolProcess::DU_PORTCHARGE;
+			$consol->process->update('sub_status');
+		}else
+		{
+			$consol->process->sub_status = (intval($consol->process->sub_status)|ConsolProcess::DU_PORTCHARGE) - ConsolProcess::DU_PORTCHARGE;
+			$consol->process->update('sub_status');
+		}
+	}
+
+	public static function updateUnpackingStatus($consol)
+	{
+		if(!empty($consol->process->mdata['unpacking_team']))
+		{
+			$consol->process->sub_status = intval($consol->process->sub_status)|ConsolProcess::DU_UNPACKS;
+			$consol->process->update('meta','sub_status','sub_status_ignore');
+		}else
+		{
+			$consol->process->sub_status = (intval($consol->process->sub_status)|ConsolProcess::DU_UNPACKS) - ConsolProcess::DU_UNPACKS;
+			$consol->process->update('sub_status');
+		}
+	}
+
+
+	public static function updateReceiptOStatus($consol)
+	{
+		if(!empty($consol->process->mdata['receipt_pass'])&&(($consol->process->sub_status&ConsolProcess::DU_RECEIPTO)==0||($consol->process->sub_status_ignore&ConsolProcess::DU_RECEIPTO)>0))
+		{
+			$consol->process->sub_status = intval($consol->process->sub_status)|ConsolProcess::DU_RECEIPTO;
+			$consol->process->sub_status_ignore = (intval($consol->process->sub_status_ignore)|ConsolProcess::DU_RECEIPTO)-ConsolProcess::DU_RECEIPTO;
+			$consol->process->update('meta','sub_status','sub_status_ignore');
+		}else
+		{
+			$consol->process->sub_status = (intval($consol->process->sub_status)|ConsolProcess::DU_RECEIPTO) - ConsolProcess::DU_RECEIPTO;
+			$consol->process->update('sub_status');
+		}
+	}
+
+	public static function updateOutturnUnpackStatus($consol)
+	{
+		if(!empty($consol->process->mdata['unpack_outturn_pass'])&&(($consol->process->sub_status&ConsolProcess::DU_UNPACKINGO)==0||($consol->process->sub_status_ignore&ConsolProcess::DU_UNPACKINGO)>0))
+		{
+			$consol->process->sub_status = intval($consol->process->sub_status)|ConsolProcess::DU_UNPACKINGO;
+			$consol->process->sub_status_ignore = (intval($consol->process->sub_status_ignore)|ConsolProcess::DU_RECEIPTO)-ConsolProcess::DU_RECEIPTO;
+			$consol->process->update('meta','sub_status','sub_status_ignore');
+		}else
+		{
+			$consol->process->sub_status = (intval($consol->process->sub_status)|ConsolProcess::DU_UNPACKINGO) - ConsolProcess::DU_UNPACKINGO;
+			$consol->process->update('sub_status');
+		}
+	}
+
+	public static function updateManifestStatus($consol)
+	{
+		if($consol->service==Consol::SEACONSOL)
+		{
+			if(!empty($consol->process->mdata['manifest_pass']))
+			{
+				$consol->process->addOperationLog("Manifest Shipments");
+
+				$consol->process->sub_status = intval($consol->process->sub_status)|ConsolProcess::DU_MANIFEST;
+				$consol->process->sub_status_ignore = (intval($consol->process->sub_status_ignore)|ConsolProcess::DU_MANIFEST)-ConsolProcess::DU_MANIFEST;
+				$consol->process->update('meta','sub_status','sub_status_ignore');
+			}else
+			{
+				$consol->process->sub_status = (intval($consol->process->sub_status)|ConsolProcess::DU_MANIFEST) - ConsolProcess::DU_MANIFEST;
+				$consol->process->update('sub_status');
+			}
+		}
+	}
+
+	public static function updateInvoiceStatus($consol)
+	{
+		if(!empty($consol->process->mdata['invoice_pass']))
+		{
+			$consol->process->addOperationLog("Generate Invoice");
+
+			$consol->process->sub_status = intval($consol->process->sub_status)|ConsolProcess::DU_INVOICE;
+			$consol->process->sub_status_ignore = (intval($consol->process->sub_status_ignore)|ConsolProcess::DU_INVOICE)-ConsolProcess::DU_INVOICE;
+			$consol->process->update('meta','sub_status','sub_status_ignore');
+		}else
+		{
+			$consol->process->sub_status = (intval($consol->process->sub_status)|ConsolProcess::DU_INVOICE) - ConsolProcess::DU_INVOICE;
+			$consol->process->update('sub_status');
+		}
+	}
+
+	public static function updateCLRStatus($shipment,$consol)
+	{
+		if(!empty($shipment->status==ImParcel::STATE_CLEAR))
+		{
+			$consol->process->sub_status = intval($consol->process->sub_status)|ConsolProcess::DU_CLR;
+			$consol->process->sub_status_ignore = (intval($consol->process->sub_status_ignore)|ConsolProcess::DU_CLR)-ConsolProcess::DU_CLR;
+			$consol->process->update('meta','sub_status','sub_status_ignore');
+		}else
+		{
+			$consol->process->sub_status = (intval($consol->process->sub_status)|ConsolProcess::DU_CLR) - ConsolProcess::DU_CLR;
+			$consol->process->update('sub_status');
+		}
+	}
+
+	public function updateSeaConsolPortChargeFlexibleRate($consol,$data)
+	{
+		$orgIds = $consol->getAllAgentId();
+		$allData = OrgFlexibleRate::getOrgFlexibleRateByOrgIds($consol->id,$orgIds,true,true);
+		$check = false;
+		foreach ($allData as $key => $value) {
+			$o = OrgFlexibleRate::model()->findByPk($value['id']);
+			if($o->fid==0)
+			{
+				$o->id = null;
+				$o->isNewRecord = true;
+				$o->fid = $consol->id;
+				$o->model = "Consol";
+				if(strtoupper($o->item)=="PORT CHARGES"||strtoupper($o->item)=="PORT CHARGE")
+				{
+					$o->amount = $data['price'];
+					$check = true;
+				}
+				$o->save();
+			}else
+			{
+				if(strtoupper($value['item'])=="PORT CHARGES"||strtoupper($value['item'])=="PORT CHARGE")
+				{
+					$o->amount = $data['price'];
+					$o->save();
+					$check = true;
+				}
+				
+			}
+		}
+
+		if($check)
+		{
+			return $this->getSuccessResult();
+		}else
+		{
+			return $this->getFailResult("can not find PORT CHARGS In Org Flexible Rate");
+		}
+	}
+
+	public function editCartageEmail($postData,$getData,$ids)
+	{
+		$consol = Consol::model()->findByPk($ids[0]);
+		$ccEmail = "imports@toplogistics.com.au";
+		$vesselInfo = @$consol->mdata['sea_vessel']." ".$consol->airline." ".$consol->flight;
+		$emailContent = $vesselInfo."</br></br> Info:</br><table border=2 cellspacing=0 ><tr><th>TYPE</th><th>CTN number</th><th>Vessel</th><th>Vessel ID</th><th>Voyage</th><th>ETA</th><th>Free Detention Days</th></tr>";
+		$consols = [];
+		foreach ($ids as $key => $id) {
+			$thisConsol = Consol::model()->findByPk($id);
+			$emailContent.= "<tr><td>".@Consol::SEA_TYPE[$thisConsol->mdata['sea_type']]."</td>"."<td>".@$thisConsol->container_no."</td>"."<td>".@$thisConsol->mdata['sea_vessel']."</td>"."<td>".@$thisConsol->airline."</td>"."<td>".@$thisConsol->flight."</td>"."<td>".@$thisConsol->eta."</td>"."<td>".(empty($thisConsol->mdata['free_detention_days'])?"8":$thisConsol->mdata['free_detention_days'])."</td>"."</tr>";
+			$consols[] = $thisConsol;
+		}
+		$emailContent .= "</table>";
+		$seaConsolService = new SeaConsolService();
+
+		$emailService = new EmailService();
+		[$model,$data] = $emailService->createEmailContent($postData,$getData,Emailog::CARTAGE_EMAIL,["VESSEL_INFO",$vesselInfo],["EMAIL_CONTENT"=>$emailContent],$ccEmail);
+		if($data===1)
+		{
+			foreach ($consols as $key => $value) {
+				$consol->process->addOperationLog("Send Cartage Email");
+
+				$consol->process->mdata['send_cartage_email'] = 1;
+				$this->updateCartageProcessStatus($consol);
+			}
+		}
+
+		return [$model,$data];
+	}
+
+	public function getUnpackingTeam($consol)
+	{
+		$results = [];
+		$orgs = Org::model()->findAll("status=:status and (cargo_driver_type & :type)>0",[":status"=>Org::STATEACTIVE,":type"=>Org::$upackingTypesRe[$consol->dpt_id]]);
+
+		foreach ($orgs as $key => $value) {
+			$results[$value->id] = $value->name;
+		}
+		return $results;
+	}
+	
+}
+?>

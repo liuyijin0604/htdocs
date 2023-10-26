@@ -1,0 +1,1 @@
+<?php echo $this->renderPartial('shipment_form', array('model'=>$model,'org'=>$org)); ?>

@@ -1,0 +1,1070 @@
+<style type="text/css">
+.display_none {
+		display: none;
+	}
+ span.exp{
+	border: 1px solid #15538b;
+	color: #15538b;
+	border-radius: 4px;
+	padding: 0 2px;
+	cursor: pointer;
+	font-weight: bold;
+}
+span.exp:hover{
+	background-color:#15538b;
+	color: white;
+}
+a.cnee-col-tog.hi{
+	font-size: 1em;
+	font-weight: bold;
+	text-decoration: underline;
+}
+</style>
+<div class="form">
+<div style="position:absolute;visibility:hidden"><a class="jqm_link" id="word_replace" href="#">11</a></div>
+<?php $form=$this->beginWidget('CActiveForm', array(
+	'id'=>'imparcel-form',
+	'enableClientValidation'=>true,
+	'clientOptions'=>array(
+		'validateOnSubmit'=>true,
+	),
+));
+?>
+<?php if(Acl::hasAccess('B:Import/ChangeAfterConsol')): ?>
+	<div class="row rowcol rowleft">
+		<?php echo $form->labelEx($model,'owner_id'); ?>
+		<?php echo $form->hiddenField($model,'owner_id');
+			$acname = empty($_GET["tabid"])? 'owner_ac' : $_GET["tabid"].'_owner_ac';
+			$this->widget('zii.widgets.jui.CJuiAutoComplete', array(
+				'name' => $acname,
+				'sourceUrl' => array('org/ownerSuggest'),
+				'value' => empty($model->owner_id)? '': $model->owner->name,
+				'options' => array(
+						'showAnim' => 'fold',
+						'minLength' => 2,
+						'delay' => 200,
+						'select' => 'js:function(event, ui){ $(this).val(ui.item["label"]); $(this).prevAll("input[type=hidden]").val(ui.item["value"]).data("ov",ui.item["value"]); return false; }',
+						'change' => 'js:function(event, ui){ if(ui.item == null) $(this).prevAll("input[type=hidden]").val(""); return false; }',
+				),
+				'htmlOptions' => array(
+					'size' => '50',
+				),
+		));
+		?>
+
+		<?php echo $form->error($model,'owner_id'); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo $form->labelEx($model,'agent_id'); ?>
+		<?php echo $form->hiddenField($model,'agent_id');
+			$acname = empty($_GET["tabid"])? 'agent_ac' : $_GET["tabid"].'_agent_ac';
+			$this->widget('zii.widgets.jui.CJuiAutoComplete', array(
+				'name' => $acname,
+				'sourceUrl' => array('org/agentSuggest'),
+				'value' => empty($model->agent->name) ? '' : $model->agent->name,
+				'options' => array(
+						'showAnim' => 'fold',
+						'minLength' => 2,
+						'delay' => 200,
+						'select' => 'js:function(event, ui){ $(this).val(ui.item["label"]); $(this).prevAll("input[type=hidden]").val(ui.item["value"]).data("ov",ui.item["value"]); return false; }',
+						'change' => 'js:function(event, ui){ if(ui.item == null) $(this).prevAll("input[type=hidden]").val(""); return false; }',
+				),
+				'htmlOptions' => array(
+					'class' => 'required',
+					'size' => '50',
+				),
+		));
+		?>
+
+		<?php echo $form->error($model,'agent_id'); ?>
+	</div>
+<?php endif; ?>
+<?php if(!$model->isNewRecord && Acl::hasAccess('B:Import/StatusOverride')): ?>
+	<div class="row rowcol">
+		<?php echo $form->labelEx($model,'status'); ?>
+		<?php echo $form->dropDownList($model, 'status', ImParcel::$states, array('disabled' => 'disabled')); ?>
+		 <div style="background-position:-240px -416px" class="icon"></div>
+		<?php echo $form->error($model,'status'); ?>
+
+		<?php
+			if (in_array($model->status, [50, 55, 58, 60])) {
+				// in case reported or held status , we maybe want to resend AIRCR again
+				echo CHtml::htmlButton('RE-SEND ACR',['id' => 'resend-acr-btn']);
+				echo '&nbsp;<span style="border:1px solid black;padding:5px;">';
+				echo CHtml::checkBox('config_acr'),'Config Sac&nbsp;';
+				echo CHtml::RadioButtonList('can_sac',1, array('0'=>'NO Sac','1'=>'SAC'),array('labelOptions'=>array('class'=>'radio_label'),'separator'=>'&nbsp;&nbsp;')),'</span>';
+			}
+
+		?>
+	</div>
+
+	<div class="row rowcol">
+		<?php
+			if (isset($model->mdata['cargo_delivery']))
+			{
+				echo CHtml::checkBox('mdata[cargo_delivery]',@$model->mdata['cargo_delivery']),'Truck Delivery&nbsp;';
+				echo "<p id=".'chargecodep'." class=".'display_none'.">&nbsp;ChargeCode:&nbsp;".CHtml::textField('mdata[chargecode]',@$model->mdata['chargecode'],['class' => 'required','size'=>10,'id'=>'charge_code_text']),'&nbsp;or Invoice Id:&nbsp;'. CHtml::textField('mdata[invoiceid]',@$model->mdata['invoiceid'],['class' => 'required','size'=>10,'id'=>'invoice_text']).'</p>';
+			}else
+			{
+				echo CHtml::checkBox('mdata[cargo_delivery]'),'Truck Delivery&nbsp;';
+				echo "<p id=".'chargecodep'." class=".'display_none'.">&nbsp;ChargeCode:&nbsp;".CHtml::textField('mdata[chargecode]',@$model->mdata['chargecode'],['class' => 'required','size'=>10,'id'=>'charge_code_text']),'&nbsp;or Invoice Id:&nbsp;'. CHtml::textField('mdata[invoiceid]',@$model->mdata['invoiceid'],['class' => 'required','size'=>10,'id'=>'invoice_text']).'</p>';
+			}
+
+			echo "<p>".CHtml::checkBox('mdata[cargo_pickup]',@$model->mdata['cargo_pickup']),'Self Pickup&nbsp;</p>';
+			echo "<p>".CHtml::checkBox('mdata[cargo_ignore_scan]',@$model->mdata['cargo_ignore_scan']),'Ignore Scan&nbsp;</p>';
+
+		?>
+	</div>
+	<?php endif; ?>
+
+	<div class="row">
+	<div class="col" style="margin-right: 25px">
+	<h3>Shipper</h3>
+	<div class="row">
+		<?php echo $form->labelEx(@$model->cnor, 'name'); ?>
+		<?php echo CHtml::textField('Cnor[name]', @$model->cnor->name, array('size'=>60)); ?>
+	</div>
+	<div class="row">
+		<?php echo $form->labelEx(@$model->cnor, 'address'); ?>
+		<?php echo CHtml::textField('Cnor[address]', @$model->cnor->address, array('size'=>60)); ?>
+	</div>
+	<div class="row rowcol rowleft">
+		<?php echo $form->labelEx(@$model->cnor, 'state'); ?>
+		<?php echo CHtml::textField('Cnor[state]', @$model->cnor->state, array()); ?>
+	</div>
+	<div class="row rowcol">
+		<?php echo $form->labelEx(@$model->cnor, 'city'); ?>
+		<?php echo CHtml::textField('Cnor[city]', @$model->cnor->city, array()); ?>
+	</div>
+	<div class="row rowcol">
+		<?php echo $form->labelEx(@$model->cnor, 'suburb'); ?>
+		<?php echo CHtml::textField('Cnor[suburb]', @$model->cnor->suburb, array()); ?>
+	</div>
+	<div class="row rowcol rowleft">
+		<?php echo $form->labelEx(@$model->cnor, 'postcode'); ?>
+		<?php echo CHtml::textField('Cnor[postcode]', @$model->cnor->postcode); ?>
+	</div>
+	<div class="row rowcol">
+		<?php echo $form->labelEx(@$model->cnor, 'country'); ?>
+		<?php echo CHtml::textField('Cnor[country]', @$model->cnor->country); ?>
+	</div>
+	<div class="row">
+		<?php echo $form->labelEx(@$model->cnor, 'tel'); ?>
+		<?php echo CHtml::textField('Cnor[tel]', @$model->cnor->tel); ?>
+	</div>
+	<div class="row">
+		<?php echo $form->labelEx(@$model->cnor, 'email'); ?>
+		<?php echo CHtml::textField('Cnor[email]', @$model->cnor->email, array('size'=>60,'autocomplete'=>"off")); ?>
+	</div>
+		<div class="row">
+			<?php echo $form->labelEx(@$model->cnor, 'company'); ?>
+			<?php echo CHtml::textField('Cnor[company]', @$model->cnor->company, array('size'=>60)); ?>
+		</div>
+	</div>
+	<div class="col">
+	<h3 style="color: #000; font-weight: normal;"><a href="#col-cnee" class="cnee-col-tog hi">Consignee</a> | <a href="#col-rcvr" class="cnee-col-tog">Receiver(Custom)</a> | <a href="#col-ntfy" class="cnee-col-tog">Notify Party</a></h3>
+	<div id="col-cnee" class="col cnee-col">
+	<div class="row">
+		<?php echo $form->labelEx(@$model->cnee, 'name'); ?>
+		<?php echo CHtml::textField('Cnee[name]', @$model->cnee->name, array('size'=>60)); ?>
+	</div>
+	<div class="row">
+		<?php echo $form->labelEx(@$model->cnee, 'address'); ?>
+		<?php echo CHtml::textField('Cnee[address]', @$model->cnee->address, array('size'=>60)); ?>
+	</div>
+	<div class="row rowcol rowleft">
+		<?php echo $form->labelEx(@$model->cnee, 'suburb');
+		$sacname = empty($_GET["tabid"])? 'cnee_sub_ac' : $_GET["tabid"].'_cnee_sub_ac';
+		$this->widget('zii.widgets.jui.CJuiAutoComplete', array(
+				'name' => $sacname,
+				'sourceUrl' => array('postcode/suggest'),
+				'value' => (@$model->cnee->suburb) ? @$model->cnee->suburb : '',
+				'options' => array(
+						'showAnim' => 'fold',
+						'minLength' => 2,
+						'delay' => 200,
+						'select' => 'js:function(event, ui){ $(this).val(ui.item["value"]); $(this).trigger("ac_after_select", ui); return false; }',
+				),
+				'htmlOptions' => array(
+					'size' => '20',
+					'name' => 'Cnee[suburb]',
+				),
+		));
+		?>
+	</div>
+	<div class="row rowcol">
+		<?php echo $form->labelEx(@$model->cnee, 'state'); ?>
+		<?php echo CHtml::dropDownList('Cnee[state]', strtoupper(@$model->cnee->state), array('ACT' => 'ACT - Australia Capital Territory', 'NSW' => 'NSW - New South Wales', 'NT' => 'NT - Northern Territory', 'QLD' => 'QLD - Queensland', 'SA' => 'SA - South Australia', 'TAS' => 'TAS - Tasmania', 'VIC' => 'VIC - Victoria', 'WA' => 'WA - Western Australia','NI'=>'NI - North Island','SI'=>'SI - South Island'), array('empty' => 'Select One')); ?>
+	</div>
+	<div class="row rowcol rowleft">
+		<?php echo $form->labelEx(@$model->cnee, 'postcode'); ?>
+		<?php echo CHtml::textField('Cnee[postcode]', @$model->cnee->postcode); ?>
+	</div>
+	<div class="row rowcol">
+		<?php echo $form->labelEx(@$model->cnee, 'country'); ?>
+		<?php echo CHtml::textField('Cnee[country]', @$model->cnee->country); ?>
+	</div>
+	<div class="row">
+		<?php echo $form->labelEx(@$model->cnee, 'tel'); ?>
+		<?php echo CHtml::textField('Cnee[tel]', @$model->cnee->tel); ?>
+	</div>
+	<div class="row">
+		<?php echo $form->labelEx(@$model->cnee, 'email'); ?>
+		<?php echo CHtml::textField('Cnee[email]', @$model->cnee->email, array('size'=>60,'autocomplete'=>"off")); ?>
+	</div>
+		<div class="row">
+			<?php echo $form->labelEx(@$model->cnee, 'company'); ?>
+			<?php echo CHtml::textField('Cnee[company]', @$model->cnee->company, array('size'=>60)); ?> <label><input type="checkbox" name="bwf_ffi" value="1" <?=($model->bwf & 4096) > 0? 'checked ' : '';?>/> Freight Forwarder</label>
+		</div>
+	</div>
+	   <?php if(!empty($model->receiver)):?>
+	<div id="col-rcvr" class="col cnee-col">
+	<div class="row">
+		<?php echo $form->labelEx($model->receiver, 'name'); ?>
+		<?php echo CHtml::textField('Receiver[name]', $model->receiver->name, array('size'=>60)); ?>
+	</div>
+	<div class="row">
+		<?php echo $form->labelEx($model->receiver, 'address'); ?>
+		<?php echo CHtml::textField('Receiver[address]', $model->receiver->address, array('size'=>60)); ?>
+	</div>
+	<div class="row rowcol rowleft">
+		<?php echo $form->labelEx($model->receiver, 'suburb');
+		$rsacname = empty($_GET["tabid"])? 'receiver_sub_ac' : $_GET["tabid"].'_receiver_sub_ac';
+		$this->widget('zii.widgets.jui.CJuiAutoComplete', array(
+				'name' => $rsacname,
+				'sourceUrl' => array('postcode/suggest'),
+				'value' => ($model->receiver->suburb) ? $model->receiver->suburb : '',
+				'options' => array(
+						'showAnim' => 'fold',
+						'minLength' => 2,
+						'delay' => 200,
+						'select' => 'js:function(event, ui){ $(this).val(ui.item["value"]); $(this).trigger("acr_after_select", ui); return false; }',
+				),
+				'htmlOptions' => array(
+					'size' => '20',
+					'name' => 'Receiver[suburb]',
+				),
+		));
+		?>
+	</div>
+	<div class="row rowcol">
+		<?php echo $form->labelEx($model->receiver, 'state'); ?>
+		<?php echo CHtml::dropDownList('Receiver[state]', strtoupper($model->receiver->state), array('ACT' => 'ACT - Australia Capital Territory', 'NSW' => 'NSW - New South Wales', 'NT' => 'NT - Northern Territory', 'QLD' => 'QLD - Queensland', 'SA' => 'SA - South Australia', 'TAS' => 'TAS - Tasmania', 'VIC' => 'VIC - Victoria', 'WA' => 'WA - Western Australia','NI'=>'NI - North Island','SI'=>'SI - South Island'), array('empty' => 'Select One')); ?>
+	</div>
+	<div class="row rowcol rowleft">
+		<?php echo $form->labelEx($model->receiver, 'postcode'); ?>
+		<?php echo CHtml::textField('Receiver[postcode]', $model->receiver->postcode); ?>
+	</div>
+	<div class="row rowcol">
+		<?php echo $form->labelEx($model->receiver, 'country'); ?>
+		<?php echo CHtml::textField('Receiver[country]', $model->receiver->country); ?>
+	</div>
+	<div class="row">
+		<?php echo $form->labelEx($model->receiver, 'tel'); ?>
+		<?php echo CHtml::textField('Receiver[tel]', $model->receiver->tel); ?>
+	</div>
+	<div class="row">
+		<?php echo $form->labelEx($model->receiver, 'email'); ?>
+		<?php echo CHtml::textField('Receiver[email]', $model->receiver->email, array('size'=>60)); ?>
+	</div>
+		<div class="row">
+			<?php echo $form->labelEx($model->receiver, 'company'); ?>
+			<?php echo CHtml::textField('Receiver[company]', $model->receiver->company, array('size'=>60)); ?>
+		</div>
+	</div>
+	   <?php endif;?>
+	   <?php if(!empty($model->notifier)):?>
+	<div id="col-ntfy" class="col cnee-col" style="display:none;">
+	<div class="row">
+		<?php echo $form->labelEx($model->notifier, 'name'); ?>
+		<?php echo CHtml::textField('Notifier[name]', $model->notifier->name, array('size'=>60)); ?>
+	</div>
+	<div class="row">
+		<?php echo $form->labelEx($model->notifier, 'address'); ?>
+		<?php echo CHtml::textField('Notifier[address]', $model->notifier->address, array('size'=>60)); ?>
+	</div>
+	<div class="row rowcol rowleft">
+		<?php echo $form->labelEx($model->notifier, 'suburb');
+		$notifyname = empty($_GET["tabid"])? 'notifier_sub_ac' : $_GET["tabid"].'_notifier_sub_ac';
+		$this->widget('zii.widgets.jui.CJuiAutoComplete', array(
+				'name' => $notifyname,
+				'sourceUrl' => array('postcode/suggest'),
+				'value' => ($model->notifier->suburb) ? $model->notifier->suburb : '',
+				'options' => array(
+						'showAnim' => 'fold',
+						'minLength' => 2,
+						'delay' => 200,
+						'select' => 'js:function(event, ui){ $(this).val(ui.item["value"]); $(this).trigger("acrn_after_select", ui); return false; }',
+				),
+				'htmlOptions' => array(
+					'size' => '20',
+					'name' => 'Notifier[suburb]',
+				),
+		));
+		?>
+	</div>
+	<div class="row rowcol">
+		<?php echo $form->labelEx($model->notifier, 'state'); ?>
+		<?php echo CHtml::dropDownList('Notifier[state]', strtoupper($model->notifier->state), array('ACT' => 'ACT - Australia Capital Territory', 'NSW' => 'NSW - New South Wales', 'NT' => 'NT - Northern Territory', 'QLD' => 'QLD - Queensland', 'SA' => 'SA - South Australia', 'TAS' => 'TAS - Tasmania', 'VIC' => 'VIC - Victoria', 'WA' => 'WA - Western Australia','NI'=>'NI - North Island','SI'=>'SI - South Island'), array('empty' => 'Select One')); ?>
+	</div>
+	<div class="row rowcol rowleft">
+		<?php echo $form->labelEx($model->notifier, 'postcode'); ?>
+		<?php echo CHtml::textField('Notifier[postcode]', $model->notifier->postcode); ?>
+	</div>
+	<div class="row rowcol">
+		<?php echo $form->labelEx($model->notifier, 'country'); ?>
+		<?php echo CHtml::textField('Notifier[country]', $model->notifier->country); ?>
+	</div>
+	<div class="row">
+		<?php echo $form->labelEx($model->notifier, 'tel'); ?>
+		<?php echo CHtml::textField('Notifier[tel]', $model->notifier->tel); ?>
+	</div>
+	<div class="row">
+		<?php echo $form->labelEx($model->notifier, 'email'); ?>
+		<?php echo CHtml::textField('Notifier[email]', $model->notifier->email, array('size'=>60)); ?>
+	</div>
+		<div class="row">
+			<?php echo $form->labelEx($model->notifier, 'company'); ?>
+			<?php echo CHtml::textField('Notifier[company]', $model->notifier->company, array('size'=>60)); ?>
+		</div>
+	</div>
+	   <?php endif;?>
+	</div>
+
+	<div class="row">
+	<h3>Goods</h3>
+	<div class="row rowcol rowleft" style="margin-right: 25px">
+		<?php echo $form->labelEx($model,'pkg'); ?>
+		<?php echo $form->textField($model,'pkg', array('size' => 10)); ?>
+	</div>
+	<div class="row rowcol" style="margin-right: 15px">
+		<?php echo $form->labelEx($model,'weight'); ?>
+		<?php echo $form->textField($model,'weight', array('size' => 10)); ?> KG
+	</div>
+		<?php if(isset($model->mdata['manifest_weight'])):?>
+		<div class="row rowcol" style="margin-right: 15px">
+		<?php echo CHtml::label("Manifest weight",'manifest_weight'); ?>
+			<div style="font-weight:bold;"><?=@$model->mdata['manifest_weight']?>&nbsp;KG</div> 
+	</div>
+		<?php endif;?>
+		<?php if(User::checkIsNotTruckUser()):?>
+		<div class="row rowcol" style="margin-right: 15px">
+				<?php echo CHtml::label("Our Charge Weight",'charge_weight'); ?>
+				<div style="font-weight:bold;"><?=isset($model->mdata['charge_client_weight'])?$model->mdata['charge_client_weight']:(isset($model->mdata['chargecode'])?$model->chargeWeight():$model->weight)?>&nbsp;KG</div> 
+		</div>
+		<?php if(!empty($chargeWeight=$model->getStartrackChargeWeight())):?>
+		 <div class="row rowcol" style="margin-right: 5px">
+			 <?php echo CHtml::label("Courier weight",'manifest_weight'); ?>
+			<div style="font-weight:bold;"><?=@$chargeWeight?>&nbsp;KG</div> 
+			</div>
+		<?php endif;?>
+		<?php endif;?>
+		<div class="row rowcol" style="margin-right: 25px">
+		<?php echo CHtml::label('Total CBM','total_cbm'); ?>
+				<?php echo CHtml::numberField('mdata[total_cbm]',@$model->mdata['total_cbm'], array('size' => 5)); ?> M<sup>3</sup>
+	</div>
+	<div class="row rowcol" style="margin-right: 25px">
+		<?php echo $form->labelEx($model,'cbm',array('label'=>'Average CBM')); ?>
+		<?php echo $form->textField($model,'cbm', array('size' => 10)); ?> M<sup>3</sup>
+	</div>
+	<div class="row rowcol" style="margin-right: 25px">
+		<label>DIM (WxHxD)</label>
+		<?php echo CHtml::textField('dim[w]', @$model->mdata['dim']['w'], array('size' => 4)); ?>CM x 
+		<?php echo CHtml::textField('dim[h]', @$model->mdata['dim']['h'], array('size' => 4)); ?>CM x 
+		<?php echo CHtml::textField('dim[d]', @$model->mdata['dim']['d'], array('size' => 4)); ?>CM
+	</div>
+	<div class="row rowcol">
+		<?php echo $form->labelEx($model,'currency'); ?>
+		<?php echo $form->dropDownList($model,'currency', array(
+		'1' => 'AUD',
+		'2' => 'USD',
+	), array('empty' => 'Select One')); ?>
+	</div>
+
+	<div class="row rowcol">
+			<?php echo CHtml::label('Damaged Packs','damaged_packs');?>
+			<?php echo CHtml::numberField('mdata[damaged_packs]',@$model->mdata['damaged_packs'],["style"=>"width:40px;"]);?>
+	</div>
+
+	
+	<div class="row rowcol">
+		<?php echo CHtml::label('Customs Duties & Fees:/Awb<span class="required">*</span>','cust_duty_fee');?>
+		<?php echo CHtml::numberField('mdata[cust_duty_fee]',@$model->mdata['cust_duty_fee']);?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('Customs Lines:<span class="required">*</span>','cust_duty_lines');?>
+		<?php echo CHtml::numberField('mdata[cust_duty_lines]',@$model->mdata['cust_duty_lines']);?>
+	</div>
+	<div class="row">
+	<div class="row rowcol">
+	<h3>Packages From Customer</h3>
+	<table id="packages" style = "border: 1px solid #000;">
+	<thead>
+	<tr><th style="width:10em;">#</th><th style="width:10em;">Weight</th><th style="width:10em;">Length</th><th style="width:10em;">Height</th><th style="width:10em;">Width</th></tr>
+	</thead>
+	<tbody>
+		<?php foreach($model->packs as $key => $pack)
+		{
+			$num = $key+1;
+			echo "<tr><td align='center'>{$num}</td><td align='center'>".@$pack['weight']."kg</td><td align='center'>".@$pack['length']."CM</td><td align='center'>".@$pack['height']."CM</td><td align='center'>".@$pack['width']."CM</td></tr>";
+		}?>
+		
+	</tbody>
+	</table>
+	</div>
+
+	<div class="row rowcol">
+	<h3>Manifest Packages To Courier</h3>
+	<table id="packages" style = "border: 1px solid #000;">
+	<thead>
+	<tr><th style="width:10em;">Qty</th><th style="width:10em;">Weight</th><th style="width:10em;">Length</th><th style="width:10em;">Height</th><th style="width:10em;">Width</th></tr>
+	</thead>
+	<tbody>
+		<?php 
+		if(!empty($model->mdata['eiz']))
+		{
+			foreach($model->mdata['eiz']['package'] as $key => $pack)
+			{
+				$num = $key+1;
+				echo "<tr><td align='center'>".@$pack['qty']."</td><td align='center'>".@$pack['weight']."kg</td><td align='center'>".@$pack['length']."CM</td><td align='center'>".@$pack['height']."CM</td><td align='center'>".@$pack['width']."CM</td></tr>";
+			}
+		}elseif(!empty($model->mdata['ubi_toll']))
+		{
+			foreach($model->mdata['ubi_toll'] as $key => $pack)
+			{
+				$num = $key+1;
+				echo "<tr><td align='center'>".@$pack['qty']."</td><td align='center'>".@$pack['weight']."kg</td><td align='center'>".@$pack['length']."CM</td><td align='center'>".@$pack['height']."CM</td><td align='center'>".@$pack['width']."CM</td></tr>";
+			}
+		}
+
+		?>
+		
+	</tbody>
+	</table>
+	</div>
+	</div>
+
+	<?php
+	$rtsPackages = ShipmentRtsRecord::model()->findAll("shipment_id = :shipment_id",[":shipment_id"=>$model->id]);
+	?>
+	<?php if(!empty($rtsPackages)):?>
+	<div class="row">
+	<h3><?=$this->t('RTS Packages');?></h3>
+	<table style = "border: 1px solid #000;">
+		<tr>
+			<th style="width:20em;">
+				<?=CHtml::label('RTS Barcode','RTS Barcode');?>
+			</th>
+			<th style="width:20em;">
+				<?=CHtml::label('RTS Reason','RTS Reason');?>
+			</th>
+			<th style="width:20em;">
+				<?=CHtml::label('RTS Image','RTS Image');?>
+			</th>
+		</tr>
+        <?php
+
+        	foreach($rtsPackages as $key => $package)
+        	{
+        		echo '<tr>';
+	        		echo '<td>';
+	        		echo '<center>';
+	                echo CHtml::label($package->barcode,'cbarcode',['class'=>'form-control form-control-border']);
+	                echo '</center>';
+	                echo '</td>';
+
+	                echo '<td>';
+	                echo '<center>';
+	                echo CHtml::label($package->reason,'creason',['class'=>'form-control form-control-border']);
+	                echo '</center>';
+	               	echo '</td>';
+
+
+	                echo '<td>';
+	                echo '<center>';
+	                echo CHtml::link($package->getUrl(),'curl');
+	                echo '</center>';
+	                echo '</td>';
+                echo '</tr>';
+        	}
+        ?>
+	</table>
+	</div>
+	<?php endif;?>
+
+	<div class="row">
+	<table id="items">
+	<thead>
+	<tr><th>#</th><th>Item <span class="required">*</span></th><th>中文品名</th><th>HS Code</th><th>Quantity <span class="required">*</span></th><th>Unit Value <span class="required">*</span></th><th>Sub Total</th></tr>
+	</thead>
+	<tbody>
+	</tbody>
+	<tfoot>
+	<tr><td colspan="3"><?php if($model->status < 50): ?><input type="button" value="More item" id="more_item" /><?php else: ?>&nbsp;<?php endif;?></td><th class="tright">Total:</th><th id="tot_qty"></th><td>&nbsp;</td><th id="tot_value">&nbsp;</th><td>&nbsp;</td></tr>
+	</tfoot>
+	</table>
+	</div>
+	</div>
+	<div class="row">
+		<div class="row rowcol">
+			<?php echo CHtml::label("Cito Excel Service Type - Tailgate Pallet", ''); ?>
+			<?php echo CHtml::checkBox('mdata[Tailgate_Pallet]'),'Tailgate Pallet';?>
+		</div>
+	</div>
+	<div class="row">
+		<div class="row rowcol">
+			<?php echo CHtml::label("Pickup Booking Time", 'pickup_booking_time'); ?>
+			<?php echo CHtml::textField('mdata[pickup_booking_time]', @$model->mdata['pickup_booking_time'], array('size' => 20,'class'=>"datetime_input",'id'=>'pickup_booking_time'.$_GET["tabid"])); ?>
+		</div>
+		<div class="row rowcol">
+		<?php echo CHtml::label("Pickup Booking Number", 'pickup_booking_number'); ?>
+			<?php echo CHtml::textField('mdata[pickup_booking_number]', @$model->mdata['pickup_booking_number'], array('size' => 20,'class'=>"text_input",'id'=>'pickup_booking_number'.$_GET["tabid"], 'disabled' => true)); ?>
+		</div>
+		<div class="row rowcol">
+		<?php echo CHtml::label("Need Wrap", 'pickup_booking_wrap'); ?>
+			<?php echo CHtml::textField('mdata[pickup_booking_wrap]', @$model->mdata['pickup_booking_wrap'], array('size' => 20,'id'=>'pickup_booking_wrap'.$_GET["tabid"], 'disabled' => true)); ?>
+		</div>
+	</div>
+	<?php
+		echo "<div class='row'>";
+		echo "<div class='row rowcol rowleft'>";
+		echo CHtml::radioButton("delivery_select",0,['value'=>CargoProcess::FBA_CARGO,'id'=>'amazon_delivery_select']),'Amazon Delivery&nbsp;';
+		echo "</div>";
+		echo "<div class='row rowcol'>";
+				
+		echo CHtml::radioButton("delivery_select",0,['value'=>CargoProcess::NORMAL_CARGO,'id'=>'delivery_select']),'Delivery&nbsp;';
+				
+		echo "</div>";
+
+		echo "</div>";
+	?>
+	<div class="row" id="amazon_info_area">
+			<div class="row rowcol rowleft">
+				<?php echo CHtml::label('Amazon PO#(.,;)','amazon_po'); ?>
+				<?php echo CHtml::textField("mdata[amazon_po]",@$model->mdata['amazon_po'], array('size' => 30)); ?>
+			</div>
+			<div class="row rowcol">
+				<?php echo CHtml::label('Amazon Shipment Id(.,;)','amazon_shipment_ids'); ?>
+				<?php echo CHtml::textField("mdata[amazon_shipment_ids]",@$model->mdata['amazon_shipment_ids'], array('size' => 30)); ?>
+			</div>
+			<div class="row rowcol" >
+				<?php echo CHtml::label('Pallets','amazon_pallet'); ?>
+				<?php echo CHtml::numberField('mdata[amzon_pallet]',@$model->mdata['amzon_pallet'], array('size' => 5)); ?>
+			</div>
+			<div class="row rowcol" >
+				<?php echo CHtml::label('Pallet Type','amzon_pallet_type'); ?>
+				<?php echo CHtml::dropDownList('mdata[amzon_pallet_type]', @$model->mdata['amzon_pallet_type'], ImParcel::$amzonPalletTypes,array('prompt'=>'SELECT','style'=>"width:120px;")); ?>
+			</div>
+			<div class="row rowcol rowleft" >
+				<?php echo CHtml::label('Amazon Booking Time','amazon_booking_time'); ?>
+				<?php echo CHtml::textField('AmazonInfo[amazon_booking_time]',@$model->amazon_info->amazon_booking_time, array('size' => 20,'class'=>"datetime_input",'id'=>'amazon_book_time'.$_GET['tabid'])); ?>
+			</div>
+		   <div class="row rowcol">
+				<?php echo CHtml::label("AmazonBooking Info", 'booking_ref'); ?>
+				<?php echo CHtml::textField('AmazonInfo[booking_ref]', @$model->amazon_info->booking_ref); ?>
+			</div>
+	</div>
+	<?php 
+				echo"<div class='row' id='delivery_area'>";
+				echo "<div class='row rowcol rowleft' >";
+				echo CHtml::label('Delivery Booking Time','Delivery_booking_time');
+				$deliveryBookingTime = $model->cargo_delivery_info == null?"":$model->cargo_delivery_info->delivery_booking_time;
+				echo CHtml::textField('CargoDeliveryInfo[delivery_booking_time]',$deliveryBookingTime, array('size' => 20,'class'=>"datetime_input",'id'=>'delivery_book_time'.$_GET["tabid"]));
+				echo "</div>";
+				echo "</div>";
+	?>
+	<div class="row">
+		   <div class="row rowcol">
+				<?php echo CHtml::label("Choose Address", 'delivery_address'); ?>
+				<?php echo CHtml::dropDownList('mdata[delivery_address]', @$model->mdata['delivery_address'], DmawbConsol::$cargo_receip_address,array('prompt'=>'SELECT','style'=>"width:120px;")); ?>
+			</div>
+			<div class="row rowcol">
+				<?php echo CHtml::label("Delivery Address", 'cargo_receipt_addr'); ?>
+				<?php echo CHtml::textField('mdata[cargo_receipt_addr]', @$model->mdata['cargo_receipt_addr'],array('size'=>50)); ?>
+			</div>
+	</div>
+
+	<div class="row">
+	   <div class="row rowcol rowleft" >
+		<?php echo CHtml::label('Importer ABN','importer_abn'); ?>
+		<?php echo CHtml::textField('mdata[importer_abn]',@$model->mdata['importer_abn'], array('size' => 20)); ?>
+	</div>
+	<div class="row rowcol">
+		<?php echo CHtml::label("Vendor id", 'vendor_id'); ?>
+		<?php echo CHtml::textField('mdata[vendor_id]', @$model->mdata['vendor_id'],array('size'=>20)); ?>
+	</div>
+	<?php if(@$model->consol->service == 20):?>
+	<div class="row rowcol">
+		<?php echo CHtml::label("Sea Storage End Date", 'storage_end_date'); ?>
+		<?php echo CHtml::textField('mdata[storage_end_date]', @$model->mdata['storage_end_date'],array('size'=>20,'class'=>'date_input','id'=>$_GET['tabid'].'storage_end_date')); ?>
+	</div>
+	<div class="row rowcol">
+		<?php echo CHtml::label('Handling Instruction', 'sea_instruction'); ?>
+		<?php echo CHtml::textField('mdata[sea_instruction]', @$model->mdata['sea_instruction'], array('size' => 40)); ?>
+	</div>
+	<?php endif;?>
+	<div class="row rowcol">
+		<?php echo CHtml::label('Marks And Numbers', 'sea_mark_number'); ?>
+		<?php echo CHtml::textField('mdata[sea_mark_number]', @$model->mdata['sea_mark_number'], array('size' => 30)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('Express Service', 'express_service'); ?>
+		<?php
+		echo $form->dropDownList($model, 'styp', ImParcel::$styp);
+		?>
+	</div>
+	<div class="row rowcol">
+		<?php echo CHtml::label('Extra Service', 'extra_service'); ?>
+		<?php
+			echo CHtml::checkbox('mdata[is_dg]',@$model->mdata['is_dg']),'DG';
+		?>
+	</div>
+	<div class="row rowcol">
+		<?php echo CHtml::label('isB2B', 'isB2B'); ?>
+		<?php
+			echo CHtml::checkbox('mdata[is_b2b]',(isset($model->mdata['is_b2b'])?$model->mdata['is_b2b']:0)),'isB2B';
+		?>
+	</div>
+	<div class="row rowcol">
+		<?php echo CHtml::label('isB2C', 'isB2C'); ?>
+		<?php
+			echo CHtml::checkbox('mdata[is_b2c]',(isset($model->mdata['is_b2b'])?($model->mdata['is_b2b']==1?0:1):0)),'isB2C';
+		?>
+	</div>
+	<div class="row rowcol rowleft">
+		<?php echo $form->labelEx($model,'insurance'); ?>
+		<?php echo $form->textField($model,'insurance', array('size' => 10)); ?>
+	</div>
+	<?php if(!empty($model->mdata['tnt'])): ?>
+	<div class="row rowcol">
+		<?php echo CHtml::label('TNT Insurance Class', 'tnt_warranty_class'); ?>
+		<?php echo CHtml::dropDownList('mdata[tnt_warranty_class]', @$model->mdata['tnt_warranty_class'], array('A' => 'Class A', 'B' => 'Class B', 'C' => 'Class C'), array('empty' => 'Select One', 'data-ov' => @$model->mdata['tnt_warranty_class'])); ?>
+	</div>
+	<?php endif; ?>
+	<div class="row rowcol">
+		<?php echo $form->labelEx($model,'can'); ?>
+		<?php echo $form->textField($model,'can', array('size' => 20)); ?>
+	</div>
+	<div class="row rowcol">
+		<?php echo $form->labelEx($model,'ref'); ?>
+		<?php echo $form->textField($model,'ref', array('size' => 20)); ?>
+	</div>
+	<div class="row rowcol">
+		<?php echo $form->labelEx($model,'cref'); ?>
+		<?php
+		if (preg_match('/^T\d{6,7}$/', $model->cref)) {
+			echo '<a href="wmsTask/update/' . substr($model->cref, 1) . '" class="tab_link" title="' . $model->cref . '">' . $model->cref . '</a>';
+		} else {
+			echo $form->textField($model,'cref', array('size' => 20));
+		}
+		?>
+	</div>
+	<div class="row rowcol">
+		<?php echo CHtml::label('cust Inv Ref','cust_inv_ref'); ?>
+		<?php
+		if (preg_match('/^T\d{6,7}$/', $model->cref)) {
+			$invlines = InvLine::model()->findAll('fid >= :fid1 AND fid <= :fid2 AND model = "WmsInvoiceLine" AND inv_id != 0', array(':fid1' => substr($model->cref, 1), ':fid2' => substr($model->cref, 1) + 3));
+			if (!empty($invlines)) {
+				echo '<a href="invoice/print/' . $invlines[0]->invoice->id . '" target="_blank" title="' . $invlines[0]->invoice->no . '">' . $invlines[0]->invoice->no . '</a>';
+			} else {
+				echo 'no relative invoice created';
+			}
+		} else {
+			echo CHtml::textField('mdata[cust_invoice_ref]', @$model->mdata['cust_invoice_ref'], array('size' => 20));
+		}
+		?>
+	</div>
+			<?php if(!empty($model->mdata['letter_aupost'])):?>
+	<div class="row rowcol">
+		<?php echo CHtml::label('letter_aupost','cref'); ?>
+		<?php echo CHtml::textField('letter_aupost', ImParcel::$letter_types[@$model->mdata['letter_aupost']], array('size' => 20,'disabled'=>true)); ?>
+	</div>
+			<?php endif;?>
+	  
+		<div class="row rowcol">
+			<br>
+				<?php echo CHtml::checkbox('re_print_label',($model->cbwf&2048)>0?1:0),'Re Print Label';?> 
+		</div>
+		
+		<div class="row rowcol">
+			<?php echo CHtml::label('customs clearance agent','customs_clearence_agent'); ?>
+			<?php
+			echo CHtml::textField('mdata[customs_clearence_agent]', @$model->mdata['customs_clearence_agent'], array('size' => 20));
+			?>
+		</div>
+
+		<div style="position: fixed; right: 10em; top:20em;">
+			<a class="jqm_link" href="<?=Yii::app()->createAbsoluteUrl("ImParcel/updateClearReason/" . $model->id); ?>"> <h1 style="font-size: 3em;" id="the_warning">  <?= $model->getWarnings(true,true)?>&nbsp;#</h1></a>
+		</div>
+		<div style="position: fixed; right: 10em; top:30em;">
+			 <h1 style="font-size: 3em;"> <?= $model->getDGWarnings()?>&nbsp;#</h1>
+		</div>
+	<?php if(User::getCurrentUser()->org->type != Org::CUSTOMS_BROKER_TYPE):?>
+	<div class="row">
+		<div class="row rowcol">
+			<?php echo CHtml::label('Instruction', 'mdata_instruction'); ?>
+			<?php echo CHtml::textArea('mdata[instruction]', @$model->mdata['instruction'],array('rows'=>5, 'cols' => 60)); ?>
+		</div>
+		<div class="row rowcol">
+			<?php echo CHtml::label('Outturn Comments', 'mdata_outturn_comments'); ?>
+			<?php echo CHtml::textArea('mdata[outturn_comments]', @$model->mdata['outturn_comments'],array('rows'=>5, 'cols' => 60)); ?>
+		</div>
+	</div>
+	<div class="row">
+		<?php echo $form->labelEx($model,'note'); ?>
+		<?php echo $form->textArea($model,'note',array('rows'=>5, 'cols' => 60)); ?>
+	</div>
+	<?php endif;?>
+	<div class="row">
+		<?php echo CHtml::label('Clear Log','clear_log'); ?>
+		<?php echo CHtml::textArea('clear_log',@$model->mdata['clear_log'],array('rows'=>2, 'cols' => 60)); ?>
+	</div>
+		   <?php if(preg_match('/(^7RFZ|^4XHZ)\d{8}/i', $model->ref)):?>
+	<div class="row rowcol ">
+		   <?php  echo CHtml::Button('update Startrack',array('disabled'=>true,'id'=>'update_startrack'));?>
+			<div style="background-position:-240px -416px" class="icon"></div>
+	</div>
+		<?php endif;?>
+	<div class="row">
+		<?php echo $form->checkbox($model,'pickup'); ?>
+		<?php echo $form->labelEx($model,'pickup', array('class' => 'radio_label')); ?>
+	</div>
+		<?php if(isset($model->consol->bwf)&&($model->consol->bwf&2)>0):?>
+		<!-- Only when sea consol  -->
+	<div class="row">
+		<?php echo CHtml::checkbox('gen_sea_inv',''); ?>
+		<?php echo CHtml::label('Create Sea Storage Inovice','gen_sea_inv', array('class' => 'radio_label')); ?>
+	</div>
+		<?php endif;?>
+	<div class="row pu-addr" style="display:none">
+		<?php echo CHtml::label('Pickup Address', 'pickup-addr'); ?>
+		<?php echo CHtml::textArea('mdata[pickup-addr]', @$model->mdata['pickup-addr'], array('rows'=>3, 'cols' => 60)); ?>
+	</div>
+	</div>
+	  
+	<div class="row buttons">
+		<?php if($model->status < 50 || Acl::hasAccess('B:Import/ChangeAfterConsol') || Yii::app()->user->grp == 72) echo CHtml::submitButton('Submit'); ?>
+	</div>
+
+<?php $this->endWidget(); ?>
+
+</div><!-- form -->
+
+<script type="text/javascript">
+$(function(){
+	var tab = $('#<?=$_GET["tabid"];?>');
+	var panel = tab.data('panel');
+	
+	var pitems = <?=json_encode(empty($model->eitems)? '' : $model->eitems);?> || {};
+	var addItem = function(add){
+		var tb = $('#items tbody', panel);
+		var id = $('tr', tb).length;
+		var add = add || 1;
+		while(add-- > 0){
+			tb.append('<tr class="'+(id%2==0? 'even' : 'odd')+'"><td>'+(id+1)+'</td><td><input type="text" name="items[g]['+id+']" size="40" value="'+(pitems.g && pitems.g[id]? pitems.g[id] : '')+'"'+(pitems.g && pitems.g[id] === false? ' class="error"' : '')+' /></td><td><input type="text" class="item_g_zh'+(pitems.g_zh && pitems.g_zh[id] === false? ' error' : '')+'" name="items[g_zh]['+id+']" size="40" value="'+(pitems.g_zh && pitems.g_zh[id]? pitems.g_zh[id] : '')+'" /></td><td><input type="text" name="items[hs]['+id+']" size="20" value="'+(pitems.hs && pitems.hs[id]? pitems.hs[id] : '')+'" /></td><td><input type="text" class="item_qty'+(pitems.q && pitems.q[id] === false? ' error' : '')+'" name="items[q]['+id+']" size="5" value="'+(pitems.q && pitems.q[id]? pitems.q[id]: '')+'" /></td><td><input type="text" class="item_uv'+(pitems.v && pitems.v[id] === false? ' error' : '')+'" name="items[v]['+id+']" size="10" value="'+(pitems.v && pitems.v[id]? pitems.v[id]: '')+'" /></td><td class="item_tot">&nbsp</td><td><span class="exp show_sub">-</span>&nbsp;&nbsp;<span class="exp show_add">+</span></td></tr>');
+			id++;
+		}
+				
+	};
+
+	$('#mdata_cargo_delivery',panel).on('change',function(){
+		if($('#mdata_cargo_delivery',panel).is(":checked")){
+			$('#chargecodep',panel).removeClass("display_none");
+			if($('#charge_code_text',panel).val()!=""){
+				$('#invoice_text',panel).removeClass("required");
+			}
+			if($('#invoice_text',panel).val()!=""){
+				$('#charge_code_text',panel).removeClass("required");
+			}
+		}else{
+			$('#chargecodep',panel).addClass("display_none");
+		}
+	});
+	
+	$('#charge_code_text',panel).on('change',function(){
+		if($('#charge_code_text',panel).val()!=""){
+				$('#invoice_text',panel).removeClass("required");
+				$('#invoice_text',panel).removeClass("required error");
+			}else{
+				$('#invoice_text',panel).addClass("required");
+			}
+	});
+
+	$('#invoice_text',panel).on('change',function(){
+		if($('#invoice_text',panel).val()!=""){
+				$('#charge_code_text',panel).removeClass("required");
+				$('#charge_code_text',panel).removeClass("required error");
+			}
+			else{
+				$('#charge_code_text',panel).addClass("required");
+			}
+	});
+
+	$("#can_sac",panel).hide();  
+	$('input[name=config_acr]',panel).on('change',function(){
+	   if(this.checked){
+		   $("#can_sac",panel).show();
+	   }else{
+		 $("#can_sac",panel).hide();  
+	   }
+	});
+		
+	var calcTot = function(){
+		var tqty = 0;
+		var tval = 0;
+		
+		$('#items tbody tr', panel).each(function(){
+			q = Number($('.item_qty', this).val()) || 0;
+			if(q <= 0) return;
+			p = Number($('.item_uv', this).val()) || 0;
+			if(q <= 0) return;
+			sub = q * p;
+			$('.item_tot', this).text(Math.round(q*p*100)/100);
+			tval += sub;
+			tqty += q;
+		});
+		
+		$('#tot_qty', panel).text(tqty);
+		$('#tot_value', panel).text(Math.round(tval*100)/100);
+	};
+
+	$('#mdata_chargecode',panel).change(function() {
+  		if($('#mdata_chargecode',panel).val().length!=0){
+			$('#mdata_invoiceid',panel).removeClass("required");
+			$('#mdata_invoiceid',panel).removeClass("error");
+		  }
+	});
+
+
+	$('#mdata_invoiceid',panel).change(function() {
+  		if($('#mdata_invoiceid',panel).val().length!=0){
+			$('#mdata_chargecode',panel).removeClass("required");
+			$('#mdata_chargecode',panel).removeClass("error");
+		  }
+	});
+
+	$('a.cnee-col-tog', panel).on('click', function(){
+		$('.cnee-col', panel).hide();
+		$($(this).attr('href'), panel).show();
+		$('a.cnee-col-tog', panel).removeClass('hi');
+		$(this).addClass('hi');
+		return false;
+	});
+
+	$('#resend-acr-btn',panel).click(function(e){
+		if ( confirm('Are your re-send ACR again?') ) {
+			var data={};
+			if($('input[name=config_acr]',panel).prop('checked')){
+			 data['config_check']=1;
+			 data['can_sac']=$('input:radio[name=can_sac]:checked',panel).val();
+			}else{
+			  data['config_check']=0;
+			}
+			$.ajax({
+				type : 'GET',
+				url : '<?php echo Yii::app()->createAbsoluteUrl("ImParcel/ResendACR/" . $model->id ) ;?>',
+				data:data,
+				dataType: 'json',
+				success:function(resp){
+					if ( resp.success == 1 ) {
+						myApp.notice('the shipment ACR re-sent successfully!', 5000);
+					} else {
+						myApp.alert(resp.msg);
+					}
+				}
+			});
+		}
+	});
+
+	$('#items', panel).off('change', '.item_qty,.item_uv').on('change', '.item_qty,.item_uv', calcTot);
+	$('#ImParcel_pickup', panel).change(function(){
+		if($(this).attr('checked')){
+			$('.pu-addr', panel).show();
+		}else{
+			$('.pu-addr', panel).hide();
+		}
+	}).click(function(){
+		$(this).trigger('change');
+	}).trigger('change');
+	
+	$('#more_item', panel).click(function(){
+		addItem(1);
+		$('.show_add',panel).off('click').on('click',function(){
+		var word=encodeURIComponent($(this).parent().parent().find("input").first().val());
+		$("#word_replace",panel).attr('href',"<?=Yii::app()->createUrl("WordReplace/Create") ;?>?word="+word).trigger('click');
+		});
+
+		$('.show_sub',panel).off('click').on('click',function(){
+	            $(this).parent().parent().remove();
+	            calcTot();
+		});
+
+	});
+	addItem(pitems.g? pitems.g.length : 3);
+	
+	$('.show_sub',panel).off('click').on('click',function(){
+	            $(this).parent().parent().remove();
+	            calcTot();
+	});
+
+	<?php
+	if(Yii::app()->user->grp == 72):?>
+		$('#Cnee_tel, #Cnee_email, #Cnee_company, #Receiver_tel, #Receiver_email, #Receiver_company', panel).addClass('nolock');
+	$('form', panel).lockForm();
+	<?php
+	endif;?>
+
+	<?php if(!User::checkIsNotTruckUser()):?>
+		$('#Cnee_name,#Cnee_address,#Cnee_suburb,#Cnee_state,#Cnee_postcode,#<?=$_GET['tabid']?>_cnee_sub_ac,#pickup_booking_time<?=$_GET['tabid']?>, #Cnee_country,#Cnee_tel, #Cnee_email, #Cnee_company, #Receiver_tel, #Receiver_email, #Receiver_company,#ImParcel_pkg,#ImParcel_weight,#ImParcel_pkg,#mdata_total_cbm,#ImParcel_cbm,#dim_w,#dim_h,#dim_d,#ImParcel_can,#mdata_instruction', panel).addClass('nolock');
+		$('form', panel).lockForm();
+	<?php endif; ?>
+
+	<?php if($model->status >= 50 && !Acl::hasAccess('B:Import/ChangeAfterConsol')):?>
+	$('form', panel).lockForm();
+
+	<?php endif; ?>
+
+	var setOv = function(e){
+		if(e.data('ov')) e.val(e.data('ov'));
+		if(e.val() != '') e.trigger('change');
+	};
+
+// 	$('#Cnor_state', panel).load('<?=Yii::app()->baseURL.'/cnZip/province';?>', function(){
+// 		setOv($(this));
+// 	});
+
+// 	$('#Cnor_state', panel).off('change').on('change', function(){
+// 		var s = $('option:selected', this).data('id');
+// 		if(s == '') return;
+// 		$('#Cnor_city', panel).load('<?=Yii::app()->baseURL.'/cnZip/city';?>/s/'+s, function(){
+// 			$(this).focus();
+// 			if($('#Cnor_city option', panel).length == 2){
+// 				$($('#Cnor_city option', panel)[1]).attr('selected', true);
+// 			}
+// 			setOv($(this));
+// 		});
+// 	});
+// 		  $('.show_add',panel).off('click').on('click',function(){
+// 				 var word=encodeURIComponent($(this).parent().parent().find("input").first().val());
+// 				  $("#word_replace",panel).attr('href',"<?=Yii::app()->createUrl("WordReplace/Create") ;?>?word="+word).trigger('click');
+// //                   console.log($(this).parent().parent().find("input").first().val());
+// 				 });
+// 	$('#Cnor_city', panel).off('change').on('change', function(){
+// 		var s = $('option:selected', this).data('id');
+// 		if(s == '') return;
+// 		$('#Cnor_suburb', panel).load('<?=Yii::app()->baseURL.'/cnZip/area';?>/s/'+s, function(){
+// 			$(this).focus();
+// 			if($('#Cnor_suburb option', panel).length == 2){
+// 				$($('#Cnor_suburb option', panel)[1]).attr('selected', true);
+// 			}
+// 			setOv($(this));
+// 		});
+// 	});
+// 	$('#Cnor_suburb', panel).off('change').on('change', function(){
+// 		var zip = $('option:selected', this).data('zip');
+// 		$('#Cnor_postcode', panel).val(zip);
+// 	});
+	
+	<?php if(!$model->isNewRecord && Acl::hasAccess('B:Import/StatusOverride')): ?>
+	$('#ImParcel_status', panel).next().on('dblclick', function(){
+		if(window.confirm('Are you sure to override status?')){
+			$(this).prev().attr('disabled', false);
+		}
+	});
+	<?php endif; ?>
+		<?php if(preg_match('/(^7RFZ|^4XHZ)\d{8}/i', $model->ref)):?>
+		$('#update_startrack', panel).next().on('dblclick', function(){
+		if(window.confirm('Are you sure to update startrack?')){
+			$(this).prev().attr('disabled', false);
+		}
+	});
+	   $('#update_startrack',panel).on('click', function(){
+		if(window.confirm('Are you sure to submit startrack?')){
+					
+					$('#imparcel-form',panel).submit().data({custom_success:function(r){
+						  $('#update_startrack',panel).attr('disabled',true);   
+						   $.ajax({
+							type:'GET',
+							url:'<?php echo Yii::app()->createAbsoluteUrl("ImParcel/updateStartrack/" . $model->id); ?>',
+							dataType: 'json',
+							success:function(resp){     
+						   if ( resp.success == 1 ) {
+							   myApp.notice(resp.msg, 5000);
+							  } else {
+								 myApp.alert(resp.msg);
+							   }
+							 }
+						 });   
+				   }});
+		}
+	});
+		<?php endif;?>
+
+	//suburb ac
+	$('#<?=$sacname;?>', panel).off('ac_after_select').on('ac_after_select', function(evt, ui){
+		$("#Cnee_postcode", panel).val(ui.item['pc']);
+		$('#Cnee_state', panel).val(ui.item['st']);
+	});
+		//suburb ac
+	  <?php if(!empty($rsacname)):?>
+	$('#<?=$rsacname;?>', panel).off('acr_after_select').on('acr_after_select', function(evt, ui){
+		$("#Receiver_postcode", panel).val(ui.item['pc']);
+		$('#Receiver_state', panel).val(ui.item['st']);
+	});
+	 <?php endif;?>
+	 <?php if(!empty($notifyname)):?>
+	$('#<?=$notifyname;?>', panel).off('acrn_after_select').on('acrn_after_select', function(evt, ui){
+		$("#Notifier_postcode", panel).val(ui.item['pc']);
+		$('#Notifier_state', panel).val(ui.item['st']);
+	});
+	 <?php endif;?>
+		 $("input[name='mdata[total_cbm]']",panel).on('change',function(){
+			 var totalCbm=$(this).val();
+			 var pkg=$("#ImParcel_pkg",panel).val();
+			 var averageCbm=Math.round(totalCbm/pkg*1000)/1000;
+			 $("#ImParcel_cbm",panel).val(averageCbm);
+		 });
+		   $("input[name='ImParcel[cbm]']",panel).on('change',function(){
+			 var averageCbm=$(this).val();
+			 var pkg=$("#ImParcel_pkg",panel).val();
+			 var totalCbm=averageCbm*pkg;
+			   $("input[name='mdata[total_cbm]']",panel).val(totalCbm);
+		 });
+			function calculateCbm(){
+			var averageCbm=$("input[name='ImParcel[cbm]']",panel).val();
+			 var pkg=$("#ImParcel_pkg",panel).val();
+			 var totalCbm=averageCbm*pkg;
+			$("input[name='mdata[total_cbm]']",panel).val(totalCbm);
+			
+		}
+	   calculateCbm();
+		 var addr=<?=json_encode(DmawbConsol::$cargo_receip_address)?>;
+		$('#mdata_delivery_address',panel).on('change',function(){
+		   var address=addr[$(this).val()];
+		   if(address){
+			   $('#mdata_cargo_receipt_addr',panel).val(address);
+		   }
+
+		});
+
+		 $("input[name='delivery_select']",panel).on('change',function(){
+			 if($(this).val()==<?=CargoProcess::FBA_CARGO?>)
+			 {
+			 	$("#amazon_info_area",panel).show();
+			 	$("#delivery_area",panel).hide();
+			 }else
+			 {
+			 	$("#amazon_info_area",panel).hide();
+			 	$("#delivery_area",panel).show();
+			 }
+		 });
+
+		 <?= (!empty($model->mdata['cargo_delivery'])||!empty($model->mdata['cargo_pickup']))&&$model->cargo_delivery_info !== null?"$('#delivery_select',panel).click();":"$('#amazon_delivery_select',panel).click();" ?>
+
+		 $("#col-rcvr",panel).hide();
+
+});
+</script>

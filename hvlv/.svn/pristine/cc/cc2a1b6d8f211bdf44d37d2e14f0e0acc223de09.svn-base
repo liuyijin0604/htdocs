@@ -1,0 +1,26 @@
+<table width="100%" cellspacing="0" class="chart">
+		<thead>
+			<tr style="background: rgba(100,100,100,0.4);">
+				<th align="left" width="100">No</th>
+                                <th align="left" width="400">Shipment Ref</th>
+                                 <th align="left" width="350">awb</th>
+				<th align="left"  width="50">pkg</th>
+                                <th align="left"  width="50">Weight</th>
+                                <th align="left"  width="350">Agent</th>
+                                <th align="middle"  width="160">eta</th>
+                                
+			</tr>
+		</thead>
+		<tbody>
+		<?php
+                $i=0;
+ 	foreach($rs as $r){
+	echo '<tr class="'.($i%2 == 1? 'even' : 'odd').'"><td align="center" valign="top">'.($i+1).'</td><td valign="top" style="word-break:break-all; word-wrap:break-all;">'.(!empty($r->ref)?$r->ref:$r->hbn).'</td><td valign="top" style="word-break:break-all; word-wrap:break-all;"> '.@$r->consol->awb.
+                '</td><td valign="top">'.$r->pkg.'</td><td valign="top">'.sprintf("%.2f",$r->weight).'</td><td valign="top">'.@$r->agent->name.'</td><td valign="center">'.@$r->consol->eta.'</td></tr>';
+			$i++;
+             }
+        ?>
+
+</tbody>
+</table>
+

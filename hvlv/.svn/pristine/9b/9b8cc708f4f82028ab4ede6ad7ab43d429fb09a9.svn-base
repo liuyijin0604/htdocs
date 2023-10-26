@@ -1,0 +1,231 @@
+<?php 
+class LabelService extends Service
+{
+	public function changeCourierLabel($refs,$orgRates)
+	{
+		if(empty($refs)||empty($orgRates))
+		{
+			return $this->getFailResult('need hbns/refs and couriers');
+		}
+
+		$orgRateService = new OrgRateService();
+		foreach ($refs as $key => $ref) {
+			$shipment = ImParcel::model()->find(' (ref = :ref or hbn = :ref) and status <100',[':ref'=>$ref]);
+			if(empty($shipment))
+			{
+				$this->warns[]= ["Line ".$key.":".$ref." failure,not found"];
+				continue;
+			}
+			$oToll = $orgRateService->calculateCheaperCourierCost($shipment,$orgRates);
+			//$oCP = $orgRateService->calculateCheaperCourierCost($shipment,[70]);
+
+			$cost1 = empty($oToll->status)?0:$oToll->minCost;
+			$TOLLCourier = empty($oToll->status)?"":$oToll->courier->code;
+			//$cost2 = empty($oCP->status)?0:$oCP->minCost;
+			$pref = "";
+			$pcan = "";
+			$pnote = "";
+			$pmdata = [];
+			if(!empty($cost1))
+			{	
+				$pref = $shipment->ref;
+				$pcan = $shipment->can;
+				$pnote = $shipment->note;
+				$pmdata = $shipment->mdata;
+				$shipment->can = $shipment->ref;
+				$shipment->note = $shipment->note."</br>".$shipment->ref;
+				$shipment->ref = "";
+				if(!empty($shipment->mdata['cargo_delivery']))
+				{
+					unset($shipment->mdata['cargo_delivery']);
+				}
+				$shipment->save();
+				$status = $shipment->createCourierLabel($oToll->courier);
+				if($status)
+				{
+					$changeShipmentLabel = new ChangeShipmentLabel();
+					$changeShipmentLabel->newref = $shipment->ref;
+					$changeShipmentLabel->pid = $shipment->id;
+					$changeShipmentLabel->pref = $shipment->can;
+					$changeShipmentLabel->phbn = $shipment->hbn;
+					$changeShipmentLabel->save();
+
+					if(!empty($shipment->trans))
+					{
+						foreach ($shipment->trans as $key => $tran)
+						{
+							if($tran->connote!=$shipment->ref&&$tran->type==80)
+							{
+								$tran->delete();
+							}
+						}
+					}
+
+					$gatepassShipments = GatepassShipment::model()->findAll('fid = :fid',[':fid'=>$shipment->id]);
+					foreach ($gatepassShipments as $key => $gatepassShipment) {
+						$gatepassShipment->connote_no = $shipment->ref;
+						$gatepassShipment->courier_id = $oToll->courier->org_id;
+						$gatepassShipment->status = 0;
+						$gatepassShipment->parent_id = 0;
+						$gatepassShipment->gate_pass_time = '0000-00-00 00:00:00';
+						$gatepassShipment->save();
+					}
+
+					if(!empty($shipment->cargo_process))
+					{
+						$shipment->cargo_process->status = CargoProcess::DELETED;
+						$shipment->cargo_process->save();
+					}
+					$shipment->save();
+					$this->warns[]= ["Line ".$key.":".$ref." success,new ref:".$shipment->ref];
+				}else
+				{
+					$shipment->ref = $pref;
+					$shipment->can = $pcan;
+					$shipment->note = $pnote;
+					$shipment->mdata = $pmdata;
+					$shipment->save();
+					if(!empty($shipment->tempErrors))
+					{
+						$this->warns[]= ["Line ".$key.":".$ref." failure ".$shipment->tempErrors];
+					}
+				}
+			}else
+			{
+				$this->warns[]= ["Line ".$key.":".$ref." failure undeliverable".join(',',$oToll->error)];
+			}
+		}
+
+		return $this->getSuccessResultWithWarns();
+	}
+
+	public function importParcelThirdPartyLabelInfo($file,$orgRateId)
+	{
+		if(empty($file)||empty($orgRateId))
+		{
+			return $this->getFailResult('need file and couriers');
+		}
+		$data = $this->getFileData($file);
+		$data = $data[0];
+		unset($data[1]);
+
+		foreach ($data as $key => $d) {
+			$checkShipment = ImParcel::model()->find(' (ref = "'.$d[2].'" or hbn = "'.$d[2].'") and status <100',[':ref'=>$d[2]]);
+			if(!empty($checkShipment))
+			{
+				$this->warns[]= ["Line ".$key.":".$d[2]." failure, ref existed"];
+				continue;
+			}
+			$shipment = ImParcel::model()->find(' (ref = "'.$d[1].'" or hbn = "'.$d[1].'") and status <100');
+			if(empty($shipment))
+			{
+				$this->warns[]= ["Line ".$key.":".$d[1]." failure,not found"];
+				continue;
+			}
+			$orgRate = OrgRate::model()->findByPk($orgRateId);
+			if($shipment->ref!=$d[2])
+			{
+				$shipment->can = $shipment->ref;
+				$shipment->ref = $d[2];
+			}
+			$shipment->mdata['org_id'] = $orgRate->org_id;
+			$shipment->mdata['org_rate_id'] = $orgRate->id;
+			$barcodes = explode(';', $d[3]);
+			$saveBarcodes = [];
+			$transaction=Yii::app()->db->beginTransaction();
+			try {
+
+				foreach ($barcodes as $key2 => $barcode) {
+					if(empty($barcode)) continue;
+					$pb = new ParcelBarcode();
+					$pb->main_ref = $shipment->ref;
+					$pb->fid = $shipment->id;
+					$pb->sub_ref = $barcode;
+					$pb->sn = $key+1;
+					$pb->save();
+					$saveBarcodes[] = $barcode;
+				}
+				$shipment->mdata['barcode'] = join(',',$saveBarcodes);
+				$shipment->save();
+				foreach ($shipment->trans as $key2 => $tran) {
+					if($tran->type == Tranship::THIRD_PARTY_TYPE)
+					{
+						$tran->delete();
+					}else
+					{
+						$tran->mdata['non_manifest'] = 1;
+						$tran->save();
+					}
+				}
+				$ts = new Tranship;
+				$ts->pid = $shipment->id;
+				$ts->org_id = $orgRate->org_id;
+				$ts->type = Tranship::THIRD_PARTY_TYPE;
+				$ts->status = 10;
+				$ts->connote = $shipment->ref;
+				$ts->time = date('Y-m-d H:i:s');
+				$ts->cost = 0;
+				$ts->mdata['oid'] = $orgRate->org_id;
+				$ts->mdata['non_manifest'] = 1;
+				$ts->save();
+
+				$changeShipmentLabel = new ChangeShipmentLabel();
+				$changeShipmentLabel->newref = $shipment->ref;
+				$changeShipmentLabel->pid = $shipment->id;
+				$changeShipmentLabel->pref = $shipment->can;
+				$changeShipmentLabel->phbn = $shipment->hbn;
+				$changeShipmentLabel->save();
+				$transaction->commit();
+				$this->warns[]= ["Line ".$key.":".$d[1]." Success"];
+			} catch (Exception $ex) {
+				$transaction->rollback();
+				throw $ex;
+			}
+		}
+
+		return $this->getSuccessResultWithWarns();
+	}
+
+	public function printLabel($id,$helper=false,$sn = 0)
+	{
+
+		$model = Shipment::model()->findByPk($id);
+		if (empty($model)) {
+			throw new CHttpException(404, 'Page not found!');
+		}
+		if(!empty($helper)){
+			$type = 'pdf';
+			if(!empty($model->trans)&&$model->trans[0]->org_id == 115){
+				$file_data = $this->renderPartial('//_pdf/_label_fastway_zpl2020', ['label' => $model], true);
+				$type = 'zpl';
+			}else{
+				if(ImParcelService::isOtherLabel($model))
+	            {
+					$imparcelService = new ImParcelService();
+					$pdf = $imparcelService->getImparcelLabel([$model],$sn,3);
+					$file_data = base64_encode($pdf);
+				}else
+				{
+					$pdf = oPDF::renderPDF('label_A6', ['tpl' => '_label_1', 'empty' => false, 'rs' => [$model], 'sn' => empty($sn)? 0 : $sn], 0);
+					$file_data = base64_encode($pdf);
+				}
+			}
+
+			$files = [['printer' => 'label', 'type' => $type, 'file' => $file_data]];
+			echo json_encode(array("result" => true, "file" => json_encode($files)));
+			Yii::app()->end();
+
+		}
+
+		if(ImParcelService::isOtherLabel($model))
+		{
+			$imparcelService = new ImParcelService();
+			$imparcelService->getImparcelLabel([$model],$sn);
+			return;
+		}
+
+		oPDF::renderPDF('label_A6', ['tpl' => '_label_1', 'empty' => false, 'rs' => [$model], 'sn' => empty($sn)? 0 : $sn]);
+	}
+	
+}
+?>

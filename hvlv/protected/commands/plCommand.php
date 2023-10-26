@@ -1,0 +1,3565 @@
+<?php
+
+/**
+ * for Michael Yue to execute some short command only
+ * Class YXCommand
+ */
+class plCommand extends CConsoleCommand {
+	private $db;
+	private $args;
+	private $tmp;
+	private $debug = false;
+
+	public function __construct($name, $runner){
+		$this->db = Yii::app()->getDb();
+		$this->tmp = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR;
+		return parent::__construct($name, $runner);
+	}
+
+	public function run($args) {
+		$this->args = $args;
+		foreach($this->args as $ag){
+			if($ag == '-d') $this->debug = true;
+		}
+		if(!empty($args[0]) && method_exists($this, $args[0])){
+			$this->{$args[0]}();
+		}
+	}
+
+	public function pushImportCost2Plledger(){
+		$imconsoles = ImcoConsol::model()->findAll('eta >= :d AND eta <= :td', [':d' => $this->prompt('From Date: ', date('Y-m-01')), ':td' => $this->prompt('To Date: ', date('Y-m-d', strtotime(date('Y-m-01').' +1 month -1 day')))]);
+		$allCount =  count($imconsoles);
+		echo 'all ' . $allCount . ' to be processed' . PHP_EOL;
+
+		$processed = 0;
+		foreach ( $imconsoles as $k => $console ) {
+			$processed++;
+
+			echo 'process for console : ' . $console->no . PHP_EOL;
+
+			// process for delivery cost pl ledger
+			foreach ( $console->shipments as $shipment ){
+				echo 'process for shipment : ' . $shipment->hbn . PHP_EOL;
+				// get all tranships
+				$tss = isset($shipment->trans) ? $shipment->trans : array();
+				foreach ( $tss as $ts ) {
+					echo 'process for ts : ' . $ts->id . PHP_EOL;
+
+					// push cost data to pl ledger table as well
+					// group 2 saved as tranship org id which is courier id
+
+					$d = [
+						'gl' => 29,
+						'fid' => $shipment->id,
+						'model' => 'ImParcel',
+						'dpt_id' => Org::PCAE_DEPARTMENT_SYDNEY,
+						'lid' => 0,
+						'org_id' => $shipment->agent_id,
+						'dpmt' => Invoice::DPMT_IMPORT,
+						'grp1' => $console->id,
+						'date' => $con->eta,
+						'amt' => $ts->cost,
+						'actual_amt' => isset($shipment->mdata['actual_delivery_cost']) ?  $shipment->mdata['actual_delivery_cost'] : 0,
+						'gst' => 0,
+						'acc' => isset($shipment->mdata['actual_delivery_cost']) ? 1 : 0,
+					];
+						
+					PlLedger::add($d, true, ['org_id', 'date', 'lid', 'grp1']);
+				}
+			}
+
+			echo 'cosole delivery billing done ' . PHP_EOL;
+
+			$billings = BillingLine::model()->findAll('billing_ref = :cref', [':cref' => $console->no ]);
+
+			foreach ( $billings as $billing ) {
+				echo 'process for billing : ' . $billing->no . PHP_EOL;
+				if ($billing->org_id == Org::ORGID_COURIER_TOLL ||
+					$billing->org_id == Org::ORGID_COURIER_STARTRACK ||
+					$billing->org_id == Org::ORGID_COURIER_AUPOST ||
+					$billing->org_id == Org::ORGID_COURIER_FASTWAY ||
+					$billing->org_id == Org::ORGID_COURIER_D2Z||
+					$billing->org_id == Org::ORGID_COURIER_HUNTER||
+					$billing->org_id == Org::ORGID_COURIER_ECOF) {
+
+				} else {
+					// for other billing
+					$chargeCodeModel = Chargecode::model()->find('status = 1 AND code = :code', [':code' => $billing->charge_code]);
+					$chargeCodeId = empty($chargeCodeModel)? 0 : $chargeCodeModel->id;
+					$d = [
+						'gl' => $chargeCodeId,
+						'fid' => $billing->id,
+						'model' => 'BillingLine',
+						'dpt_id' => $billing->dpt_id,
+						'lid' => 0,
+						'org_id' => $billing->org_id,
+						'dpmt' => $billing->dpmt,
+						'grp1' => $console->id,
+						'date' => $console->eta,
+						'amt' => $billing->accrual_amount,
+						'actual_amt' => $billing->actual_amount,
+						'gst' => 0,
+						'acc' => empty($billing->actual_amount)? 0 : 1,
+					];
+					
+					PlLedger::add($d, true, ['org_id', 'date', 'dpmt', 'lid', 'grp1', 'grp2']);
+				}
+			}
+
+			echo 'processed for : ' . $console->no . PHP_EOL;
+			echo $processed  . ' / ' . $allCount . ' Finished' . PHP_EOL;
+			unset($imconsoles[$k]->shipments);
+			unset($imconsoles[$k]); // release memory
+		}
+		echo 'all done' . PHP_EOL;
+	}
+
+	public function pushElmsConsolCost2Plledger(){
+		$imconsoles = ElmsConsol::model()->findAll('created >= :d AND created <= :td', [':d' => $this->prompt('From Date: ', date('Y-m-01')), ':td' => $this->prompt('To Date: ', date('Y-m-d', strtotime(date('Y-m-01').' +1 month -1 day')))]);
+		$allCount =  count($imconsoles);
+		echo 'all ' . $allCount . ' to be processed' . PHP_EOL;
+
+		$processed = 0;
+		foreach ( $imconsoles as $k =>  $console ) {
+			$processed++;
+
+			$billings = BillingLine::model()->findAll('billing_ref = :cref', [':cref' => $console->no ]);
+
+			foreach ( $billings as $billing ) {
+				// push cost to pl ledger table
+				$d = [
+						'gl' => 29,
+						'fid' => $billing->id,
+						'model' => 'BillingLine',
+						'dpt_id' => $billing->dpt_id,
+						'lid' => 0,
+						'org_id' => $billing->org_id,
+						'dpmt' => $billing->dpmt,
+						'grp1' => $console->id,
+						'date' => $console->eta,
+						'amt' => $billing->accrual_amount,
+						'actual_amt' => $billing->actual_amount,
+						'gst' => 0,
+						'acc' => empty($billing->actual_amount)? 0 : 1,
+					];
+						
+				PlLedger::add($d, true, ['org_id', 'date', 'dpmt', 'lid', 'grp1', 'grp2']);
+			}
+
+			echo 'processed for : ' . $console->no . PHP_EOL;
+			echo $processed  . ' / ' . $allCount . ' Finished' . PHP_EOL;
+		}
+		echo 'all done' . PHP_EOL;
+	}
+
+	public function pushImportDirectCost2Plledger(){
+		$imconsoles = DmawbConsol::model()->findAll('eta >= :d AND eta <= :td', [':d' => $this->prompt('From Date: ', date('Y-m-01')), ':td' => $this->prompt('To Date: ', date('Y-m-d', strtotime(date('Y-m-01').' +1 month -1 day')))]);
+		$allCount =  count($imconsoles);
+		echo 'all ' . $allCount . ' to be processed' . PHP_EOL;
+
+		$processed = 0;
+		foreach ( $imconsoles as $k =>  $console ) {
+			$processed++;
+
+			$billings = BillingLine::model()->findAll('billing_ref = :cref', [':cref' => $console->no ]);
+
+			foreach ( $billings as $billing ) {
+				echo 'process for billing : ' . $billing->no . PHP_EOL;
+				if ($billing->org_id == Org::ORGID_COURIER_TOLL ||
+					$billing->org_id == Org::ORGID_COURIER_STARTRACK ||
+					$billing->org_id == Org::ORGID_COURIER_AUPOST ||
+					$billing->org_id == Org::ORGID_COURIER_FASTWAY ) {
+
+				} else {
+					// for other billing
+					$chargeCodeModel = Chargecode::model()->find('status = 1 AND code = :code', [':code' => $billing->charge_code]);
+					$chargeCodeId = empty($chargeCodeModel)? 0 : $chargeCodeModel->id;
+
+					$d = [
+						'gl' => $chargeCodeId,
+						'fid' => $billing->id,
+						'model' => 'BillingLine',
+						'dpt_id' => $billing->dpt_id,
+						'lid' => 0,
+						'org_id' => $billing->org_id,
+						'dpmt' => $billing->dpmt,
+						'grp1' => $console->id,
+						'date' => $console->eta,
+						'amt' => $billing->accrual_amount,
+						'actual_amt' => $billing->actual_amount,
+						'gst' => 0,
+						'acc' => empty($billing->actual_amount)? 0 : 1,
+					];
+						
+					PlLedger::add($d, true, ['org_id', 'date', 'dpmt', 'lid', 'grp1', 'grp2']);
+				}
+			}
+
+			echo 'processed for : ' . $console->no . PHP_EOL;
+			echo $processed  . ' / ' . $allCount . ' Finished' . PHP_EOL;
+		}
+		echo 'all done' . PHP_EOL;
+	}
+
+	public function imDirectConsolAccrualPL(){
+		$processedCount = 0;
+		$rs = DmawbConsol::model()->findAll('status < 100 AND dpt_id = :syd AND eta >= :d AND eta <= :td', [':d' => $this->prompt('From Date: ', date('Y-m-01')), ':td' => $this->prompt('To Date: ', date('Y-m-d', strtotime(date('Y-m-01').' +1 month -1 day'))), ':syd' => Org::PCAE_DEPARTMENT_SYDNEY]);
+		foreach($rs as $i => $r){
+			$totalWeight = $r->totWeight();
+			if ( $totalWeight <= 0 ) $totalWeight = 1;
+
+			$billings = BillingLine::model()->findAll('billing_ref = :cno',[':cno' => $r->no]);
+			foreach ( $billings as $billing ) {
+				// ignore delivery cost
+				if ( $billing->charge_code == '91031' ) continue;
+
+				// try to get gl index
+				$chargeCode = Chargecode::model()->find('status = 1 AND code = :code',[':code' => $billing->charge_code]);
+				if ( empty($chargeCode) ) continue;
+				if ( empty($r->shipments ) ) {
+					// in case thera are no any linked shipments we should put billing to pl ledger table directly
+
+					$d = [
+						'gl' => $chargeCode->id,
+						'fid' => $billing->id,
+						'model' => 'BillingLine',
+						'dpt_id' => $billing->dpt_id,
+						'lid' => 0,
+						'org_id' => $billing->org_id,
+						'dpmt' => $billing->dpmt,
+						'grp1' => $r->id,
+						'date' => $r->eta,
+						'amt' => $billing->accrual_amount,
+						'actual_amt' => $billing->accrual_amount,
+						'gst' => 0,
+					];
+						
+					PlLedger::add($d, true, ['org_id', 'dpmt', 'date', 'grp1', 'grp2']);
+				} else {
+					// in case there are linked shipments, we push billing to each shipment
+					foreach ($r->shipments as $p) {
+						$d = [
+							'gl' => $chargeCode->id,
+							'fid' => $p->id,
+							'model' => 'ImParcel',
+							'dpt_id' => Org::PCAE_DEPARTMENT_SYDNEY,
+							'lid' => 0,
+							'org_id' => $p->agent_id,
+							'dpmt' => Invoice::DPMT_IMPORT,
+							'grp1' => $r->id,
+							'grp2' => $billing->org_id,
+							'date' => empty($billing->date) ? $billing->created : $billing->date,
+							'amt' => round($billing->accrual_amount * $p->weight / $totalWeight, 2),
+							'actual_amt' => round($billing->accrual_amount * $p->weight / $totalWeight, 2),
+							'gst' => 0,
+						];
+							
+						PlLedger::add($d, true, ['org_id', 'date', 'grp1']);
+					}
+				}
+			}
+
+			echo 'Consoles ' . $r->no . ' Done'. PHP_EOL;
+			unset($r->shipments);
+			unset($rs[$i]);
+		}
+
+		echo 'all ' . $processedCount . ' Consoles done'. PHP_EOL;
+	}
+
+	/**
+	 * push all old other import invoice data to pl_ledger tabel
+	 */
+	public function pushOldDiInvoice2Pledger(){
+		//$allConsols = ImcoConsol::model()->findAll('created >= :date',[':date' => '2016-12-01']);
+		// push revenue firstly
+		 $invoices = Invoice::model()->findAll('type = 39 AND status < 10 AND date >= :date',[':date' => '2017-06-01']);
+	  //  $invoices = Invoice::model()->findAll('type = 39 AND status < 10 AND dpmt = 10 AND date >= :ldate AND date <= :hdate',[':ldate' => '2017-07-01',':hdate' => '2017-07-31']);
+		$allCount = 0;
+		echo count($invoices) .' invoices need to be processed' . PHP_EOL;
+		foreach ( $invoices as $k => $invoice ) {
+			foreach ( $invoice->lines as $line ) {
+				$allCount++;
+
+				$d = [
+					'gl' => 1,
+					'fid' => $line->fid,
+					'model' => 'ImParcel',
+					'dpt_id' =>$invoice->dpt_id,
+					'lid' => $line->id,
+					'org_id' => $invoice->to_id,
+					'dpmt' => Invoice::DPMT_IMPORT,
+					'grp1' => 'ImDirectConsol',
+					'date' => $invoice->date,
+					'amt' => $line->amount - $line->gst,
+					'gst' => $line->gst,
+				];
+					
+				$pl = PlLedger::add($d, true, ['org_id', 'date', 'grp1']);
+				$errors = $pl->getErrors();
+				if ( !empty($errors) ) {
+					echo 'Invoice : ' . $line->id . ' failed : ' . implode(' ', $errors) . PHP_EOL;
+				}
+			}
+			unset($invoices[$k]->lines);
+			unset($invoices[$k]);
+			echo 'invoice ' . $invoice->no . ' processed' . PHP_EOL;
+		}
+		echo 'all line : ' . $allCount . ' added' . PHP_EOL;
+	}
+
+	/**
+	 * push all old other import invoice data to pl_ledger tabel
+	 */
+	public function pushOldRtsInvoice2Pledger(){
+		//$allConsols = ImcoConsol::model()->findAll('created >= :date',[':date' => '2016-12-01']);
+		// push revenue firstly
+		$invoices = Invoice::model()->findAll('type = 36 AND status < 10 AND date >= :date',[':date' => '2017-06-01']);
+
+		$allCount = 0;
+		echo count($invoices) .' invoices need to be processed' . PHP_EOL;
+		foreach ( $invoices as $k => $invoice ) {
+			foreach ( $invoice->lines as $line ) {
+
+				$allCount++;
+				foreach($line->mdata['items'] as $si=>$sp)
+				{
+					$d = [
+						'gl' => 1,
+						'fid' => $line->id,
+						'model' => 'InvLine',
+						'dpt_id' =>$invoice->dpt_id,
+						'lid' => $line->id,
+						'org_id' => $invoice->to_id,
+						'dpmt' => Invoice::DPMT_IMPORT,
+						'grp1' => 'ImRts',
+						'date' => empty($invoice->posted) ? $invoice->date : $invoice->posted,
+						'amt' => isset($sp[4]) ? $sp[4] : 0,
+						'gst' => 0,
+					];
+					
+					$pl = PlLedger::add($d, true, ['org_id', 'date', 'grp1', 'grp2']);
+					$errors = $pl->getErrors();
+					if ( !empty($errors) ) {
+						echo 'Invoice : ' . $line->id . ' failed : ' . implode(' ', $errors) . PHP_EOL;
+					}
+				}
+			}
+			unset($invoices[$k]->lines);
+			unset($invoices[$k]);
+			echo 'invoice ' . $invoice->no . ' processed' . PHP_EOL;
+		}
+		echo 'all line : ' . $allCount . ' added' . PHP_EOL;
+	}
+
+	public function pushOldRtsResendInvoice2Pledger(){
+		//$allConsols = ImcoConsol::model()->findAll('created >= :date',[':date' => '2016-12-01']);
+		// push revenue firstly
+		$invoices = Invoice::model()->findAll('type = 37 AND status < 10 AND date >= :date',[':date' => '2017-07-01']);
+	   // $invoices = Invoice::model()->findAll('type = 37 AND status < 10 AND dpmt = 10 AND date >= :ldate AND date <= :hdate',[':ldate' => '2017-07-01',':hdate' => '2017-07-31']);
+
+		$allCount = 0;
+		echo count($invoices) .' invoices need to be processed' . PHP_EOL;
+		foreach ( $invoices as $k =>  $invoice ) {
+			foreach ( $invoice->lines as $line ) {
+
+				$allCount++;
+				foreach($line->mdata['items'] as $si=>$sp)
+				{
+					$d = [
+						'gl' => 1,
+						'fid' => $line->id,
+						'model' => 'InvLine',
+						'dpt_id' =>$invoice->dpt_id,
+						'lid' => $line->id,
+						'org_id' => $invoice->to_id,
+						'dpmt' => Invoice::DPMT_IMPORT,
+						'grp1' => 'ImRtsResend',
+						'date' => empty($invoice->posted) ? $invoice->date : $invoice->posted,
+						'amt' => isset($sp[2]) ? $sp[2] : 0,
+						'gst' => 0,
+					];
+					
+					$pl = PlLedger::add($d, true, ['org_id', 'date', 'grp1', 'grp2']);
+
+					$errors = $pl->getErrors();
+					if ( !empty($errors) ) {
+						echo 'Invoice : ' . $line->id . ' failed : ' . implode(' ', $errors) . PHP_EOL;
+					}
+				}
+			}
+			unset($invoices[$k]->lines);
+			unset($invoices[$k]);
+			echo 'invoice ' . $invoice->no . ' processed' . PHP_EOL;
+		}
+		echo 'all line : ' . $allCount . ' added' . PHP_EOL;
+	}
+
+	/**
+	 * push all old other import invoice data to pl_ledger tabel
+	 */
+	public function pushOldImportOtherInvoice2Pledger(){
+		//$allConsols = ImcoConsol::model()->findAll('created >= :date',[':date' => '2016-12-01']);
+		// push revenue firstly
+		$invoices = Invoice::model()->findAll('type = 40 AND status < 10 AND dpmt = 10 AND date >= :date',[':date' => '2017-06-01']);
+	  // $invoices = Invoice::model()->findAll('type = 40 AND status < 10 AND dpmt = 10 AND date >= :ldate AND date <= :hdate',[':ldate' => '2017-07-01',':hdate' => '2017-07-31']);
+
+		$allCount = 0;
+		echo count($invoices) .' invoices need to be processed' . PHP_EOL;
+		foreach ( $invoices as $k => $invoice ) {
+			foreach ( $invoice->lines as $line ) {
+				$allCount++;
+				{
+					$d = [
+						'gl' => 1,
+						'fid' => $line->id,
+						'model' => 'InvLine',
+						'dpt_id' =>$invoice->dpt_id,
+						'lid' => $line->id,
+						'org_id' => $invoice->to_id,
+						'dpmt' => Invoice::DPMT_IMPORT,
+						'grp1' => 'ImOther',
+						'date' => $invoice->date,
+						'amt' =>($line->amount - $line->gst) * $line->qty,
+						'gst' => $line->gst * $line->qty,
+					];
+					
+					$pl = PlLedger::add($d, true, ['org_id', 'date', 'grp1', 'grp2']);
+
+					$errors = $pl->getErrors();
+					if ( !empty($errors) ) {
+						echo 'Invoice : ' . $line->id . ' failed : ' . implode(' ', $errors) . PHP_EOL;
+					}
+				}
+			}
+			unset($invoices[$k]->lines);
+			unset($invoices[$k]);
+			echo 'invoice ' . $invoice->no . ' processed' . PHP_EOL;
+		}
+		echo 'all line : ' . $allCount . ' added' . PHP_EOL;
+	}
+
+	/**
+	 * push all old import invoice data to pl_ledger tabel
+	 */
+	public function pushOldImportInvoice2Pledger(){
+		//$allConsols = ImcoConsol::model()->findAll('created >= :date',[':date' => '2016-12-01']);
+		// push revenue firstly
+	   $invoices = Invoice::model()->findAll('type = 10 AND status < 10  and dpmt = 10 AND  date >= :date',[':date' => '2017-06-01']);
+
+	  //  $invoices = Invoice::model()->findAll('type = 10 AND status < 10 AND dpmt = 10 AND date >= :ldate AND date <= :hdate',[':ldate' => '2017-07-01',':hdate' => '2017-07-31']);
+
+		$allCount = 0;
+		echo count($invoices) .' invoices need to be processed' . PHP_EOL;
+		$pl = null;
+		foreach ( $invoices as $k =>  $invoice ) {
+			foreach ( $invoice->lines as $line ) {
+
+				foreach($line->mdata['items'] as $si => $sp) {
+					$allCount++;
+					$ref = $sp[0];
+					$amt = isset($sp[5]) ? $sp[5] : 0;
+					// try to find ImParcel
+					$parcel = ImParcel::model()->find('hbn = :ref OR ref = :ref OR cref = :ref',[':ref' => $ref]);
+
+					if ( !empty($parcel) ) {
+						$d = [
+							'gl' => 1,
+							'fid' => $parcel->id,
+							'model' => 'ImParcel',
+							'dpt_id' =>$invoice->dpt_id,
+							'lid' => $line->id,
+							'org_id' => $invoice->to_id,
+							'dpmt' => Invoice::DPMT_IMPORT,
+							'grp1' => $invoice->consol_id,
+							'grp2' => @end($parcel->trans)->org_id,
+							'date' => $invoice->date,
+							'amt' => $amt,
+							'gst' => 0,
+						];
+						
+						$pl = PlLedger::add($d, true, ['org_id', 'date', 'grp1', 'grp2']);
+
+						$errors = $pl->getErrors();
+						if ( !empty($errors) ) {
+							echo 'ImParcel : ' . $parcel->id . ' failed : ' . implode(' ', $errors) . PHP_EOL;
+						}
+					} else {
+						// in case for not found maybe two cases:
+						// item is for chargeable weight  or really no found
+						// we still need to considerate the cost
+						// we just add to previous pl ledger object
+						if ( !empty($pl) ) {
+							$pl->amt += $amt;
+							$pl->update('amt');
+						}
+					}
+				}
+			}
+			unset($invoices[$k]->lines);
+			unset($invoices[$k]);
+			echo 'invoice ' . $invoice->no . ' processed' . PHP_EOL;
+		}
+
+		echo 'all line : ' . $allCount . ' added' . PHP_EOL;
+
+	}
+
+	/**
+	 * storage invoice push to
+	 */
+	public function pushStorageInvoice2Pledger()
+	{
+		$invoices = Invoice::model()->findAll('type = 35 AND date >= :d AND date <= :td AND status < 10', [':d' => $this->prompt('From Date: ', date('Y-m-01')), ':td' => $this->prompt('To Date: ', date('Y-m-d', strtotime(date('Y-m-01').' +1 month -1 day')))]);
+		$allCount = 0;
+		echo count($invoices) . ' invoices need to be processed' . PHP_EOL;
+		foreach ($invoices as $k =>  $invoice) {
+			foreach ($invoice->lines as $line) {
+				$allCount++;
+				foreach ($line->mdata['items'] as $si => $sp) {
+					{   
+						$d = [
+							'gl' => 1,
+							'fid' => $line->fid,
+							'model' => $line->model,
+							'dpt_id' =>$invoice->dpt_id,
+							'lid' => $line->id,
+							'org_id' => $invoice->to_id,
+							'dpmt' => Invoice::DPMT_AIRSEA,
+							'grp1' => $line->fid,
+							'date' => $invoice->date,
+							'amt' => isset($sp[6]) ? $sp[6] : 0,
+							'gst' => 0,
+						];
+						
+						$pl = PlLedger::add($d, true, ['org_id', 'date', 'grp1', 'grp2']);
+
+						$errors = $pl->getErrors();
+						if ( !empty($errors) ) {
+							echo 'Invoice : ' . $line->id . ' fid :' . $line->fid .' model :' . $line->model . ' failed : ' . implode(' ', $errors) . PHP_EOL;
+						}
+					}
+				}
+				echo 'invoice ' . $invoice->no . ' processed' . PHP_EOL;
+			}
+			unset($invoices[$k]->lines);
+			unset($invoices[$k]);
+			echo 'all line : ' . $allCount . ' added' . PHP_EOL;
+		}
+	}
+	public function imConsolAccrualPL($cron=false){
+		Yii::app()->name = 'TLA';
+		$id = 0;
+		if($cron){
+			$fd = date('Y-m-01', strtotime('-1 month'));
+			$td = date('Y-m-d');
+		}else{
+			$fd = $this->prompt('From Date: ', date('Y-m-01'));
+			$td = $this->prompt('To Date: ', date('Y-m-d', strtotime(date('Y-m-01').' +1 month -1 day')));
+			$id = $this->prompt('Test Id: ');
+		}
+		$this->funcImConsolAccrualPL($fd,$td,$id);
+	}
+
+	public function imConsolAccrualPLConsolsToday()
+	{
+		Yii::app()->name = 'TLA';
+		$id = 0;
+		$fd = date("Y-m-d");
+		$td = date("Y-m-d");
+		$invs = Invoice::model()->findAll(["condition"=>"date >= :fd and date <= :td","params"=>[":fd"=>$fd,":td"=>$td],"group"=>"consol_id"]);
+		$billings = BillingLine::model()->findAll(["condition"=>"created >= :fd and created <= :td and billing_ref !='' ","params"=>[":fd"=>$fd,":td"=>$td],"group"=>"billing_ref"]);
+		
+		$id = [];
+		$cids = array_column($invs,"consol_id");
+		foreach ($cids as $key => $cid) {
+			$id[$cid] = $cid;
+		}
+
+		if(!empty($billings))
+		{
+			$nos = array_column($billings, "billing_ref");
+			$consols = Consol::model()->findAll(" no in ('".join("','",$nos)."')");
+			$id2 = array_column($consols, "id");
+		}
+		
+
+		foreach ($id2 as $key => $cid) {
+			$id[$cid] = $cid;
+		}
+
+		$this->funcImConsolAccrualPL($fd,$td,join(',',$id));
+	}
+
+	public function imConsolAccrualPLConsols($cron=false){
+		Yii::app()->name = 'TLA';
+		$id = 0;
+		$today = date("Y-m-d");
+		$invs = Invoice::model()->findAll(["condition"=>"date = :today ","params"=>[":today"=>$today],"group"=>"consol_id"]);
+		$billings = BillingLine::model()->findAll(["condition"=>"created = :today and billing_ref !='' ","params"=>[":today"=>$today],"group"=>"billing_ref"]);
+		
+		$id = [];
+		$cids = array_column($invs,"consol_id");
+		foreach ($cids as $key => $cid) {
+			$id[$cid] = $cid;
+		}
+
+		if(!empty($billings))
+		{
+			$nos = array_column($billings, "billing_ref");
+			$consols = Consol::model()->findAll(" no in ('".join("','",$nos)."')");
+			$id2 = array_column($consols, "id");
+		}
+		
+
+		foreach ($id2 as $key => $cid) {
+			$id[$cid] = $cid;
+		}
+
+
+		$this->funcImConsolAccrualPL(date("Y-m-01"),date("Y-m-d"),join(',',$id));
+	}
+
+	public function funcImConsolAccrualPL($fd,$td,$id=null){
+		Yii::app()->name = 'TLA';
+		$processedCount = 0;
+
+		if(!empty($id))
+		{
+			$rs = Consol::model()->findAll("id in ( ".$id.")");
+		}else
+		{
+			$rs = Consol::model()->findAll(['condition'=>'type IN (15,70,80) AND status < 100 AND eta >= :d AND eta <= :td', 'params'=>[':d' => $fd, ':td' => $td],'order'=>'eta ASC']);
+		}	
+		foreach($rs as $i => $r)
+		{
+			$terminal = $r->getDeportOriginAgent(true);
+			$sql = "DELETE from pl_ledger_management where model !='ImP_Manifest' and grp1 = '".$r->id."' ";
+		    $this->db->createCommand($sql)->execute();
+
+			//revenue
+			$invoices = Invoice::model()->findAll('consol_id = :cid AND status NOT IN (1,10,99)', [':cid' => $r->id]);
+			$lines = array();
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			$charterLink = false;
+			$toIds = array_column($invoices, "to_id");
+			if(in_array(4252,$toIds))
+			{
+				$charterLink = true;
+			}
+			foreach ( $invoices as $k=> $invoice ){
+				$amount =0;
+				if($charterLink)
+				{
+					$invoice->to_id = 4252;
+				}
+				foreach ( $invoice->lines as $line ) 
+				{
+						// get glid and dpmt for invoice
+						$dpmt = $invoice->dpmt;
+						$glId = 1;
+						if(!empty($line->ccode))
+						{
+							$myCode = ChargeItemType::model()->find("code = :code",[":code"=>$line->ccode]);
+							if(!empty($myCode))
+							{
+								if(!empty($myCode->charge_code))
+								{
+									$code = $myCode->charge_code;
+									$cog = Chargecode::model()->find('status = 1 AND code = :code',[':code' => $code]);
+									if ( empty($cog) ){
+										echo 'Error, charge code ', $cog->charge_code,' not found', PHP_EOL;
+									}else
+									{
+										$glId = $cog->id;
+									}
+								}
+								if(!empty($myCode->dpmt))
+								{
+									$dpmt = $myCode->dpmt;
+								}
+							}
+						}
+
+					if(in_array($invoice->type, [10, 37,104])){
+						foreach($line->mdata['items'] as $si => $sp) {
+							$allCount++;
+							$amt = isset($sp[5]) ? $sp[5] : 0;
+							$amt = round($amt * 100) / 100;
+							// try to find ImParcel
+							$parcel = ImParcel::model()->find('(hbn = :ref OR ref = :ref OR cref = :ref) and consol_id=:consol_id',[':ref' => $sp[0],":consol_id"=>$r->id]);
+							if(empty($parcel)&&$invoice->type==37)//for RT
+							{
+								$parcel = ImParcel::model()->find('(hbn = :ref OR ref = :ref OR cref = :ref) and consol_id=:consol_id',[':ref' => $sp[3],":consol_id"=>$r->id]);
+								$amt = isset($sp[2]) ? $sp[2] : 0;
+								$amt = round($amt * 100) / 100;
+							}else if(empty($parcel))
+							{
+								$dLabel =DfeChangeLabel::model()->find('dfe_ref = :dfeRef ',[':dfeRef'=>$sp[0]]);
+								if(!empty($dLabel))
+								{
+									$parcel = ImParcel::model()->findByPk($dLabel->pid);
+								}
+							}
+
+							$d = [
+								'gl' => $glId,
+								'model' => 'ImParcel',
+								'dpt_id' =>$r->dpt_id,
+								'lid' => $line->id,
+								'org_id' => $invoice->to_id,
+								'dpmt' => $dpmt,
+								'grp1' => $r->id,
+								'grp3' => $line->id."|".$si,
+								'date' => $r->eta,
+								'amt' => number_format($amt,2,'.',''),
+								'actual_amt' => number_format($amt,2,'.',''),
+								'gst' => 0,
+								'acc' => 1,
+							];
+							$amount +=$amt;
+							if ( empty($parcel) ) {
+								echo 'INV '.$invoice->no.': shipment '.$sp[0].' not found saved as other fee' . PHP_EOL;
+								$d['fid'] = 0;
+								$d['model'] = $sp[0];
+								$d['mdata'] = ["description"=> $sp[1]];
+								if(preg_match("/(DOC FEE|THC FEE|Air Doc|Air Terminal)/i",$sp[1]))
+								{
+									$d['grp2'] = $terminal;
+								}
+							}else{
+								$d['fid'] = $parcel->id;
+								$d['grp2'] = @end($parcel->trans)->org_id;
+								if(in_array($invoice->type,[10,104]))
+								{
+									$d['weight'] = $parcel->weight;
+								}else
+								{
+									$d['weight'] = 0;
+								}
+
+								$zone = ZoneMap::getAusZone($parcel->cnee->postcode);
+								$d['zone'] = empty($zone)?"none":$zone;
+							}
+								
+							$pl = PlLedger::add($d, true, ['org_id', 'date', 'grp1', 'grp2','weight','zone']);
+
+							$errors = $pl->getErrors();
+							if ( !empty($errors) ) {
+								echo 'ImParcel : ' . $parcel->id . ' failed : ' . implode(' ', $errors) . PHP_EOL;
+							}
+						}
+						continue;
+					}
+
+					if(in_array($invoice->type, [Invoice::INVOICE_TYPE_PICKUPBOOKING])){
+							foreach($line->mdata['items'] as $si => $sp) {
+								$allCount++;
+								$amt = isset($sp[5]) ? $sp[5] : 0;
+								$amt = round($amt * 100) / 100;
+								$pid = $invoice->pid;
+								$parcel = ImParcel::model()->findByPk($pid);
+								if(preg_match('/(.*)(\sBooking|Plain|Shrink)/i',$sp[1],$m))
+								{
+									// try to find ImParcel
+									$parcel = ImParcel::model()->find('(hbn = :ref OR ref = :ref OR cref = :ref) and consol_id=:consol_id',[':ref' => $m[1],":consol_id"=>$r->id]);
+									if(!empty($parcel))
+									{
+										$pid = $parcel->id;
+									}
+								}
+								
+
+								$d = [
+									'gl' => $glId,
+									'model' => 'ImParcel',
+									'dpt_id' =>$r->dpt_id,
+									'lid' => $line->id,
+									'org_id' => $invoice->to_id,
+									'dpmt' => $dpmt,
+									'grp1' => $r->id,
+									'grp3' => $line->id."|".$si,
+									'date' => $r->eta,
+									'amt' => number_format($amt,2,'.',''),
+									'actual_amt' => number_format($amt,2,'.',''),
+									'gst' => 0,
+									'acc' => 1,
+									'fid' =>$pid
+								];
+									
+								$pl = PlLedger::add($d, true, ['org_id', 'date', 'grp1', 'grp2','weight','zone']);
+
+								$errors = $pl->getErrors();
+								if ( !empty($errors) ) {
+									echo 'ImParcel : ' . $parcel->id . ' failed : ' . implode(' ', $errors) . PHP_EOL;
+								}
+								$amount +=$amt;
+							}
+							continue;
+					}
+
+					if(in_array($invoice->type, [Invoice::INVOICE_TYPE_CASUAL,Invoice::INVOICE_TYPE_DIRECT_MAWB,Invoice::INVOICE_TYPE_OTHERS]))
+					{
+						$amt = 0;
+						if ($invoice->type == Invoice::INVOICE_TYPE_CASUAL) {
+							$amt = $line->amount - $line->gst;
+						} else if ($invoice->type == Invoice::INVOICE_TYPE_DIRECT_MAWB) {
+							foreach ($line->mdata['items'] as $item) {
+									if (preg_match('/Customs Declaration|Customs Duties & Fees/i', $item[1])) {
+										$amt += $item[4];
+									}
+								}
+						} else if ($invoice->type == Invoice::INVOICE_TYPE_OTHERS) {
+							if (preg_match('/CUSTOMS DUTY\/GST|PROCESSING FEE|Declaration|Customs Duties & Fee|Customs Clearance|DUTY|LINE CHARGE|LINES CHARGE|CLEARANCE/i', $line->ccode)) {
+									$amt += $line->amount * $line->qty;
+							}
+						}
+
+						if(!empty($amt))
+						{
+							$parcel = ImParcel::model()->findByPk($invoice->pid);
+							if(!empty($parcel))
+							{
+								$d = [
+										'gl' => $glId,
+										'model' => 'ImParcel',
+										'dpt_id' =>$r->dpt_id,
+										'lid' => $line->id,
+										'org_id' => $invoice->to_id,
+										'dpmt' => $dpmt,
+										'grp1' => $r->id,
+										'grp3' => $line->id,
+										'date' => $r->eta,
+										'amt' => number_format($amt,2,'.',''),
+										'actual_amt' => number_format($amt,2,'.',''),
+										'gst' => 0,
+										'acc' => 1,
+									];
+									$amount +=$amt;
+
+									$d['fid'] = $parcel->id;
+									$shipmentProcesses = ShipmentProcess::model()->findAll("pid =:pid",[":pid"=>$parcel->id]);
+									if(!empty($shipmentProcesses))
+									{
+										$brokerId= 0;
+										foreach ($shipmentProcesses as $keyp => $process) {
+											if(!empty($process->broker_id))
+											{
+												$brokerId = $process->broker_id;
+												break;
+											}
+										}
+										if($brokerId>0)
+										{
+											$d['grp2'] = $brokerId;
+										}else
+										{
+											$d['grp2'] = "Unknown Broker";
+										}
+										
+									}else
+									{
+										$d['grp2'] = "Unknown Broker";
+									}
+
+									$pl = PlLedger::add($d, true, ['org_id', 'date', 'grp1', 'grp2']);
+
+									$errors = $pl->getErrors();
+									if ( !empty($errors) ) {
+										echo 'ImParcel : ' . $parcel->id . ' failed : ' . implode(' ', $errors) . PHP_EOL;
+									}
+
+									continue;
+							}
+						}
+					}
+
+					if(in_array($invoice->type, [40,102]))
+					{
+						$thisRef = explode('/', $line->det)[0];
+						if(!empty($thisRef))
+						{
+							$parcel = ImParcel::model()->find('(hbn = :ref OR ref = :ref OR cref = :ref) and consol_id=:consol_id',[':ref' =>$thisRef,":consol_id"=>$r->id]);
+							if(empty($parcel))
+							{
+								$dLabel =DfeChangeLabel::model()->find('dfe_ref = :dfeRef ',[':dfeRef'=>$thisRef]);
+								if(!empty($dLabel))
+								{
+									$parcel = ImParcel::model()->findByPk($dLabel->pid);
+								}
+							}
+
+							if(!empty($parcel))
+							{
+								$amt = ($line->amount-$line->gst)*$line->qty;
+								$d = [
+										'gl' => $glId,
+										'model' => 'ImParcel',
+										'dpt_id' =>$r->dpt_id,
+										'lid' => $line->id,
+										'org_id' => $invoice->to_id,
+										'dpmt' => $dpmt,
+										'grp1' => $r->id,
+										'grp3' => $line->id,
+										'date' => $r->eta,
+										'amt' => number_format($amt,2,'.',''),
+										'actual_amt' => number_format($amt,2,'.',''),
+										'gst' => 0,
+										'acc' => 1,
+									];
+									$amount +=$amt;
+
+									$d['fid'] = $parcel->id;
+									$d['grp2'] = @end($parcel->trans)->org_id;
+									$d['weight'] = 0;
+
+									$zone = ZoneMap::getAusZone($parcel->cnee->postcode);
+									$d['zone'] = empty($zone)?"none":$zone;
+
+									$pl = PlLedger::add($d, true, ['org_id', 'date', 'grp1', 'grp2','weight','zone']);
+
+									$errors = $pl->getErrors();
+									if ( !empty($errors) ) {
+										echo 'ImParcel : ' . $parcel->id . ' failed : ' . implode(' ', $errors) . PHP_EOL;
+									}
+
+									continue;
+							}
+						}
+					}
+
+					if($line->qty == 0) $line->qty = 1;
+					$amt = ($line->amount - $line->gst) * $line->qty;
+					$aamt = $amt;
+					$gst = $line->gst * $line->qty;
+
+					$d = [
+						'gl' => $glId,
+						'fid' => (!empty($invoice->pid)?$invoice->pid:$line->fid),
+						'model' => 'ImParcel',
+						'dpt_id' =>$r->dpt_id,
+						'lid' => $line->id,
+						'org_id' => $invoice->to_id,
+						'dpmt' => $dpmt,
+						'grp1' => $r->id,
+						'grp3' => $line->id,
+						'date' => $r->eta,
+						'amt' => number_format($amt,2,'.',''),
+						'actual_amt' => number_format($aamt,2,'.',''),
+						'gst' => $gst,
+						'acc' => 1,
+					];
+					$amount +=$aamt;
+
+					if(preg_match("/(DOC FEE|THC FEE)/i",$line->det))
+					{
+						$d['grp2'] = $terminal;
+					}
+						
+					$pl = PlLedger::add($d, true, ['org_id', 'date', 'grp1','grp2']);
+					$errors = $pl->getErrors();
+					if ( !empty($errors) ) {
+						echo 'Invoice : ' . $line->id . ' failed : ' . implode(' ', $errors) . PHP_EOL;
+					}
+				}
+				unset($invoices[$k]->lines);
+				unset($invoices[$k]);
+				//echo 'invoice ' . $invoice->no . ' processed' . PHP_EOL;
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+
+		//cost
+		$importsTotalWeight = 0;
+		$totalTotalWeight = 0;
+		$tldTotalWeight =0;
+		$tplTotalWeight =0;
+		$importsTotalShipments = 0;
+		$tldTotalShipments =0;
+		$tplTotalShipments =0;
+		$importsShipment = [];
+		$tldShipment = [];
+		$tplShipment = [];
+		$agentIds = [];
+		foreach ($r->shipments as $key => $p)
+		{
+			$totalTotalWeight+=$p->weight;
+			if($p->checkIsKPWithRef())
+			{
+				$tldShipment[] = $p;
+				$tldTotalWeight += $p->weight;
+				$tldTotalShipments += 1;
+				continue;
+			}else if($p->is3PL())
+			{
+				$tplShipment[] = $p;
+				$tplTotalWeight += $p->weight;
+				$tplTotalShipments += 1;
+				continue;
+			}
+
+			$importsShipment[] = $p;
+			$importsTotalWeight += $p->weight;
+			$importsTotalShipments += 1;
+			$agentIds[$p->agent_id] = $p->agent_id;
+		}
+		$supplierId = [];
+		//push for delivery cost
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			foreach($r->shipments as $p){
+				if ( empty($p) ) continue;
+				$ts = @end($p->trans);
+				//if ( empty($ts) ) continue;
+				$aamt = empty($p->mdata['actual_delivery_cost'])? 0 : $p->mdata['actual_delivery_cost'];
+
+				$cogsLines = CogsLine::model()->findAll('fid=:fid and model="ImParcel" and item_code in ("item","fuel")',[":fid"=>$p->id]);
+				$aamt2 = 0;
+				foreach ($cogsLines as $key => $cos)
+				{
+					$aamt2 +=$cos->actual_amount;
+				}
+				if(!empty($aamt2)) $aamt = $aamt2;
+
+				if(empty($aamt2))
+				{
+					$siReoncileLines = SiReconcileLine::model()->with('parent')->findAll('parent.status!=100 and fid = :fid and item_code in ("item","fuel")',[':fid'=>$p->id]);
+					foreach ($siReoncileLines as $key => $siReoncileLine) {
+						$aamt2 +=$siReoncileLine->value;
+					}
+					if(!empty($aamt2)) $aamt = $aamt2;
+				}
+				if(empty($aamt)) continue;
+				$supplierId[$ts->org_id] = $ts->org_id;
+
+				if($ts->org_id==Org::ORGID_COURIER_GV_AUPOST&&$p->agent_id==Org::ORGID_CLIENT_GLOBAVEND)
+				{
+					continue;
+				}
+
+				$d = [
+					'gl' => ($p->getDpmt()==Invoice::DPMT_IMPORT?29:($p->getDpmt()==Invoice::DPMT_3PL?385:388)),
+					'fid' => $p->id,
+					'model' => 'ImParcel',
+					'dpt_id' => $r->dpt_id,
+					'lid' => 0,
+					'org_id' => ($charterLink?4252:$p->agent_id),
+					'dpmt' => $p->getDpmt(),
+					'grp1' => $r->id,
+					'grp2' => $ts->org_id,
+					'grp3' => 'DeliveryCost',
+					'date' => $r->eta,
+					'amt' => empty($ts)?0:number_format($ts->cost,2,'.',''),
+					'actual_amt' => number_format($aamt,2,'.',''),
+					'gst' => 0,
+					'acc' => empty($aamt)? 0 : 1
+				];
+					
+				PlLedger::add($d, true, ['org_id', 'date', 'grp1']);
+				if($d['dpmt']==Invoice::DPMT_COURIER_SERVICE&&$d['gl']==Consol::DELIVERY_COURIER_SERVCE_COST_GL_CODE)
+				{
+					$pls = PlLedger::model()->findAll('gl in (367,1) and model="ImParcel" and fid = :fid and zone is not null',[":fid"=>$p->id]);
+					foreach ($pls as $key => $pl) {
+						$pl->dpmt = $dpmt;
+						$pl->grp2 = $d['grp2'];
+						$pl->save();
+					}
+				}
+
+
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+		//for credit note 
+		Yii::app()->name = 'TLA';
+		$creditnotes = Payment::model()->findAll('type = 5 AND (ref LIKE :ref or JSON_VALUE(meta, "$.consol") LIKE :ref) AND status != 9', [':ref' => '%' . $r->no . '%']);
+		foreach ($creditnotes as $key => $creditnote) 
+		{
+				$allocations = PayInv::model()->findAll("pay_id =:payId",[":payId"=>$creditnote->id]);
+				$gst = $creditnote->getGst();
+				foreach ($allocations as $key => $allocation)
+				{
+					$d = [
+						'gl' => 99999,
+						'fid' => $creditnote->id,
+						'model' => 'Payment',
+						'dpt_id' =>$r->dpt_id,
+						'lid' => 0,
+						'org_id' => ($charterLink?4252:$creditnote->org_id),
+						'dpmt' => $creditnote->dpmt,
+						'grp1' => $r->id,
+						'grp2' => 0,
+						'grp3'=>$payinv->id,
+						'date' => $r->eta,
+						'amt' => number_format($creditnote->amount-$gst,2,'.',''),
+						'actual_amt' => number_format($creditnote->amount-$gst,2,'.',''),
+						'gst' => 0,
+						'acc' => empty($creditnote->amount-$gst)? 0 : 1
+					];
+					
+					PlLedger::add($d, true, ['org_id', 'date', 'grp1']);
+				}
+		}
+		//for elms
+
+		if($r->type ==Consol::ELMSCONSOLTYPE)
+		{
+			$sis = SiReconcileLine::model()->with('parent')->findAll('parent.status !=100 and ref = :ref and model=:ref',[":ref"=>$r->awb]);
+			if(!empty($sis))
+			{
+				foreach($sis as $si) 
+				{
+					$d = [
+						'gl' => 29,
+						'fid' => $r->id,
+						'model' => 'Consol',
+						'dpt_id' => $r->dpt_id,
+						'lid' => 0,
+						'org_id' => $r->owner_id,
+						'dpmt' => 10,
+						'grp1' => $r->id,
+						'grp2' => 101,
+						'grp3' => $si->id,
+						'date' => $r->eta,
+						'amt' => number_format($si->my_value,2,'.',''),
+						'actual_amt' =>number_format($si->value,2,'.',''),
+						'gst' => 0,
+						'acc' =>1,
+					];
+						
+					PlLedger::add($d, true, ['org_id', 'date', 'grp1']);
+				}
+			}
+			continue;
+		}
+
+
+		$tabBillings = $r->getTabBilling(true)['data'];
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			foreach ( $tabBillings as $billing ) {
+				if(in_array($billing['supplier_id'],$supplierId)&&empty($billing['confirm_payable'])) continue;
+				// ignore delivery cost
+				// try to get gl index
+				$chargeCode = Chargecode::model()->find('status = 1 AND code = :code',[':code' => $billing['glcode']]);
+				if ( empty($chargeCode) ){
+					echo 'Error, charge code ', $billing['glcode'],' not found', PHP_EOL;
+					if(empty($billing['glcode']))
+					{
+						$billing['glcode'] = '91031';
+					}
+				}
+
+				$dpmt = $billing['dpmt'];
+				if(!empty($chargeCode->dpmt))
+				{
+					$dpmt = $chargeCode->dpmt;
+				}
+				if(empty($dpmt)) $dpmt = Invoice::DPMT_IMPORT;
+
+
+
+				if ( empty($r->shipments ) ) {
+					$d = [
+						'gl' => $chargeCode->id,
+						'fid' => $billing['billing_id'],
+						'model' => 'BillingLine',
+						'dpt_id' => $r->dpt_id,
+						'lid' => 0,
+						'org_id' => $r->owner_id,
+						'dpmt' => $dpmt,
+						'grp1' => $r->id,
+						'grp2' => $billing['supplier_id'],
+						'grp3' => $billing['id'],
+						'date' => $r->eta,
+						'amt' => $billing['accrual'],
+						'actual_amt' => $billing['confirm_payable'],
+						'gst' => 0,
+						'acc' => (empty($billing['confirm_payable']) || $billing['confirm_payable'] == 0)? 0 : 1,
+					];
+						
+					PlLedger::add($d, true, ['org_id', 'date', 'grp1', 'grp2']);
+				}else{
+					$shipments = [];
+					$totalWeight = 0;
+					$totalShipments = 0;
+					if($dpmt==Invoice::DPMT_IMPORT)
+					{
+						$shipments = $importsShipment;
+						$totalWeight = $importsTotalWeight;
+						$totalShipments = $importsTotalShipments;
+						$find = false;
+					}elseif($dpmt==Invoice::DPMT_3PL)
+					{
+						$shipments = $tplShipment;
+						$totalWeight =  $tplTotalWeight;
+						$totalShipments = $tplTotalShipments;
+						$find = false;
+					}elseif($dpmt==Invoice::DPMT_COURIER_SERVICE)
+					{
+						$shipments = $tldShipment;
+						$totalWeight = $tldTotalWeight;
+						$totalShipments = $tldTotalShipments;
+						$find = false;
+					}
+
+					$desArr = explode('***', $billing['desc']);
+					foreach ($desArr as $key => $desc)
+					{
+						$desc = trim($desc);
+						if(!empty($desc))
+						{
+							$si = SiReconcile::model()->with('parent')->find('t.status !=100 and parent.inv_no = :invNo and t.org_id = :supplier_id',[":invNo"=>$billing['inv_no'],":supplier_id"=>$billing['supplier_id']]);
+							if(!empty($si))
+							{
+								$sils = SiReconcileLine::model()->with('parent')->findAll('rec_id =:recId and det = :det',[":recId"=>$si->id,":det"=>$desc]);
+								foreach ($sils as $key => $sil)
+								{
+									if(preg_match('/Amazon (\d+)/', $desc,$m)||preg_match('/Amazon ISA(\d+)/', $desc,$m))
+									{
+										//this setting is for handling the manual cost for amazon
+										if($sil->ref!=$r->no) continue;
+										$thisRef = $m[1];
+										$amazonInfos = AmazonInfo::model()->findAll("(booking_ref = :ref1 or booking_ref = :ref2)",[":ref1"=>'ISA '.$thisRef,":ref2"=>$thisRef]);
+										$thisAmazonWeight = 0;
+										$amazonShipments = [];
+										foreach ($amazonInfos as $key => $amazonInfo)
+										{
+											if($amazonInfo->model=='ImParcel')
+											{
+												$thisP = $amazonInfo->shipment;
+												if($thisP->consol_id==$r->id)
+												{
+													$amazonShipments[$thisP->id] = $thisP;
+												}
+											}else
+											{
+												$ca = CargoProcess::model()->findByPk($amazonInfo->fid);
+												if($ca->shipment->consol_id==$r->id)
+												{
+													$amazonShipments[$ca->shipment_id] = $ca->shipment;
+												}
+											}
+										}
+
+										foreach ($amazonShipments as $key => $p) {
+											$thisAmazonWeight+=$p->weight;
+										}
+
+										foreach ($amazonShipments as $key => $p)
+										{
+											$aamt = $sil->value;
+											$d = [
+												'gl' => ($p->getDpmt()==Invoice::DPMT_IMPORT?29:($p->getDpmt()==Invoice::DPMT_3PL?385:388)),
+												'fid' => $p->id,
+												'model' => 'ImParcel',
+												'dpt_id' => $r->dpt_id,
+												'lid' => 0,
+												'org_id' => ($charterLink?4252:$p->agent_id),
+												'dpmt' => $dpmt,
+												'grp1' => $r->id,
+												'grp2' => $billing['supplier_id'],
+												'grp3' => 'DeliveryCost',
+												'date' => $r->eta,
+												'amt' => 0,
+												'actual_amt' => number_format($aamt*($p->weight/$thisAmazonWeight),2,'.',''),
+												'gst' => 0,
+												'acc' => 1,
+												'weight' => $p->weight
+											];
+											PlLedger::addWithSum($d, true, ['org_id', 'date','weight']);
+											$pls = PlLedger::model()->findAll('gl in (367,1,14,379,370,373) and model="ImParcel" and fid = :fid and zone is not null',[":fid"=>$p->id]);
+											foreach ($pls as $key => $pl) {
+												$pl->dpmt = $dpmt;
+												$pl->grp2 = $billing['supplier_id'];
+												$pl->save();
+											}
+											$find = true;
+										}
+										continue;
+									}
+
+
+									$thisRef = "";
+									if(preg_match('/T[a-zA-Z]N\d{10}/', $desc,$m))
+									{
+										$thisRef = $m[0];
+									}
+
+									if(preg_match('/PICKUP\d{7}/', $desc,$m))
+									{
+										$thisRef = $m[0];
+									}
+
+									if(empty($thisRef))
+									{
+										$thisRefs= preg_split('/-|\s|\//', $desc);
+										$thisRef = $thisRefs[0];
+									}
+									
+									
+
+									if(!empty($thisRef))
+									{
+										$p = ImParcel::model()->find('(hbn = :ref OR ref = :ref OR cref = :ref) and consol_id=:consol_id',[':ref' => $thisRef,':consol_id'=>$r->id]);
+										if(empty($p))
+										{
+											$thisRef = "";
+											if (is_array($thisRefs)) {
+												for ($i=1; $i < sizeof($thisRefs); $i++)
+												{
+													$thisRef .= trim($thisRefs[$i]);
+												}
+											}
+											
+											if(!empty($thisRef))
+											{
+												$p = ImParcel::model()->find('(hbn = :ref OR ref = :ref OR cref = :ref)  and consol_id=:consol_id',[':ref' => $thisRef,':consol_id'=>$r->id]);
+											}
+										}
+										if(!empty($p))
+										{
+											$aamt = $sil->value;
+											$d = [
+												'gl' => ($p->getDpmt()==Invoice::DPMT_IMPORT?29:($p->getDpmt()==Invoice::DPMT_3PL?385:388)),
+												'fid' => $p->id,
+												'model' => 'ImParcel',
+												'dpt_id' => $r->dpt_id,
+												'lid' => 0,
+												'org_id' => ($charterLink?4252:$p->agent_id),
+												'dpmt' => $dpmt,
+												'grp1' => $r->id,
+												'grp2' => $billing['supplier_id'],
+												'grp3' => 'DeliveryCost',
+												'date' => $r->eta,
+												'amt' => 0,
+												'actual_amt' => number_format($aamt,2,'.',''),
+												'gst' => 0,
+												'acc' => 1,
+												'weight' => $p->weight
+											];
+											PlLedger::addWithSum($d, true, ['org_id', 'date','weight']);
+											$pls = PlLedger::model()->findAll('gl in (367,1,14,379,370,373) and model="ImParcel" and fid = :fid and zone is not null',[":fid"=>$p->id]);
+											foreach ($pls as $key => $pl) {
+												$pl->dpmt = $dpmt;
+												$pl->grp2 = $billing['supplier_id'];
+												$pl->save();
+											}
+											$find = true;
+										}
+									}
+								}
+							}
+						}
+					}
+
+					//for broker cost
+					if($find == false)
+					{
+						$si = SiReconcile::model()->with('parent')->find('t.status !=100 and parent.inv_no = :invNo and t.type = :type and t.org_id = :supplier_id',[":invNo"=>$billing['inv_no'],":type"=>SiReconcile::TYPE_BROKER,":supplier_id"=>$billing['supplier_id']]);
+						if(!empty($si))
+						{ 	
+							$lines = SiReconcileLine::model()->findAll('rec_id = :recId',[":recId"=>$si->id]);
+							foreach ($lines as $key => $li) {
+								$p = ImParcel::model()->findByPk($li->fid);
+								$brokerInvoice = $this->findBrokerInvoice($p);
+								$d = [
+									'gl' => $chargeCode->id,
+									'fid' => $li->fid,
+									'model' => 'ImParcel',
+									'dpt_id' => $r->dpt_id,
+									'lid' => 0,
+									'org_id' => ($charterLink?4252:(empty($brokerInvoice)?Org::ORGID_IMPORT_CASUAL_CUSTOMER:$brokerInvoice->to_id)),
+									'dpmt' => $dpmt,
+									'grp1' => $r->id,
+									'grp2' => $billing['supplier_id'],
+									'grp3' => $billing['id'],
+									'date' => $r->eta,
+									'amt' => number_format($billing['accrual'],2,'.',''),
+									'actual_amt' =>number_format($billing['confirm_payable'],2,'.',''),
+									'gst' => 0,
+									'acc' => (empty($billing['confirm_payable']) || $billing['confirm_payable'] == 0)? 0 : 1,
+								];
+									
+								PlLedger::add($d, true, ['org_id', 'date', 'grp1']);
+								break;
+							}
+							continue;
+						}
+					}
+
+
+					//for terminal cost
+					if($find == false)
+					{
+						$si = SiReconcile::model()->with('parent')->find('t.status !=100 and parent.inv_no = :invNo and t.type = :type and t.org_id = :supplier_id',[":invNo"=>$billing['inv_no'],":type"=>SiReconcile::TYPE_TERMINAL,":supplier_id"=>$billing['supplier_id']]);
+						if(!empty($si))
+						{
+							foreach ($r->shipments as $p) {
+								$d = [
+									'gl' => $chargeCode->id,
+									'fid' => $p->id,
+									'model' => 'ImParcel',
+									'dpt_id' => $r->dpt_id,
+									'lid' => 0,
+									'org_id' => ($charterLink?4252:$p->agent_id),
+									'dpmt' => $dpmt,
+									'grp1' => $r->id,
+									'grp2' => $billing['supplier_id'],
+									'grp3' => $billing['id'],
+									'date' => $r->eta,
+									'amt' => (empty($totalTotalWeight)?$billing['accrual']:number_format($billing['accrual']*($p->weight/$totalTotalWeight),2,'.','')),
+									'actual_amt' =>(empty($totalTotalWeight)?$billing['confirm_payable']:number_format($billing['confirm_payable']*($p->weight/$totalTotalWeight),2,'.','')),
+									'gst' => 0,
+									'acc' => (empty($billing['confirm_payable']) || $billing['confirm_payable'] == 0)? 0 : 1,
+								];
+								PlLedger::add($d, true, ['org_id', 'date', 'grp1']);
+							}
+							continue;
+						}
+					}
+
+					if($find == false)
+					{
+						$si = SiReconcile::model()->with('parent')->find('t.status !=100 and parent.inv_no = :invNo and t.type = :type  and t.org_id = :supplier_id',[":invNo"=>$billing['inv_no'],":type"=>SiReconcile::TYPE_COURIER,":supplier_id"=>$billing['supplier_id']]);
+						if(!empty($si)) continue;//Delivery Cost
+
+						//海运费分配逻辑
+						if(count($agentIds)>1&&in_array(3103, $agentIds))
+						{
+							if($billing['supplier_id']==3103||$billing['supplier_id']==3946)
+							{
+								$newShhipments = [];
+								$newTotalWeight = 0;
+								$newTotalShipments = 0;
+								foreach ($shipments as $key => $thisS) {
+									if(!in_array($thisS->agent_id,[3103])&&$thisS->agent_id!=Org::ORGID_IMPORT_CASUAL_CUSTOMER)
+									{
+										$newShhipments[] = $thisS;
+										$newTotalWeight+= $thisS->weight;
+										$newTotalShipments++;
+									}
+								}
+								$shipments = $newShhipments;
+								$totalWeight = $newTotalWeight;
+								$totalShipments = $newTotalShipments;
+							}else
+							{
+								$newShhipments = [];
+								$newTotalWeight = 0;
+								$newTotalShipments = 0;
+								foreach ($shipments as $key => $thisS) {
+									if(in_array($thisS->agent_id,[3103]))
+									{
+										$newShhipments[] = $thisS;
+										$newTotalWeight+= $thisS->weight;
+										$newTotalShipments++;
+									}
+								}
+								$shipments = $newShhipments;
+								$totalWeight = $newTotalWeight;
+								$totalShipments = $newTotalShipments;
+							}
+						}
+
+						$agentIdArr = array_column($shipments,'agent_id');
+						$agentIdArr = array_unique($agentIdArr);
+						if(count($agentIdArr)>1)
+						{
+							foreach($shipments as $thisShipmentKey => $p)
+							{
+								if($p->agent_id==Org::ORGID_IMPORT_CASUAL_CUSTOMER)
+								{
+									unset($shipments[$thisShipmentKey]);
+									$totalShipments = $totalShipments-1;
+									$totalWeight=  $totalWeight- $p->weight;
+								}
+							}
+						}
+
+						//for general cost
+						foreach($shipments as $p) {
+							if($totalWeight==0)
+							{
+								$thisAmt = 	round($billing['accrual'] / $totalShipments,2);
+								$thisActualAmt = round($billing['confirm_payable'] / $totalShipments,2);
+							}else
+							{
+								$thisAmt = round($billing['accrual'] * $p->weight / $totalWeight,2);
+								$thisActualAmt = round($billing['confirm_payable'] * $p->weight / $totalWeight,2);
+							}
+
+							$d = [
+								'gl' => $chargeCode->id,
+								'fid' => $p->id,
+								'model' => 'ImParcel',
+								'dpt_id' => $r->dpt_id,
+								'lid' => 0,
+								'org_id' => ($charterLink?4252:$p->agent_id),
+								'dpmt' => $dpmt,
+								'grp1' => $r->id,
+								'grp2' => $billing['supplier_id'],
+								'grp3' => $billing['id'],
+								'date' => $r->eta,
+								'amt' => number_format($thisAmt,2,'.',''),
+								'actual_amt' =>number_format($thisActualAmt,2,'.',''),
+								'gst' => 0,
+								'acc' => (empty($billing['confirm_payable']) || $billing['confirm_payable'] == 0)? 0 : 1,
+							];
+								
+							PlLedger::add($d, true, ['org_id', 'date', 'grp1']);
+
+							if($dpmt==Invoice::DPMT_COURIER_SERVICE&&$billing['glcode']==Consol::DELIVERY_COURIER_SERVCE_COST_GL_CODE)
+							{
+								$pls = PlLedger::model()->findAll('gl in (367,1) and model="ImParcel" and fid = :fid and zone is not null',[":fid"=>$p->id]);
+								foreach ($pls as $key => $pl) {
+									$pl->dpmt = $dpmt;
+									$pl->grp2 = $billing['supplier_id'];
+									$pl->save();
+								}
+							}
+
+
+
+						}
+					}
+				}
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+
+			echo 'Consol ' . $r->no . ' Done'. PHP_EOL;
+			$processedCount++;
+			unset($r->shipments);
+			unset($rs[$i]);
+		}
+
+		echo $processedCount . ' Consols done'. PHP_EOL;
+		$this->funcGeneralExpensePL($fd,$td);
+		$this->funcImConsolAccrualRebatePL($fd,$td,$id);
+		$this->funcUpdateDptId($fd,$td,$id);
+	}
+
+	public function imConsolAccrualRebatePL($cron=false){
+		Yii::app()->name = 'TLA';
+		$id = 0;
+		if($cron){
+			$fd = date('Y-m-01', strtotime('-1 month'));
+			$td = date('Y-m-d');
+		}else{
+			$fd = $this->prompt('From Date: ', date('Y-m-01'));
+			$td = $this->prompt('To Date: ', date('Y-m-d', strtotime(date('Y-m-01').' +1 month -1 day')));
+			$id = $this->prompt('Test Id: ');
+		}
+		$this->funcImConsolAccrualRebatePL($fd,$td,$id);
+	}
+
+	public function funcImConsolAccrualRebatePL($fd,$td,$id=null){
+		Yii::app()->name = 'TLA';
+		$processedCount = 0;
+
+		if(!empty($id))
+		{
+			$rs = Consol::model()->findAll("id in ( ".$id.")");
+		}else
+		{
+			$rs = Consol::model()->findAll(['condition'=>'type IN (15,70,80) AND status < 100 AND eta >= :d AND eta <= :td', 'params'=>[':d' => $fd, ':td' => $td],'order'=>'eta ASC']);
+		}	
+		foreach($rs as $i => $r)
+		{
+
+			$sql = "DELETE from pl_ledger_management where model !='ImP_Manifest' and grp1 = '".$r->id."' and gl='99997' ";
+		    $this->db->createCommand($sql)->execute();
+
+			//revenue
+			$invoices = Invoice::model()->findAll('consol_id = :cid AND status NOT IN (1,8,10,99)', [':cid' => $r->id]);
+			$lines = array();
+			$trans = Yii::app()->db->beginTransaction();
+			try{
+				$charterLink = false;
+				$toIds = array_column($invoices, "to_id");
+				if(in_array(4252,$toIds))
+				{
+					$charterLink = true;
+				}
+				foreach ( $invoices as $k=> $invoice ){
+					$amount =0;
+					if($charterLink)
+					{
+						$invoice->to_id = 4252;
+					}
+					
+					$rate = OrgRateService::getOrgRebatePercentWithRebateAmount(1000,$invoice->to_id);
+					if(empty($rate)) continue;
+					foreach ( $invoice->lines as $line ) 
+					{
+						if(empty($line->rebate)) continue;
+						// get glid and dpmt for invoice
+						$dpmt = $invoice->dpmt;
+						$glId = 99997;
+						if(!empty($line->ccode))
+						{
+							$myCode = ChargeItemType::model()->find("code = :code",[":code"=>$line->ccode]);
+							if(!empty($myCode))
+							{
+								if(!empty($myCode->charge_code))
+								{
+									$code = $myCode->charge_code;
+									$cog = Chargecode::model()->find('status = 1 AND code = :code',[':code' => $code]);
+									if ( empty($cog) ){
+										echo 'Error, charge code ', $cog->charge_code,' not found', PHP_EOL;
+									}
+								}
+								if(!empty($myCode->dpmt))
+								{
+									$dpmt = $myCode->dpmt;
+								}
+							}
+						}
+						if(!empty($line->mdata['items']))
+						{
+							foreach($line->mdata['items'] as $si => $sp)
+							{
+								if(empty($sp['rebate'])) continue;
+								$allCount++;
+								$amt = isset($sp[5]) ? $sp[5] : 0;
+								$amt = round($amt * 100) / 100;
+
+								// try to find ImParcel
+								$parcel = ImParcel::model()->find('(hbn = :ref OR ref = :ref OR cref = :ref) and consol_id=:consol_id',[':ref' => $sp[0],":consol_id"=>$r->id]);
+								if(empty($parcel)&&$invoice->type==37)//for RT
+								{
+									$parcel = ImParcel::model()->find('(hbn = :ref OR ref = :ref OR cref = :ref) and consol_id=:consol_id',[':ref' => $sp[3],":consol_id"=>$r->id]);
+									$amt = isset($sp[2]) ? $sp[2] : 0;
+									$amt = round($amt * 100) / 100;
+								}else if(empty($parcel))
+								{
+									$dLabel =DfeChangeLabel::model()->find('dfe_ref = :dfeRef ',[':dfeRef'=>$sp[0]]);
+									if(!empty($dLabel))
+									{
+										$parcel = ImParcel::model()->findByPk($dLabel->pid);
+									}
+								}
+								
+								$amt = $amt*$rate;
+
+								$d = [
+									'gl' => $glId,
+									'model' => 'ImParcel',
+									'dpt_id' =>$r->dpt_id,
+									'lid' => $line->id,
+									'org_id' => $invoice->to_id,
+									'dpmt' => $dpmt,
+									'grp1' => $r->id,
+									'grp3' => $line->id."|".$si,
+									'date' => $r->eta,
+									'amt' => number_format($amt,2,'.',''),
+									'actual_amt' => number_format($amt,2,'.',''),
+									'gst' => 0,
+									'acc' => 1,
+								];
+
+								$amount +=$amt;
+								if ( empty($parcel) ) {
+									echo 'INV '.$invoice->no.': shipment '.$sp[0].' not found saved as other fee' . PHP_EOL;
+									$d['fid'] = 0;
+									$d['model'] = $sp[0];
+									$d['mdata'] = ["description"=> $sp[1]];
+								}else{
+									$d['fid'] = $parcel->id;
+									$d['grp2'] = @end($parcel->trans)->org_id;
+									if(in_array($invoice->type,[10,104]))
+									{
+										$d['weight'] = $parcel->weight;
+									}else
+									{
+										$d['weight'] = 0;
+									}
+
+									$zone = ZoneMap::getAusZone($parcel->cnee->postcode);
+									$d['zone'] = empty($zone)?"none":$zone;
+								}
+									
+								$pl = PlLedger::add($d, true, ['org_id', 'date', 'grp1', 'grp2','weight','zone']);
+
+								$errors = $pl->getErrors();
+								if ( !empty($errors) ) {
+									echo 'ImParcel : ' . $parcel->id . ' failed : ' . implode(' ', $errors) . PHP_EOL;
+								}
+							}
+						}else
+						{
+								
+							$amt = ($line->amount-$line->gst)*$rate;
+
+							$d = [
+								'gl' => $glId,
+								'model' => 'ImParcel',
+								'dpt_id' =>$r->dpt_id,
+								'lid' => $line->id,
+								'org_id' => $invoice->to_id,
+								'dpmt' => $dpmt,
+								'grp1' => $r->id,
+								'grp3' => $line->id."|".$si,
+								'date' => $r->eta,
+								'amt' => number_format($amt,2,'.',''),
+								'actual_amt' => number_format($amt,2,'.',''),
+								'gst' => 0,
+								'acc' => 1,
+							];
+
+							$d['fid'] = 0;
+							$d['model'] = "";
+							$d['mdata'] = ["description"=> ""];
+								
+							$pl = PlLedger::add($d, true, ['org_id', 'date', 'grp1', 'grp2','weight','zone']);
+
+							$errors = $pl->getErrors();
+							if ( !empty($errors) ) {
+								echo 'ImParcel : ' . $parcel->id . ' failed : ' . implode(' ', $errors) . PHP_EOL;
+							}
+						}
+
+					}
+					unset($invoices[$k]->lines);
+					unset($invoices[$k]);
+					//echo 'invoice ' . $invoice->no . ' processed' . PHP_EOL;
+				}
+				$trans->commit();
+			} catch (Exception $ex) {
+				$trans->rollback();
+				throw $ex;
+			}
+		}
+	}
+
+	public function updateDptId($cron=false){
+		Yii::app()->name = 'TLA';
+		$id = 0;
+		if($cron){
+			$fd = date('Y-m-01', strtotime('-1 month'));
+			$td = date('Y-m-d');
+		}else{
+			$fd = $this->prompt('From Date: ', date('Y-m-01'));
+			$td = $this->prompt('To Date: ', date('Y-m-d', strtotime(date('Y-m-01').' +1 month -1 day')));
+			$id = $this->prompt('Test Id: ');
+		}
+		$this->funcUpdateDptId($fd,$td,$id);
+	}
+
+	public function funcUpdateDptId($fd,$td,$id=null){
+		Yii::app()->name = 'TLA';
+		$processedCount = 0;
+
+		if(!empty($id))
+		{
+			$rs = Consol::model()->findAll("id in ( ".$id.")");
+		}else
+		{
+			$rs = Consol::model()->findAll(['condition'=>'type IN (15,70,80) AND status < 100 AND eta >= :d AND eta <= :td', 'params'=>[':d' => $fd, ':td' => $td],'order'=>'eta ASC']);
+		}
+
+		foreach($rs as $i => $r)
+		{
+
+			$sql = "UPDATE pl_ledger_management set dpt_id = {$r->dpt_id} where model !='ImP_Manifest' and grp1 = '".$r->id."' ";
+			$this->db->createCommand($sql)->execute();
+			echo $r->no.$r->dpt_id;
+		}
+	}
+	public function updateImConsolTerminal($cron=false){
+		Yii::app()->name = 'TLA';
+		$id = 0;
+		if($cron){
+			$fd = date('Y-m-01', strtotime('-1 month'));
+			$td = date('Y-m-d');
+		}else{
+			$fd = $this->prompt('From Date: ', date('Y-m-01'));
+			$td = $this->prompt('To Date: ', date('Y-m-d', strtotime(date('Y-m-01').' +1 month -1 day')));
+			$id = $this->prompt('Test Id: ');
+		}
+		$this->funcImConsolTerminal($fd,$td,$id);
+		$this->funcUpdateDptId($fd,$td,$id);
+	}
+
+	public function funcImConsolTerminal($fd,$td,$id=null){
+		Yii::app()->name = 'TLA';
+		$processedCount = 0;
+
+		if(!empty($id))
+		{
+			$rs = Consol::model()->findAll("id in ( ".$id.")");
+		}else
+		{
+			$rs = Consol::model()->findAll(['condition'=>'type IN (15,70,80) AND status < 100 AND eta >= :d AND eta <= :td', 'params'=>[':d' => $fd, ':td' => $td],'order'=>'eta ASC']);
+		}	
+		foreach($rs as $i => $r)
+		{
+
+		//cost
+		$importsTotalWeight = 0;
+		$tldTotalWeight =0;
+		$tplTotalWeight =0;
+		$importsTotalShipments = 0;
+		$tldTotalShipments =0;
+		$tplTotalShipments =0;
+		$importsShipment = [];
+		$tldShipment = [];
+		$tplShipment = [];
+		$agentIds = [];
+		foreach ($r->shipments as $key => $p)
+		{
+			$importsShipment[] = $p;
+			$importsTotalWeight += $p->weight;
+			$importsTotalShipments += 1;
+			$agentIds[$p->agent_id] = $p->agent_id;
+
+			if($p->checkIsKPWithRef())
+			{
+				$tldShipment[] = $p;
+				$tldTotalWeight += $p->weight;
+				$tldTotalShipments += 1;
+				continue;
+			}else if($p->is3PL())
+			{
+				$tplShipment[] = $p;
+				$tplTotalWeight += $p->weight;
+				$tplTotalShipments += 1;
+				continue;
+			}
+
+		}
+		$supplierId = [];
+
+
+		$tabBillings = $r->getTabBilling(true)['data'];
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			foreach ( $tabBillings as $billing ) {
+				if(in_array($billing['supplier_id'],$supplierId)&&empty($billing['confirm_payable'])) continue;
+				// ignore delivery cost
+				// try to get gl index
+				$chargeCode = Chargecode::model()->find('status = 1 AND code = :code',[':code' => $billing['glcode']]);
+				if ( empty($chargeCode) ){
+					echo 'Error, charge code ', $billing['glcode'],' not found', PHP_EOL;
+					if(empty($billing['glcode']))
+					{
+						$billing['glcode'] = '91031';
+					}
+				}
+
+				$dpmt = $billing['dpmt'];
+				if(!empty($chargeCode->dpmt))
+				{
+					$dpmt = $chargeCode->dpmt;
+				}
+				if(empty($dpmt)) $dpmt = Invoice::DPMT_IMPORT;
+
+				if ( empty($r->shipments ) ) {
+					
+				}else{
+					$shipments = [];
+					$totalWeight = 0;
+					$totalShipments = 0;
+					if($dpmt==Invoice::DPMT_IMPORT)
+					{
+						$shipments = $importsShipment;
+						$totalWeight = $importsTotalWeight;
+						$totalShipments = $importsTotalShipments;
+						$find = false;
+					}elseif($dpmt==Invoice::DPMT_3PL)
+					{
+						$shipments = $tplShipment;
+						$totalWeight =  $tplTotalWeight;
+						$totalShipments = $tplTotalShipments;
+						$find = false;
+					}elseif($dpmt==Invoice::DPMT_COURIER_SERVICE)
+					{
+						$shipments = $tldShipment;
+						$totalWeight = $tldTotalWeight;
+						$totalShipments = $tldTotalShipments;
+						$find = false;
+					}
+
+					//for terminal cost
+					if($find == false)
+					{
+						$si = SiReconcile::model()->with('parent')->find('t.status !=100 and parent.inv_no = :invNo and t.type = :type and t.org_id = :supplier_id',[":invNo"=>$billing['inv_no'],":type"=>SiReconcile::TYPE_TERMINAL,":supplier_id"=>$billing['supplier_id']]);
+						if(!empty($si))
+						{
+							$shipments = $r->shipments;
+							$agentIdArr = array_column($shipments,'agent_id');
+							$agentIdArr = array_unique($agentIdArr);
+							if(count($agentIdArr)>1)
+							{
+								foreach($shipments as $thisShipmentKey => $p)
+								{
+									if($p->agent_id==Org::ORGID_IMPORT_CASUAL_CUSTOMER)
+									{
+										unset($shipments[$thisShipmentKey]);
+										$totalShipments = $totalShipments-1;
+										$totalWeight=  $totalWeight- $p->weight;
+									}
+								}
+							}
+
+							foreach ($shipments as $p) {
+								$d = [
+									'gl' => $chargeCode->id,
+									'fid' => $p->id,
+									'model' => 'ImParcel',
+									'dpt_id' => $r->dpt_id,
+									'lid' => 0,
+									'org_id' => $p->agent_id,
+									'dpmt' => $dpmt,
+									'grp1' => $r->id,
+									'grp2' => $billing['supplier_id'],
+									'grp3' => $billing['id'],
+									'date' => $r->eta,
+									'amt' => number_format($billing['accrual']*($p->weight/$importsTotalWeight),2,'.',''),
+									'actual_amt' =>number_format($billing['confirm_payable']*($p->weight/$importsTotalWeight),2,'.',''),
+									'gst' => 0,
+									'acc' => (empty($billing['confirm_payable']) || $billing['confirm_payable'] == 0)? 0 : 1,
+								];
+									
+								PlLedger::add($d, true, ['org_id', 'date', 'grp1']);
+							}
+							continue;
+						}
+					}
+
+				}
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+
+			echo 'Consol ' . $r->no . ' Done'. PHP_EOL;
+			$processedCount++;
+			unset($r->shipments);
+			unset($rs[$i]);
+		}
+
+		echo $processedCount . ' Consols done'. PHP_EOL;
+	}
+
+
+	public function generalExpensePL($cron=false){
+		Yii::app()->name = 'TLA';
+		$id = 0;
+		if($cron){
+			$fd = date('Y-m-01', strtotime('-1 month'));
+			$td = date('Y-m-d');
+		}else{
+			$fd = $this->prompt('From Date: ', date('Y-m-01'));
+			$td = $this->prompt('To Date: ', date('Y-m-d', strtotime(date('Y-m-01').' +1 month -1 day')));
+			$id = $this->prompt('Test Id: ');
+		}
+		$this->funcGeneralExpensePL($fd,$td);
+	}
+
+	public function funcGeneralExpensePL($fd,$td)
+	{
+		Yii::app()->name = 'TLA';
+		$invProcessedCount = 0;
+		$processedCount = 0;
+
+		//revenue
+		$invoices = Invoice::model()->findAll('consol_id = 0 AND status NOT IN (1, 8, 10,99) AND total>0  AND date >= :d AND date <= :td',[':d' => $fd, ':td' => $td]);
+		foreach ( $invoices as $invoice )
+		{
+			$allocations = PayInv::model()->findAll("inv_id =:inv_id",[":inv_id"=>$invoice->id]);
+			$total = $invoice->total-$invoice->gst;
+			foreach ($allocations  as $key => $value) {
+				$total = $total - $value->amount;
+			}
+
+			if($total>0)
+			{
+				$d = [
+					'gl' => 99993,
+					'fid' => $invoice->id,
+					'model' => 'Invoice',
+					'dpt_id' => 0,
+					'lid' => 0,
+					'org_id' => $invoice->to_id,
+					'dpmt' => 0,
+					'grp1' => 0,
+					'grp2' => 0,
+					'grp3' => 'GeneralIncome',
+					'date' => $invoice->date,
+					'amt' => 0,
+					'actual_amt' => number_format($total,2,'.',''),
+					'gst' => 0,
+					'acc' => 1,
+					'weight' => 0
+				];
+				PlLedger::add($d, true, ['date','actual_amt','amt']);
+				$invProcessedCount+=1;
+			}
+		}
+
+		echo $invProcessedCount . ' Inv done'. PHP_EOL;
+
+		$sis = SiReconcile::model()->with('parent','lines')->findAll('t.status !=100 AND inv_date >= :d AND inv_date <= :td AND (fid = 100582 or fid = 100585 or fid = 0 AND t.type !=5) and item_code !="eparcel" ',[':d' => $fd, ':td' => $td]);
+		if(!empty($sis))
+		{
+			foreach($sis as $si)
+			{
+				foreach ($si->lines as $key => $sil)
+				{
+					$d =[
+							'gl' => 99996,
+							'fid' => $sil->id,
+							'model' => 'SiReconcileLine',
+							'dpt_id' => 0,
+							'lid' => 0,
+							'org_id' => 0,
+							'dpmt' => 0,
+							'grp1' => 0,
+							'grp2' => $si->org_id,
+							'grp3' => 'GeneralExpense',
+							'date' => $si->parent->inv_date,
+							'amt' => 0,
+							'actual_amt' => number_format($sil->value,2,'.',''),
+							'gst' => 0,
+							'acc' => 1,
+							'weight' => 0
+						];
+						PlLedger::add($d, true, ['date','actual_amt','amt']);
+						$processedCount+=1;
+				}
+			}
+		}
+
+
+		echo $processedCount . ' Si done'. PHP_EOL;
+	}
+
+
+	public function fixImcoConsolBookingFee(){
+		$fd = $this->prompt('From Date: ', date('Y-m-01'));
+		$td = $this->prompt('To Date: ', date('Y-m-d', strtotime(date('Y-m-01').' +1 month -1 day')));
+		$id = $this->prompt('Test Id: ');
+		Yii::app()->name = 'TLA';
+		$processedCount = 0;
+
+		if(!empty($id))
+		{
+			$rs = Consol::model()->findAll("id in ( ".$id.")");
+		}else
+		{
+			$rs = Consol::model()->findAll(['condition'=>'type IN (15,70,80) AND status < 100 AND eta >= :d AND eta <= :td', 'params'=>[':d' => $fd, ':td' => $td],'order'=>'eta ASC']);
+		}	
+		foreach($rs as $i => $r)
+		{
+
+			//revenue
+			$invoices = Invoice::model()->findAll('consol_id = :cid AND status NOT IN (1,10,99)', [':cid' => $r->id]);
+			$lines = array();
+			$trans = Yii::app()->db->beginTransaction();
+			try{
+				foreach ( $invoices as $k => $invoice ){
+					$amount =0;
+					foreach ( $invoice->lines as $line ) 
+					{
+							// get glid and dpmt for invoice
+							$dpmt = $invoice->dpmt;
+							$glId = 1;
+							if(!empty($line->ccode))
+							{
+								$myCode = ChargeItemType::model()->find("code = :code",[":code"=>$line->ccode]);
+								if(!empty($myCode))
+								{
+									if(!empty($myCode->charge_code))
+									{
+										$code = $myCode->charge_code;
+										$cog = Chargecode::model()->find('status = 1 AND code = :code',[':code' => $code]);
+										if ( empty($cog) ){
+											echo 'Error, charge code ', $cog->charge_code,' not found', PHP_EOL;
+										}else
+										{
+											$glId = $cog->id;
+										}
+									}
+									if(!empty($myCode->dpmt))
+									{
+										$dpmt = $myCode->dpmt;
+									}
+								}
+							}
+
+						if(in_array($invoice->type, [Invoice::INVOICE_TYPE_PICKUPBOOKING])){
+							foreach($line->mdata['items'] as $si => $sp) {
+								$allCount++;
+								$amt = isset($sp[5]) ? $sp[5] : 0;
+								$amt = round($amt * 100) / 100;
+								$pid = $invoice->pid;
+								$parcel = ImParcel::model()->findByPk($pid);
+								if(preg_match('/(.*)(\sBooking|Plain|Shrink)/i',$sp[1],$m))
+								{
+									// try to find ImParcel
+									$parcel = ImParcel::model()->find('(hbn = :ref OR ref = :ref OR cref = :ref) and consol_id=:consol_id',[':ref' => $m[1],":consol_id"=>$r->id]);
+									$pid = $parcel->id;
+								}
+								
+
+								$d = [
+									'gl' => $glId,
+									'model' => 'ImParcel',
+									'dpt_id' =>$r->dpt_id,
+									'lid' => $line->id,
+									'org_id' => $invoice->to_id,
+									'dpmt' => $dpmt,
+									'grp1' => $r->id,
+									'grp3' => $line->id."|".$si,
+									'date' => $r->eta,
+									'amt' => number_format($amt,2,'.',''),
+									'actual_amt' => number_format($amt,2,'.',''),
+									'gst' => 0,
+									'acc' => 1,
+									'fid' =>$pid
+								];
+									
+								$pl = PlLedger::add($d, true, ['org_id', 'date', 'grp1', 'grp2','weight','zone']);
+
+								$errors = $pl->getErrors();
+								if ( !empty($errors) ) {
+									echo 'ImParcel : ' . $parcel->id . ' failed : ' . implode(' ', $errors) . PHP_EOL;
+								}
+							}
+							continue;
+						}
+
+						
+					}
+					unset($invoices[$k]->lines);
+					unset($invoices[$k]);
+					//echo 'invoice ' . $invoice->no . ' processed' . PHP_EOL;
+				}
+				$trans->commit();
+			} catch (Exception $ex) {
+				$trans->rollback();
+				throw $ex;
+			}
+		}
+
+	}
+
+	public function funcImConsolAccrualPLForFinancial($fd,$td){
+		Yii::app()->name = 'TLA';
+		$id = 0;
+		$processedCount = 0;
+		$idStr = "";
+		$consolIdArr = [];
+		if(!empty($id))
+		{
+			$consolIdArr[] = $id;
+		}
+		$billingNos = [];
+		$dealBillings = [];
+		$billingObjs = Billing::model()->findAll('created >= :d and created <= :td and (json_value(meta,"$.savedToPlLedger") is null or json_value(meta,"$.savedToPlLedger")=0) and sync_xero = 1 and (json_value(meta,"$.plLock") is null or json_value(meta,"$.plLock")=0)', [':d' => $fd, ':td' => $td]);
+		foreach ($billingObjs as $key => $billingObj) {
+			//if($key>=2) continue;
+			$si = SiReconcile::model()->with('parent')->find('t.status !=100 and parent.inv_no = :invNo',[":invNo"=>$billingObj->billing_cref]);
+			if(!empty($si))
+			{
+				$billingObj->mdata['plLock'] = 1;
+				$billingObj->save();
+				$consolIds = $si->getSiReconcileConsolIds();
+				$consolIdArr = array_merge($consolIdArr,$consolIds);
+				$dealBillings[] = $billingObj;
+				break;
+			}
+		}
+		$consolIdArr = array_unique($consolIdArr);
+		if(!empty($consolIdArr))
+		{
+			$idStr = " AND id in (".join(',',$consolIdArr).") ";
+		}else
+		{
+			echo "empty consols";
+			return;
+		}
+		$rs = Consol::model()->findAll('status < 100 '.$idStr);
+		foreach($rs as $i => $r)
+		{
+
+			$sql = "DELETE from pl_ledger2 where model !='ImP_Manifest' and grp1 = '".$r->id."'";
+		    $this->db->createCommand($sql)->execute();
+
+			//cost
+			$importsTotalWeight = 0;
+			$tldTotalWeight =0;
+			$tplTotalWeight =0;
+			$importsTotalShipments = 0;
+			$tldTotalShipments =0;
+			$tplTotalShipments =0;
+			$importsShipment = [];
+			$tldShipment = [];
+			$tplShipment = [];
+			$agentIds = [];
+			foreach ($r->shipments as $key => $p)
+			{
+				if($p->isTopCourierServiceDelivery(true)||$p->checkIsCargoProcessWithRef())
+				{
+					$tldShipment[] = $p;
+					$tldTotalWeight += $p->weight;
+					$tldTotalShipments += 1;
+					continue;
+				}else if($p->is3PL())
+				{
+					$tplShipment[] = $p;
+					$tplTotalWeight += $p->weight;
+					$tplTotalShipments += 1;
+					continue;
+				}
+
+				$importsShipment[] = $p;
+				$importsTotalWeight += $p->weight;
+				$importsTotalShipments += 1;
+				$agentIds[$p->agent_id] = $p->agent_id;
+			}
+			$supplierId = [];
+
+
+			$tabBillings = $r->getTabBilling(true)['data'];
+			$trans = Yii::app()->db->beginTransaction();
+			try{
+				foreach ( $tabBillings as $billing ) {
+					if(empty($billing['inv_no'])) continue;
+					if(empty($billing['confirm_payable'])) continue;
+					// ignore delivery cost
+					// try to get gl index
+					$billingObj = Billing::model()->find("billing_cref = :invNo and status!=:status ",[":invNo"=>$billing['inv_no'],":status"=>Billing::BILLING_STATUS_CANCELLED]);
+					if(empty($billingObj)) continue;
+
+
+					$chargeCode = Chargecode::model()->find('status = 1 AND code = :code',[':code' => $billing['glcode']]);
+					if ( empty($chargeCode) ){
+						echo 'Error, charge code ', $billing['glcode'],' not found', PHP_EOL;
+						if(empty($billing['glcode']))
+						{
+							$billing['glcode'] = '91031';
+						}
+					}
+
+					$dpmt = $billing['dpmt'];
+					if(!empty($chargeCode->dpmt))
+					{
+						$dpmt = $chargeCode->dpmt;
+					}
+					if(empty($dpmt)) $dpmt = Invoice::DPMT_IMPORT;
+
+					$si = SiReconcile::model()->with('parent')->find('t.status !=100 and parent.inv_no = :invNo and t.type = :type',[":invNo"=>$billing['inv_no'],":type"=>SiReconcile::TYPE_COURIER]);
+					//Delivery Cost
+					if(!empty($si))
+					{
+						foreach ($si->lines as $key => $line)
+						{
+							if(!empty($line->imparcel)&&$line->imparcel->consol_id==$r->id)
+							{
+								$p = $line->imparcel;
+								$aamt = $line->value;
+								$d = [
+									'gl' => ($p->getDpmt()==Invoice::DPMT_IMPORT?29:($p->getDpmt()==Invoice::DPMT_3PL?385:388)),
+									'fid' => $p->id,
+									'model' => 'ImParcel',
+									'dpt_id' => $r->dpt_id,
+									'lid' => 0,
+									'org_id' => $p->agent_id,
+									'dpmt' => $p->getDpmt(),
+									'grp1' => $r->id,
+									'grp2' => $billing['supplier_id'],
+									'grp3' => 'DeliveryCost',
+									'date' => $r->eta,
+									'amt' => 0,
+									'actual_amt' => $aamt,
+									'gst' => 0,
+									'acc' => 1,
+									'weight' => $p->weight,
+									'inv_cdate' => $billingObj->created
+								];
+								PlLedger2::addWithSum($d, true, ['org_id', 'date','weight','inv_cdate']);
+							}
+						}
+						unset($si->lines);
+						unset($si);
+						continue;
+					}
+
+
+
+					if ( empty($r->shipments ) ) {
+						$d = [
+							'gl' => $chargeCode->id,
+							'fid' => $billing['billing_id'],
+							'model' => 'BillingLine',
+							'dpt_id' => $r->dpt_id,
+							'lid' => 0,
+							'org_id' => $r->owner_id,
+							'dpmt' => $dpmt,
+							'grp1' => $r->id,
+							'grp2' => $billing['supplier_id'],
+							'grp3' => $billing['id'],
+							'date' => $r->eta,
+							'amt' => $billing['accrual'],
+							'actual_amt' => $billing['confirm_payable'],
+							'gst' => 0,
+							'acc' => (empty($billing['confirm_payable']) || $billing['confirm_payable'] == 0)? 0 : 1,
+							'inv_cdate' => $billingObj->created
+						];
+							
+						PlLedger2::add($d, true, ['org_id', 'date', 'grp1', 'grp2','inv_cdate']);
+					}else{
+						$shipments = [];
+						$totalWeight = 0;
+						$totalShipments = 0;
+						if($dpmt==Invoice::DPMT_IMPORT)
+						{
+							$shipments = $importsShipment;
+							$totalWeight = $importsTotalWeight;
+							$totalShipments = $importsTotalShipments;
+							$find = false;
+						}elseif($dpmt==Invoice::DPMT_3PL)
+						{
+							$shipments = $tplShipment;
+							$totalWeight =  $tplTotalWeight;
+							$totalShipments = $tplTotalShipments;
+							$find = false;
+						}elseif($dpmt==Invoice::DPMT_COURIER_SERVICE)
+						{
+							$shipments = $tldShipment;
+							$totalWeight = $tldTotalWeight;
+							$totalShipments = $tldTotalShipments;
+							$find = false;
+						}
+
+						$desArr = explode('***', $billing['desc']);
+						foreach ($desArr as $key => $desc)
+						{
+							$desc = trim($desc);
+							if(!empty($desc))
+							{
+								$si = SiReconcile::model()->with('parent')->find('t.status !=100 and parent.inv_no = :invNo',[":invNo"=>$billing['inv_no']]);
+								if(!empty($si))
+								{
+									$sils = SiReconcileLine::model()->with('parent')->findAll('rec_id =:recId and det = :det',[":recId"=>$si->id,":det"=>$desc]);
+									foreach ($sils as $key => $sil)
+									{
+										if(preg_match('/Amazon (\d+)/', $desc,$m)||preg_match('/Amazon ISA(\d+)/', $desc,$m))
+										{
+											//this setting is for handling the manual cost for amazon
+											if($sil->ref!=$r->no) continue;
+											$thisRef = $m[1];
+											$amazonInfos = AmazonInfo::model()->findAll("(booking_ref = :ref1 or booking_ref = :ref2)",[":ref1"=>'ISA '.$thisRef,":ref2"=>$thisRef]);
+											$thisAmazonWeight = 0;
+											$amazonShipments = [];
+											foreach ($amazonInfos as $key => $amazonInfo)
+											{
+												if($amazonInfo->model=='ImParcel')
+												{
+													$thisP = $amazonInfo->shipment;
+													if($thisP->consol_id==$r->id)
+													{
+														$amazonShipments[$thisP->id] = $thisP;
+													}
+												}else
+												{
+													$ca = CargoProcess::model()->findByPk($amazonInfo->fid);
+													if($ca->shipment->consol_id==$r->id)
+													{
+														$amazonShipments[$ca->shipment_id] = $ca->shipment;
+													}
+												}
+											}
+
+											foreach ($amazonShipments as $key => $p) {
+												$thisAmazonWeight+=$p->weight;
+											}
+
+											foreach ($amazonShipments as $key => $p)
+											{
+												$aamt = $sil->value;
+												$d = [
+													'gl' => ($p->getDpmt()==Invoice::DPMT_IMPORT?29:($p->getDpmt()==Invoice::DPMT_3PL?385:388)),
+													'fid' => $p->id,
+													'model' => 'ImParcel',
+													'dpt_id' => $r->dpt_id,
+													'lid' => 0,
+													'org_id' => $p->agent_id,
+													'dpmt' => $dpmt,
+													'grp1' => $r->id,
+													'grp2' => $billing['supplier_id'],
+													'grp3' => 'DeliveryCost',
+													'date' => $r->eta,
+													'amt' => 0,
+													'actual_amt' => round($aamt*($p->weight/$thisAmazonWeight),2),
+													'gst' => 0,
+													'acc' => 1,
+													'weight' => $p->weight,
+													'inv_cdate' => $billingObj->created
+												];
+												PlLedger2::addWithSum($d, true, ['org_id', 'date','weight','inv_cdate']);
+												$pls = PlLedger2::model()->findAll('gl in (367,1,14,379,370,373) and model="ImParcel" and fid = :fid and zone is not null',[":fid"=>$p->id]);
+												foreach ($pls as $key => $pl) {
+													$pl->dpmt = $dpmt;
+													$pl->grp2 = $billing['supplier_id'];
+													$pl->save();
+												}
+												$find = true;
+											}
+											continue;
+										}
+
+
+										$thisRef = "";
+										if(preg_match('/T[a-zA-Z]N\d{10}/', $desc,$m))
+										{
+											$thisRef = $m[0];
+										}
+
+										if(preg_match('/PICKUP\d{7}/', $desc,$m))
+										{
+											$thisRef = $m[0];
+										}
+
+										if(empty($thisRef))
+										{
+											$thisRefs= preg_split('/-|\s|\//', $desc);
+											$thisRef = $thisRefs[0];
+										}
+										
+										
+
+										if(!empty($thisRef))
+										{
+											$p = ImParcel::model()->find('hbn = :ref OR ref = :ref OR cref = :ref',[':ref' => $thisRef]);
+											if(empty($p))
+											{
+												$thisRef = "";
+												for ($i=1; $i < sizeof($thisRefs); $i++)
+												{
+													$thisRef .= trim($thisRefs[$i]);
+												}
+												if(!empty($thisRef))
+												{
+													$p = ImParcel::model()->find('hbn = :ref OR ref = :ref OR cref = :ref',[':ref' => $thisRef]);
+												}
+											}
+											if(!empty($p))
+											{
+												$aamt = $sil->value;
+												$d = [
+													'gl' => ($p->getDpmt()==Invoice::DPMT_IMPORT?29:($p->getDpmt()==Invoice::DPMT_3PL?385:388)),
+													'fid' => $p->id,
+													'model' => 'ImParcel',
+													'dpt_id' => $r->dpt_id,
+													'lid' => 0,
+													'org_id' => $p->agent_id,
+													'dpmt' => $dpmt,
+													'grp1' => $r->id,
+													'grp2' => $billing['supplier_id'],
+													'grp3' => 'DeliveryCost',
+													'date' => $r->eta,
+													'amt' => 0,
+													'actual_amt' => $aamt,
+													'gst' => 0,
+													'acc' => 1,
+													'weight' => $p->weight,
+													'inv_cdate' => $billingObj->created
+												];
+												PlLedger2::addWithSum($d, true, ['org_id', 'date','weight','inv_cdate']);
+												$pls = PlLedger2::model()->findAll('gl in (367,1,14,379,370,373) and model="ImParcel" and fid = :fid and zone is not null',[":fid"=>$p->id]);
+												foreach ($pls as $key => $pl) {
+													$pl->dpmt = $dpmt;
+													$pl->grp2 = $billing['supplier_id'];
+													$pl->save();
+												}
+												$find = true;
+											}
+										}
+									}
+									unset($sils);
+								}
+							}
+						}
+
+						//for broker cost
+						if($find == false)
+						{
+							$si = SiReconcile::model()->with('parent')->find('t.status !=100 and parent.inv_no = :invNo and t.type = :type',[":invNo"=>$billing['inv_no'],":type"=>SiReconcile::TYPE_BROKER]);
+							if(!empty($si))
+							{ 	
+								$lines = SiReconcileLine::model()->findAll('rec_id = :recId',[":recId"=>$si->id]);
+								foreach ($lines as $key => $li) {
+									$p = ImParcel::model()->findByPk($li->fid);
+									$brokerInvoice = $this->findBrokerInvoice($p);
+									$d = [
+										'gl' => $chargeCode->id,
+										'fid' => $li->fid,
+										'model' => 'ImParcel',
+										'dpt_id' => $r->dpt_id,
+										'lid' => 0,
+										'org_id' => empty($brokerInvoice)?Org::ORGID_IMPORT_CASUAL_CUSTOMER:$brokerInvoice->to_id,
+										'dpmt' => $dpmt,
+										'grp1' => $r->id,
+										'grp2' => $billing['supplier_id'],
+										'grp3' => $billing['id'],
+										'date' => $r->eta,
+										'amt' => $billing['accrual'],
+										'actual_amt' =>$billing['confirm_payable'],
+										'gst' => 0,
+										'acc' => (empty($billing['confirm_payable']) || $billing['confirm_payable'] == 0)? 0 : 1,
+										'inv_cdate' => $billingObj->created
+									];
+										
+									PlLedger2::add($d, true, ['org_id', 'date', 'grp1','inv_cdate']);
+									break;
+								}
+								unset($lines);
+								continue;
+							}
+						}
+
+						if($find == false)
+						{
+							$si = SiReconcile::model()->with('parent')->find('t.status !=100 and parent.inv_no = :invNo and t.type = :type',[":invNo"=>$billing['inv_no'],":type"=>SiReconcile::TYPE_COURIER]);
+							if(!empty($si)) continue;//Delivery Cost
+
+							//海运费分配逻辑
+							if(count($agentIds)>1&&in_array(3103, $agentIds))
+							{
+								if($billing['supplier_id']==3103||$billing['supplier_id']==3946)
+								{
+									$newShhipments = [];
+									$newTotalWeight = 0;
+									$newTotalShipments = 0;
+									foreach ($shipments as $key => $thisS) {
+										if(!in_array($thisS->agent_id,[3103])&&$thisS->agent_id!=Org::ORGID_IMPORT_CASUAL_CUSTOMER)
+										{
+											$newShhipments[] = $thisS;
+											$newTotalWeight+= $thisS->weight;
+											$newTotalShipments++;
+										}
+									}
+									$shipments = $newShhipments;
+									$totalWeight = $newTotalWeight;
+									$totalShipments = $newTotalShipments;
+								}else
+								{
+									$newShhipments = [];
+									$newTotalWeight = 0;
+									$newTotalShipments = 0;
+									foreach ($shipments as $key => $thisS) {
+										if(in_array($thisS->agent_id,[3103]))
+										{
+											$newShhipments[] = $thisS;
+											$newTotalWeight+= $thisS->weight;
+											$newTotalShipments++;
+										}
+									}
+									$shipments = $newShhipments;
+									$totalWeight = $newTotalWeight;
+									$totalShipments = $newTotalShipments;
+								}
+							}
+
+							$agentIdArr = array_column($shipments,'agent_id');
+							$agentIdArr = array_unique($agentIdArr);
+							if(count($agentIdArr)>1)
+							{
+								foreach($shipments as $thisShipmentKey => $p)
+								{
+									if($p->agent_id==Org::ORGID_IMPORT_CASUAL_CUSTOMER)
+									{
+										unset($shipments[$thisShipmentKey]);
+										$totalShipments = $totalShipments-1;
+										$totalWeight=  $totalWeight- $p->weight;
+									}
+								}
+							}
+
+							//for general cost
+							foreach($shipments as $p) {
+								if($totalWeight==0)
+								{
+									$thisAmt = 	round($billing['accrual'] / $totalShipments,2);
+									$thisActualAmt = round($billing['confirm_payable'] / $totalShipments,2);
+								}else
+								{
+									$thisAmt = round($billing['accrual'] * $p->weight / $totalWeight,2);
+									$thisActualAmt = round($billing['confirm_payable'] * $p->weight / $totalWeight,2);
+								}
+
+								$d = [
+									'gl' => $chargeCode->id,
+									'fid' => $p->id,
+									'model' => 'ImParcel',
+									'dpt_id' => $r->dpt_id,
+									'lid' => 0,
+									'org_id' => $p->agent_id,
+									'dpmt' => $dpmt,
+									'grp1' => $r->id,
+									'grp2' => $billing['supplier_id'],
+									'grp3' => $billing['id'],
+									'date' => $r->eta,
+									'amt' => $thisAmt,
+									'actual_amt' =>$thisActualAmt,
+									'gst' => 0,
+									'acc' => (empty($billing['confirm_payable']) || $billing['confirm_payable'] == 0)? 0 : 1,
+									'inv_cdate' => $billingObj->created
+								];
+									
+								PlLedger2::add($d, true, ['org_id', 'date', 'grp1','inv_cdate']);
+
+								if($dpmt==Invoice::DPMT_COURIER_SERVICE&&$billing['glcode']==Consol::DELIVERY_COURIER_SERVCE_COST_GL_CODE)
+								{
+									$pls = PlLedger2::model()->findAll('gl in (367,1) and model="ImParcel" and fid = :fid and zone is not null',[":fid"=>$p->id]);
+									foreach ($pls as $key => $pl) {
+										$pl->dpmt = $dpmt;
+										$pl->grp2 = $billing['supplier_id'];
+										$pl->save();
+									}
+								}
+
+
+
+							}
+						}
+					}
+				}
+				$trans->commit();
+			} catch (Exception $ex) {
+				$trans->rollback();
+				throw $ex;
+			}
+
+			echo 'Consol ' . $r->no . ' Done'. PHP_EOL;
+			$processedCount++;
+			unset($r->shipments);
+			unset($rs[$i]);
+		}
+
+		foreach ($dealBillings as $key => $billingObj)
+		{
+			//update billing status
+			if(empty($billingObj->mdata['savedToPlLedger']))
+			{
+				$billingObj->mdata['savedToPlLedger'] = 1;
+				$billingObj->mdata['plLock'] = 0;
+				$billingObj->save();
+			}
+		}
+		echo count($dealBillings) . ' Billings done'. PHP_EOL;
+
+		echo $processedCount . ' Consols done'. PHP_EOL;
+	}
+
+
+	public function changePlImToTLD($cron=false){
+		Yii::app()->name = 'TLA';
+		$id = 0;
+		$processedCount = 0;
+		if($cron){
+			$fd = date('Y-m-01', strtotime('-1 month'));
+			$td = date('Y-m-d');
+		}else{
+			$fd = $this->prompt('From Date: ', date('Y-m-01'));
+			$td = $this->prompt('To Date: ', date('Y-m-d', strtotime(date('Y-m-01').' +1 month -1 day')));
+		}
+
+		$pls = PlLedger::model()->with(["consol"])->findAll("dpmt in (10,40) and model='ImParcel' and date>=:d and date<=:td and consol.no like 'WDT%'", [':d' => $fd, ':td' => $td]);
+		foreach($pls as $i => $pl)
+		{
+			$p = Shipment::model()->findByPk($pl->fid);
+			if(!empty($p)&&$p->checkIsCargoProcessWithRef())
+			{
+				$pl->dpmt = Invoice::DPMT_COURIER_SERVICE;
+				$pl->save();
+				echo "1";
+				$processedCount++;
+			}
+		}
+
+		echo $processedCount . 'shipments done'. PHP_EOL;
+	}
+
+	public function imConsolCreditNotePL($cron=false){
+		Yii::app()->name = 'TLA';
+		$id = 0;
+		if($cron){
+			$fd = date('Y-m-01', strtotime('-1 month'));
+			$td = date('Y-m-d');
+		}else{
+			$fd = $this->prompt('From Date: ', date('Y-m-01'));
+			$td = $this->prompt('To Date: ', date('Y-m-d', strtotime(date('Y-m-01').' +1 month -1 day')));
+			$id = $this->prompt('Test Id: ');
+		}
+
+		$processedCount = 0;
+		$idStr = "";
+		if(!empty($id))
+		{
+			$idStr = " AND id = ".$id;
+		}
+
+		$rs = Consol::model()->findAll('type IN (15,70,80) AND status < 100 AND eta >= :d AND eta <= :td'.$idStr, [':d' => $fd, ':td' => $td]);
+
+
+		foreach($rs as $i => $r)
+		{
+			$sql = "DELETE from pl_ledger where model ='Payment' and grp1 = '".$r->id."'";
+		    $this->db->createCommand($sql)->execute();
+			$trans = Yii::app()->db->beginTransaction();
+			try{
+
+				$creditnotes = Payment::model()->findAll('type = 5 AND (ref LIKE :ref or JSON_VALUE(meta, "$.consol") LIKE :ref) AND status != 9', [':ref' => '%' . $r->no . '%']);
+				foreach ($creditnotes as $key => $creditnote) 
+				{
+						$allocations = PayInv::model()->findAll("pay_id =:payId",[":payId"=>$creditnote->id]);
+						$gst = $creditnote->getGst();
+						foreach ($allocations as $key => $allocation)
+						{
+							$invoice = Invoice::model()->find(' id = :id and status != 8',[":id"=>$allocation->inv_id]);
+							if(!empty($invoice))
+							{
+								$d = [
+									'gl' => 99999,
+									'fid' => $creditnote->id,
+									'model' => 'Payment',
+									'dpt_id' =>$r->dpt_id,
+									'lid' => 0,
+									'org_id' => $creditnote->org_id,
+									'dpmt' => $creditnote->dpmt,
+									'grp1' => $r->id,
+									'grp2' => 0,
+									'grp3'=>$payinv->id,
+									'date' => $r->eta,
+									'amt' => number_format($creditnote->amount-$gst,'2','.',''),
+									'actual_amt' => number_format($creditnote->amount-$gst,'2','.',''),
+									'gst' => 0,
+									'acc' => empty($creditnote->amount-$gst)? 0 : 1
+								];
+							
+								PlLedger::add($d, true, ['org_id', 'date', 'grp1']);
+							}
+						}
+				}
+
+
+
+				$trans->commit();
+			} catch (Exception $ex) {
+				$trans->rollback();
+				throw $ex;
+			}
+
+			$processedCount++;
+		}
+
+		
+		echo $processedCount . ' Consols done'. PHP_EOL;
+	}
+
+	public function findBrokerInvoice($imparcel)
+	{
+		$bResult = [];
+		$shipment = Shipment::model()->findByPk($imparcel->id);
+		$consol = Consol::model()->findByPk($imparcel->consol_id);
+		$returnInvoice = null;
+		if(!empty($consol))
+		{
+			if($consol->isTLA())
+			{
+				Yii::app()->name = 'TLA';
+			}else
+			{
+				Yii::app()->name = 'PCAE';
+			}
+		}
+		// first check CA
+		if (!empty($shipment) && !empty($consol)) {
+			$invoice = Invoice::model()->find(['condition' => 'pid = :pid AND consol_id = :consol_id AND type = :type AND status NOT IN (8, 10)', 'params' => [':pid' => $shipment->id, ':consol_id' => $consol->id, ':type' => Invoice::INVOICE_TYPE_CASUAL], 'order' => 'id DESC']);
+			if (!empty($invoice)) {
+				$bResult = $invoice->getCustomBrokerAmount();
+				$returnInvoice = $invoice;
+			}
+		}
+		// then check CA fully credit
+		if (empty($invoice) && !empty($shipment) && !empty($consol)) {
+			$invoice = Invoice::model()->find(['condition' => 'pid = :pid AND consol_id = :consol_id AND type = :type AND status = 8', 'params' => [':pid' => $shipment->id, ':consol_id' => $consol->id, ':type' => Invoice::INVOICE_TYPE_CASUAL], 'order' => 'id DESC']);
+			if (!empty($invoice)) {
+				$bResult= $invoice->getCustomBrokerAmount();
+				$returnInvoice = $invoice;
+			}
+		}
+
+		// then check CA for dmawbconsol shipment
+		if (empty($invoice) && !empty($consol) && get_class($consol) == 'DmawbConsol' && count($consol->shipments) == 1) {
+			$invoice = Invoice::model()->find(['condition' => 'pid = :pid AND consol_id = :consol_id AND type = :type AND status NOT IN (8, 10)', 'params' => [':pid' => $consol->shipments[0]->id, ':consol_id' => $consol->id, ':type' => Invoice::INVOICE_TYPE_CASUAL], 'order' => 'id DESC']);
+			if (!empty($invoice)) {
+				$bResult = $invoice->getCustomBrokerAmount();
+				$returnInvoice = $invoice;
+			}
+		}
+
+		// then check DI
+		if (empty($invoice) && !empty($shipment) && !empty($consol)) {
+			$invoices = Invoice::model()->findAll('consol_id = :consol_id AND type = :type AND status NOT IN (8, 10)', [':consol_id' => $consol->id, ':type' => Invoice::INVOICE_TYPE_DIRECT_MAWB]);
+			foreach ($invoices as $invoice) {
+				$bResult = $invoice->getCustomBrokerAmount();
+				if (!empty($bResult[1])) {
+					$returnInvoice = $invoice;
+					break;
+				}
+			}
+		}
+
+		// then check OT
+		if (empty($invoice) && !empty($shipment) && !empty($consol)) {
+			$invoices = Invoice::model()->findAll('consol_id = :consol_id AND type = :type AND status NOT IN (8, 10)', [':consol_id' => $consol->id, ':type' => Invoice::INVOICE_TYPE_OTHERS]);
+			foreach ($invoices as $invoice) {
+				$bResult = $invoice->getCustomBrokerAmount();
+				if (!empty($bResult[1])) {
+					$returnInvoice = $invoice;
+					break;
+				}
+			}
+		}
+
+		return $returnInvoice;
+	}
+
+
+	public function imConsolAccrualPLCogsLine($cron=false){
+		$id = 0;
+		if($cron){
+			$fd = date('Y-m-01', strtotime('-1 month'));
+			$td = date('Y-m-d');
+		}else{
+			$fd = $this->prompt('From Date: ', date('Y-m-01'));
+			$td = $this->prompt('To Date: ', date('Y-m-d', strtotime(date('Y-m-01').' +1 month -1 day')));
+			$id = $this->prompt('Test Id: ');
+		}
+
+		$processedCount = 0;
+		$idStr = "";
+		if(!empty($id))
+		{
+			$idStr = " AND id = ".$id;
+		}
+
+		$rs = Consol::model()->findAll('type IN (15,70,80) AND status < 100 AND eta >= :d AND eta <= :td'.$idStr, [':d' => $fd, ':td' => $td]);
+		foreach($rs as $i => $r)
+		{
+				// push for delivery cost
+			$trans = Yii::app()->db->beginTransaction();
+			try{
+				foreach($r->shipments as $p){
+					if ( empty($p) ) continue;
+					$ts = @end($p->trans);
+					if ( empty($ts) ) continue;
+					$cogs = CogsLine::model()->findAll('model = "ImParcel" and fid = :fid and item_code in ("item","fuel")',[":fid"=>$p->id]);
+					$aamt = 0;
+					if(!empty($cogs))
+					{
+						$aamt=CogsLine::getTotal($cogs, 'actual_amount');
+					}
+					$d = [
+						'gl' => 29,
+						'fid' => $p->id,
+						'model' => 'ImParcel',
+						'dpt_id' => Org::PCAE_DEPARTMENT_SYDNEY,
+						'lid' => 0,
+						'org_id' => $p->agent_id,
+						'dpmt' => Invoice::DPMT_IMPORT,
+						'grp1' => $r->id,
+						'grp2' => $ts->org_id,
+						'date' => $r->eta,
+						'amt' => $ts->cost,
+						'actual_amt' => $aamt,
+						'gst' => 0,
+						'acc' => empty($aamt)? 0 : 1
+					];
+					
+					PlLedger::add($d, true, ['org_id', 'date', 'grp1']);
+				}
+				$trans->commit();
+			} catch (Exception $ex) {
+				$trans->rollback();
+				throw $ex;
+			}
+
+		$cogs = CogsLine::model()->findAll('model in ("ImcoConsol","DmawbConsol) and fid = :fid',[':fid' => $r->id]);
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			foreach ( $cogs as $cog ) {
+				// ignore delivery cost
+				if ( $cog->charge_code == '91031' && $r->type != 80) continue;
+
+				// try to get gl index
+				$chargeCode = Chargecode::model()->find('status = 1 AND code = :code',[':code' => $cog->charge_code]);
+				if ( empty($chargeCode) ){
+					echo 'Error, charge code ', $cog->charge_code,' not found', PHP_EOL;
+					continue;
+				}
+
+				if ( empty($r->shipments ) ) {
+					$d = [
+						'gl' => $chargeCode->id,
+						'fid' => $cog->id,
+						'model' => 'CogsLine',
+						'dpt_id' => $cog->dpt_id,
+						'lid' => 0,
+						'org_id' => $r->owner_id,
+						'dpmt' => $cog->dpmt,
+						'grp1' => $r->id,
+						'grp2' => $cog->org_id,
+						'date' => $r->eta,
+						'amt' => $cog->accrual_amount,
+						'actual_amt' => $cog->actual_amount,
+						'gst' => 0,
+						'acc' => (empty($cog->actual_amount) || $cog->actual_amount == 0)? 0 : 1,
+					];
+						
+					PlLedger::add($d, true, ['org_id', 'date', 'grp1', 'grp2']);
+				}else{
+					foreach($r->shipments as $p) {
+						$d = [
+							'gl' => $chargeCode->id,
+							'fid' => $p->id,
+							'model' => 'ImParcel',
+							'dpt_id' => Org::PCAE_DEPARTMENT_SYDNEY,
+							'lid' => 0,
+							'org_id' => $p->agent_id,
+							'dpmt' => Invoice::DPMT_IMPORT,
+							'grp1' => $r->id,
+							'grp2' => $cog->org_id,
+							'date' => $r->eta,
+							'amt' => round($cog->accrual_amount * $p->weight / $totalWeight,2),
+							'actual_amt' => round($cog->actual_amount * $p->weight / $totalWeight,2),
+							'gst' => 0,
+							'acc' => (empty($cog->actual_amount) || $cog->actual_amount == 0)? 0 : 1,
+						];
+							
+						PlLedger::add($d, true, ['org_id', 'date', 'grp1']);
+					}
+				}
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+
+			echo 'Consol ' . $r->no . ' Done'. PHP_EOL;
+			$processedCount++;
+			unset($r->shipments);
+			unset($rs[$i]);
+		}
+
+		echo $processedCount . ' Consols done'. PHP_EOL;
+	}
+
+
+
+
+	public function imParcelManifestPL($cron=false){
+		$id = 0;
+		if($cron){
+			$fd = date('Y-m-01', strtotime('-1 month'));
+			$td = date('Y-m-d');
+		}else{
+			$fd = $this->prompt('From Date: ', date('Y-m-01'));
+			$td = $this->prompt('To Date: ', date('Y-m-d', strtotime(date('Y-m-01').' +1 month -1 day')));
+			$id = $this->prompt('Manifest Id');
+		}
+
+		$processedCount = 0;
+		$idStr = "";
+		if(!empty($id))
+		{
+			$idStr = " AND id = ".$id;
+		}
+
+		$rs =  Manifest::model()->findAll('type = 90 and created>=:d and created<= :td'.$idStr, [':d' => $fd, ':td' => $td]);
+		foreach($rs as $i => $r)
+		{
+			echo $processedCount;
+			$processedCount++;
+			$trans = Yii::app()->db->beginTransaction();
+			try
+			{
+				$maniMaps = ManiMap::model()->findAll("mani_id = :id and model = 'ImParcel'",[":id"=>$r->id]);
+				foreach ( $maniMaps as $maniMap )
+				{
+					// try to find ImParcel
+					$parcel = ImParcel::model()->findByPk($maniMap->fid);//
+					if(empty($parcel)){
+						continue;
+					}
+					$d = [
+						'gl' => 101,
+						'fid' => $parcel->id,
+						'model' => 'ImP_Manifest',
+						'dpt_id' =>$parcel->ddpt_id,
+						'lid' => $maniMap->id,
+						'org_id' => $parcel->agent_id,
+						'dpmt' => 10,
+						'grp1' => $parcel->consol_id,
+						'date' => $r->created,
+						'amt' => $parcel->trans[0]->cost,
+						'actual_amt' => 0,
+						'gst' => 0,
+						'acc' => 1,
+					];
+					$zone = ZoneMap::getAusZone($parcel->cnee->postcode);
+					$d['zone'] = empty($zone)?"none":$zone;
+					$d['grp2'] = @end($parcel->trans)->org_id;
+					$d['weight'] = $parcel->weight;
+					$pl = PlLedger::add($d, true, ['dpmt', 'lid', 'date','grp1','weight', 'zone']);
+
+					$errors = $pl->getErrors();
+					if ( !empty($errors) ) {
+						print_r($errors);
+						echo 'ImParcel : ' . $parcel->id . ' failed : ' . implode(' ', $errors) . PHP_EOL;
+					}
+				}
+				$trans->commit();
+			} catch (Exception $ex) {
+				$trans->rollback();
+				throw $ex;
+			}
+		}
+
+		echo $processedCount . ' Manifest done'. PHP_EOL;
+	}
+
+	public function exParcelRev2Pl($p){
+		$il = InvLine::model()->with('invoice')->find("invoice.status NOT IN (1,10) AND t.model = 'Manifest' AND t.fid IN (SELECT m.id from manifest m INNER JOIN mani_map p ON m.id = p.mani_id WHERE m.type = 40 AND p.fid = ".$p->id.")");
+		$d = [
+				'fid' => $p->id,
+				'model' => 'ExParcel',
+				'org_id' => $p->agent_id,
+				'dpt_id' => $p->odpt_id,
+				'dpmt' => Invoice::DPMT_EXPORT,
+				'lid' => 0,
+				'grp1' => $p->consol_id,
+				'gl' => 18,
+				'date' => $p->consol->etd,
+				'amt' => 0,
+				'actual_amt' => 0,
+				'gst' => 0,
+				'acc' => 1,
+			];
+		if(empty($il)){
+			$rate = $p->getAgentRate();
+			$d['amt'] = $rate[2];
+			$d['acc'] = 0;
+			if($rate[2] < 0) die($p->agent_id.' has no rate!');
+		}else{
+			foreach($il->mdata['items'] as $i=>$v){
+				if($v[0] == $p->hbn){
+					$dp['lid'] = $il->id;
+					$d['amt'] = $v[7]+(empty($v[8])? 0 : $v[8]);
+					$d['actual_amt'] = $v[7]+(empty($v[8])? 0 : $v[8]);
+					break;
+				}
+			}
+		}
+		PlLedger::add($d, true);
+	}
+
+	public function exConsolAccrualPL(){
+		$rs = ExcoConsol::model()->findAll('status = 80 AND etd >= :d AND etd <= :td AND pol = :syd', [':d' => $this->prompt('From Date: ', date('Y-m-01')), ':td' => $this->prompt('To Date: ', date('Y-m-d', strtotime(date('Y-m-01').' +1 month -1 day'))),':syd' => 'AUSYD']);
+		
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			foreach($rs as $i => $r){
+				foreach($r->shipments as $p){
+					//revenue
+					$this->exParcelRev2Pl($p);
+
+					//cost
+					foreach(['af' => [22, $p->cost_af($r->pol, $r->pod, $r->exrate)], 'dc' => [3, $p->cost_dc($r->poc, $r->exrate)], 'cr' => [3, $p->cost_courier($r->poc, $r->exrate)]] as $k => $v){
+						if($v[1] == 0) continue;
+						PlLedger::add([
+							'fid' => $p->id,
+							'model' => 'ExParcel',
+							'org_id' => $p->agent_id,
+							'dpt_id' => 106,
+							'dpmt' => Invoice::DPMT_EXPORT,
+							'lid' => 0,
+							'grp1' => $p->consol_id,
+							'grp2' => $k == 'af'? '' : $k,
+							'gl' => $v[0],
+							'date' => $r->etd,
+							'amt' => round($v[1] / $r->exrate * 1000) / 1000,
+							'gst' => 0,
+							'acc' => 0,
+						], true);
+						//${'tc_'.$k} += $v[1];
+					}
+				}
+				unset($r->shipments);
+				unset($rs[$i]);
+				echo $r->no."\n";
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+		
+		echo "Done\n";
+	}
+
+	public function exConsolActualPL(){
+		if(empty($this->args[1])){
+			$rs = ExcoConsol::model()->findAll('status = 80 AND etd >= :d AND etd <= :td AND pol = :syd', [':d' => $this->prompt('From Date: ', date('Y-m-01')), ':td' => $this->prompt('To Date: ', date('Y-m-d', strtotime(date('Y-m-01').' +1 month -1 day'))),':syd' => 'AUSYD']);
+		}else{
+			$rs = ExcoConsol::model()->findAll('no = :n', [':n' => $this->args[1]]);
+		}
+
+		foreach($rs as $i => $r){
+			$acrs = $this->db->createCommand("SELECT grp2, SUM(amt) AS amt FROM `pl_ledger` WHERE dpmt = ".Invoice::DPMT_EXPORT." AND grp1 = '".$r->id."' AND grp2 IN ('af', 'dc', 'cr') GROUP BY grp2")->queryAll();
+
+			$atrs = $this->db->createCommand("SELECT item_code, SUM(actual_amount) AS amt, org_id FROM `billing_line` WHERE type = 2 AND link_id = '".$r->id."' GROUP BY item_code")->queryAll();
+
+			//$cwc = ConsolWeightCheck::model()->with('lines')->find('lines.consol_id = :n', [':n' => $r->no]);
+
+			$ats = ['af' => 0, 'dc' => 0, 'cr' => 0, 'dt' => 0];
+			foreach($atrs as $tr){
+				$k = 'af';
+				switch($tr['item_code']){
+					case 'channel_clear_cost':
+						$k = 'dc';
+					break;
+					case 'channel_delivery_cost':
+						$k = 'cr';
+					break;
+					case 'channel_duty_cost':
+					case 'channel_others_cost':
+					case '':
+						$k = 'dt';
+					break;
+				}
+				$ats[$k] += $tr['amt'];
+			}
+			$ats['af'] = 0;
+
+			if($this->debug) print_r($acrs);
+			if($this->debug) print_r($ats);
+
+			$ratio = [];
+			foreach($acrs as $cr){
+				$ratio[$cr['grp2']] = empty($cr['amt'])? -1 : $ats[$cr['grp2']] / $cr['amt'];
+			}
+			foreach($ats as $k => $v){
+				if(empty($v) || $k == 'dt') continue;
+				if(!isset($ratio[$k])) $ratio[$k] = -1;
+			}
+			$twt = $r->totWeight();
+
+			if(empty($ratio['dc']) && empty($ratio['cr'])){
+				unset($ratio['dc']);
+				unset($ratio['cr']);
+			}
+
+			if($this->debug) print_r($ratio);
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			foreach($r->shipments as $p){
+				foreach($ratio as $k=>$ro){
+					if($ro == -1){ //no accrual
+						$amt = round($ats[$k] * $p->weight / $twt * 1000) / 1000;
+						PlLedger::add([
+							'fid' => $p->id,
+							'model' => 'ExParcel',
+							'org_id' => $p->agent_id,
+							'dpt_id' => 106,
+							'dpmt' => Invoice::DPMT_EXPORT,
+							'lid' => 0,
+							'grp1' => $p->consol_id,
+							'grp2' => $k,
+							'gl' => 3,
+							'date' => $r->etd,
+							'amt' => $amt,
+							'actual_amt' => $amt,
+							'gst' => 0,
+							'acc' => 1,
+						], true);
+					}else{ //add actual
+						$d = [
+							'fid' => $p->id,
+							'model' => 'ExParcel',
+							'org_id' => $p->agent_id,
+							'dpt_id' => 106,
+							'dpmt' => Invoice::DPMT_EXPORT,
+							'lid' => 0,
+							'grp1' => $p->consol_id,
+							'grp2' => $k,
+						];
+						$pl = PlLedger::model()->findByAttributes($d);
+						if(empty($pl)){
+							PlLedger::add(array_merge($d, [
+								'actual_amt' => round($pl->amt * $ro * 1000) / 1000,
+								'acc' => 1,
+							]), true);
+							echo $p->consol_id.':'.$k." added\n";
+						}else{
+							$pl->actual_amt = round($pl->amt * $ro * 1000) / 1000;
+							$pl->acc = (empty($ro) && $k == 'af')? 0 : 1;
+							$pl->save();
+						}
+					}
+				}
+			}
+
+			if(!empty($ats['dt'])){ //duty to consol
+				$dt = $ats['dt'];
+				PlLedger::add([
+					'fid' => $r->id,
+					'model' => 'ExConsol',
+					'org_id' => 0,
+					'dpt_id' => 106,
+					'dpmt' => Invoice::DPMT_EXPORT,
+					'lid' => 0,
+					'grp1' => $p->consol_id,
+					'grp2' => 'dt',
+					'gl' => 3,
+					'date' => $r->etd,
+					'amt' => $dt,
+					'actual_amt' => $dt,
+					'gst' => 0,
+					'acc' => 1,
+				], true);
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+
+			unset($r->shipments);
+			unset($rs[$i]);
+			echo $r->no."\n";
+		}
+		
+		echo "Done\n";
+	}
+
+	public function accrualAirSea($cron=false){
+		$processedCount = 0;
+		if($cron){
+			$fd = date('Y-m-01', strtotime('-6 month'));
+			$td = date('Y-m-d');
+		}else{
+			$fd = $this->prompt('From Date: ', date('Y-m-01'));
+			$td = $this->prompt('To Date: ', date('Y-m-d', strtotime(date('Y-m-01').' +1 month -1 day')));
+		}
+		$rs = EdiJob::model()->findAll('status < 40 AND created >= :d AND created <= :td', [':d' => $fd, ':td' => $td]);
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+		foreach ($rs as $i => $job){
+			if(!$job->hasInvoice() || $job->dpmt != 30){
+				$dc = PlLedger::model()->deleteAll('grp1 = :id AND model IN ("JobLine", "BillingLine") AND dpmt = 30', [':id' => $job->id]);
+				if($dc > 0) echo $job->id,' exlcuded from air/sea', PHP_EOL;
+				continue;
+			}
+			$exrate = $job->currency == 1? 1 : Currency::getExrate($job->created, $job->currency)[0];
+			//revenue
+			foreach ( $job->lines as $line ){
+				$processedCount++;
+				if ( empty($line) ) continue;
+
+				$chargeItem = ChargeItemType::model()->find('code = :code',[':code' => $line->ccode]);
+				$chargeCodeIndex = 0;
+				if ( !empty($chargeItem) ) {
+					$chargecode = Chargecode::model()->find('status = 1 AND code = :code',[':code' => $chargeItem->charge_code]);
+					if ( !empty($chargecode) ) {
+						$chargeCodeIndex = $chargecode->id;
+					}
+				}
+
+				if ( $chargeCodeIndex == 0 ) {
+					echo 'charge code not found : ' . $line->ccode . PHP_EOL;
+					continue;
+				}
+
+				$amt = round($line->qty * $line->rate / $exrate * 1000) / 1000;
+
+				// PlLedger::remove(['fid' => $line->id, 'model' => 'JobLine', 'grp1' => $job->id, 'org_id' => '!'.$job->owner_id]);
+				$addResult = PlLedger::add([
+					'fid' => $line->id,
+					'model' => 'JobLine',
+					'org_id' => $job->owner_id,
+					'dpt_id' => $job->dpt_id,
+					'dpmt' => Invoice::DPMT_AIRSEA,
+					'lid' => 0,
+					'grp1' => $job->id,
+					'gl' => $chargeCodeIndex,
+					'date' => $job->created,
+					'amt' => $amt,
+					'actual_amt' => $amt,
+					'gst' => 0,
+					'acc' => 1,
+				], true, ['org_id']);
+
+				if ( empty($addResult->id) ) echo 'Failed for jobline ' . $job->no . PHP_EOL;
+			}
+
+		//cost
+		$atrs = $this->db->createCommand("SELECT bl.id, cc.id AS ccode, actual_amount, accrual_amount, org_id, dpt_id, bl.dpmt,currency FROM `billing_line` bl INNER JOIN `chargecode` cc ON cc.code = bl.charge_code WHERE bl.type = 3 AND bl.status != 11 AND bl.billing_ref = '".$job->no."'")->queryAll();
+			foreach($atrs as $tr){
+				// if($tr['accrual_amount'] == 0 && $tr['actual_amount'] == 0) continue;
+				if(empty($tr['currency'])) $tr['currency'] = 1;
+				$exrate = $tr['currency'] == 1? 1 : Currency::getExrate($job->created, $tr['currency'])[0];
+				if(empty($exrate)){
+					echo $job->no.' cost has no exrate', PHP_EOL;
+					continue;
+				}
+
+				// PlLedger::remove(['fid' => $tr['id'], 'model' => 'BillingLine', 'grp1' => $job->id, 'org_id' => '!'.$job->owner_id]);
+				$addResult = PlLedger::add([
+					'fid' => $tr['id'],
+					'model' => 'BillingLine',
+					'org_id' => $job->owner_id,
+					'dpt_id' => $tr['dpt_id'],
+					'dpmt' => Invoice::DPMT_AIRSEA, //$tr['dpmt'],
+					'lid' => 0,
+					'grp1' => $job->id,
+					'gl' => $tr['ccode'],
+					'date' => $job->created,
+					'amt' => round($tr['accrual_amount'] / $exrate * 1000) / 1000,
+					'actual_amt' => round($tr['actual_amount'] / $exrate * 1000) / 1000,
+					'gst' => 0,
+					'acc' => $tr['actual_amount'] == 0? 0 : 1,
+				], true, ['org_id']);
+				if ( empty($addResult->id) ) echo 'Failed for billingLine ' . $job->no . PHP_EOL;
+			}
+			//echo 'Job ' . $job->no . ' Done'. PHP_EOL;
+			unset($job->lines);
+			unset($rs[$i]);
+		}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+
+		//wms service+storage
+		$rs = Invoice::model()->findAll('dpmt = 30 AND date >= :d AND date <= :td AND type IN (60,70)', [':d' => $fd, ':td' => $td]);
+
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			foreach ( $rs as $inv ){
+				if ( empty($inv->total) ) continue;
+
+				if(in_array($inv->status, [1,8,10])){
+					PlLedger::model()->deleteAll('fid = :fid AND model = "Invoice"', [':fid' => $inv->id]);
+					continue;
+				}
+
+				$amt = $inv->total - $inv->gst;
+
+				$addResult = PlLedger::add([
+					'fid' => $inv->id,
+					'model' => 'Invoice',
+					'org_id' => $inv->to_id,
+					'dpt_id' => $inv->dpt_id,
+					'dpmt' => $inv->dpmt,
+					'lid' => 0,
+					'gl' => $inv->type == 60? 2 : 14,
+					'date' => $inv->date,
+					'amt' => $amt,
+					'actual_amt' => $amt,
+					'gst' => 0,
+					'acc' => 1,
+				], true);
+
+				if ( empty($addResult->id) ) echo 'Failed for invoice ' . $inv->no . PHP_EOL;		
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+
+		echo 'all ' . $processedCount . ' Jobs done'. PHP_EOL;
+	}
+
+	public function accrual3PL($cron=false){
+		Yii::app()->name = "TLA";
+		$processedCount = 0;
+		if($cron){
+			$fd = date('Y-m-01', strtotime('-6 month'));
+			$td = date('Y-m-d');
+		}else{
+			$fd = $this->prompt('From Date: ', date('Y-m-01'));
+			$td = $this->prompt('To Date: ', date('Y-m-d', strtotime(date('Y-m-01').' +1 month -1 day')));
+		}
+		$rs = Invoice::model()->findAll('dpmt = 40 AND date >= :d AND date <= :td', [':d' => $fd, ':td' => $td]);
+
+		$trans = Yii::app()->db->beginTransaction();
+		try{
+			foreach ( $rs as $inv ){
+				if ( empty($inv->total) ) continue;
+
+				if(in_array($inv->status, [1,8,10])){
+					PlLedger::model()->deleteAll('fid = :fid AND model = "Invoice"', [':fid' => $inv->id]);
+					continue;
+				}
+
+				$amt = $inv->total - $inv->gst;
+
+				$addResult = PlLedger::add([
+					'fid' => $inv->id,
+					'model' => 'Invoice',
+					'org_id' => $inv->to_id,
+					'dpt_id' => $inv->dpt_id,
+					'dpmt' => $inv->dpmt,
+					'lid' => 0,
+					'gl' => $inv->type == 60? 2 : 14,
+					'date' => $inv->date,
+					'amt' => $amt,
+					'actual_amt' => $amt,
+					'gst' => 0,
+					'acc' => 1,
+				], true);
+
+				$costAll = 0;
+				foreach ($inv->lines as $key => $li)
+				{
+					if($li->det=='Delivery')
+					{
+						$cref = $li->mdata['items'][0][0];
+						$p = Shipment::model()->find(['condition'=>'cref =:cref and status !=100','params'=>[":cref"=>$cref],'order'=>'id desc']);
+						if(!empty($p))
+						{
+							$siReoncileLines = SiReconcileLine::model()->with('parent')->findAll('parent.status!=100 and fid = :fid and item_code in ("item","fuel")',[':fid'=>$p->id]);
+							foreach ($siReoncileLines as $key => $siReoncileLine)
+							{
+								$costAll +=$siReoncileLine->value;
+							}
+						}
+					}
+				}
+
+				if($costAll>0)
+				{
+					$addResult = PlLedger::add([
+						'fid' => $inv->id,
+						'model' => 'Invoice',
+						'org_id' => $inv->to_id,
+						'dpt_id' => $inv->dpt_id,
+						'dpmt' => $inv->dpmt,
+						'lid' => 0,
+						'gl' => 385,
+						'date' => $inv->date,
+						'amt' => $costAll,
+						'actual_amt' => $costAll,
+						'gst' => 0,
+						'acc' => 1,
+					], true);
+				}
+
+				if ( empty($addResult->id) ) echo 'Failed for invoice ' . $inv->no . PHP_EOL;
+
+				//add cost if there's linked job
+				if($inv->type == 50){
+					$job = EdiJob::model()->findByPk($inv->job_id);
+					//cost
+					$atrs = $this->db->createCommand("SELECT bl.id, cc.id AS ccode, actual_amount, accrual_amount, org_id, dpt_id, bl.dpmt FROM `billing_line` bl INNER JOIN `chargecode` cc ON cc.code = bl.charge_code WHERE bl.type = 3 AND bl.status != 11 AND bl.billing_ref = '".$job->no."'")->queryAll();
+					foreach($atrs as $tr){
+						if($tr['accrual_amount'] == 0 && $tr['actual_amount'] == 0) continue;
+						$addResult = PlLedger::add([
+							'fid' => $tr['id'],
+							'model' => 'BillingLine',
+							'org_id' => $job->owner_id,
+							'dpt_id' => $tr['dpt_id'],
+							'dpmt' => $inv->dpmt,
+							'lid' => 0,
+							'grp1' => $job->id,
+							'gl' => $tr['ccode'],
+							'date' => $job->created,
+							'amt' => round($tr['accrual_amount'] * 1000) / 1000,
+							'actual_amt' => round($tr['actual_amount'] * 1000) / 1000,
+							'gst' => 0,
+							'acc' => $tr['actual_amount'] == 0? 0 : 1,
+						], true);
+						if ( empty($addResult->id) ) echo 'Failed for billingLine ' . $job->no . PHP_EOL;
+					}
+				}			
+			}
+
+			//add cost from task billing for 3pl
+			$bls = BillingLine::model()->findAll('charge_code IN (91009,91014,91022,91023) AND billing_ref LIKE "T%" AND date >= :d AND date <= :td', [':d' => $fd, ':td' => $td]);
+			$gl_cc_map = ['91009' => 289, '91014' => 6,'91022' => 90, '91023' => 93];
+			foreach($bls as $bl){
+				$tsk = WmsTask::model()->findByPk(preg_replace('/^T0*/', '', $bl->billing_ref));
+				if(in_array($bl->status, [1,11]) || empty($tsk)){
+					PlLedger::model()->deleteAll('fid = :fid AND model = "BillingLine"', [':fid' => $bl->id]);
+					continue;
+				}
+				$addResult = PlLedger::add([
+					'fid' => $bl->id,
+					'model' => 'BillingLine',
+					'org_id' => $tsk->job->org_id,
+					'dpt_id' => $bl->dpt_id,
+					'dpmt' => $bl->dpmt,
+					'lid' => 0,
+					'grp1' => $tsk->id,
+					'gl' => $gl_cc_map[$bl->charge_code],
+					'date' => $bl->date,
+					'amt' => round($bl->accrual_amount * 1000) / 1000,
+					'actual_amt' => round($bl->actual_amount * 1000) / 1000,
+					'gst' => $bl->gst_amount,
+					'acc' => $bl->actual_amount == 0? 0 : 1,
+				], true);
+				if ( empty($addResult->id) ) echo 'Failed for billingLine ' . $tsk->no . PHP_EOL;
+			}
+
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+
+		echo 'all invoices done'. PHP_EOL;
+	}
+
+	/**
+	 * fix old Export console accrual cost
+	 */
+	public function fixExcoConsolAccrualCost(){
+		$all = ExcoConsol::model()->findAll('created >= :ldate and status IN (70, 80)',[':ldate' => $this->prompt('From Date: ', date('Y-m-01'))]);
+		$allCount = count($all);
+		if ( $allCount == 0 ) {
+			echo 'nothing to do' . PHP_EOL;
+			return;
+		}
+		$finishedCount  = 0;
+		foreach ( $all as $c ) {
+			echo 'process : ' . $c->no . PHP_EOL;
+			$c->addBillingAccrual();
+			$finishedCount++;
+			echo $finishedCount . '/' . $allCount . ' done' . PHP_EOL;
+			unset($c->shipments);
+		}
+		echo 'All done' . PHP_EOL;
+	}
+}

@@ -1,0 +1,97 @@
+<h3><?=$name?></h3>
+<style>
+    .cloumn_red{
+        background-color:pink;
+    }  
+    .column_direct{
+        color: green;
+        font-weight: bold;
+    }
+</style>
+<?php
+$type=$_GET['consol_type']==20?"Sea":"Air";
+?>
+<div style="position: absolute; right:80px;">
+<?php if(!empty($consol->process_statuses)&&in_array(ConsolProcess::STATE_WAITING_WH_SCAN,$consol->process_statuses)):?>
+        <div class="rowcol ">
+            <a class="tab_link"  href="<?=$this->createUrl("consolProcess/waitingAirout", ['pod_id'=>empty($consol->dpt_id)?"-1":$consol->dpt_id,'consol_type'=>$consol->service])?>" title="<?=$name."-".$type?> Waiting AirOut/Manifest" ><span style="background-position:-48px -688px" class="icon"></span>go to AirOut</a>
+        </div>
+<?php endif;?>
+</div>
+<?php 
+$heldShipmentArr =[];
+	if(!empty($consol->process_statuses)&&in_array(ConsolProcess::STATE_WAITING_WH_SCAN,$consol->process_statuses))
+	{
+		$heldShipmentArr = [['header'=>'Held Shipments','type'=>'raw','value'=>'$data->getReal()->totHeldShipments()']];
+	}
+
+	$list = AppHelper::setting2List('pods'); ksort($list);
+	$pod = [];
+	$cpod = empty($consol->pod)?[]:$consol->pod;
+	foreach ($list as $key => $value) {
+		if(in_array($value,$cpod))
+		{
+			$pod[] = $key;
+		}
+	}
+
+	$this->widget('zii.widgets.grid.CGridView', [
+	'id'=>$_GET["tabid"].'_consol_process_grid',
+	'cssFile' => false,
+	'dataProvider'=>$consol->search(true, 30),
+	'filter'=>$consol,
+	'columns'=>array_merge(
+		[
+			['name' => 'no', 'type' => 'raw','cssClassExpression' => '$data->type==70?"column_direct" : ""',
+				'value' => '"<a href=\"".Yii::app()->createURL(($data->type==15||$data->type==90)?"imcoConsol/update":"dmawbConsol/update", array("id" => $data->id))."\" class=\"tab_link\" title=\"".$data->no."\">".$data->no."</a>"',],
+			['name' => 'awb', 'type' => 'raw', 'value' => '$data->getReal()->AwbTracking()'],
+			['header'=>'Customer','name' => 'owner_name','value' => '$data->getReal()->getOwnerName()'],
+			['name' => 'status', 'value' => '$data->getReal()->getStatus()',
+				'filter'=>CHtml::hiddenField('Consol[service]', $consol->service).CHtml::dropDownList('Consol[status]', $consol->status, $this->t(ImcoConsol::$states), ['prompt'=>$this->t('All')]),],
+			['name'=>'process_status','type'=>'raw','value'=>'$data->getProcessStatus()','filter'=>CHtml::dropDownList('Consol[process_status]', $consol->process_status, $this->t(ConsolProcess::$states), ['prompt'=>$this->t('All')]),],
+			// ['name' => 'dpt_id', 'value' => '$data->depot->name',
+			// 	'filter'=>CHtml::dropDownList('ImcoConsol[dpt_id]', $consol->dpt_id, $this->t(Org::dptList()), ['prompt'=>$this->t('All')]),],
+			array('name'=>'process_airport','header'=>'Pick Up Airport','value'=>'@$data->process->airport'),
+			'flight',
+			'pol',
+			['name'=>'pod','filter'=>"<div style='width:200px;'>".CHtml::checkBoxList('Consol[pod]',$pod,$this->t($list),array(
+										'template'=>'{input}{label}',
+										'separator'=>'',
+										'labelOptions'=>array(
+											'style'=> 'padding-right:1px;float:left;width:40px;'),
+											'style'=>'float:left;width:20px;'))."</div>"],
+
+			['name'=>'eta','cssClassExpression' => '$data->getEtaToNow()>=3? "cloumn_red" : ""'],
+			['header' => 'Cargo Type', 'value' => '@$data->mdata["cargo_type"]','filter'=>CHtml::dropDownList('Consol[cargoType]', @$consol->mdata['cargoType'], $this->t(['LCL'=>'LCL','FCL'=>'FCL']), ['prompt'=>$this->t('All')])],
+			['header' => 'Notes', 'value' => '@$data->process->mdata["process_note"]'],
+			['header' => 'Shipments', 'value' => '$data->getReal()->totShipments()']
+			],$heldShipmentArr,
+		[
+			['header' => 'Weight', 'value' => '$data->getReal()->totWeight()'],
+			['header' => 'B/L pcs', 'value' => '$data->getReal()->getBLpcs()'],
+			['header' => 'Chargeable Weight', 'value' => '@$data->getReal()->mdata["cgb_wt"]'],
+			['header' => 'Air Type', 'value' => 'empty($data->getReal()->mdata["air_type"])?"":ImcoConsol::$air_types[$data->getReal()->mdata["air_type"]]'],
+			['header' => 'UnScanPacks', 'value' => '$data->getReal()->totLeftPacks()'],
+			['header'=>'extra Info','type'=>'raw','value'=>'$data->getReal()->getConsolDGWarnings()','filter'=>CHtml::dropDownList('Consol[exInfo]', $consol->exInfo, $this->t(Consol::$exInfos), ['prompt'=>'All'])],
+			['header'=>'AOUT','value'=>'$data->getReal()->getAOutStatus()','filter'=>CHtml::dropDownList('Consol[aout]', $consol->aout, [1=>"no outturn",2=>"Y",3=>"Y[D]",4=>"[R]"], ['prompt'=>'All'])],
+			['class'=>'oButtonColumn',
+				'template'=>'{operate}&nbsp;{log}',
+				'buttons'=>[
+					'operate' => [
+						'url'=>'Yii::app()->createURL("consolProcess/operation",array("id"=>$data->id))',
+						'imageUrl'=>false,
+						'visible'=>'true',
+						'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => '$data->no'],
+					],
+					'log' => [
+						'imageUrl'=>false,
+						'options' => ['class' => 'jqm_link grid_view_btn', 'label' => 'Log', 'data-win-class' => 'L'],
+						'visible' => 'true',
+						'url' => 'Yii::app()->createUrl("consolProcess/log", ["id" => $data->id])',
+						'label' => 'Log'
+					],
+				],
+			],
+		]
+)
+]); ?>

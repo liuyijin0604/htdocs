@@ -1,0 +1,395 @@
+<?php
+$hideDisplayPrice = 'none';
+$totalWeight = 0;
+$totalDimension = 0;
+$totalQuantity = 0;
+$baseTLD = 0;
+$baseToll = 0;
+$oversizeTLD = 0;
+$oversizeToll = 0;
+$tailgateTLD = 0;
+
+if (!empty($model)) {
+    $questionId = $model['id'];
+    $questionNum = $model['question_num'];
+    $question = $model['question'];
+    $questionType = $model['question_type'];
+}
+
+if(!empty($_GET['submit_id']))
+{
+    $submit_id = $_GET['submit_id'];
+}
+if(!empty($_GET['services_types']))
+{
+    $services_types = $_GET['services_types'];
+    // echo "successssss";
+    // Yii::app()->end();
+}
+
+$salesService = new SalesfunnelRequirementsService();
+
+?>
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-MrcW6ZMFYlzcLA8Nl+NtUVF0sA7MsXsP1UyJoMp4YLEuNSfAP+JcXn/tWtIaxVXM" crossorigin="anonymous"></script>
+    <!-- jQuery -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <!-- reCaptcha  -->
+    <!-- <script src="https://www.google.com/recaptcha/api.js"></script> -->
+    <!-- Custom CSS -->
+    <style>
+        .pe-label {
+            font-weight: 600;
+        }
+
+        .text-input-row {
+            margin-top: 8px;
+        }
+
+        #displayPrice {
+            display: none;
+        }
+
+        .btn {
+            width:  80px;
+            height: 50px;
+        }
+    </style>
+    <title>Customer Requirements Form</title>
+</head>
+
+<body>
+    <div class="container-lg">
+        <br />
+        <main id="site-content" role="main">
+            <form class="row g-3 needs-validation" id="price-enquiry-form" method="POST" action="<?=$this->createUrl('salesfunnelRequirements/showOutcome').'?submit_id='.$_GET['submit_id'];?>">
+                <div class="container" id="items">
+                    <header class="entry-header has-text-align-center header-footer-group">
+                        <div class="entry-header-inner section-inner medium">
+                            <h1 id="category-name" categ="<?=$services_types ?>" class="entry-title"><?=@$model->showServiceType() ?></h1>
+                        </div><!-- .entry-header-inner -->
+                    </header>
+                    
+
+    <?php
+    if (!empty($model))
+    {
+    	$salesService->printQuestion($model, $submit_id);
+    }
+
+    ?>
+
+                    <!-- <div class="item" id="item">                    
+                        <h3>Question 1</h3>
+                        <h5>Arrival information</h5>
+                        <label class="pe-label" >Do you need to provide trunk services:</label>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="radio" name="category_1" id="category_1_0" value="yes" checked>
+                            <label class="form-check-label pe-label" for="category_1_0">Yes</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="radio" name="category_1" id="category_1_1" value="no">
+                            <label class="form-check-label pe-label" for="category_1_1">No</label>
+                        </div>                   
+                    </div> -->
+                </div>
+                
+                <div class="col-12">                
+                    <button type="button" class="btn btn-primary" id="previousQuestionBtn" onclick="previousQustion()" style="<?=($model->question_num!=1)?"visibility:visible":"visibility:hidden"?>">Previous</button>
+
+                    <button type="button" class="btn btn-primary" id="nextQuestionBtn" onclick="nextQustion()" style="<?=($model->question_type!=SalesfunnelRequirementsQuestions::LASTQUESTIONQUESTIONTYPE)?"visibility:visible":"visibility:hidden"?>">Next</button>
+                </div>
+                <br><br><br>
+                
+                <!-- <div class="g-recaptcha" data-sitekey="6LfyO2saAAAAAJ6CdVI_q_Nt8pFZkcVqbO7aGZHJ" style="float:left"></div> -->
+                <div class="col-12">
+                    <button type="button" class="btn btn-primary" onclick="return submitForm();">Save</button>
+                </div>
+            </form>
+        <main id="site-content" role="main">
+    </div>
+
+    <script type="text/javascript">
+        var numCountItem = 0;
+        var strHtmlItem = "";
+        var questionsArray = [<?=$questionIds?>];        
+        var categoryQuesitonIds = [<?=$categoryQuesitonIds?>];
+        var answersArray = [];   
+        $('#qid').html("Question "+(questionsArray.length+1)+"/"+(categoryQuesitonIds.length+1));     
+
+        // function nextQustion() {
+        //     numCountItem++;
+        //     $('#item').remove();
+        //     this.showItem();            
+            
+        //     $('#items').append(strHtmlItem);
+        // }
+
+        function nextQustion() {
+        	let qid = $('#qid').attr("qid");            
+            let answerid ="";
+            let submit_id = <?php echo $_GET['submit_id']; ?>;
+            let answerStr = "";
+            var urlStr = "?";
+            let thisData = [];
+            let answersArray = [];            
+            document.getElementById("previousQuestionBtn").style.visibility = "visible";
+            // alert(questionsArray);
+            // alert($('input[name="_answer"]').attr("type"));
+            if ($('input[name="_answer"]').attr("type") == "radio"){
+                // alert($('input[name="_answer"]:checked')[1].val());
+                answerid = $('input[name="_answer"]:checked').val();
+                if( !answerid ) {
+                      // $('input[name="_answer"]').parents('p').addClass('warning');
+                      alert('Input can not be blank');
+                      return false;
+                } 
+                urlStr += "answerId="+answerid+"&&";               
+            }
+            else if($('input[name="_answer"]').attr("type") == "checkbox"){
+                let answerids = $('input[name="_answer"]:checked');
+                for (let i = 0; i < answerids.length; i++) {
+                  answersArray.push(answerids[i].value);
+                  // alert(answerids[i].value);
+                }
+                answerStr = answersArray.toString();
+                if( !answerStr ) {
+                      // $('input[name="_answer"]').parents('p').addClass('warning');
+                      alert('Input can not be blank');
+                      return false;
+                } 
+                // alert(answerStr);
+                thisData = {"answerStr":answerStr};
+            }
+            else{
+                answerStr = $('input[name="_answer"]').val(); 
+                if( !answerStr ) {
+                      // $('input[name="_answer"]').parents('p').addClass('warning');
+                      alert('Input can not be blank');
+                      return false;
+                } 
+                thisData = {"answerStr":answerStr};
+            }
+            let nextQustionId = categoryQuesitonIds[questionsArray.length+1];
+            numCountItem++;
+            questionsArray.push(qid);
+
+            // if (answerid){
+            //     answersArray.push(answerid);                                
+            // }
+            urlStr += "questionId="+qid+"&& submit_id="+submit_id;
+            //        alert(qid+"  "+answerid);
+   //      	var answers = new FormData(document.getElementById("_answer"));
+         	<?php
+				$url = $this->createUrl('salesfunnelRequirements/nextQuestion');
+			 ?>	             
+             // thisData = {"answerStr":answerStr, "answersArray":answersArray};
+             // alert(answerStr);
+			$.ajax({
+			           url: '<?=$url?>'+urlStr,
+			           type: "post",
+                       data: thisData,
+			           processData: true,
+			           contentType: "application/x-www-form-urlencoded; charset=UTF-8",
+			           success: function(r) {
+			           	$('#item').remove();
+			           	$('#items').append(r);
+
+
+                        $.ajax({
+                               url: '<?= $this->createUrl('salesfunnelRequirements/checkServiceType')?>'+'?questionId='+nextQustionId,
+                               type: "post",
+                               processData: false,
+                               contentType: false,
+                               success: function(r) {
+                                var response = JSON.parse(r);
+                                    if(!response.done)
+                                    {
+                                        console.log(response);
+                                        alert(response.msg);
+                                    }else
+                                    {
+                                        var service_type = response['service_type'];  
+                                        // console.log(submit_id); 
+                                        // debugger;                       
+                                        $('#category-name').html(service_type);
+                                    }
+                             },
+                               error: function(e) {
+                                   console.log(e);
+                               }
+                           });          
+
+                        if(questionsArray.length+1>0){
+                            $('#qid').html("Question "+(questionsArray.length+1)+"/"+(categoryQuesitonIds.length+1));
+                            // $('#category-name').html(checkServiceType(<?=$model->question_category ?>));
+                            // alert($('#qid').html());
+                        }
+                        // alert($('#lid').html());
+                        if ((questionsArray.length+1)>=(categoryQuesitonIds.length+1)){
+                            document.getElementById("nextQuestionBtn").style.visibility = "hidden";
+                        }
+
+			         },
+			           error: function(e) {
+			               console.log(e);
+			           }
+			       });	            
+			return false;
+        }
+
+        function previousQustion() { 
+            let qid = $('#qid').attr("qid");  
+            let submit_id = <?php echo $_GET['submit_id']; ?>;         
+            numCountItem--;            
+            let preQustionId = questionsArray[questionsArray.length-1];
+            // alert(questionsArray);
+            document.getElementById("nextQuestionBtn").style.visibility = "visible";
+   //       alert(preQustionId);
+   //       var answers = new FormData(document.getElementById("_answer"));
+            <?php
+                $url = $this->createUrl('salesfunnelRequirements/preQustion');
+             ?> 
+            $.ajax({
+                       url: '<?=$url?>'+"?preQustionId="+preQustionId+"&& submit_id="+submit_id,
+                       type: "post",
+                       processData: false,
+                       contentType: false,
+                       success: function(r) {
+                        $('#item').remove();
+                        $('#items').append(r);
+                        // alert(qid);
+
+
+                        $.ajax({
+                               url: '<?= $this->createUrl('salesfunnelRequirements/checkServiceType')?>'+'?questionId='+preQustionId,
+                               type: "post",
+                               processData: false,
+                               contentType: false,
+                               success: function(r) {
+                                var response = JSON.parse(r);
+                                    if(!response.done)
+                                    {
+                                        console.log(response);
+                                        alert(response.msg);
+                                    }else
+                                    {
+                                        var service_type = response['service_type'];  
+                                        // console.log(submit_id); 
+                                        // debugger;                       
+                                        $('#category-name').html(service_type);
+                                    }
+                             },
+                               error: function(e) {
+                                   console.log(e);
+                               }
+                           });      
+
+
+                        if(questionsArray.length+1>0){
+                            $('#qid').html("Question "+(questionsArray.length+1)+"/"+(categoryQuesitonIds.length+1));
+                            // $('#category-name').html(checkServiceType(<?=$model->question_category ?>));
+                            // alert(<?=$model->id ?>);
+                        }
+
+                        if (questionsArray.length<=0){
+                            document.getElementById("previousQuestionBtn").style.visibility = "hidden";
+                        }
+                     },
+                       error: function(e) {
+                           console.log(e);
+                       }
+                   });  
+            questionsArray.pop();
+            answersArray.pop();
+            return false;
+        }
+
+        function submitForm(){
+        
+            if ($('#lid').html()=="The questionnaire has ended."){
+                    let id = <?php echo $_GET['submit_id'] ?>;
+                    window.location.replace("<?=$this->createUrl('salesfunnelRequirements/customerSubmit')?>"+"?id="+id);
+                    return false;
+            }else{
+                alert('Your questionnaire has been saved.</br>Please finish the rest of questions with the same email when you feel free.</br>Thank you!');
+                return false;
+            }
+            
+        }
+
+
+   //      function submitForm() {
+   //          numCountItem++;
+   //          let qid = $('#qid').attr("qid");
+   //          let answerid ="";
+   //          let submit_id = <?php echo $_GET['submit_id']; ?>;
+   //          let answerStr = "";
+   //          var urlStr = "?";
+   //          questionsArray.push(qid);
+   //          // alert($('input[name="_answer"]').attr("type"));
+   //          if ($('input[name="_answer"]').attr("type") == "radio" || $('input[name="_answer"]').attr("type") == "checkbox"){
+   //              answerid = $('input[name="_answer"]:checked').val(); 
+   //              urlStr += "answerId="+answerid+"&&";               
+   //          }
+   //          else{
+   //              answerStr = $('input[name="_answer"]').val(); 
+   //          }
+   //          if (answerid){
+   //              answersArray.push(answerid);                                
+   //          }
+   //          urlStr += "questionId="+qid+"&& submit_id="+submit_id;
+   //          //        alert(qid+"  "+answerid);
+   // //       var answers = new FormData(document.getElementById("_answer"));
+   //          <?php
+   //              $url = $this->createUrl('salesfunnelRequirements/nextQuestion');
+   //           ?>              
+   //           let thisData = {"answerStr":answerStr};
+   //           // alert(answerStr);
+   //          $.ajax({
+   //                     url: '<?=$url?>'+urlStr,
+   //                     type: "post",
+   //                     data: thisData,
+   //                     processData: true,
+   //                     contentType: "application/x-www-form-urlencoded; charset=UTF-8",
+   //                     success: function(r) {
+   //                      $('#item').remove();
+   //                      $('#items').append(r);
+   //                   },
+   //                     error: function(e) {
+   //                         console.log(e);
+   //                     }
+   //                 });  
+   //          return true;
+
+   //      }
+
+        (function() {
+            'use strict'
+            // Fetch all the forms we want to apply custom Bootstrap validation styles to
+            var forms = document.querySelectorAll('.needs-validation')
+            // Loop over them and prevent submission
+            Array.prototype.slice.call(forms)
+                .forEach(function(form) {
+                    form.addEventListener('submit', function(event) {
+                        if (!form.checkValidity()) {
+                            event.preventDefault()
+                            event.stopPropagation()
+                        }
+                        form.classList.add('was-validated')
+                    }, false)
+                })
+        })()
+
+    </script>
+</body>
+
+</html>

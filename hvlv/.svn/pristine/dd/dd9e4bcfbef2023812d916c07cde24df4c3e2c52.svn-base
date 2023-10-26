@@ -1,0 +1,278 @@
+<?php
+
+/**
+ * This is the model class for table "shipment_rts_record_confirm".
+ *
+ * The followings are the available columns in table 'shipment_rts_record_confirm':
+ * @property integer $id
+ * @property string $agent_id
+ * @property string $user_id
+ * @property string $name
+ * @property string $address
+ * @property string $tel
+ * @property string $suburb
+ * @property string $state
+ * @property string $postcode
+ * @property string $country
+ * @property string $email
+ * @property integer $status
+ * @property string $create_time
+ */
+class ShipmentRtsRecordConfirm extends CActiveRecord
+{
+	public $hbn;
+	public $ref;
+	public $newRef;
+	public $barcode;
+	public $location;
+	public $warehouse_id;
+	const RTS_DONE = 90;
+	const RTS_WAITING_RESEND = 85;
+	const RTS_DISCARDED = 95;
+	const RTC_WAITING = 83;
+	const RTC_DONE = 84;
+	const RTC_CONFIRM = 1;
+	public static $ims_states = [
+		10=>'RTS Received',
+		83=>'RTC Waiting',
+		84=>'RTC Done',
+		85=>'RTS Waiting Resend',
+		90=>'RTS Done',
+		95=>'RTS_DISCARDED'
+	];
+
+	public static $whscan_states = [
+		85=>'RTS Waiting Resend',
+		90=>'RTS Done'
+	];
+	public static $rtc_states = [
+		83=>'RTC Waiting',
+		84=>'RTC Done'
+	];
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName()
+	{
+		return 'shipment_rts_record_confirm';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('agent_id, user_id', 'required'),
+			array('id, status', 'numerical', 'integerOnly'=>true),
+			array('agent_id, user_id, name, tel, suburb, state, postcode, country, email', 'length', 'max'=>45),
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, agent_id, user_id, name, address, tel, suburb, state, postcode, country, email, status, create_time, hbn, ref, newRef, barcode, location, warehouse_id', 'safe', 'on'=>'search'),
+		);
+	}
+
+	public function getStatus()
+	{
+		$status = isset(static::$ims_states[$this->status]) ? Yii::t(strtolower(__CLASS__), static::$ims_states[$this->status]) : $this->status;
+		return $status;
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return [
+			'originalShipment' => [self::BELONGS_TO, 'Shipment', 'original_id'],
+			'newShipment' => [self::BELONGS_TO, 'Shipment', 'new_id'],
+			'records' => [self::HAS_MANY, 'ShipmentRtsRecord', 'confirm_id'],
+			'rtcGatepass' => [self::BELONGS_TO, 'Manifest', 'rtc_gp_id']
+		];
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return array(
+			'id' => 'ID',
+			'agent_id' => 'Agent',
+			'user_id' => 'User',
+			'name' => 'Name',
+			'address' => 'Address',
+			'tel' => 'Tel',
+			'suburb' => 'Suburb',
+			'state' => 'State',
+			'postcode' => 'Postcode',
+			'country' => 'Country',
+			'email' => 'Email',
+			'status' => 'Status',
+			'create_time' => 'Create Time',
+			'hbn' => 'Original HBN',
+            'ref' => 'Original Ref',
+            'barcode' => 'RTS Barcodes',
+            'newRef' => 'New Ref'
+		);
+	}
+
+	public function getRTSBarcodes($isHTML = false)
+	{
+		$str = "";
+		foreach ($this->records as $key => $record)
+		{
+			if($isHTML)
+			{
+				$str.='<p>'.$record->barcode.'</p>';
+			}else
+			{
+				$str.=$record->barcode.",";
+			}
+		}
+		return $str;
+	}
+
+	public function getRTSLocation($isHTML = false,$isReason = false)
+	{
+		$str = "";
+		foreach ($this->records as $key => $record)
+		{
+			if($isHTML)
+			{
+				$str.='<p>'.$record->location->code.'</p>';
+			}else
+			{
+				$str.=$record->location->code.",";
+			}
+		}
+		return $str;
+	}
+
+	public function getRTSPackagesCount()
+	{
+		$rtsPackages = ShipmentRtsRecord::model()->count("confirm_id = :confirmId",[":confirmId"=>$this->id]);
+		return $rtsPackages;
+	}
+
+	public function getInvoice()
+	{
+		$invoice = Invoice::model()->with("lines")->find("lines.fid = :pid",[":pid"=>$this->new_id]);
+		return $invoice;
+	}
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search($pgn = true, $ps = 30, $ec = false, $defaultOrder = true)
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('t.id',$this->id);
+		$criteria->compare('t.agent_id',$this->agent_id,true);
+		$criteria->compare('t.user_id',$this->user_id,true);
+		$criteria->compare('t.name',$this->name,true);
+		$criteria->compare('t.address',$this->address,true);
+		$criteria->compare('t.tel',$this->tel,true);
+		$criteria->compare('t.suburb',$this->suburb,true);
+		$criteria->compare('t.state',$this->state,true);
+		$criteria->compare('t.postcode',$this->postcode,true);
+		$criteria->compare('t.country',$this->country,true);
+		$criteria->compare('t.email',$this->email,true);
+		$criteria->compare('t.status',$this->status);
+		$criteria->compare('t.create_time',$this->create_time,true);
+		$with = [];
+
+		if(!empty($this->hbn))
+		{
+			$with[] = 'originalShipment';
+			$criteria->compare('originalShipment.hbn',$this->hbn);
+		}
+
+		if(!empty($this->ref))
+		{
+			$with[] = 'originalShipment';
+			$criteria->compare('originalShipment.ref',$this->ref);
+		}
+
+		if(!empty($this->newRef))
+		{
+			$with[] = 'newShipment';
+			$criteria->compare('newShipment.ref',$this->ref);
+		}
+
+
+		if(!empty($this->barcode))
+		{
+			$with[] = 'records';
+			$criteria->compare('records.barcode',$this->barcode);
+		}
+
+		if(!empty($this->warehouse_id))
+		{
+			if(!in_array('records',$with))
+			{
+				$with[] = 'records';
+			}
+			$criteria->compare('records.warehouse_id',$this->warehouse_id);
+		}
+
+		if(!empty($this->location))
+		{
+			$with[] = 'records.location';
+			$criteria->compare('location.code',$this->location);
+		}
+
+		$with[] = 'records';
+		$criteria->addCondition('records.id is not null');
+
+		$sort = new CSort(get_called_class());
+		$sort->attributes = [
+
+			'*'
+		];
+
+		$sort->defaultOrder = 't.create_time DESC';
+
+		if (!empty($with)) {
+			$criteria->with = array_unique($with);
+			$criteria->together = true;
+		}
+		// in case sub-gridview, we need consol_id set by parent grid view
+		$pagerparams = $_GET;
+
+		return new CActiveDataProvider($this, [
+			'criteria' => $criteria,
+			'sort' => $sort,
+			'pagination' => $pgn ? [
+				'pageSize' => $ps,
+				'params' => $pagerparams,
+			] : false,
+		]);
+	}
+
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return ShipmentRtsRecordConfirm the static model class
+	 */
+	public static function model($className=__CLASS__)
+	{
+		return parent::model($className);
+	}
+}

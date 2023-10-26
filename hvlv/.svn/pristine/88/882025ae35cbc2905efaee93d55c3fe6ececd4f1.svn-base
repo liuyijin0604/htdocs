@@ -1,0 +1,434 @@
+<?php
+class rayCommand extends CConsoleCommand {
+	private $db, $args, $tmp,$parent;
+	private $debug = false;
+
+	public function run($args) {
+		$this->db = Yii::app()->getDb();
+		$this->args = $args;
+		$this->tmp = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR;
+
+		foreach($this->args as $ag){
+			if($ag == '-d') $this->debug = true;
+		}
+		if(!empty($args[0]) && method_exists($this, $args[0])){
+			$this->{$args[0]}();
+		}
+	}
+
+	public function testTntBne()
+	{
+		$model = TntAPI::getTntInterface('bne');
+		$result = $model->genTNTConsignmentNo();
+		print_r($model);
+		print_r($result);
+	}
+
+	public function testSearchFakEmail()
+	{
+		$no = "C19071608SZX";
+		$consol = Consol::model()->find('no = :no',[':no' => $no]);
+		$imparcelService = new ImParcelService();
+		$iEmail = $imparcelService->searchFakEamilAdr($consol);
+		print_r($iEmail);
+	}
+
+	public function testFakShipments()
+	{
+		$imparcelService = new ImParcelService();
+		$imparcelService->sendFakEmailDaily();
+		print_r('successsss');
+		// print_r(array_column($shipments, 'status'));
+		// echo count($shipments);
+	}
+
+	public function testImportConsol()
+	{
+		print_r('successsss');
+		
+		$xls = new oExcel;
+		$xls->load('C:\xampp\htdocs\hvlv_branch\ims\imco_consol_import_template_217-92198223.xlsx');
+		$data = $xls->getAll();
+		if (strpos('WarehouseAWB NoAirlineFlight No.POLPODETDETAAWB weightChargable Wt.B/L pcsShipperShipper addressConsigneeConsignee addressPMC(1)/AKE(2)/Loose(3)Consignment NumbersBag',implode('', $data[1])) != 0) {
+						$err[] = "template wrong";
+					}
+		if (!empty($err)) {
+			$resp['msg'] = implode(';', $err);
+			$resp['done'] = false;
+			echo json_encode($resp);
+			return;
+		}
+		unset($data[1]);
+		$last_consolno = 0;
+
+		foreach ($data as $i => $d) {
+			if (empty($d[17])) {
+				continue;
+			}
+
+			if ($last_consolno != 1) {
+				if (empty($d[5])) {
+					$d[5] = null;    // POL is empty 
+					continue;
+				} else if (empty($d[6])) {
+					$err[] = "Line " . $i . " POD is empty!";
+					continue;
+				} else if (empty($d[8])) {
+					$err[] = "Line " . $i . " ETA Time is empty!";
+					continue;
+				}
+				$last_consolno = 1;
+				$depot = 0;
+				if(!empty(trim($d[1]))){
+					if(!preg_match('/106|218|530|811|529/i',trim($d[1]))){
+						$depot = self::getDepotId(trim($d[1]));
+					}else{
+						$depot = trim($d[1]);
+					}
+				}
+				$tasks[1] = array(
+				'dpt_id' => $depot,
+				'service' => 10,//10 air 20 sea
+				'awb' => trim($d[2]),
+				'airline' => trim($d[3]),
+				'flight' => trim($d[4]),
+				'pol' => trim($d[5]),
+				'pod' => trim($d[6]),
+				'etd' => oExcel::toDate($d[7]),
+				'eta' => oExcel::toDate($d[8]),
+				'ignore'=> "",
+				'mdata[awb_wt]' => trim($d[9]),
+				'mdata[cgb_wt]' => trim($d[10]),
+				'mdata[b&l_pcs]' => trim($d[11]),
+				'mdata[cnor]' => trim($d[12]),
+				'mdata[cnor_addr]' => trim($d[13]),
+				'mdata[cnee]' => trim($d[14]),
+				'mdata[cnee_addr]' => trim($d[15]),
+				'mdata[air_type]' => trim($d[16]),
+				'consignment' => []
+				);
+			}
+			if (empty($d[17])) {
+				$err[] = "line " . $i . " Consignment Numbers is empty!";
+				continue;
+			}
+
+			$h = trim($d[17]);
+			if(preg_match('/[\t ]+/', trim($d[17]))){
+				$ts = preg_split('/[\t ]+/', trim($d[17]));
+				$h = trim($ts[0]);
+			}
+
+			//bagTag
+			$bagTag = trim($d[18]);
+
+			$p = ImParcel::model()->find('(hbn = :h OR ref = :h) AND (cbwf&:cbwf)=0', [':h' => $h,':cbwf'=> ImParcel::CBWF_D2Z_CONSOL_NOT_FOR_SCAN]);
+			if (empty($p)) {
+				$err[] = "line " . $i . " Consignment Numbers ".trim($d[17])." not found!";
+				continue;
+			}
+			
+			$tasks[1]['consignment'][] = array(
+				'ref' => $h,
+				'bagTag' => $bagTag,//bagtag
+			);
+		
+		}
+		if (!empty($err)) {
+			$resp['msg'] = implode('<br />', $err);
+			$resp['done'] = false;
+			echo json_encode($resp);
+			return;
+		}
+		foreach ($tasks as $temp_task) {
+
+			$model = new ImcoConsol;
+			$errors=[];
+			if (empty($temp_task)) {
+				continue;
+			}else{
+				$selected_services=[];
+				$ignore_depot = empty($temp_task['ignore'])?0:1;
+
+				foreach ($temp_task['consignment'] as $temp_label){
+					$h = $temp_label['ref'];
+					if(preg_match('/[\t ]+/',$temp_label['ref'])){
+						$ts = preg_split('/[\t ]+/', $temp_label['ref']);
+						$h = trim($ts[0]);
+					}
+					$p = ImParcel::model()->find('(hbn = :h OR ref = :h) AND (cbwf&:cbwf)=0', [':h' => $h,':cbwf'=> ImParcel::CBWF_D2Z_CONSOL_NOT_FOR_SCAN]);
+					$model->checkImparcel($p,$errors, $selected_services,$h,$_POST['ImcoConsol']['dpt_id'],$ignore_depot);
+				}
+
+				if (sizeof($selected_services)>=1) {
+					asort($selected_services);
+					$selected_services= array_reverse($selected_services, true);
+					$the_service=key($selected_services)-(key($selected_services)&32);
+
+				}
+				foreach ($temp_task['consignment'] as $temp_label){
+					$h = $temp_label['ref'];
+					if(preg_match('/[\t ]+/',$temp_label['ref'])){
+						$ts = preg_split('/[\t ]+/', $temp_label['ref']);
+						$h = trim($ts[0]);
+					}
+
+					$p = ImParcel::model()->find('(hbn = :h OR ref = :h)', [':h' => $h]);
+					$model->checkServiceErrors($p,$the_service,$errors,$h);
+				}
+
+				if (!empty($errors)) {
+					$model->addError('shipment', implode(';', $errors));
+					$this->ajaxResult($model);
+				}
+
+				$model->dpt_id=$temp_task['dpt_id'];
+				$model->service=$temp_task['service'];
+				$model->awb=$temp_task['awb'];
+				$model->airline=$temp_task['airline'];
+				$model->flight=$temp_task['flight'];
+				$model->pol=$temp_task['pol'];
+				$model->pod=$temp_task['pod'];
+				$model->etd=$temp_task['etd'];
+				$model->eta=$temp_task['eta'];
+				$model->awb=$temp_task['awb'];
+				$model->mdata['awb_wt'] = $temp_task['mdata[awb_wt]'];
+				$model->mdata['cgb_wt'] = $temp_task['mdata[cgb_wt]'];
+				$model->mdata['b&l_pcs'] = $temp_task['mdata[b&l_pcs]'];
+				$model->mdata['cnor'] = $temp_task['mdata[cnor]'];
+				$model->mdata['cnor_addr'] = $temp_task['mdata[cnor_addr]'];
+				$model->mdata['cnee'] = $temp_task['mdata[cnee]'];
+				$model->mdata['cnee_addr'] = $temp_task['mdata[cnee_addr]'];
+				$model->mdata['air_type'] = $temp_task['mdata[air_type]'];
+				$model->status = 10;
+				$model->save();
+
+				$transaction=Yii::app()->db->beginTransaction();
+				try {
+					foreach ($temp_task['consignment'] as $temp_label) {
+						$h = $temp_label['ref'];
+						if (!empty($temp_label['ref'])) {
+							$ts = preg_split('/[\t ]+/', $temp_label['ref']);
+							$h = trim($ts[0]);
+							$wt = trim($ts[1]);
+						}
+						$p = ImParcel::model()->find('(hbn = :h OR ref = :h) AND cbwf&:cbwf=0', [':h' => $h,':cbwf'=> ImParcel::CBWF_D2Z_CONSOL_NOT_FOR_SCAN]);
+						if(!empty($model->id))
+						{
+							$model->putImparcelIntoConsol($p,@$wt);
+						}
+
+
+						if(!empty($temp_label['bagTag'])){
+							$bag = $temp_label['bagTag'];
+							if(!empty($bag) && strlen($bag)<=45){
+								$objBag = ImportBag::model()->find('bag_tag = :bag_tag',[':bag_tag'=>$bag]);
+								if(empty($objBag)){
+									$objBag = new ImportBag();
+									$objBag->user_id= 1;
+									$objBag->bag_tag = $bag;
+									$objBag->created = date("Y-m-d H:i:s");
+									$objBag->save();
+								}
+
+								//bagtag
+								$bagTag = ImportBagTag::model()->find('shipment_id = :shipment_id',[':shipment_id'=>$p->id]);
+								if(empty($bagTag)){
+									$bagTag = new ImportBagTag();
+								}
+								$bagTag->bag_tag = $bag;
+								$bagTag->import_bag_id = $objBag->id;
+								$bagTag->shipment_id = $p->id;
+								$bagTag->save();
+							}
+						}
+					}
+					$transaction->commit();
+					
+				}
+				catch(Exception $ex){
+					$transaction->rollback();
+					throw $ex;
+				}
+			}
+		}
+		echo json_encode($resp);
+	}
+
+	public function testDeshipmentSearch(){
+		$criteria = new CDbCriteria();
+		$criteria->addCondition('( t.connote_no like "F3X%" or t.connote_no like "33XHE%" or t.connote_no like "33XJM%" or t.connote_no like "33G7K%" or t.connote_no like "3CK20%" or t.connote_no like "33YVW%" or t.connote_no like "33YVQ%" or (t.connote_no like "34HWK%") or (t.connote_no like "34VJ%" ) or (t.connote_no like "34QJ%") or ((t.connote_no like "33MHJ%" or t.connote_no like "WQF%" or t.connote_no like "WQE%" or t.connote_no like "WQC%") )  ) and t.scan_time  > "2022-03-01" and t.connote_no not like "34WMP%"');
+		$gapsShipments = GatepassShipment::model()->findAll($criteria);
+		if(!empty($gapsShipments)){
+			foreach ($gapsShipments as $key => $gapsShipment) {
+				echo ($gapsShipment->id);
+			}
+		}
+		else{
+			echo "not found";
+		}
+		
+	}
+
+	public function inputShipmentHbnTosDe()
+	{
+		$shipmentHbnStr = $this->prompt('HBN: ');
+		$criteria = new CDbCriteria();
+		// $shipmentHbnStr = "'33D98315914501000935001','33D98315321401000935000','33D98314616301000935001','33D98315906801000935003','33D98315905401000935006','33D98314781901000935006','33D98314761901000935002','33D98314781501000935008','33D98315906601000935009','33D98314782401000935000'";
+		// $shipmentHbnStr = "'TMN1474027968','TMN1474028042','TSN1474027884'";
+		$criteria->addCondition(" hbn in ({$shipmentHbnStr}) ");
+		$shipments = Shipment::model()->findAll($criteria);
+		// $shipments = Shipment::model()->findAll("hbn in (".$shipmentHbnStr.")");
+		if(!empty($shipments)){
+			foreach ($shipments as $key => $shipment) {
+				$shipment->status = 98;
+				if($shipment->update('status')){
+					$hbnStr .= " ".$shipment->hbn;
+				}
+			}
+			echo $hbnStr."has been done";
+		}
+		else{
+			echo "Can not find";
+		}
+	}
+
+	public function changeShipmentStatusDe()
+	{
+		$hbnStr = "";
+		$criteria = new CDbCriteria();
+		$shipmentHbnStr = "'33D98315914501000935001','33D98315321401000935000','33D98314616301000935001','33D98315906801000935003','33D98315905401000935006','33D98314781901000935006','33D98314761901000935002','33D98314781501000935008','33D98315906601000935009','33D98314782401000935000'";
+		// $shipmentHbnStr = "'TMN1474027968','TMN1474028042','TSN1474027884'";
+		$criteria->addCondition(" hbn in ({$shipmentHbnStr}) ");
+		$shipments = Shipment::model()->findAll($criteria);
+		// $shipments = Shipment::model()->findAll("hbn in (".$shipmentHbnStr.")");
+		if(!empty($shipments)){
+			foreach ($shipments as $key => $shipment) {
+				$shipment->status = 98;
+				if($shipment->update('status')){
+					$hbnStr .= " ".$shipment->hbn;
+				}
+			}
+			echo $hbnStr."has been done";
+		}
+		else{
+			echo "Can not find";
+		}
+	}
+
+	public function copyOrgFlexibleRate()
+	{
+		$fromOrgId = 4063;
+		$toOrgId = 4597;
+
+		$fromOrgFlexibleRate= new OrgFlexibleRate();
+		$fromOrgFlexibleRates = $fromOrgFlexibleRate->findAll('org_id = :orgId and fid=0 and model=""', array(':orgId' => $fromOrgId));
+		foreach ($fromOrgFlexibleRates as $key => $value) {
+			$orgFlexibleRate = new OrgFlexibleRate();
+			$orgFlexibleRate->item =    $value->item;
+			$orgFlexibleRate->amount =  $value->amount;
+			$orgFlexibleRate->unit =    $value->unit;
+			$orgFlexibleRate->minimum = $value->minimum;
+			$orgFlexibleRate->branch =  $value->branch;
+			$orgFlexibleRate->fid = $value->fid;
+			$orgFlexibleRate->model = $value->model;
+			$orgFlexibleRate->cargo =   $value->cargo;
+			$orgFlexibleRate->service = $value->service;
+			$orgFlexibleRate->org_id =  $toOrgId;
+			$orgFlexibleRate->user_id=  $value->user_id;
+			$orgFlexibleRate->create =  $value->create;
+			$orgFlexibleRate->rebate =  $value->rebate;
+			$orgFlexibleRate->criteria = $value->criteria;
+			$orgFlexibleRate->start_date = $value->start_date;
+			$orgFlexibleRate->save();
+		}
+
+		$fromOrgFlexibleRateBk= new OrgFlexibleRateBk();
+		$fromOrgFlexibleRateBks = $fromOrgFlexibleRateBk->findAll('org_id = :orgId and fid=0 and model=""', array(':orgId' => $fromOrgId));
+		foreach ($fromOrgFlexibleRateBks as $key => $value) {
+			$orgFlexibleRateBk = new OrgFlexibleRateBk();
+			$orgFlexibleRateBk->item =    $value->item;
+			$orgFlexibleRateBk->amount =  $value->amount;
+			$orgFlexibleRateBk->unit =    $value->unit;
+			$orgFlexibleRateBk->minimum = $value->minimum;
+			$orgFlexibleRateBk->branch =  $value->branch;
+			$orgFlexibleRateBk->cargo =   $value->cargo;
+			$orgFlexibleRateBk->service = $value->service;
+			$orgFlexibleRateBk->org_id =  $toOrgId;
+			$orgFlexibleRateBk->user_id=  $value->user_id;
+			$orgFlexibleRateBk->create =  $value->create;
+			$orgFlexibleRateBk->rebate =  $value->rebate;
+			$orgFlexibleRateBk->version = $version;
+			$orgFlexibleRateBk->create_user = User::currentUserID();
+			$orgFlexibleRateBk->start_date = $value->start_date;
+			$orgFlexibleRateBk->criteria = $value->criteria;
+			$orgFlexibleRateBk->save();
+		}
+	}
+
+	public function changeChargecode()
+	{
+		$hbnStr = "";
+		$criteria = new CDbCriteria();
+		$shipmentHbnStr = "'8214935820','10240080465','10239982631'";
+		// $shipmentHbnStr = "'TMN1474027968','TMN1474028042','TSN1474027884'";		
+		$criteria->addCondition("t.	status != ".ImParcel::STATE_CANCELLED);
+		$criteria->addCondition(" hbn in ({$shipmentHbnStr}) ");
+		$shipments = Shipment::model()->findAll($criteria);
+		// $shipments = Shipment::model()->findAll("hbn in (".$shipmentHbnStr.")");
+		if(!empty($shipments)){
+			foreach ($shipments as $key => $shipment) {
+				$shipment->mdata['chargecode'] = 7546;
+				if($shipment->update('meta')){
+					$hbnStr .= " ".$shipment->hbn;
+				}
+			}
+			echo $hbnStr." has been done";
+		}
+		else{
+			echo "Can not find";
+		}
+	}
+
+	public function changeDepot()
+	{
+		$hbnStr = "";
+		$criteria = new CDbCriteria();
+		$shipmentHbnStr = "'8214935820','10240080465','10239982631'";
+		// $shipmentHbnStr = "'TMN1474027968','TMN1474028042','TSN1474027884'";		
+		$criteria->addCondition("t.	status != ".ImParcel::STATE_CANCELLED);
+		$criteria->addCondition(" hbn in ({$shipmentHbnStr}) ");
+		$shipments = Shipment::model()->findAll($criteria);
+		// $shipments = Shipment::model()->findAll("hbn in (".$shipmentHbnStr.")");
+		if(!empty($shipments)){
+			foreach ($shipments as $key => $shipment) {
+				$shipment->ddpt_id = 218;
+				if($shipment->update('ddpt_id')){
+					$hbnStr .= " ".$shipment->hbn;
+				}
+			}
+			echo $hbnStr." has been done";
+		}
+		else{
+			echo "Can not find";
+		}
+	}
+
+
+
+	public static function getDepotId($code){
+		switch($code){
+			case 'AUSYD':
+				return 106;
+			case 'AUMEL':
+				return 218;
+			case 'AUBNE':
+				return 530;
+			case 'AUPER':
+				return 811;
+			case 'AUADL':
+				return 529;	
+		}
+	}
+	
+}

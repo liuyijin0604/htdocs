@@ -1,0 +1,242 @@
+<?php
+
+class RtsProcessController extends Controller
+{
+	/**
+	 * Declares class-based actions.
+	 */
+	protected $nonAjax=['bulkPrint','print','export','report','rtsInvoice'];
+	protected $skipAcl=['auPcSuggest','cnCitySuggest','cnSuburbSuggest','prodSuggest', 'tracking'];
+
+	protected $org;
+	protected $type;
+
+
+	public function beforeAction($action)
+	{
+		if (!Yii::app()->user->isGuest) {
+			$this->org = Org::model()->findByPk(Yii::app()->user->org);
+			$this->type = 'im';
+		}
+		return parent::beforeAction($action);
+	}
+
+
+    public function actionIndex()
+	{
+		$this->render('index',[]);
+	} 
+
+	public function actionProcessPage()
+	{
+		$warehouseService = new WarehouseService();
+		switch ($_GET['tab']) {
+			case 'rts_received':
+				
+				$model = new Shipment('search');
+				$model->unsetAttributes();
+				
+				if(!empty($_GET['Shipment']))
+				{
+					$model->setAttributes($_GET['Shipment']);
+				}
+
+				if(!empty($_GET['Shipment']['barcode']))
+				{
+					$barcodeStr = 'barcode = "'.$_GET['Shipment']['barcode'].'"';
+				}
+
+
+				$status = 0;
+				$status = ShipmentRtsRecord::NEW;
+				$records = ShipmentRtsRecord::model()->findAll("agent_id =:agent_id and type=:type and status=:status ".$barcodeStr,[':agent_id'=>User::currentUserOrgId(),':status'=>$status,':type'=>ShipmentRtsRecord::KNOWN]);
+				$ids = array_column($records,'shipment_id');
+				$ids[] = -1;
+				$model->ot_id= null;
+				$model->mids = $ids;
+				if (!empty($_GET['ImParcel'])) {
+					$model->setAttributes($_GET['Shipment']);
+					$model->type = ImParcel::RTS_RECEIVED;
+				}
+
+				$this->render('rts_received', ['model' => $model,'rtsType'=>$status]);
+				break;
+
+			case 'rts_waiting_resend':
+				$model = new ShipmentRtsRecordConfirm('search');
+				$model->unsetAttributes();
+				if(!empty($_GET['ShipmentRtsRecordConfirm']))
+				{
+					$model->setAttributes($_GET['ShipmentRtsRecordConfirm']);
+				}
+				$model->agent_id = User::currentUserOrgId();
+				$model->status = ShipmentRtsRecordConfirm::RTS_WAITING_RESEND;
+				$this->render('rts_done', ['model' => $model,'op'=>'rtsresend']);
+				break;
+
+
+			case 'rts_done':
+				$model = new ShipmentRtsRecordConfirm('search');
+				$model->unsetAttributes();
+				if(!empty($_GET['ShipmentRtsRecordConfirm']))
+				{
+					$model->setAttributes($_GET['ShipmentRtsRecordConfirm']);
+				}
+				$model->agent_id = User::currentUserOrgId();
+				$model->status = ShipmentRtsRecordConfirm::RTS_DONE;
+				$this->render('rts_done', ['model' => $model,'op'=>'rtsdone']);
+				break;
+
+
+
+			case 'rts_discarded':
+				$model = new ShipmentRtsRecordConfirm('search');
+				$model->unsetAttributes();
+				if(!empty($_GET['ShipmentRtsRecordConfirm']))
+				{
+					$model->setAttributes($_GET['ShipmentRtsRecordConfirm']);
+				}
+				$model->agent_id = User::currentUserOrgId();
+				$model->status = ShipmentRtsRecordConfirm::RTS_DISCARDED;
+				$this->render('rts_discarded', ['model' => $model]);
+				break;
+			default:
+				# code...
+				break;
+		}
+	}
+
+	public function actionRtsOperate($id)
+	{
+		$model = $this->loadModel($id);
+		$org = Org::model()->findByPk(User::currentUserOrgId());
+		$rtsPackages = ShipmentRtsRecord::model()->findAll("shipment_id = :shipment_id and status = :status",[":shipment_id"=>$model->id,":status"=>ShipmentRtsRecord::NEW]);
+		$rtsObj = $this->getRtsPackages($model);
+
+		$rs= ImportChargeCode::model()->findAll('status=1 AND org_id=:oid', [':oid'=>$org->id]);
+		$chargecodeInfo=[];
+		foreach ($rs as $r) {
+		    if(!empty($r->description))
+		    {
+		        $chargecodeInfo[$r->chargecode]=$r->chargecode."(".$r->description.")";
+		    }else
+		    {
+		        $chargecodeInfo[$r->chargecode]=$r->chargecode;
+		    }
+		}
+
+		$this->render('rts_form',["model"=>$model,"org"=>$org,"rtsPackages"=>$rtsPackages,"rtsObj"=>$rtsObj,"chargecodeInfo"=>$chargecodeInfo]);
+	}
+
+
+	public function actionDiscardRTS($id)
+	{
+		$rtsProcessService = new RtsProcessService();
+		if($rtsProcessService->discardKnownRTS($id))
+		{
+			echo "done";
+		}else
+		{
+			echo "failure";
+		}
+	}
+
+
+	public function actionCheckChargecodeCanRTS($id)
+	{
+        $result = $this->getRTSCheckResult($id);
+        $model = $result[0];
+        $reply = $result[2];
+        if($reply->success)
+        {
+        	$charge = $model->getChargeByChargecode();
+        	$reply->charge = $charge;
+        }else
+        {
+        	$reply->msg = join(',',$reply->error);
+        }
+        echo json_encode($reply);
+	}
+
+	private function getRTSCheckResult($id)
+	{
+		$model = $this->loadModel($id);
+		$model->cnee->name = $_POST['Cnee']['name'];
+		$model->cnee->tel = $_POST['Cnee']['tel'];
+		$model->cnee->address = $_POST['Cnee']['address'];
+		$model->cnee->suburb = $_POST['Cnee']['suburb'];
+		$model->cnee->state = $_POST['Cnee']['state'];
+		$model->cnee->postcode = $_POST['Cnee']['postcode'];
+		$model->cnee->country = $_POST['Cnee']['country'];
+		$model->cnee->email = $_POST['Cnee']['email'];
+		$chargecode = $_POST['chargecode'];
+		$model->mdata['chargecode'] = $chargecode;
+		$testOnly = true;
+		$rtsObj = $this->getRtsPackages($model);
+		$model->weight = $rtsObj->weight;
+		$model->cbm = $rtsObj->cbm;
+		$model->pkg = $rtsObj->pkg;
+		$o = new stdClass();
+		$o->error = [];
+		$rt = ChooseShipment::selectServiceByChargeCode($chargecode, $model,'AU', $testOnly);
+        $reply = ChooseShipment::funcAfterSelectServiceByChargeCode($o,$model,$rt,false,$testOnly);
+       return [$model,$rt,$reply];
+	}
+
+	public function actionSubmitRTS($id)
+	{
+		$result = $this->getRTSCheckResult($id);
+		$reply = $result[2];
+        if($reply->success)
+        {
+        	$rtsProcessService = new RtsProcessService();
+        	$newShipment = $rtsProcessService->createNewShipment($result[0], $result[1]);
+        	if(!empty($newShipment->ref))
+        	{
+        		$charge = $newShipment->getChargeByChargecode();
+        		$rtsProcessService->createRTSResendInvoice($newShipment, $charge);
+        	}
+        	$reply->charge = $charge;
+        }else
+        {
+        	$reply->msg = join(',',$reply->error);
+        }
+        echo json_encode($reply);
+	}
+
+	public function actionRtsInvoice($id)
+	{
+		$shipmentRtsRecordConfirm = ShipmentRtsRecordConfirm::model()->findByPk($id);
+		$invoice = $shipmentRtsRecordConfirm->getInvoice();
+		$invoiceService = new InvoiceService();
+		$invoiceService->printInvoice($invoice->id);
+
+
+	}
+
+	private function getRtsPackages($model)
+	{
+		$rtsPackages = ShipmentRtsRecord::model()->findAll("shipment_id = :shipment_id and status = 10",[":shipment_id"=>$model->id]);
+		$rtsObj = new stdClass();
+		$rtsObj->pkg = count($rtsPackages);
+		$rtsObj->cbm = $model->cbm;
+		if($rtsObj->pkg==$model->pkg)
+		{
+			$rtsObj->weight = $model->weight;
+		}else
+		{
+			$rtsObj->weight = number_format(($model->weight/$model->pkg)*$rtsObj->pkg,2,'.','');
+		}
+		return $rtsObj;
+	}
+
+	public function loadModel($id)
+	{
+		$model = ImParcel::model()->findByPk($id);
+
+		if ($model===null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		return $model;
+	}
+}

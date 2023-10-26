@@ -1,0 +1,99 @@
+<?php
+
+/**
+ * RequirementUserIdentity represents the data needed to identity a user.
+ * It contains the authentication method that checks if the provided
+ * data can identity the user.
+ */
+class RequirementUserIdentity extends CUserIdentity
+{
+	private $_id;
+    private $_isDriver;
+	
+	/**
+	 * Authenticates a user.
+	 * The example implementation makes sure if the username and password
+	 * are both 'demo'.
+	 * In practical applications, this should be changed to authenticate
+	 * against some persistent user identity storage (e.g. database).
+	 * @return boolean whether authentication succeeds.
+	 */
+	public function authenticate() {
+        $this->errorCode = self::ERROR_NONE;
+
+        $this->_isDriver = false;
+        // only driver can login by user identity
+		$submission = SalesfunnelRequirementsSubmission::model()->find(["condition"=>'status = 1 AND email ="'.$this->username.'"',"order"=>"id DESC"]);
+        // echo $submission->id;
+        // Yii::app()->end();
+
+        $this->setState('driver', false);
+        // we support customer login with custormer id and contact number
+        // ...        
+        if ( $submission != null && !empty($submission) ) {
+                $password = $submission->password;
+                if ($password == md5($this->password)) {                    
+                // we still get a real user id , if not existing in User table
+                // how to do this ???
+                $this->_id = $submission->id;
+                $this->setState('submission_id', $submission->id);
+                $this->setState('company_name', $submission->company_name);
+                $this->setState('first_name', $submission->first_name);
+                $this->setState('last_name', $submission->last_name);
+                $this->setState('email', $submission->email);
+                $this->setState('contact_number', $submission->contact_number);
+                $this->setState('status', $submission->status);
+                $this->setState('category',$submission->category);
+                $this->setState('forwarder_shippingagent',$submission->forwarder_shippingagent);
+                $this->setState('sub_status',$submission->sub_status);
+                $_POST['submissionModel'] = $submission;                               
+                
+                $this->errorCode = self::ERROR_NONE;
+            } else {
+                $this->errorCode = self::ERROR_PASSWORD_INVALID;
+            }
+        } else {
+            $this->errorCode = self::ERROR_USERNAME_INVALID;
+        }
+        return !$this->errorCode;
+
+	if ($submission === null) {
+		$this->errorCode = self::ERROR_USERNAME_INVALID;
+	} else if ($submission->password !== md5($this->password)) {
+		$this->errorCode = self::ERROR_PASSWORD_INVALID;
+	} else {
+		$this->_id = $submission->id;
+		$this->submission_id = $submission->id;
+        $this->setState('company_name', $submission->company_name);
+        $this->setState('first_name', $submission->first_name);
+        $this->setState('last_name', $submission->last_name);
+        $this->setState('email', $submission->email);
+        $this->setState('contact_number', $submission->contact_number);
+        $this->setState('status', $submission->status);
+        $this->setState('category',$submission->category);
+        $this->setState('forwarder_shippingagent',$submission->forwarder_shippingagent);
+        $this->setState('sub_status',$submission->sub_status);
+		$this->errorCode = self::ERROR_NONE;
+		$submission->logLogin();
+	}
+	return !$this->errorCode;
+}
+	
+	// public function getOrg(){
+ //        if ( $this->_isDriver ) {
+ //            $r = User::model()->findByPk($this->_id);
+ //            return $r->org;
+ //        } else {
+ //            $org = Org::model()->findByPk($this->_id);
+ //            return $org;
+ //        }
+	// }
+
+    public function isDriver(){
+        return $this->_isDriver;
+    }
+
+	public function getId(){
+		return $this->_id;
+	}
+}

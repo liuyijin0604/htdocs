@@ -1,0 +1,95 @@
+<h2>Consol Process</h2>
+<h3>Overview</h3>
+<style>
+   .cloumn_red_1{
+        color:red;
+        font-weight: bold;
+    }
+   #consol_process_dp_view .type_row,#consol_main_process_type_id .type_row {
+        color:rgb(119, 119, 218);
+        text-align: center;
+        font-size: 20px;
+        font-weight: bold;
+    }
+</style>
+<div style="width:30%;float: left;margin-top: 3em;">
+    <h3>Air Process</h3>
+    <?php  
+    $this->widget('zii.widgets.grid.CGridView',array(
+            'id'=>'consol_main_menue2'.$_GET['tabid'],
+            'cssFile' => false,
+            'dataProvider'=>$dataProvider[0],
+            'filter'=>$dataProvider[1],
+            'columns'=>array(
+           array('name'=>'status','headerHtmlOptions' => array('style' => 'display:none'),'filterHtmlOptions' => array('style' => 'display:none'),
+                'htmlOptions' => array('style' => 'display:none'),'type'=>'raw'),
+           array('name'=>'status','value'=>'@ConsolProcess::$states[$data["status"]]'),
+            'number',
+            array('name'=>'day1','header'=>'<=1 days'),
+            array('name'=>'day2','header'=>'2 days'),
+            array('name'=>'day3','header'=>'>=3 days','cssClassExpression' => '$data>0? "cloumn_red_1" : ""'),
+          
+        ),
+    ));?>
+</div>
+<div style="width:30%;float: left;margin-left: 3em;margin-top: 3em;">
+    <h3>Sea Process</h3>
+    <?php  
+    $this->widget('zii.widgets.grid.CGridView',array(
+            'id'=>'consol_main_menue3'.$_GET['tabid'],
+            'cssFile' => false,
+            'dataProvider'=>$dataProvider4[0],
+            'filter'=>$dataProvider4[1],
+            'columns'=>array(
+           array('name'=>'status','headerHtmlOptions' => array('style' => 'display:none'),'filterHtmlOptions' => array('style' => 'display:none'),
+                'htmlOptions' => array('style' => 'display:none'),'type'=>'raw'),
+           array('name'=>'status','value'=>'@ConsolProcess::$newSeaStates[$data["status"]]'),
+            'number',
+            array('name'=>'day1','header'=>'<=2 weeks'),
+            array('name'=>'day2','header'=>'<=1 month'),
+            array('name'=>'day3','header'=>'>1 month','cssClassExpression' => '$data>0? "cloumn_red_1" : ""'),
+          
+        ),
+    ));?>
+</div>
+<div class="pane" id="consol_process_dp_view" style="width:200px">
+    <?php 
+    $column=[];
+    $column[]=array('name'=>'pod_id','headerHtmlOptions' => array('style' => 'display:none'), 'filterHtmlOptions' => array('style' => 'display:none'),
+                        'htmlOptions' => array('style' => 'display:none'), 'type' => 'raw');
+    $column[]=array('name'=>'pod','type'=>'raw','cssClassExpression'=>'"type_row"');
+//    $process=ConsolProcess::$states;
+//    unset($process[80]);
+//    foreach($process as $key=>$value){
+//        $column[]=array('name'=>$key,'header'=>$value);
+//    }
+    $this->widget('zii.widgets.grid.CGridView',array(
+            'id'=>'consol_main_menue'.$_GET['tabid'],
+            'cssFile' => false,
+            'dataProvider'=>$dataProvider1[0],
+            'columns'=>$column,
+    ));?>
+</div>
+<div  class="pane" id="consol_process_dp_view_type">
+<?=$this->render('sub_type_list',array('dataProvider2'=>$dataProvider2,'dataProvider3'=>$dataProvider3,'name'=>$name,'dataProvider5'=>$dataProvider5));?>
+</div>
+<script>
+    $(function(){
+       var tab=$("<?=$_GET['tabid']?>");
+       var panel=tab.data('panel');
+       $("#consol_process_dp_view",panel).on('click',"table tbody td",function(){
+         var podId=parseInt($(this).parent().children(':nth-child(1)').html());
+         var data = {};
+        data['pod_id'] = podId;
+        $.ajax({
+            type : 'GET',
+            url : '<?php echo Yii::app()->createAbsoluteUrl("consolProcess/typeList",array('tabid'=>$_GET['tabid'])) ;?>',
+            data: data,
+            dataType: 'html',
+            success:function(resp){
+                $('#consol_process_dp_view_type').html(resp);
+            },
+        });
+       })
+   })
+</script>

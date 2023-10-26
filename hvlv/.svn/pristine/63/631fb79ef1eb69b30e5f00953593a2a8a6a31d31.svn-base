@@ -1,0 +1,263 @@
+<?php
+class rayCommand extends CConsoleCommand {
+	private $db, $args, $tmp,$parent;
+	private $debug = false;
+
+	public function run($args) {
+		$this->db = Yii::app()->getDb();
+		$this->args = $args;
+		$this->tmp = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR;
+
+		foreach($this->args as $ag){
+			if($ag == '-d') $this->debug = true;
+		}
+		if(!empty($args[0]) && method_exists($this, $args[0])){
+			$this->{$args[0]}();
+		}
+	}
+
+	public function testTntBne()
+	{
+		$model = TntAPI::getTntInterface('bne');
+		$result = $model->genTNTConsignmentNo();
+		print_r($model);
+		print_r($result);
+	}
+
+	public function testFakShipments()
+	{
+		$imparcelService = new ImParcelService();
+		$imparcelService->sendFakEmailDaily();
+		print_r('successsss');
+		// print_r(array_column($shipments, 'status'));
+		// echo count($shipments);
+	}
+
+	public function testImportConsol()
+	{
+		print_r('successsss');
+		
+		$xls = new oExcel;
+		$xls->load('C:\xampp\htdocs\hvlv_branch\ims\imco_consol_import_template_217-92198223.xlsx');
+		$data = $xls->getAll();
+		if (strpos('WarehouseAWB NoAirlineFlight No.POLPODETDETAAWB weightChargable Wt.B/L pcsShipperShipper addressConsigneeConsignee addressPMC(1)/AKE(2)/Loose(3)Consignment NumbersBag',implode('', $data[1])) != 0) {
+						$err[] = "template wrong";
+					}
+		if (!empty($err)) {
+			$resp['msg'] = implode(';', $err);
+			$resp['done'] = false;
+			echo json_encode($resp);
+			return;
+		}
+		unset($data[1]);
+		$last_consolno = 0;
+
+		foreach ($data as $i => $d) {
+			if (empty($d[17])) {
+				continue;
+			}
+
+			if ($last_consolno != 1) {
+				if (empty($d[5])) {
+					$d[5] = null;    // POL is empty 
+					continue;
+				} else if (empty($d[6])) {
+					$err[] = "Line " . $i . " POD is empty!";
+					continue;
+				} else if (empty($d[8])) {
+					$err[] = "Line " . $i . " ETA Time is empty!";
+					continue;
+				}
+				$last_consolno = 1;
+				$depot = 0;
+				if(!empty(trim($d[1]))){
+					if(!preg_match('/106|218|530|811|529/i',trim($d[1]))){
+						$depot = self::getDepotId(trim($d[1]));
+					}else{
+						$depot = trim($d[1]);
+					}
+				}
+				$tasks[1] = array(
+				'dpt_id' => $depot,
+				'service' => 10,//10 air 20 sea
+				'awb' => trim($d[2]),
+				'airline' => trim($d[3]),
+				'flight' => trim($d[4]),
+				'pol' => trim($d[5]),
+				'pod' => trim($d[6]),
+				'etd' => oExcel::toDate($d[7]),
+				'eta' => oExcel::toDate($d[8]),
+				'ignore'=> "",
+				'mdata[awb_wt]' => trim($d[9]),
+				'mdata[cgb_wt]' => trim($d[10]),
+				'mdata[b&l_pcs]' => trim($d[11]),
+				'mdata[cnor]' => trim($d[12]),
+				'mdata[cnor_addr]' => trim($d[13]),
+				'mdata[cnee]' => trim($d[14]),
+				'mdata[cnee_addr]' => trim($d[15]),
+				'mdata[air_type]' => trim($d[16]),
+				'consignment' => []
+				);
+			}
+			if (empty($d[17])) {
+				$err[] = "line " . $i . " Consignment Numbers is empty!";
+				continue;
+			}
+
+			$h = trim($d[17]);
+			if(preg_match('/[\t ]+/', trim($d[17]))){
+				$ts = preg_split('/[\t ]+/', trim($d[17]));
+				$h = trim($ts[0]);
+			}
+
+			//bagTag
+			$bagTag = trim($d[18]);
+
+			$p = ImParcel::model()->find('(hbn = :h OR ref = :h) AND (cbwf&:cbwf)=0', [':h' => $h,':cbwf'=> ImParcel::CBWF_D2Z_CONSOL_NOT_FOR_SCAN]);
+			if (empty($p)) {
+				$err[] = "line " . $i . " Consignment Numbers ".trim($d[17])." not found!";
+				continue;
+			}
+			
+			$tasks[1]['consignment'][] = array(
+				'ref' => $h,
+				'bagTag' => $bagTag,//bagtag
+			);
+		
+		}
+		if (!empty($err)) {
+			$resp['msg'] = implode('<br />', $err);
+			$resp['done'] = false;
+			echo json_encode($resp);
+			return;
+		}
+		foreach ($tasks as $temp_task) {
+
+			$model = new ImcoConsol;
+			$errors=[];
+			if (empty($temp_task)) {
+				continue;
+			}else{
+				$selected_services=[];
+				$ignore_depot = empty($temp_task['ignore'])?0:1;
+
+				foreach ($temp_task['consignment'] as $temp_label){
+					$h = $temp_label['ref'];
+					if(preg_match('/[\t ]+/',$temp_label['ref'])){
+						$ts = preg_split('/[\t ]+/', $temp_label['ref']);
+						$h = trim($ts[0]);
+					}
+					$p = ImParcel::model()->find('(hbn = :h OR ref = :h) AND (cbwf&:cbwf)=0', [':h' => $h,':cbwf'=> ImParcel::CBWF_D2Z_CONSOL_NOT_FOR_SCAN]);
+					$model->checkImparcel($p,$errors, $selected_services,$h,$_POST['ImcoConsol']['dpt_id'],$ignore_depot);
+				}
+
+				if (sizeof($selected_services)>=1) {
+					asort($selected_services);
+					$selected_services= array_reverse($selected_services, true);
+					$the_service=key($selected_services)-(key($selected_services)&32);
+
+				}
+				foreach ($temp_task['consignment'] as $temp_label){
+					$h = $temp_label['ref'];
+					if(preg_match('/[\t ]+/',$temp_label['ref'])){
+						$ts = preg_split('/[\t ]+/', $temp_label['ref']);
+						$h = trim($ts[0]);
+					}
+
+					$p = ImParcel::model()->find('(hbn = :h OR ref = :h)', [':h' => $h]);
+					$model->checkServiceErrors($p,$the_service,$errors,$h);
+				}
+
+				if (!empty($errors)) {
+					$model->addError('shipment', implode(';', $errors));
+					$this->ajaxResult($model);
+				}
+
+				$model->dpt_id=$temp_task['dpt_id'];
+				$model->service=$temp_task['service'];
+				$model->awb=$temp_task['awb'];
+				$model->airline=$temp_task['airline'];
+				$model->flight=$temp_task['flight'];
+				$model->pol=$temp_task['pol'];
+				$model->pod=$temp_task['pod'];
+				$model->etd=$temp_task['etd'];
+				$model->eta=$temp_task['eta'];
+				$model->awb=$temp_task['awb'];
+				$model->mdata['awb_wt'] = $temp_task['mdata[awb_wt]'];
+				$model->mdata['cgb_wt'] = $temp_task['mdata[cgb_wt]'];
+				$model->mdata['b&l_pcs'] = $temp_task['mdata[b&l_pcs]'];
+				$model->mdata['cnor'] = $temp_task['mdata[cnor]'];
+				$model->mdata['cnor_addr'] = $temp_task['mdata[cnor_addr]'];
+				$model->mdata['cnee'] = $temp_task['mdata[cnee]'];
+				$model->mdata['cnee_addr'] = $temp_task['mdata[cnee_addr]'];
+				$model->mdata['air_type'] = $temp_task['mdata[air_type]'];
+				$model->status = 10;
+				$model->save();
+
+				$transaction=Yii::app()->db->beginTransaction();
+				try {
+					foreach ($temp_task['consignment'] as $temp_label) {
+						$h = $temp_label['ref'];
+						if (!empty($temp_label['ref'])) {
+							$ts = preg_split('/[\t ]+/', $temp_label['ref']);
+							$h = trim($ts[0]);
+							$wt = trim($ts[1]);
+						}
+						$p = ImParcel::model()->find('(hbn = :h OR ref = :h) AND cbwf&:cbwf=0', [':h' => $h,':cbwf'=> ImParcel::CBWF_D2Z_CONSOL_NOT_FOR_SCAN]);
+						if(!empty($model->id))
+						{
+							$model->putImparcelIntoConsol($p,@$wt);
+						}
+
+
+						if(!empty($temp_label['bagTag'])){
+							$bag = $temp_label['bagTag'];
+							if(!empty($bag) && strlen($bag)<=45){
+								$objBag = ImportBag::model()->find('bag_tag = :bag_tag',[':bag_tag'=>$bag]);
+								if(empty($objBag)){
+									$objBag = new ImportBag();
+									$objBag->user_id= 1;
+									$objBag->bag_tag = $bag;
+									$objBag->created = date("Y-m-d H:i:s");
+									$objBag->save();
+								}
+
+								//bagtag
+								$bagTag = ImportBagTag::model()->find('shipment_id = :shipment_id',[':shipment_id'=>$p->id]);
+								if(empty($bagTag)){
+									$bagTag = new ImportBagTag();
+								}
+								$bagTag->bag_tag = $bag;
+								$bagTag->import_bag_id = $objBag->id;
+								$bagTag->shipment_id = $p->id;
+								$bagTag->save();
+							}
+						}
+					}
+					$transaction->commit();
+					
+				}
+				catch(Exception $ex){
+					$transaction->rollback();
+					throw $ex;
+				}
+			}
+		}
+		echo json_encode($resp);
+	}
+	public static function getDepotId($code){
+		switch($code){
+			case 'AUSYD':
+				return 106;
+			case 'AUMEL':
+				return 218;
+			case 'AUBNE':
+				return 530;
+			case 'AUPER':
+				return 811;
+			case 'AUADL':
+				return 529;	
+		}
+	}
+	
+}

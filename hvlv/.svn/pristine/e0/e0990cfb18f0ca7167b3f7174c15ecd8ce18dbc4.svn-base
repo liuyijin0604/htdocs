@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-MrcW6ZMFYlzcLA8Nl+NtUVF0sA7MsXsP1UyJoMp4YLEuNSfAP+JcXn/tWtIaxVXM" crossorigin="anonymous"></script>
+    <!-- jQuery -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <!-- reCaptcha  -->
+    <!-- <script src="https://www.google.com/recaptcha/api.js"></script> -->
+    <!-- Custom CSS -->
+    <style>
+        .pe-label {
+            font-weight: 600;
+        }
+
+        .text-input-row {
+            margin-top: 8px;
+        }
+
+        #displayPrice {
+            display: none;
+        }
+
+        .invalid{
+            color: red;
+        }
+    </style>
+    <title>Customer Login</title>
+</head>
+
+<body>
+    <div class="container-lg">
+        <br />
+        <main id="site-content" role="main">
+
+            <form id="requirementLoginForm" name="requirementLoginForm" action="<?=$this->createUrl('salesfunnelCustomerLogin/customerLogin');?>" method="post">
+                <div class="container" id="items">
+                    <header class="entry-header has-text-align-center header-footer-group">
+                        <div class="entry-header-inner section-inner medium">
+                            <h1 class="entry-title">Customer Requirements Login</h1>
+                        </div><!-- .entry-header-inner -->
+                    </header>
+                    <div class="item" id="invalid_detail">
+<?php
+    if(@$invalid==1){
+        echo '<label class="invalid">Invalid login detail</label>';
+    } 
+?>                        
+                    </div>                    
+
+                    <div class="item" id="item">
+                        <div class="row">
+                            <div class="col-md-12">
+                                <label for="email" class="form-label pe-label text-input-row">Email address</label>
+                                <input type="email" class="form-control" id="email" name="RequirementLoginForm[email]" placeholder="xxxxxx@xx.xx" pattern="[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,4}$" required >
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-12">
+                                <label for="contact_number" class="form-label pe-label text-input-row">Password</label>
+                                <input type="password" class="form-control" id="password" name="RequirementLoginForm[password]" placeholder="xxxxxxxx" required >
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="formField">
+                                <input name="RequirementLoginForm[vvc]" type="text" id="lf_vvc" autocomplete="off" style="width:80px;" maxlength="8" class="required" minlength="4" />
+                                <img src="" id="capcha" title="<?=$this->t('Click to Reload');?>" alt="CAPTCHA" style="left:10px;top:5px;cursor:pointer;" />
+                            </div>
+                     </div>
+                    </div>
+                </div>
+                <br><br><br>
+                
+                <!-- <div class="g-recaptcha" data-sitekey="6LfyO2saAAAAAJ6CdVI_q_Nt8pFZkcVqbO7aGZHJ" style="float:left"></div> -->
+                <div class="col-12">
+                    <button type="submit" class="btn btn-primary" onclick="return submitForm();">Login</button>
+                </div>
+            </form>
+        </div>
+
+    <script type="text/javascript">
+
+        function submitForm() {
+
+            let email = $('#email').val();
+            let valid = email.match(
+                /^(([^<>()[\]\\.,;:\s@\"]+(\.[^<>()[\]\\.,;:\s@\"]+)*)|(\".+\"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/
+              );
+
+              if (!valid) {
+                alert("email is not valid");
+                return false;
+              }
+              
+            // alert("");
+             return true;
+
+        }
+
+            //prep captcha
+            $('#capcha').on('reload', function(){
+                $(this).attr('src','../salesfunnelCustomerLogin/captcha/' + Math.round(100*Math.random()));
+            }).on('click', function(){ $(this).trigger('reload'); });
+
+             $('#password').on('focus',function(){
+                $('#capcha').trigger('reload');
+            });
+            $('#password').focus();
+
+
+    </script>
+
+    
+</body>
+
+</html>

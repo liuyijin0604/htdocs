@@ -1,0 +1,320 @@
+<style type="text/css">
+    .container
+    {
+        width:100%;
+    }
+    .cloumn_red_1
+    {
+        background-color: red;
+    }
+
+</style>
+<?php
+$this->widget('zii.widgets.CBreadcrumbs', array(
+        'homeLink'=>CHtml::link('Home', array('site/index')),
+        'links' => array(
+        'TRUCK DELIVERY/PICKUP Parcel Prepare List',
+    ),
+));
+// $form=$this->beginWidget('CActiveForm', array(
+//     'id'=>'ad_search_form',
+//     'enableAjaxValidation'=>false,
+//     ));
+?>
+<div id="show_searching" style="<?=!empty($notSearch)?"display:none":""?>">
+<div class="form-group">
+<?= CHtml::dropDownList('ddpt_id_drop', $ddpt_id, $this->t(Org::$importWarehouseList),['class'=>'form-control','style'=>'width:10em;float:left;']);?>
+</div>
+<br>
+<div class="form-group">
+<?= CHtml::label('Gatepass No.','Gatepass No.');?><?= CHtml::label('Pickup date.','Pickup date',["style"=>"margin-left:7em;"]);?>
+<br>
+<?= CHtml::textField('gatepassNo', '',['class'=>'form-control','style'=>'width:10em;float:left;']);?><?= CHtml::dropDownList('pickupDate','', ["today"=>"today","tomorrow"=>"tomorrow","after tomorrow"=>"after tomorrow"],['class'=>'form-control','style'=>'width:10em;float:left;margin-left:3em;','prompt'=>'SELECT']);?>
+</div>
+<br>
+<br>
+<?=CHtml::submitButton('Search',array('class'=>'form-control search','style'=>'width:5em;float:left;','id'=>'search'));// $this->endWidget();?>
+<br/><br/><br/><br/>
+</div>
+<?php
+    if(!empty($notSearch))
+    {
+       echo "<h3>".CargoProcess::$cargoTypeList[$cargoType]."</h3>";
+       echo "<h3>".(empty($gatepassNo)?"":"GatepassNo:&nbsp;".$gatepassNo)."</h3>";
+    }
+?>
+<?=CHtml::button('All Done',array('class'=>'form-control allDone','style'=>'width:5em;float:left;','id'=>'allDone'));?>
+<br/>
+
+<?php
+    if(!empty($notSearch))
+    {
+         $this->widget('application.extensions.booster.TbExtendedGridView',array(
+                        'fixedHeader'=>true,
+                        'id'=>'gatepass_shipment_signature_1',
+                        'filter'=>$cargo,
+                        'type'=>'striped bordered',
+                        'headerOffset'=>40,
+                        'responsiveTable'=>true,
+                        'dataProvider'=>$cargo->getNeedPrepareParcel(true, 200,false,true,$ddpt_id,null),
+                        'template' => "{summary}\n{items}\n{pager}",
+                        'afterAjaxUpdate'=>'function(){initDone();}',
+                        'columns'=>[        
+                            array('header'=>'select','type'=>'raw','value'=>'CHtml::checkBox("shipmentId",false,["value"=>"$data->id"])','filter'=>'<input id="select_all" type="checkbox" value="1" name="select All"> all<input id="ids" type="hidden" name="ids" value="'.@$cargo->ids.'"><input id="selected_shipmentIds" type="hidden" value="" name="selected_shipmentIds">'.CHtml::hiddenField("gatepass_no",$cargo->gatepassNo,["class"=>"form-control"]).CHtml::hiddenField("pickup_date",$cargo->pickupDate,["class"=>"form-control"])),
+                            array('name' => 'hbn','filter'=>CHtml::hiddenField("ddpt_id",$ddpt_id,["class"=>"form-control"]).CHtml::hiddenField("Operation",0,["class"=>"form-control"]).CHtml::textField("CargoProcess[hbn]",@$cargo->hbn,["class"=>"form-control"])),
+                            array('name' => 'ref','filter'=>CHtml::textField("CargoProcess[ref]",@$cargo->ref,["class"=>"form-control"])),
+                            ['name' => 'shipment.consol.no', 'type'=>'raw','filter'=>CHtml::textField('CargoProcess[consol_no]', $cargo->consol_no)],
+                            ['name'=>'shipment.consol.service','value'=>'@Consol::$services[$data->shipment->consol->service]'],
+                            ['name'=>'shipment.can','filter'=>CHtml::textField('CargoProcess[memo]',@$cargo->memo,["class"=>"form-control"])],
+                            ['name' => 'status', 'value' => 'CargoProcess::$processTypes[$data->status]','filter'=>CHtml::dropDownList('CargoProcess[status]', $cargo->status, $this->t(CargoProcess::$processTypesShort), ['prompt'=>$this->t('All')]),],
+                            // ['name' => 'deliveryBookingTime','header'=>'Delivery/Pickup booking time','value' => '$data->getDeliveryBookingTime()','cssClassExpression' => '$data->getShowColor()','filter'=>CHtml::textField('CargoProcess[deliveryBookingTime]',@$cargo->getBookingTime())],
+                            ['header' => 'Location','type'=>'raw', 'value' => '$data->shipment->getRackName(true,true)'],
+                            ['header' => 'pickupBookingTime','header'=>'Pickup booking time','value' => '!empty($data->mdata["pickup_booking_time"])?$data->mdata["pickup_booking_time"]:@$data->shipment->mdata["pickup_booking_time"]','cssClassExpression' => '$data->getShowColor("pickup")','filter'=>CHtml::textField('pickup_booking_time',@$cargo->pickupBookingTime,["class"=>"form-control"])],
+                            ['name' => 'cargoType','value'=> 'CargoProcess::$cargoTypeList[$data->type]','filter'=>CHtml::dropDownList('CargoProcess[type]', $cargo->type, $this->t(CargoProcess::$cargoTypeList), ['prompt'=>$this->t('All')]),],
+                            ['name'=>'note','filter'=>false],
+                            array('header' => 'Wrap', 'type'=>'raw', 'value'=>'@$data->shipment->mdata["pickup_booking_wrap"]'),
+                            array('name'=>'driver.name','filter'=>CHtml::dropDownList('CargoProcess[driver_id]',@$cargo->driver_id, @Org::getDriverList($cargo->getDriverTypes()),array('prompt'=>'Select','style'=>'width:5em;'))),
+                            ['name'=>'shipment.cnee.name'],//,'filter'=>CHtml::textField('CargoProcess[cname]',@$cargo->cname,["class"=>"form-control"])],
+                            ['name' => 'shipment.pkg'],//,'filter'=>CHtml::textField('pkg', $cargo->pkg,["class"=>"form-control","style"=>"width:40px;"])],
+                            ['name'=>'shipment.weight'],//,'filter'=>CHtml::textField('CargoProcess[weight]',@$cargo->weight,["class"=>"form-control"])],
+                            ['name' =>'shipment.cbm'],//'value'=>'$data->shipment->getTotalCBM()','filter'=>CHtml::textField('CargoProcess[cbm]',@$cargo->cbm,["class"=>"form-control"])],
+                            ['header' =>'pallet','type'=>'raw','value'=>'$data->getPltStr()'],//,'filter'=>CHtml::textField('CargoProcess[plt]',@$cargo->plt,["class"=>"form-control"])],
+                             array('header'=>'Storage Fee','value'=>'$data->getStorageFee(0)'),
+                            array('header'=>'Storage Days','value'=>'$data->getStorageFee(1)'),
+                             array('header'=>'Storage Start Date','type'=>'raw','value'=>'$data->getStorageFee(2,true)'),
+                            ['class'=>'oButtonColumn',
+                                'template'=>'{done}&nbsp;&nbsp;{reject}&nbsp;&nbsp;{log}',
+                                'buttons'=>[
+                                     'done' => [
+                                        'imageUrl'=>false,
+                                        'options' => ['class' => 'grid_edit_btn prepare_done', 'label' => 'Done', 'data-win-class' => 'L','title'=>'$data->id','value'=>'1'],
+                                        'visible' => 'true',
+                                        'url' => 'Yii::app()->createUrl("/gapsig/gatePass/prepareDone", ["id" => $data->id])',
+                                        'label' => 'Done'
+                                    ],
+                                    'reject' => [
+                                        'imageUrl'=>false,
+                                        'options' => ['class' => 'grid_edit_btn prepare_cancel', 'label' => 'Done', 'data-win-class' => 'L','title'=>'$data->id','value'=>'1'],
+                                        'visible' => 'true',
+                                        'url' => 'Yii::app()->createUrl("/gapsig/gatePass/prepareCancel", ["id" => $data->id])',
+                                        'label' => 'Reject'
+                                    ],
+                                    'log' => [
+                                        'imageUrl'=>false,
+                                        'options' => ['class' => 'jqm_link grid_view_btn', 'label' => 'Log', 'data-win-class' => 'L'],
+                                        'visible' => 'false',
+                                        'url' => 'Yii::app()->createUrl("cargoProcess/log", ["id" => $data->id])',
+                                        'label' => 'Log'
+                                    ],
+                                ],
+                            ]
+                        ],
+                    ));
+    }else
+    {
+         $this->widget('application.extensions.booster.TbExtendedGridView',array(
+                        'fixedHeader'=>true,
+                        'id'=>'gatepass_shipment_signature_1',
+                        'filter'=>$cargo,
+                        'type'=>'striped bordered',
+                        'headerOffset'=>40,
+                        'responsiveTable'=>true,
+                        'dataProvider'=>$cargo->getNeedPrepareParcel(true, 200,false,true,$ddpt_id,null),
+                        'template' => "{summary}\n{items}\n{pager}",
+                        'afterAjaxUpdate'=>'function(){initDone();}',
+                        'columns'=>[        
+                            array('header'=>'select','type'=>'raw','value'=>'CHtml::checkBox("shipmentId",false,["value"=>"$data->id"])','filter'=>'<input id="select_all" type="checkbox" value="1" name="select All"> all<input id="ids" type="hidden" name="ids" value="'.@$cargo->ids.'"><input id="selected_shipmentIds" type="hidden" value="" name="selected_shipmentIds">'.CHtml::hiddenField("gatepass_no",$cargo->gatepassNo,["class"=>"form-control"]).CHtml::hiddenField("pickup_date",$cargo->pickupDate,["class"=>"form-control"])),
+                            array('name' => 'hbn','filter'=>CHtml::hiddenField("ddpt_id",$ddpt_id,["class"=>"form-control"]).CHtml::hiddenField("Operation",0,["class"=>"form-control"]).CHtml::textField("CargoProcess[hbn]",@$cargo->hbn,["class"=>"form-control"])),
+                            array('name' => 'ref','filter'=>CHtml::textField("CargoProcess[ref]",@$cargo->ref,["class"=>"form-control"])),
+                            ['name' => 'shipment.consol.no', 'type'=>'raw','filter'=>CHtml::textField('CargoProcess[consol_no]', $cargo->consol_no)],
+                            ['name'=>'shipment.consol.service','value'=>'@Consol::$services[$data->shipment->consol->service]'],
+                            ['name'=>'shipment.can','filter'=>CHtml::textField('CargoProcess[memo]',@$cargo->memo,["class"=>"form-control"])],
+                            ['name' => 'status', 'value' => 'CargoProcess::$processTypes[$data->status]','filter'=>CHtml::dropDownList('CargoProcess[status]', $cargo->status, $this->t(CargoProcess::$processTypesShort), ['prompt'=>$this->t('All')]),],
+                            ['name'=>'shipment.status','value' => '$data->shipment->getStatus()'],
+                            // ['name' => 'deliveryBookingTime','header'=>'Delivery/Pickup booking time','value' => '$data->getDeliveryBookingTime()','cssClassExpression' => '$data->getShowColor()','filter'=>CHtml::textField('CargoProcess[deliveryBookingTime]',@$cargo->getBookingTime())],
+                            ['header' => 'Location','type'=>'raw', 'value' => '$data->shipment->getRackName(true,true)'],
+                            ['header' => 'pickupBookingTime','header'=>'Pickup booking time','value' => '@$data->shipment->mdata["pickup_booking_time"]','cssClassExpression' => '$data->getShowColor("pickup")','filter'=>CHtml::textField('pickup_booking_time',@$cargo->pickupBookingTime,["class"=>"form-control"])],
+                            ['name' => 'cargoType','value'=> 'CargoProcess::$cargoTypeList[$data->type]','filter'=>CHtml::dropDownList('CargoProcess[type]', $cargo->type, $this->t(CargoProcess::$cargoTypeList), ['prompt'=>$this->t('All')]),],
+                            'note',
+                            array('header' => 'Wrap', 'type'=>'raw', 'value'=>'@$data->shipment->mdata["pickup_booking_wrap"]'),
+                            array('name'=>'driver.name','filter'=>CHtml::dropDownList('CargoProcess[driver_id]',@$cargo->driver_id, @Org::getDriverList($cargo->getDriverTypes()),array('prompt'=>'Select','style'=>'width:5em;'))),
+                            ['name'=>'shipment.cnee.name','filter'=>CHtml::textField('CargoProcess[cname]',@$cargo->cname,["class"=>"form-control"])],
+                            ['name' => 'shipment.pkg','filter'=>CHtml::textField('pkg', $cargo->pkg,["class"=>"form-control","style"=>"width:40px;"])],
+                            ['name'=>'shipment.weight','filter'=>CHtml::textField('CargoProcess[weight]',@$cargo->weight,["class"=>"form-control"])],
+                            ['name' =>'shipment.cbm','value'=>'$data->shipment->getTotalCBM()','filter'=>CHtml::textField('CargoProcess[cbm]',@$cargo->cbm,["class"=>"form-control"])],
+                            ['header' =>'pallet','type'=>'raw','value'=>'$data->getPltStr()','filter'=>CHtml::textField('CargoProcess[plt]',@$cargo->plt,["class"=>"form-control"])],
+                             array('header'=>'Storage Fee','value'=>'$data->getStorageFee(0)'),
+                            array('header'=>'Storage Days','value'=>'$data->getStorageFee(1)'),
+                             array('header'=>'Storage Start Date','type'=>'raw','value'=>'$data->getStorageFee(2,true)'),
+                            ['class'=>'oButtonColumn',
+                                'template'=>'{done}&nbsp;&nbsp;{reject}&nbsp;&nbsp;{log}',
+                                'buttons'=>[
+                                     'done' => [
+                                        'imageUrl'=>false,
+                                        'options' => ['class' => 'grid_edit_btn prepare_done', 'label' => 'Done', 'data-win-class' => 'L','title'=>'$data->id','value'=>'1'],
+                                        'visible' => 'true',
+                                        'url' => 'Yii::app()->createUrl("/gapsig/gatePass/prepareDone", ["id" => $data->id])',
+                                        'label' => 'Done'
+                                    ],
+                                    'reject' => [
+                                        'imageUrl'=>false,
+                                        'options' => ['class' => 'grid_edit_btn prepare_cancel', 'label' => 'Done', 'data-win-class' => 'L','title'=>'$data->id','value'=>'1'],
+                                        'visible' => 'true',
+                                        'url' => 'Yii::app()->createUrl("/gapsig/gatePass/prepareCancel", ["id" => $data->id])',
+                                        'label' => 'Reject'
+                                    ],
+                                    'log' => [
+                                        'imageUrl'=>false,
+                                        'options' => ['class' => 'jqm_link grid_view_btn', 'label' => 'Log', 'data-win-class' => 'L'],
+                                        'visible' => 'false',
+                                        'url' => 'Yii::app()->createUrl("cargoProcess/log", ["id" => $data->id])',
+                                        'label' => 'Log'
+                                    ],
+                                ],
+                            ]
+                        ],
+                    ));
+    }
+           
+
+?> 
+
+<script type="text/javascript">
+    function initDone()
+    {
+        var notSearch = "<?=@$notSearch?>";
+        if(notSearch!="")
+        {
+            filterObjs = $('.filters>td');
+            for (var i = 0; i < filterObjs.length; i++) {
+                if(i>2)
+                {
+                    filterObjs[i].setAttribute('style','display:none');
+                }
+            }
+        }
+         $('.prepare_done').on('click', function(evt){
+            if(confirm('Are you sure to done this parcel?'))
+                {
+                    let id = $(this).attr('title');
+                     let grid = $(this).attr('value');
+                    $.ajax({
+                        url: '<?=$this->createUrl("gatePass/prepareDone")."?id="?>'+id,
+                        type: "get",
+                        dataType:'json',
+                        success: function(r) {
+                            if(r.done)
+                            {
+                                $("#gatepass_shipment_signature_1").yiiGridView('update');
+                            }
+
+                         },
+                        error: function(e) {
+                            console.log(e);
+                        }
+                    });
+                }
+                 return false;
+            });
+        $('.prepare_cancel').on('click', function(evt){
+            if(confirm('Are you sure to cancel this parcel?'))
+                {
+                    let id = $(this).attr('title');
+                     let grid = $(this).attr('value');
+                    $.ajax({
+                        url: '<?=$this->createUrl("gatePass/prepareCancel")."?id="?>'+id,
+                        type: "get",
+                        dataType:'json',
+                        success: function(r) {
+                            if(r.done)
+                            {
+                                 $(".search").click();
+                                //$('#gatepass_shipment_signature_'+grid).yiiGridView('update');
+                            }
+
+                         },
+                        error: function(e) {
+                            console.log(e);
+                        }
+                    });
+                }
+                 return false;
+            });
+
+        ccheck = 0;
+        $('#select_all').on('change',function()
+        {
+            if(ccheck==0)
+            {
+                $("input[name='shipmentId']").click();
+                ccheck = 1;
+            }else
+            {
+                $("input[name='shipmentId']").removeAttr("checked");
+                ccheck = 0;
+            }
+            return false;
+        });
+    }
+
+    $(function(){
+            $('#ad_search_form').on('submit', function(evt){
+                var f = $(this);
+                if(!f.data('ajaxf')){
+                    f.ajaxForm({
+                        success: function(r,s,x,f) {
+                           $('#main').html(r);
+                        },
+                        type: "get",
+                        dataType: 'html',
+                    });
+                    f.data('ajaxf', true);
+                    f.submit();
+                    return false;
+                    }
+            });
+            initDone();
+            $('#allDone').on('click',function(){
+                bootbox.confirm("Mark all as doned?", function(result) 
+                {
+                    if(result)
+                    {
+                        selectedIds = "";
+                        $('input:checkbox[name=shipmentId]:checked').each(function(i){
+                           if(0==i){
+                             selectedIds = $(this).val();
+                           }else{
+                             selectedIds += (","+$(this).val());
+                           }
+                        });
+
+                        if(selectedIds=="")
+                        {
+                           alert("Please Select Parcels!");
+                         $('#notifc').notify({message: {html: 'Please Select Parcels!'},type: 'danger'}).show();
+                           return false;
+                        }else
+                        {
+                            $('#selected_shipmentIds').val(selectedIds);
+                        }
+                        $('#gatepass_no').val($('#gatepassNo').val());
+
+                        $('#Operation').val(1);
+                        $('#ddpt_id').val($('#ddpt_id_drop').val());
+                        $("#gatepass_shipment_signature_1").yiiGridView('update', {data: $('.filters input, .filters select').serialize() + '&' + $(this).serialize()});;
+                    }
+                });
+            });
+
+            $('#search').on('click',function(){
+                        $('#gatepass_no').val($('#gatepassNo').val());
+                        $('#pickup_date').val($('#pickupDate').val());
+                        $('#ddpt_id').val($('#ddpt_id_drop').val());
+                        $("#gatepass_shipment_signature_1").yiiGridView('update', {data: $('.filters input, .filters select').serialize() + '&' + $(this).serialize()});;
+            });
+        
+    });
+
+
+</script>
+    

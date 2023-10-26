@@ -1,0 +1,108 @@
+<?php $podName=Org::dptList()[$_GET['pod_id']];
+$type=$_GET['consol_type']==20?"Sea":"Air";?>
+<h2><?=$podName."-".$type?> Consol Processing</h2>
+<div style="position: absolute; right:80px;">
+    <a class="tab_link"  href="<?=$this->createUrl("consolProcess/newConsol", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type']])?>" title="<?=$podName."-".$type?> New" ><span style="background-position:-48px -688px" class="icon"></span>New</a>
+    <a class="tab_link"  href="<?=$this->createUrl("consolProcess/waitAcr", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type']])?>" title="<?=$podName."-".$type?> Waiting ACR" ><span style="background-position:-48px -688px" class="icon"></span>Waiting ACR</a>
+    <a class="tab_link"  href="<?=$this->createUrl("consolProcess/waitUbm", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type']])?>" title="<?=$podName."-".$type?> Waiting UBM" ><span style="background-position:-48px -688px" class="icon"></span>Waiting UBM</a>
+    <a class="tab_link"  href="<?=$this->createUrl("consolProcess/waitAirportCheckIn", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type']])?>" title="<?=$podName."-".$type?> Waiting Airport Check In" ><span style="background-position:-48px -688px" class="icon"></span>Waiting Airport Check In</a>
+    <a class="tab_link"  href="<?=$this->createUrl("consolProcess/waitingDriverPickUp", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type']])?>" title="<?=$podName."-".$type?> Waiting Driver PickUp" ><span style="background-position:-48px -688px" class="icon"></span>Waiting Driver PickUp</a>
+    <a class="tab_link"  href="<?=$this->createUrl("consolProcess/waitingWhScan", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type']])?>" title="<?=$podName."-".$type?> Waiting WH Scan" ><span style="background-position:-48px -688px" class="icon"></span>Waiting WH Scan</a>
+    <a class="tab_link"  href="<?=$this->createUrl("consolProcess/waitingAirout", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type']])?>" title="<?=$podName."-".$type?> Waiting AirOut/Manifest" ><span style="background-position:-48px -688px" class="icon"></span>Waiting AirOut/Manifest</a>
+    <a class="tab_link"  href="<?=$this->createUrl("consolProcess/waitingInvoice", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type']])?>" title="<?=$podName."-".$type?> Waiting create Invoice" ><span style="background-position:-48px -688px" class="icon"></span>Waiting create Invoice</a>
+    <a class="tab_link"  href="<?=$this->createUrl("consolProcess/processDone", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type']])?>" title="<?=$podName."-".$type?> Process Done" ><span style="background-position:-48px -688px" class="icon"></span>Process Done</a>
+</div>
+<br>
+<br>
+<style>
+    .cloumn_red_1{
+        color:red;
+        font-weight: bold;
+    }   
+</style>
+
+<div style="width:50%" id="consols-client-view<?=$_GET['tabid']?>">
+   <?php $this->widget('zii.widgets.grid.CGridView', [
+    'id'=>'consols-client-list-grid'.$_GET['tabid'],
+    'htmlOptions'=>['style'=>'width: 70%'],
+    'cssFile' => false,
+    'dataProvider'=>$dataProvider[0],
+    'filter'=>$dataProvider[1],
+    'columns'=>[
+        ['name'=>'status','headerHtmlOptions' => ['style' => 'display:none'],'filterHtmlOptions' => ['style' => 'display:none'],
+            'htmlOptions' => ['style' => 'display:none'],'type'=>'raw'],
+        ['name'=>'status','value'=>'ConsolProcess::$states[$data["status"]]'],
+        'number',
+        ['name'=>'day1','header'=>'<=1 days'],
+        ['name'=>'day2','header'=>'2 days'],
+        ['name'=>'day3','header'=>'>=3 days','cssClassExpression' => '$data>0? "cloumn_red_1" : ""'],
+    ],
+   ]); ?>
+</div>
+<br/>
+<div class="form">
+    <div class="row">
+   <?php  echo CHtml::button('Show All', ['class' => 'show_all']);?>
+    </div>
+</div>
+<div style="right: 20px;position: absolute;">
+    <a class="jqm_link grid_edit_btn" href="<?=$this->createUrl('consolProcess/splitConsol');?>"> Split Consol</a> 
+<a href="#" class="export_search" target="_blank" data-baseurl="<?=$this->createUrl('consolProcess/export', ['typ' => '','pod_id'=>$_GET['pod_id']]);?>"><div style="background-position:-48px -688px" class="icon"></div> Export Current Search</a> 
+</div>
+ <div class="row">
+  <span> <h2> Available Consols </h2></span>
+                    <!--<div id="loadingPic"  style="width:20px;height:20px;float:left;"></div>-->
+ <div id="consol-list-view<?=$_GET['pod_id']?>">
+      <?php
+         $this->renderPartial('_sub_consols', [
+            'consol' => $consol,
+            'name' =>'All'
+         ]);
+    ?>
+  </div>
+</div>
+<script>
+$(function(){
+    var tab = $('#<?=$_GET["tabid"];?>');
+    var panel=tab.data('panel');
+     $('#consols-client-view<?=$_GET['tabid']?>',panel).on("click", "table tbody td", function(event){
+        // get console id
+        var status = parseInt($(this).parent().children(':nth-child(1)').html());
+        var data = {};
+        data['status'] = status;
+        data['pod_id']=<?=$_GET['pod_id']?>;
+        data['consol_type']=<?=$_GET['consol_type']?>;
+        $.ajax({
+            type : 'GET',
+            url : '<?php echo Yii::app()->createAbsoluteUrl("ConsolProcess/consolList", ['tabid'=>$_GET['tabid']]) ;?>',
+            data: data,
+            dataType: 'html',
+            success:function(resp){
+                $('#consol-list-view<?=$_GET['pod_id']?>',panel).html(resp);
+            },
+        });
+    }); 
+    
+    $('.show_all',panel).on('click',function(event){
+        var data = {};
+        data['status'] = 0;
+        data['pod_id']=<?=$_GET['pod_id']?>;
+        data['consol_type']=<?=$_GET['consol_type']?>;
+        $.ajax({
+            type : 'GET',
+            url : '<?php echo Yii::app()->createAbsoluteUrl("ConsolProcess/consolList", ['tabid'=>$_GET['tabid']]) ;?>',
+            data: data,
+            dataType: 'html',
+            success:function(resp){
+                $('#consol-list-view<?=$_GET['pod_id']?>').html(resp);
+            },
+        });
+        
+    });
+     $('a.export_search', panel).on('mousedown', function(){
+        var q = $('.filters input, .filters select', panel).serialize();
+        $(this).attr('href', $(this).data('baseurl') + '&' + q);
+    });
+})
+  
+</script>

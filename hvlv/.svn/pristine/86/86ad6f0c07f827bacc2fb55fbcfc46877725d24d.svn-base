@@ -1,0 +1,348 @@
+<?php
+
+class ShipmentScanController extends Controller
+{
+	protected $nonAjax=['downloadScanReport'];
+
+	/**
+	 * Lists the report
+	 */
+	public function actionIndex()
+	{
+	    $depotMapping = [
+	        106 => 'SYDNEY',
+	        218 => 'MELBOURNE',
+	        530 => 'BRISBANE',
+	        529 => 'ADELAIDE',
+	        811 => 'PERTH',
+	        2936 => 'FREMANTLE',
+	        4414 => 'MOXON',
+	        4756 => 'SHENZHEN',
+	    ];
+	    $provide = [];
+	    $filtersForm = new FiltersForm;
+	    $sort = new CSort();
+	    $sort->attributes = [
+	        'scan_date' => [
+	            'asc' => 'scan_date ASC',
+	            'desc' => 'scan_date DESC',
+	        ],
+	        'user' => [
+	            'asc' => 'user ASC',
+	            'desc' => 'user DESC',
+	        ],
+	        'time' => [
+	            'asc' => 'time ASC',
+	            'desc' => 'time DESC',
+	        ],
+	        'total_weight' => [
+	            'asc' => 'total_weight ASC',
+	            'desc' => 'total_weight DESC',
+	        ],
+	        'total_packs' => [
+	            'asc' => 'total_packs ASC',
+	            'desc' => 'total_packs DESC',
+	        ]
+	    ];
+	    if (!empty($_GET['start_date']) && !empty($_GET['end_date'])) {
+	        $start_time = $_GET['start_date'];
+	        $end_time = $_GET['end_date'];
+	        $criteria = new CDbCriteria;
+	        $criteria->select = "user_id";
+	        $criteria->group = "user_id";
+	        $criteria->addCondition("scan_time >= :start AND scan_time <= :end");
+	        $criteria->params = [':start' => $start_time, ':end' => $end_time];
+	        $user_ids = ShipmentScan::model()->findAll($criteria);
+	        $uids = [];
+	        foreach ($user_ids as $user) {
+	            $uids[] = $user['user_id'];
+	        }
+	        $criteria = new CDbCriteria;
+	        $criteria->addCondition("type in (0,5) AND scan_time > :start AND scan_time < :end AND user_id IN (" . implode(',', $uids) . ") ORDER BY scan_time");
+	        $criteria->params = [':start' => $start_time, ':end' => $end_time];
+	        $rs = ShipmentScan::model()->findAll($criteria);
+	        $scan_date_data = [];
+	        $gap = 300;
+	        foreach ($rs as $r) {
+	            $uid = $r->user_id;
+	            $scan_date = date('Y-m-d', strtotime($r->scan_time));
+	            if (!isset($scan_date_data[$uid][$scan_date])) {
+	                $scan_date_data[$uid][$scan_date] = [
+	                    'time' => 0,
+	                    'user' => empty($r->user) ? '' : $r->user->getFullName(),
+	                    'depot' => $r->warehouse,
+	                    'pcs_packs' => 0,
+	                    'pcs_weight' => 0,
+	                    'carton_packs' => 0,
+	                    'carton_weight' => 0
+	                ];
+	                $start = $r->scan_time;
+	            }
+	            if (abs(strtotime($start) - strtotime($r->scan_time)) < $gap) {
+	                $scan_date_data[$uid][$scan_date]['time'] += abs(strtotime($start) - strtotime($r->scan_time));
+	            } else {
+	                $scan_date_data[$uid][$scan_date]['time'] += 1;
+	            }
+	            $start = $r->scan_time;
+	            if ($r->type == 0) {
+	                $isBagTag = ImportBagTag::model()->find('import_bag_id = :pid', [':pid' => $r->pid]);
+	                $isScan = ShipmentScan::model()->find('pid = :pid AND type = 5', [':pid' => $r->pid]);
+	                if (empty($isBagTag) || empty($isScan)) {
+	                    $scan_date_data[$uid][$scan_date]['pcs_packs'] += $r->pkg;
+	                    $scan_date_data[$uid][$scan_date]['pcs_weight'] += $r->weight;
+	                }
+	            } else if ($r->type == 5) {
+	                $scan_date_data[$uid][$scan_date]['carton_packs'] += 1;
+	                $importBagTags = ImportBagTag::model()->findAll('import_bag_id = :pid', [':pid' => $r->pid]);
+	                foreach ($importBagTags as $importBagTag) {
+	                    $shipment = Shipment::model()->find('id =:id', [':id' => $importBagTag->shipment_id]);
+	                    if (!empty($shipment)) {
+	                        $scan_date_data[$uid][$scan_date]['carton_weight'] += $shipment->weight;
+	                    }
+	                }
+	            }
+	        }
+	        foreach ($scan_date_data as $uid => $user_data) {
+	            foreach ($user_data as $scan_date => $data) {
+	                $hrs = round($data['time'] / 3600, 5);
+	                $provide[] = [
+	                    'id' => $uid,
+	                    'user' => $data['user'],
+	                    'depot' => isset($depotMapping[$data['depot']]) ? $depotMapping[$data['depot']] : '',
+	                    'pcs_packs' => $data['pcs_packs'],
+	                    'pcs_weight' => $data['pcs_weight'],
+	                    'carton_packs' => $data['carton_packs'],
+	                    'carton_weight' => $data['carton_weight'],
+	                    'scan_date' => $scan_date,
+	                    'time' => number_format($hrs, 2),
+	                    'total_packs' => $data['pcs_packs'] + $data['carton_packs'],
+	                    'total_weight' => number_format($data['pcs_weight'] + $data['carton_weight'], 2)
+	                ];
+	            }
+	        }
+	    }
+
+	    $filteredData = $filtersForm->filter($provide);
+	    $dataprovider = new CArrayDataProvider($filteredData);
+
+	    $sort->defaultOrder = "user ASC";
+	    $dataprovider->sort = $sort;
+	    $dataprovider->pagination = ['pageSize' => 9999];
+
+	    if (!empty($_GET['partial'])) {
+	        $this->renderPartial('_search1', [
+	            'dataProvider' => [$dataprovider, $filtersForm]
+	        ]);
+	        return;
+	    }
+
+	    $this->render('index', ['dataProvider' => [$dataprovider, $filtersForm]]);
+	}
+
+
+
+	public function actionExport()
+	{
+	    $depotMapping = [
+	        106 => 'SYDNEY',
+	        218 => 'MELBOURNE',
+	        530 => 'BRISBANE',
+	        529 => 'ADELAIDE',
+	        811 => 'PERTH',
+	        2936 => 'FREMANTLE',
+	        4414 => 'MOXON',
+	        4756 => 'SHENZHEN',
+	    ];
+	    $provide = [];
+	    if (!empty($_GET['start_date']) && !empty($_GET['end_date'])) {
+	        $start_time = $_GET['start_date'];
+	        $end_time = $_GET['end_date'];
+	        $criteria = new CDbCriteria;
+	        $criteria->select = "user_id";
+	        $criteria->group = "user_id";
+	        $criteria->addCondition("scan_time >= :start AND scan_time <= :end");
+	        $criteria->params = [':start' => $start_time, ':end' => $end_time];
+	        $user_ids = ShipmentScan::model()->findAll($criteria);
+	        $uids = [];
+	        foreach ($user_ids as $user) {
+	            $uids[] = $user['user_id'];
+	        }
+	        $criteria = new CDbCriteria;
+	        $criteria->addCondition("type in (0,5) AND scan_time > :start AND scan_time < :end AND user_id IN (" . implode(',', $uids) . ") ORDER BY scan_time");
+	        $criteria->params = [':start' => $start_time, ':end' => $end_time];
+	        $rs = ShipmentScan::model()->findAll($criteria);
+	        $scan_data =[];
+	        $gap = 300;
+	        foreach ($rs as $r) {
+	            $uid = $r->user_id;
+	            $scan_date = date('Y-m-d', strtotime($r->scan_time));
+	            $consol_no = null;
+	            if ($r->type == 0) {
+	                $shipment = Shipment::model()->find('id = :id', [':id' => $r->pid]);
+	                if (!empty($shipment)) {
+	                    $consol = Consol::model()->find('id = :id', [':id' => $shipment->consol_id]);
+	                    $consol_no = @$consol->no;
+	                }
+	            } else if ($r->type == 5) {
+	                $importBagTags = ImportBagTag::model()->findAll('import_bag_id = :pid', [':pid' => $r->pid]);
+	                foreach ($importBagTags as $importBagTag) {
+	                    $shipment = Shipment::model()->find('id = :id', [':id' => $importBagTag->shipment_id]);
+	                    if (!empty($shipment)) {
+	                        $consol = Consol::model()->find('id = :id', [':id' => $shipment->consol_id]);
+	                        $consol_no = @$consol->no;
+	                    }
+	                }
+	            }
+
+	            if (!isset($scan_data[$uid][$scan_date][$consol_no])) {
+	                $scan_data[$uid][$scan_date][$consol_no] = [
+	                    'time' => 1,
+	                    'user' => empty($r->user) ? '' : $r->user->getFullName(),
+	                    'depot' => $r->warehouse,
+	                    'consol_no'=>$consol_no,
+	                    'pcs_packs' => 0,
+	                    'pcs_weight' => 0,
+	                    'carton_packs' => 0,
+	                    'carton_weight' => 0
+	                ];
+	                $start = $r->scan_time;
+	            }
+
+	            if (abs(strtotime($start) - strtotime($r->scan_time)) < $gap) {
+	                $scan_data[$uid][$scan_date][$consol_no]['time'] += abs(strtotime($start) - strtotime($r->scan_time));
+	            } else {
+	                $scan_data[$uid][$scan_date][$consol_no]['time'] += 1;
+	            }
+	            $start = $r->scan_time;
+
+	            if ($r->type == 0) {
+	                $isBagTag = ImportBagTag::model()->find('import_bag_id = :pid', [':pid' => $r->pid]);
+	                $isScan = ShipmentScan::model()->find('pid = :pid AND type = 5', [':pid' => $r->pid]);
+	                if (empty($isBagTag) || empty($isScan)) {
+	                    $scan_data[$uid][$scan_date][$consol_no]['pcs_packs'] += $r->pkg;
+	                    $scan_data[$uid][$scan_date][$consol_no]['pcs_weight'] += $r->weight;
+	                }
+	            } else if ($r->type == 5) {
+	                $scan_data[$uid][$scan_date][$consol_no]['carton_packs'] += 1;
+	                $importBagTags = ImportBagTag::model()->findAll('import_bag_id = :pid', [':pid' => $r->pid]);
+	                foreach ($importBagTags as $importBagTag) {
+	                    $shipment = Shipment::model()->find('id =:id', [':id' => $importBagTag->shipment_id]);
+	                    if (!empty($shipment)) {
+	                        $scan_data[$uid][$scan_date][$consol_no]['carton_weight'] += $shipment->weight;
+	                    }
+	                }
+	            }
+	        }
+	        foreach ($scan_data as $uid => $scan_dates) {
+	            foreach ($scan_dates as $scan_date => $consolData) {
+	                foreach ($consolData as $consol_id => $data) {
+	                    $hrs = round($data['time'] / 3600, 5);
+	                    $provide[] = [
+	                        'user' => $data['user'],
+	                        'depot' => isset($depotMapping[$data['depot']]) ? $depotMapping[$data['depot']] : '',
+	                        'consol_no' => $data['consol_no'],
+	                        'pcs_packs' => $data['pcs_packs'],
+	                        'pcs_weight' => $data['pcs_weight'],
+	                        'carton_packs' => $data['carton_packs'],
+	                        'carton_weight' => $data['carton_weight'],
+	                        'scan_date' => $scan_date,
+	                        'time' => number_format($hrs, 2),
+	                        'total_packs' => $data['pcs_packs'] + $data['carton_packs'],
+	                        'total_weight' => number_format($data['pcs_weight'] + $data['carton_weight'], 2)
+	                    ];
+	                }
+	            }
+	        }
+
+	        $exportData = $provide;
+	        $xls = new oExcel;
+	        $i = 1;
+	        $xls->addRow($i++, ['User', 'Scan Date', 'Depot', 'Consol No', 'PCS Scan', 'PCS Weight', 'Carton Scan', 'Carton Weight', 'Total Scan', 'Total Weight', 'Time (hours)']);
+	        foreach ($exportData as $record) {
+	            $xls->addRow($i++, [
+	                $record['user'],
+	                $record['scan_date'],
+	                $record['depot'],
+	                $record['consol_no'],
+	                $record['pcs_packs'],
+	                $record['pcs_weight'],
+	                $record['carton_packs'],
+	                $record['carton_weight'],
+	                $record['total_packs'],
+	                $record['total_weight'],
+	                $record['time']
+	            ]);
+	        }
+	        $filename = Yii::app()->basePath . DIRECTORY_SEPARATOR . 'runtime' . DIRECTORY_SEPARATOR . 'ScanReport.xlsx';
+	        $xls->output($filename, null, false);
+
+	        echo $this->createUrl('shipmentScan/downloadScanReport');
+	    }
+	}
+
+
+
+	public function actionDownloadScanReport()
+	{
+		$xls = new oExcel;
+		$mfn = 'ScanReport';
+		$tempfile = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR.'ScanReport.xlsx';
+		$xls->load($tempfile);
+		$xls->output($mfn.'.xlsx');
+	}
+
+
+
+
+
+	public function actionWorkTimeChange()
+	{
+		$date = $_POST['date'];
+		$workTime = $_POST['workTime'];
+		SystemSetting::setDateWorkTime($date,$workTime);
+		echo "done";
+	}
+
+	/*$this function used to combine the pack rate the average weight of packs.
+	* @params $x pack rage   $y weight/pack
+	* @return  figures ( normal 1);
+	*/
+	private function getfigure($x, $y)
+	{
+		$z = sprintf("%.2f", ($x * exp($y / 8.199)) / 750);
+		if ($z>100&&$z<200) {
+			$z=0.3*$z+70;
+		} elseif ($z>200) {
+			$z=130+round($z/1000, 2);
+		}
+		return $z;
+	}
+
+	/**
+	 * Returns the data model based on the primary key given in the GET variable.
+	 * If the data model is not found, an HTTP exception will be raised.
+	 * @param integer $id the ID of the model to be loaded
+	 * @return ShipmentScan the loaded model
+	 * @throws CHttpException
+	 */
+	public function loadModel($id)
+	{
+		$model=ShipmentScan::model()->findByPk($id);
+		if ($model===null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		return $model;
+	}
+
+	/**
+	 * Performs the AJAX validation.
+	 * @param ShipmentScan $model the model to be validated
+	 */
+	protected function performAjaxValidation($model)
+	{
+		if (isset($_POST['ajax']) && $_POST['ajax']==='shipment-scan-form') {
+			echo CActiveForm::validate($model);
+			Yii::app()->end();
+		}
+	}
+}

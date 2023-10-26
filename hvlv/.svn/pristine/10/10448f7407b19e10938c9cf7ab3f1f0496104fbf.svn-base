@@ -1,0 +1,66 @@
+<?php
+$ub_own_depot = ((!empty($model->mdata['ubmsent']) && $model->mdata['ubmsent'] == ImcoConsol::UBMAPPROVED)||$model->findUbmSent()) && (!empty($model->mdata['ubm_dest']) && in_array($model->mdata['ubm_dest'], [Yii::app()->params['ics']['est_id_AUSYD'], Yii::app()->params['ics']['est_id_AUMEL']]));
+$ub_other_depot = ((!empty($model->mdata['ubmsent']) && $model->mdata['ubmsent'] == 9)||$model->findUbmSent()) && (!empty($model->mdata['ubm_dest']) && !empty(IcsService::getIcsConfig($model->mdata['ubm_dest'])));
+
+if($model->service == 20 && ($ub_own_depot||$ub_other_depot)){
+	echo CHtml::label('Arrive Time: ', 'spr'),
+	CHtml::textField('mdata[ctn_receipt_time]', @$model->mdata['ctn_receipt_time'], ['class' => 'datetime_input', 'id' => 'ctn_receipt_time_'.$_GET["tabid"]]), ' ',
+	CHtml::button('Outturn Receipt', ['class' => 'seaout_btn']),
+	CHtml::button('Pass', ['class' => 'seaout_pass_btn']),
+	'<br />';
+}
+if($model->service==ImcoConsol::AIRCONSOL)
+{
+	if(empty($model->mdata['ctn_receipt_time']))
+	{
+		$modelReport = new ModelReport("","", [],[],"","" ,"","","",$model->awb);
+		$records = $modelReport->funcRecords();
+		if(!empty($records))
+		{
+			foreach ($records as $key => $record) {
+				if($record->no==$model->no)
+				{
+					if(!empty($record->client_finish)&&is_array($record->client_finish))
+					{
+						$model->mdata['ctn_receipt_time'] = $record->client_finish[0];
+					}elseif(!empty($record->client_finish)&&!is_array($record->client_finish))
+					{
+						$model->mdata['ctn_receipt_time'] = $record->client_finish;
+					}
+				}
+			}
+		}
+	}
+}
+if($model->service == 10 && ($ub_own_depot||$ub_other_depot)){
+	echo CHtml::label('Arrive Time: ', 'spr'),
+	CHtml::textField('mdata[ctn_receipt_time]', @$model->mdata['ctn_receipt_time'], ['class' => 'datetime_input', 'id' => 'ctn_receipt_time_'.$_GET["tabid"]]), ' ',
+	CHtml::button('Air Outturn Receipt', ['class' => 'airout_receipt_btn']),
+	CHtml::button('Pass', ['class' => 'airout_pass_btn']),
+	'<br />';
+}
+
+if($model->service == 10 || (!$ub_own_depot&&!$ub_other_depot) || !empty($model->mdata['seaoutreceipt'])){
+	if($model->service == 20&&((!empty($model->mdata['ubmsent'])&&$model->mdata['ubmsent']==ImcoConsol::UBMAPPROVED)||$model->findUbmSent())){
+		echo CHtml::label('Complete Time: ', 'spr'),
+		CHtml::textField('mdata[ctn_comp_time]', @$model->mdata['ctn_comp_time'], ['class' => 'datetime_input', 'id' => 'ctn_comp_time_'.$_GET["tabid"]]), ' ';
+	}
+
+	if($model->isWDT())
+	{
+		echo CHtml::button('Scan All And Send outturn to customer', ['class' => 'scan_all_and_send_outturn']),'&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;',CHtml::button('Send outturn to customer only', ['class' => 'send_outturn_only']);
+	}else
+	{
+		echo CHtml::button('Outturn Unpack', ['class' => 'airout_btn']),
+		' ', CHtml::checkbox('to_cus', true) . 'to cus','&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;',CHtml::button('Send outturn to customer only', ['class' => 'send_outturn_only']);
+	}
+}
+echo "<dir class='row'>";
+echo CHtml::label('Deconsolidation Time: ', 'deconsolidation'),
+	CHtml::textField('mdata[scan_start_time]', @$model->mdata['ctn_scstart_time'], ['class' => 'datetime_input', 'id' => 'ctn_scstart_time2_'.$_GET["tabid"]]), ' ';
+
+echo CHtml::label('Complete Time: ', 'spr'),
+	CHtml::textField('mdata[ctn_comp_time]', @$model->mdata['ctn_comp_time'], ['class' => 'datetime_input', 'id' => 'ctn_comp_time2_'.$_GET["tabid"]]), ' ';
+echo CHtml::button('Save Complete Time', ['class' => 'ctn_btn']);
+echo "</div>";
+?>

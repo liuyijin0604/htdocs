@@ -1,0 +1,2627 @@
+<?php
+
+/**
+ * This is the model class for table "emailog".
+ *
+ * The followings are the available columns in table 'emailog':
+ * @property string $id
+ * @property integer $from_id
+ * @property integer $to_id
+ * @property integer $type
+ * @property integer $status
+ * @property string $fid
+ * @property string $dt
+ * @property string $subject
+ * @property string $body
+ * @property string $scheduled
+ * @property string $meta
+ */
+class Emailog extends CActiveRecord
+{
+	public static $types = [
+		'10' => 'Invoice',
+		'20' => 'Statement',
+		'30' => 'client',
+		'40' => 'outturn report',
+		'50' => 'Credit Notice',
+		'60' => 'Credit Note',
+		'61' => 'Custom Document FROM SENDER',
+		'62' => 'Custom Document FROM CUSTOMER',
+		'63' => 'Custom broker',
+		'64' => 'Entry To Confirm',
+		'59' => 'Request Final Entry from Broker',
+		'65' => 'Broker to Pay',
+		'66' => 'Custom invoice inform',
+		'67' => 'OP notice',
+		'68' => 'Require LOA',
+		'69' => 'Notice Delivery',
+		'70' => 'EMPP Require Documents',
+		'71' => 'RTS Notice Return',
+		'72' => 'AQIS Require Documents',
+		'73' => 'AQIS TO Custom',
+		'74' => 'Export Chase ID',
+		'75' => 'CG Change Password',
+		'76' => 'custom invoice inform agent',
+		'77' => 'Held Reason Report Daily',
+		'78' => 'Delivery Email Notice',
+		'79' => 'Invoice Statement',
+		'80' => 'Invoice Not Paid Notice',
+		'81' => 'DDU Storage Invoice Notice',
+		'82' => 'Payment Received',
+		'83' => 'EMPP TO Custom',
+		'84' => 'Border Other DDU',
+		'85' => 'Sea Pre Alert',
+		'86' => 'Sea Request Manifest',
+		'87' => 'Sea DO',
+		'88' => 'Sea Outturn',
+		'89' => 'Border Other DDU Remind',
+		'99' => 'Mass Email',
+		'109' => 'Search Parcel Email',
+		'110' => 'Wms API Email',
+		'111' => 'Shipment available Notice',
+		'112' => 'Wms Comparison Report',
+		'113' => 'Wms Stock Check Report',
+		'114' => 'UFL Short Report',
+		'115' => 'Shopify Sync Report',
+		'120' => 'AU ENQUIRY',
+		'121' => 'INTL ENQUIRY',
+		self::WMS_CONSUMER_BACKORDER => 'Wms Consumer Backorder',
+		self::WMS_RETAILER_BACKORDER => 'Wms Retailer Backorder',
+		self::WMS_GOODS_RETURN => 'Wms Goods Return',
+		self::WMS_MINIMUM_STOCK_ALERT => 'Wms Minimum Stock Alert',
+		self::WMS_DELIVERY_DESPATCH_CONSUMER => 'Wms Delivery Despatch Consumer',
+		self::WMS_DELIVERY_DESPATCH_RETAILER => 'Wms Delivery Despatch Retailer',
+		self::WMS_INBOUND_DELIVERY_ADVICE => 'Wms Inbound Delivery Advice',
+		self::WMS_INBOUND_DELIVERY_REPORT => 'Wms Inbound Delivery Report',
+		self::INVOICE_STATEMENT_3PL => '3PL Invoice Statement',
+		self::WINIT_NOTICE => 'Winit Notice',
+		self::FOURPX_NOTICE => '4PX Notice',
+		self::PADSTOW_NOTICE => 'Padstow Notice',
+		self::GC_NOTICE => 'GC Notice',
+		self::OTHER_NOTICE => 'Other Notice',
+		self::WMS_STOCK_ON_HAND => 'Wms Stock On Hand',
+		self::DFE_API_TEMPLATE =>'DFE Manifest',
+		self::CARGO_EMAIL_NOTICE=>'CARGO EMAIL NOTICE',
+		self::CARGO_WH_EMAIL_NOTICE=>'CARGO WAREHOUSE EMAIL NOTICE',
+		self::CARGO_GP_EMAIL_NOTICE=>'CARGO GATEPASS NOTICE',
+		self::CUSTOMER_SERVICE=>'Customer Service Ticket',
+		self::SORRY=>'Sorry',
+		self::CUSTOMER_SERVICE_TRACKING_ENQUIRY=>'Customer Service Tracking Enquiry',
+		self::PACKAGE_INFO_REQUIRING => "Package Info Requiring",
+		self::PACKAGE_INFO_REQUIRING2 => "Package Info Requiring2",
+		self::OP_REPORT=>"OP report",
+		self::PIER_FILE=>"Port file",
+		self::INVOICE_TERM_DUE=>"Invoice Term Due",
+		self::BOOKING_CONFIRMATION => 'Pickup Booking Confirmation',
+		self::BOOKING_EDIT => 'Pickup Booking Edit'
+	];
+	
+	public static $states = [
+		'10' => 'Queued',
+		'30' => 'Sent',
+		'90' => 'Failed',
+		'95' => 'Cancelled',
+	];
+
+	const OUTTURN_REPORT=40;
+	const INVOICE=10;
+	const REQUEST_FINAL_ENTRY_BROKER=59;
+	const CREDIT_NOTICE=50;
+	const CUST_DOCUMENT_SENDER=61;
+	const CUST_DOCUMENT_CUSTOMER=62;
+	const CUST_DOCUMENT_BROKER=63;
+	const CUST_ENTRY_CONFIRM=64;
+	const BROKER_TO_PAY=65;
+	const CUST_INVOICE_INFORM=66;
+	const OP_NOTICE=67;
+	const CUST_DOCUMENT_CUSTOMER2=68; //send to confirm and require LOA.
+	const NOTICE_DELIVERY=69;
+	const EMPP_DOCUMENT=70;
+	const RTS_RETURN_NOTICE=71;
+	const AQIS_DOCUMENT=72;
+	const AQIS_TO_CUSTOM=73;
+	const EX_ID_CHASE=74;
+	const CG_CHANGE_PASSWORD = 75;
+	const CUSTOM_INVOICE_AGENT=76;
+	const HIGH_VALUE_NOTICE=77;
+	const DELIVERY_EMAIL_NOTICE=78;
+	const INVOICE_STATEMENT=79;
+	const INVOICE_NOT_PAID_NOTICE=80;
+	const INVOICE_DDU_STORAGE_INVOICE_NOTICE=81;
+	const PAYMENT_RECEIVED = 82;
+	const EMPP2CUSTOMS = 83;
+	const BORDER_OTHER_DDU = 84;
+	const SEA_PRE_ALERT=85;
+	const SEA_REQUEST_MANIFEST=86;
+	const SEA_DO=87;
+	const SEA_OUTTURN=88;
+	const BORDER_OTHER_DDU_REMIND = 89;
+	const SEARCH_PARCEL_EMAIL = 109;
+	const WMS_API_EMAIL = 110;
+	const INVOICE_SHIPMENT_AVAILABLE_NOTICE = 111;
+	const WMS_COMPARISON_REPORT = 112;
+	const WMS_STOCK_CHECK_REPORT = 113;
+	const UFL_SHORT_REPORT = 114;
+	const SHOPIFY_SYNC_REPORT = 115;
+	const WMS_CONSUMER_BACKORDER = 131;
+	const WMS_RETAILER_BACKORDER = 132;
+	const WMS_GOODS_RETURN = 133;
+	const WMS_MINIMUM_STOCK_ALERT = 134;
+	const WMS_DELIVERY_DESPATCH_CONSUMER = 135;
+	const WMS_DELIVERY_DESPATCH_RETAILER = 136;
+	const WMS_INBOUND_DELIVERY_ADVICE = 137;
+	const WMS_INBOUND_DELIVERY_REPORT = 138;
+	const INVOICE_STATEMENT_3PL = 139;
+	const WINIT_NOTICE = 140;
+	const WMS_STOCK_ON_HAND = 141;
+	const DFE_API_TEMPLATE = 142;
+	const PICK_OUTTURN_TEMPLATE = 143;
+	const CARGO_EMAIL_NOTICE = 144;
+	const CARGO_WH_EMAIL_NOTICE = 146;
+	const CARGO_GP_EMAIL_NOTICE = 147;
+	const FOURPX_NOTICE = 145;
+	const Google_Review_Email = 148;
+	const Marketing_Email = 152;
+	const Price_Enquiry_Notice = 151;
+	const CUSTOMER_SERVICE = 149;
+	const SORRY = 150;
+	const PADSTOW_NOTICE = 153;
+	const GC_NOTICE = 154;
+	const OTHER_NOTICE = 155;
+	const CUSTOMER_SERVICE_TRACKING_ENQUIRY = 156;
+	const B2B_BOOKING_NOTICE = 157;
+	const OP_REPORT = 158;
+	const PACKAGE_INFO_REQUIRING = 127;
+	const PACKAGE_INFO_REQUIRING2 = 130;
+	const TASK_FEEDBACK_EMAIL = 160;
+	const PRICE_ENQUIRY_EMAIL = 161;
+	const PIER_FILE = 168;
+	const INVOICE_TERM_DUE = 166;
+	const BOOKING_CONFIRMATION = 200;
+	const BOOKING_EDIT = 201;
+	const BOOKING_SUBMIT_CONFIRMATION = 202;
+	public $mdata;
+	public $tpl;
+	public $fobj;
+	public $isTLA;
+	public $to_name;
+	public $from_name;
+	public $isNewInvoice=true;
+		
+	const NOTIFY_OP_EMAIL="gero@toplogistics.com.au";
+	
+	/**
+	* @return string the associated database table name
+	*/
+	public function tableName()
+	{
+		return 'emailog';
+	}
+
+	/**
+	* @return array validation rules for model attributes.
+	*/
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return [
+			['from_id, to_id, type, status, fid, dt, subject, body, scheduled, meta', 'safe'],
+			['type', 'numerical', 'integerOnly'=>true],
+			['from_id, to_id, fid', 'length', 'max'=>11],
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			['id, from_id, to_id, to_name, from_name, type, status, fid, dt, subject, body, scheduled, meta', 'safe', 'on'=>'search'],
+		];
+	}
+
+	/**
+	* @return array relational rules.
+	*/
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return [
+			'attachments' => [self::HAS_MANY, 'FileRepo', 'fid', 'on'=>'attachments.type = 80'],
+			'to' => [self::BELONGS_TO, 'OrgContact', 'to_id'],
+			'to' => [self::BELONGS_TO, 'Org', 'to_id'],
+			'from' => [self::BELONGS_TO, 'User', 'from_id'],
+		];
+	}
+
+	/**
+	* @return array customized attribute labels (name=>label)
+	*/
+	public function attributeLabels()
+	{
+		return [
+			'id' => 'ID',
+			'from_id' => 'From',
+			'from_name' => 'From',
+			'to_id' => 'To',
+			'to_name' => 'To',
+			'to' => 'To',
+			'type' => 'Type',
+			'status' => 'Status',
+			'fid' => 'FID',
+			'dt' => 'Time',
+			'subject' => 'Subject',
+			'body' => 'Body',
+			'scheduled' => 'Scheduled',
+			'meta' => 'Meta',
+		];
+	}
+	
+	public function getTemplate()
+	{
+		$typ2tpl = [
+			10 => 'invoice',
+			20 => 'statement',
+			30 => 'client',
+			35 => 'invoice',
+			40 => 'outturn',
+			50 => 'credit',
+			59 => 'rqfenty',
+			60 => 'credit_note',
+			61 => 'hvdc',
+			62 => 'hvdcc',
+			63 => 'broker',
+			64 => 'entry',
+			65 => 'brokerpay',
+			66 => 'custinv',
+			67 => 'opnotice',
+			68 => 'hvdcf',
+			69 => 'noticedy',
+			70 => 'empp',
+			71 => 'rtsnotice',
+			72 => 'aqis',
+			73 => 'sacn',
+			74 => 'exidchase',
+			75 => 'cgchangepassword',
+			76 => 'custinvagent',
+			77 => 'heldnotice',
+			78 => 'deliverynotice',
+			79 => 'invoicestatment',
+			80 => 'invoicenotpaidwarning',
+			81 => 'storageinv',
+			82 => 'paymentreceived',
+			83 => 'empp2customs',
+			84 => 'borderotherddu',
+			85 => 'prealert',
+			86 => 'requestmanifest',
+			87 => 'seado',
+			88 => 'seaotturn',
+			89 => 'borderotherdduremind',
+			110 => 'wmsapiemail',
+			111 => 'shipmentavailable',
+			112 => 'wmscomparsionreport',
+			113 => 'wmsstockcheckreport',
+			114 => 'uflshortreport',
+			115 => 'shopifysyncreport',
+			self::WMS_CONSUMER_BACKORDER => 'wmsreport',
+			self::WMS_RETAILER_BACKORDER => 'wmsreport',
+			self::WMS_GOODS_RETURN => 'wmsreport',
+			self::WMS_MINIMUM_STOCK_ALERT => 'wmsreport',
+			self::WMS_DELIVERY_DESPATCH_CONSUMER => 'wmsreport',
+			self::WMS_DELIVERY_DESPATCH_RETAILER => 'wmsreport',
+			self::WMS_INBOUND_DELIVERY_ADVICE => 'wmsreport',
+			self::WMS_INBOUND_DELIVERY_REPORT => 'wmsreport',
+			self::INVOICE_STATEMENT_3PL => '3plinvoicestatement',
+			self::WINIT_NOTICE => 'winitNotice',
+			self::FOURPX_NOTICE => '4pxNotice',
+			self::PADSTOW_NOTICE => 'padstowNotice',
+			self::GC_NOTICE => 'gcNotice',
+			self::OTHER_NOTICE => 'otherNotice',
+			self::WMS_STOCK_ON_HAND => 'wmsreport',
+			self::DFE_API_TEMPLATE =>'dfeapitemplate',
+			self::PICK_OUTTURN_TEMPLATE => 'pickupoutturn',
+			self::CARGO_EMAIL_NOTICE=>'cargoemailnotice',
+			self::CARGO_WH_EMAIL_NOTICE=>'cargowhemailnotice',
+			self::CARGO_GP_EMAIL_NOTICE=>'cargogpemailnotice',
+			self::CUSTOMER_SERVICE=>'customerservice',
+			self::SORRY=>'sorry',
+			self::CUSTOMER_SERVICE_TRACKING_ENQUIRY=>'customerservicetrackingenquiry',
+			self::B2B_BOOKING_NOTICE => 'b2bbookingnotice',
+			self::PACKAGE_INFO_REQUIRING => 'packageinforequiring',
+			self::PACKAGE_INFO_REQUIRING2 => 'packageinforequiring2',
+			self::TASK_FEEDBACK_EMAIL => 'ImportsMailFeedback',
+			self::PIER_FILE=>'pierfile',
+			self::INVOICE_TERM_DUE=>'invoice_term_due',
+			self::PRICE_ENQUIRY_EMAIL => 'PriceEnquiry',
+			self::BOOKING_CONFIRMATION => 'BookingConfirmation',
+			self::BOOKING_EDIT => 'BookingEdit',
+			self::BOOKING_SUBMIT_CONFIRMATION => 'BookingSubmitConfirmation'
+		];
+
+		$con = null;
+		$isTLA = false;
+		if(!empty($this->isTLA))
+		{
+			$isTLA = $this->isTLA;
+		}else
+		{
+			if(!empty($this->fobj))
+			{
+				if(!empty(get_class($this->fobj)=='Consol'))
+				{
+					$con = $this->fobj;
+				}
+
+				if(!empty(get_class($this->fobj)=='ImParcel'))
+				{
+					$con = $this->fobj->consol;
+				}
+
+				if(!empty(get_class($this->fobj)=='Invoice'))
+				{
+					
+					if(isset($this->fobj->consol_id) && isset($this->fobj->dpmt) && $this->fobj->consol_id > 0 && $this->fobj->dpmt == 10){
+						$con = Consol::model()->findByPk($this->fobj->consol_id);
+					}
+					// create, then change eta to 2020-08-01
+					if (!empty($this->fobj->id) && $this->fobj->id < 500000) $con = null;
+				}
+
+			}
+			if(!empty($con))
+			{
+
+				if(in_array($con->type, [Consol::DMAWBCONSOLTYPE,Consol::IMCOCONSOLTYPE,Consol::ELMSCONSOLTYPE])&&!$con->is3PL()&&strtotime($con->eta) >= strtotime('2020-08-01'))
+				{
+					$isTLA = 1;
+				}
+			}
+		}
+
+		$this->tpl = empty($typ2tpl[$this->type])? new EmailTpl : EmailTpl::getTplBySlug($typ2tpl[$this->type],$isTLA);
+	}
+	
+	public function getFobj()
+	{
+		switch ($this->type) {
+			case 10:
+			case 35:
+				$this->fobj = Invoice::model()->findByPk($this->fid);
+			break;
+			case 20:
+			case 75:
+			case self::INVOICE_STATEMENT_3PL:
+				$this->fobj = Org::model()->findByPk($this->fid);
+			break;
+			case 40:
+				$this->fobj = Consol::model()->findByPk($this->fid);
+			break;
+			case 60:
+				$this->fobj = Payment::model()->findByPk($this->fid);
+			break;
+			case 59:
+			case 61:
+			case 62:
+			case 63:
+			case 64:
+			case 65:
+			case 66:
+			case 67:
+			case 68:
+			case 69:
+			case 70:
+			case 71:
+			case 72:
+			case 73:
+			case 76:
+			case 78:
+			case 81:
+			case 82:
+			case 83:
+			case 84:
+			case 85:
+			case 86:
+			case 87:
+			case 88:
+			case 89:
+			case 111:
+			case self::CARGO_EMAIL_NOTICE:
+			case self::CARGO_WH_EMAIL_NOTICE:
+			case self::CARGO_GP_EMAIL_NOTICE:
+			case self::PICK_OUTTURN_TEMPLATE:
+			case self::WINIT_NOTICE:
+			case self::FOURPX_NOTICE:
+			case self::GC_NOTICE:
+			case self::PADSTOW_NOTICE:
+			case self::OTHER_NOTICE:
+				$this->fobj = ImParcel::model()->findByPk($this->fid);
+			break;
+			case 74:
+				$this->fobj= ExCrm::model()->findByPk($this->fid);
+			break;
+			case 112:
+				$this->fobj = WmsTask::model()->findByPk($this->fid);
+			break;
+		}
+	}
+
+	public function getFobjName()
+	{
+		$this->getFobj();
+		if (!empty($this->fobj)) {
+			if (in_array(get_class($this->fobj), ['Invoice', 'Consol', 'Payment', 'ExCrm']) || preg_match('/Consol/i', get_class($this->fobj))) {
+				return $this->fobj->no;
+			} else if (in_array(get_class($this->fobj), ['Org'])) {
+				return $this->fobj->name;
+			} else if (in_array(get_class($this->fobj), ['ImParcel'])) {
+				return $this->fobj->ref;
+			}
+		}
+		return '';
+	}
+	
+	public function prepTemplate()
+	{
+		if (empty($this->fobj)) $this->getFobj();
+		if (empty($this->tpl)) $this->getTemplate();
+		$tos = [];
+		switch($this->type)
+		{
+			case Emailog::EMPP_DOCUMENT:
+			case Emailog::CUST_DOCUMENT_CUSTOMER2:
+			case Emailog::CUST_DOCUMENT_SENDER:
+			case Emailog::CUST_DOCUMENT_BROKER:
+			case Emailog::AQIS_DOCUMENT:
+			case Emailog::EMPP2CUSTOMS:
+				$isair = empty($this->fobj->consol) || $this->fobj->consol->service == 10 || empty($this->fobj->consol->service);
+				if($isair)
+				{
+					$this->tpl->assignSubject('NO', $this->fobj->consol->awb);
+				}else
+				{
+					$this->tpl->assignSubject('NO', @$this->fobj->consol->mdata['container_no']);
+				}
+			break;
+		}
+
+		switch ($this->type) {
+			case 10:
+			case 35:
+				if(empty($this->fobj->dpmt) || $this->fobj->dpmt == 30)
+				{
+					$BSB = '032090';
+					$accountNumber = '876589';
+				}else
+				{
+					$BSB = '032166';
+					$accountNumber = '366789';
+				}
+
+				$org = $this->fobj->cust;
+				$this->tpl->assignSubject('INV_NO', $this->fobj->no);
+				$awb = $this->fobj->getModelAWB();
+				$paypalLink = $this->fobj->getPaypalUrl();
+				$this->tpl->assignSubject('AWB_NO', empty($awb)? '' : ' / '.$awb);
+				$this->tpl->assignThese([
+					'CLIENT_NAME' => $org->name,
+					'PAYPAL_LINK' => $paypalLink,
+				]);
+				if ($this->isNewInvoice) {
+					$this->tpl->assignThese([
+						'OLD_INVOICE' =>'',
+						'BSB'=>$BSB,
+						'ACCOUNT_NUMBER'=>$accountNumber
+					]);
+				}
+				$this->to_id = $org->id;
+				foreach ($org->contactList(1) as $oc) {
+					if (!empty($oc->email)) {
+						$tos[] = $oc->email;
+					}
+				}
+				if ($this->type == self::INVOICE && !empty($org->extra['invoice-feq']) && $org->extra['invoice-feq'] == 'yes' && !empty($org->extra['invoice-rec'])) {
+					$tos = explode(';', str_replace(' ', '', $org->extra['invoice-rec']));
+				}
+			break;
+			case 20:
+				$org = $this->fobj;
+				$inv = new Invoice();
+				$inv->to_id = $org->id;
+				$this->tpl->assignSubject('OID', $org->id);
+				$this->tpl->assignThese([
+					'CLIENT_NAME' => $org->name,
+					'TOT_BALANCE' => $inv->statementTotal(false),
+				]);
+				$this->to_id = $org->id;
+				foreach ($org->contactList(1) as $oc) {
+					if (!empty($oc->email)) {
+						$tos[] = $oc->email;
+					}
+				}
+			break;
+			case self::INVOICE_STATEMENT_3PL:
+				$org = $this->fobj;
+				$inv = new Invoice();
+				$inv->to_id = $org->id;
+				$this->tpl->assignSubject('CLIENT_NAME', $org->name);
+				$this->tpl->assignThese([
+					'CLIENT_NAME' => $org->name,
+				]);
+				$this->to_id = $org->id;
+				foreach ($org->contactList(1) as $oc) {
+					if (!empty($oc->email)) {
+						$tos[] = $oc->email;
+					}
+				}
+			break;
+			case 30:
+			case 40:
+				if (empty($this->to_id)) {
+					break;
+				}
+				$org=Org::model()->findByPk($this->to_id);
+				if($this->fobj->service==Consol::SEACONSOL)
+				{
+					$this->tpl->assignSubject('CON_NO', @$this->fobj->mdata['container_no'].(empty($this->fobj->mdata['house_bill'])? '' : '/'.$this->fobj->mdata['house_bill']));
+				}else
+				{
+					$this->tpl->assignSubject('CON_NO', $this->fobj->awb.(empty($this->fobj->mdata['house_bill'])? '' : '/'.$this->fobj->mdata['house_bill']));
+				}
+				$this->tpl->assignThese([
+					'CLIENT_NAME' => $org->name,
+				]);
+			break;
+			case 60:
+				$org = $this->fobj->cust;
+				$this->tpl->assignSubject('CREDIT_NO', $this->fobj->no);
+				$this->tpl->assignThese([
+					'CLIENT_NAME' => $org->name,
+				]);
+			break;
+			case 61:
+				if (empty($this->to_id)) {
+					break;
+				}
+				$org=Org::model()->findByPk($this->to_id);
+				$this->tpl->assignSubject('SHIPMENT_NO', $this->fobj->ref."--".$this->fobj->hbn);
+				$this->tpl->assignThese([
+					'CLIENT_NAME' => $org->name,
+					'SHIPMENT_NO'=>$this->fobj->ref,
+					'CUSTOMER_REF'=>$this->fobj->cref,
+					'LINK'=>self::prepareLink($this->fobj->getTheHashUrl(2)),//false means link to sender;
+				]);
+			break;
+			case 62:
+				$this->tpl->assignSubject('SHIPMENT_NO', $this->fobj->ref."--".$this->fobj->hbn);
+				$this->tpl->assignThese([
+					'SHIPMENT_NO'=>$this->fobj->ref,
+					'LINK'=> self::prepareLink($this->fobj->getTheHashUrl(1)),//1 to consignee
+					'SHIPMENT_ITEMS'=> $this->fobj->getGoodsItemsForCustomer(),
+				]);
+			break;
+			case 59:
+				$org=Org::model()->findByPk($this->to_id);
+				$this->tpl->assignSubject('SHIPMENT_NO', $this->fobj->hbn);
+				$this->tpl->assignThese([
+					'CLIENT_NAME' => $org->name,
+					'SHIPMENT_INFO'=> $this->fobj->hbn,
+				]);
+			break;
+			case 63:
+				$org=Org::model()->findByPk($this->to_id);
+				$this->tpl->assignSubject('SHIPMENT_NO', $this->fobj->hbn);
+				$this->tpl->assignThese([
+					'CLIENT_NAME' => $org->name,
+					'SHIPMENT_INFO'=> $this->fobj->getShipmentInfoForBroker(),
+					'ISDDP'=>$this->fobj->getDDPInfoforBroker(),
+					'ISDDU'=>$this->fobj->getDDUInfoforBroker(),
+			
+				]);
+			break;
+			case 64:
+				$isair = empty($this->fobj->consol) || $this->fobj->consol->service == 10;
+				$this->tpl->assignSubject('SHIPMENT_NO', $this->fobj->ref."--".$this->fobj->hbn);
+				$this->tpl->assignThese([
+					'SHIPMENT_NO'=>$this->fobj->ref,
+					'LINK'=>self::prepareLink($this->fobj->getTheHashUrl(3)),
+					'STORAGE_RATE' => $isair? 1.4 : 0.8,
+				]);
+			break;
+			case 65:
+				$org=Org::model()->findByPk($this->to_id);
+				$this->tpl->assignSubject('SHIPMENT_NO', $this->fobj->hbn);
+				$this->tpl->assignThese([
+					'CLIENT_NAME' => $org->name,
+					'SHIPMENT_INFO'=> $this->fobj->hbn,
+				]);
+			break;
+			case 66:
+				$isair = empty($this->fobj->consol) || $this->fobj->consol->service == 10;
+				$isair = empty($this->fobj->consol) || $this->fobj->consol->service == 10 || empty($this->fobj->consol->service);
+				$storageNote = "";
+				if($isair)
+				{
+					if(!empty($this->fobj->consol)&&!$this->fobj->consol->isOurWarehouse())
+					{
+						$storagetRate = 0.2;
+						$storageNote = "We will send you a notification email when the cargo is available. And please note your shipment has 2 business days free storage period in our depot after this. Thereafter, we will charge storage of \${$storagetRate}/kg per day, Min \$50.";
+					}else
+					{
+						$days = 0;
+						$dayType = "calendar";
+					
+						if (($this->fobj->bwf & ImParcel::CUSTOM_DDP) > 0) {
+							$days = 14;
+						} elseif (($this->fobj->bwf & ImParcel::CUSTOM_DDU) > 0) {
+							$days = 3;
+							$dayType = "business";
+						}
+						$storagetRate = 1.4;
+						$storageNote = "Pls note your shipment has {$days} {$dayType} day free storage period in our depot. Thereafter, we will charge storage of \${$storagetRate}/kg per week!";
+					}
+				}else
+				{
+					$days = 3;
+					$storageNote = "Pls note after the deconsolidation is done, your shipment has {$days} business day free storage period in our depot. Thereafter, your storage fee will be charged AUD 30/cbm/day + AUD 80/shipment.";
+				}
+
+
+				$this->tpl->assignSubject('SHIPMENT_NO', $this->fobj->ref);
+				$invInfo= $this->fobj->getCasulInvTotal();
+				$this->tpl->assignThese([
+					'CLIENT_NAME'=>$this->fobj->getClientName(),
+					'SHIPMENT_NO'=>$this->fobj->ref,
+					'LINK'=> self::prepareLink($this->fobj->getTheHashUrl(4)),
+					'INV_TOTAL'=>$invInfo[0],
+					'INV_NO'=>$invInfo[1],
+					'INV_BALANCE' => $invInfo[2],
+					'STORAGE_NOTE' => $storageNote,
+					'PAYPAL_LINK'=> $invInfo[3],
+				]);
+			break;
+			case 67:
+				$this->tpl->assignSubject('SHIPMENT_NO', $this->fobj->ref."--".$this->fobj->hbn);
+				$this->tpl->assignThese([
+					'SHIPMENT_NO'=>$this->fobj->ref,
+					'EVENT'=>isset($this->fobj->mdata['event_msg'])?$this->fobj->mdata['event_msg']:'',
+				]);
+			break;
+			case 68:
+				$isair = empty($this->fobj->consol) || $this->fobj->consol->service == 10 || empty($this->fobj->consol->service);
+				if($isair)
+				{
+					if(!empty($this->fobj->consol)&&!$this->fobj->consol->isOurWarehouse())
+					{
+						$storagetRate = 0.2;
+						$storageNote = "We will send you a notification email when the cargo is available. And please note your shipment has 2 business days free storage period in our depot after this. Thereafter, we will charge storage of \${$storagetRate}/kg per day, Min \$50.";
+					}else
+					{
+						$days = 0;
+						$dayType = "calendar";
+						if (($this->fobj->bwf & ImParcel::CUSTOM_DDP) > 0) {
+							$days = 14;
+						} elseif (($this->fobj->bwf & ImParcel::CUSTOM_DDU) > 0) {
+							$days = 3;
+							$dayType = "business";
+						}
+						$storagetRate = 1.4;
+						$storageNote = "Pls note your shipment has {$days} {$dayType} day free storage period in our depot. Thereafter, we will charge storage of \${$storagetRate}/kg per week!";
+					}
+				}else
+				{
+					$days = 3;
+					$storageNote = "Pls note after the deconsolidation is done, your shipment has {$days} business day free storage period in our depot. Thereafter, your storage fee will be charged AUD 30/cbm/day + AUD 80/shipment.";
+				}
+
+				$this->tpl->assignSubject('SHIPMENT_NO', $this->fobj->ref."--".$this->fobj->hbn);
+				$this->tpl->assignThese([
+					'SHIPMENT_NO'=>$this->fobj->ref,
+					'LINK'=>self::prepareLink($this->fobj->getTheHashUrl(1)),//1 to consignee
+					'SHIPMENT_ITEMS'=> $this->fobj->getGoodsItemsForCustomer(),
+					'STORAGE_NOTE' => $storageNote,
+				]);
+			break;
+			case 69:
+				if($this->fobj->consol->service==Consol::SEACONSOL)
+				{
+					$this->tpl->assignSubject('NO', @$this->fobj->consol->mdata['container_no']);
+				}else if($this->fobj->consol->service==Consol::AIRCONSOL)
+				{
+					$this->tpl->assignSubject('NO', $this->fobj->consol->awb);
+				}
+				$this->tpl->assignSubject('SHIPMENT_NO', $this->fobj->ref."--".$this->fobj->hbn);
+				$courierInfo=$this->fobj->getCourierInfo();
+				$this->tpl->assignThese([
+					'SHIPMENT_NO'=>$this->fobj->ref,
+					'COURIER'=>$courierInfo[0],
+					'TRACK_LINK'=>$courierInfo[1],
+				]);
+			break;
+			case 70:
+				$org=Org::model()->findByPk($this->to_id);
+				$this->tpl->assignSubject('SHIPMENT_NO', $this->fobj->ref."--".$this->fobj->hbn);
+				$this->tpl->assignThese([
+					'SHIPMENT_NO'=>$this->fobj->ref,
+					'CUSTOMER_REF'=>$this->fobj->cref,
+					'CLIENT_NAME' => $org->name,
+					'LINK'=>self::prepareLink($this->fobj->getTheHashUrl(5)),//5 means empp
+				]);
+			break;
+			case 71:
+				$org=Org::model()->findByPk($this->to_id);
+				$this->tpl->assignSubject('SHIPMENT_NO', $this->fobj->hbn);
+				$this->tpl->assignThese([
+					'CLIENT_NAME' => $org->name,
+					'DISCARD_DATE' =>date('Y-m-d', strtotime('1 month', strtotime($this->fobj->mdata['rts_scan_date']))),
+				]);
+			break;
+			case 72:
+				$org=Org::model()->findByPk($this->to_id);
+				$this->tpl->assignSubject('SHIPMENT_NO', $this->fobj->ref."--".$this->fobj->hbn);
+				$this->tpl->assignThese([
+					'SHIPMENT_NO'=>$this->fobj->ref,
+					'CUSTOMER_REF'=>$this->fobj->cref,
+					'CLIENT_NAME' => $org->name,
+					'LINK'=>self::prepareLink($this->fobj->getTheHashUrl(6)),//6 means aqis
+				]);
+			break;
+			case 73:
+				$org=Org::model()->findByPk($this->to_id);
+				$this->tpl->assignSubject('SHIPMENT_NO', $this->fobj->hbn." ".$this->fobj->ref);
+				$this->tpl->assignThese([
+					'SHIPMENT_INFO'=>$this->fobj->getShipmentInfoForAqis(),
+						
+				]);
+			break;
+			case 74:
+				$shipment= $this->fobj->shipments;
+				$this->tpl->assignSubject('SHIPMENT_NO', isset($shipments[0]->hbn)?$shipments[0]->hbn:'');
+				$this->tpl->assignThese([
+					'SHIPMENT_NO'=>isset($shipments[0]->hbn)?$shipments[0]->hbn:'',
+				]);
+			break;
+			case 75:
+				$this->tpl->assignThese([
+					'PASSWORD' => $this->fobj->resetPassword()
+				]);
+				$tos[] = $this->fobj->email;
+			break;
+			case 76:
+				$this->tpl->assignSubject('SHIPMENT_NO', $this->fobj->ref."--".$this->fobj->hbn);
+				$invInfo= $this->fobj->getCasulInvTotal();
+				$this->tpl->assignThese([
+					'CLIENT_NAME'=>$this->fobj->getClientName(),
+					'SHIPMENT_NO'=>$this->fobj->ref,
+					'INV_TOTAL'=>$invInfo[0],
+					'INV_NO'=>$invInfo[1],
+				]);
+			break;
+			case 77:
+				$org=Org::model()->findByPk($this->to_id);
+				$this->tpl->assignSubject('DATE', date('Y-m-d'));
+				$this->tpl->assignThese([
+					'DATE'=>date('Y-m-d'),
+					'CLIENT_NAME' => $org->name,
+				]);
+			break;
+			case 78:
+				$this->tpl->assignSubject('SHIPMENT_NO', $this->fobj->ref);
+				$info=$this->fobj->getCourierInfo();
+				$this->tpl->assignThese([
+					'SHIPMENT_NO'=>$this->fobj->ref,
+					'CLIENT_NAME' =>  $this->fobj->cnee->name,
+					'COURIER_NAME' =>$info[0],
+					'DELIVERY_ADDRESS'=> $this->fobj->cnee->apAddress(),
+					'COUIER_CONTACT'=>$info[0].' : '.(empty($info[2])?$info[1]:$info[2]),
+				]);
+			break;
+			case 79:
+				$org=Org::model()->findByPk($this->to_id);
+				$start=(date('d')<16?date('Y-m-16', strtotime("-1 month")):date('Y-m-01'));
+				$end=(date('d')<16?(date('Y-m', strtotime("-1 month")).'-'.date('t', strtotime('last month'))):date('Y-m-15'));
+				$payday=(date('d')<16?date('Y-m-05'):date('Y-m-20'));
+				$this->tpl->assignSubject('DAY_RANGE', $start.' to '.$end);
+				$this->tpl->assignSubject('ORG_ID', $this->to_id."(".substr($org->code, 0, 20).")");
+					$this->tpl->assignThese([
+						'PAY_DAY' => $payday,
+						'CLIENT_NAME'=>$org->name,
+					]);
+			break;
+			case 80:
+				$org=Org::model()->findByPk($this->to_id);
+				$start=(date('d')<16?date('Y-m-16', strtotime("-1 month")):date('Y-m-01'));
+				$end=(date('d')<16?(date('Y-m', strtotime("-1 month")).'-'.date('t', strtotime('last month'))):date('Y-m-15'));
+				$dueday=(date('d')<16?date('Y-m-07'):date('Y-m-22'));
+				$this->tpl->assignSubject('DAY_RANGE', $start.' to '.$end);
+				$this->tpl->assignThese([
+					'DUE_DAY' => $dueday,
+					'CLIENT_NAME'=>$org->name,
+				]);
+			break;
+			case 81:
+				$this->tpl->assignSubject('SHIPMENT_NO', $this->fobj->ref);
+				$this->tpl->assignThese([
+					'CLIENT_NAME'=>$this->fobj->getClientName(),
+					'SHIPMENT_NO'=>$this->fobj->ref,
+					'LINK'=> self::prepareLink($this->fobj->getTheHashUrl(4)),
+					// 'INV_TOTAL'=>$invInfo[0],
+				]);
+			break;
+			case 82:
+				$this->tpl->assignSubject('SHIPMENT_NO', $this->fobj->ref);
+				$this->tpl->assignThese([]);
+			break;
+			case 83:
+				$this->tpl->assignSubject('SHIPMENT_NO', $this->fobj->hbn." ".$this->fobj->ref);
+				$this->tpl->assignThese([
+					'SHIPMENT_NO'=>$this->fobj->hbn,
+				]);
+			break;
+			case 84:
+				$this->tpl->assignSubject('SHIPMENT_NO', $this->fobj->ref);
+				$this->tpl->assignThese([
+					'SHIPMENT_CUST_REF' => $this->fobj->cref,
+					'SHIPMENT_NO' => $this->fobj->ref,
+					'SHIPMENT_HBN' => $this->fobj->hbn,
+				]);
+			break;
+			case 85:
+			case 86:
+			case 87:
+			case 88:
+				$this->tpl->assignSubject('SHIPMENT_NO', $this->fobj->ref);
+				$this->tpl->assignThese([
+					'SHIPMENT_NO'=>$this->fobj->ref,
+				]);
+			break;
+			case 89:
+				$this->tpl->assignSubject('SHIPMENT_NO', $this->fobj->ref);
+				$this->tpl->assignThese([
+					'SHIPMENT_CUST_REF' => $this->fobj->cref,
+					'SHIPMENT_NO' => $this->fobj->ref,
+				]);
+			break;
+			case 111:
+				$this->tpl->assignSubject('SHIPMENT_NO', $this->fobj->ref);
+				$this->tpl->assignThese([
+					'SHIPMENT_NO' => $this->fobj->ref,
+				]);
+			break;
+			case 112:
+				$this->tpl->assignSubject('TASK_NO', $this->fobj->getNo() . ' ' . $this->fobj->ref);
+				$this->tpl->assignThese([
+					'TASK_NO' => $this->fobj->getNo() . ' ' . $this->fobj->ref,
+				]);
+			break;
+		}
+		$this->tpl->assign('USER_NAME', isset(Yii::app()->user)?(Yii::app()->user->name):'TLA');
+		$this->mdata['to'] = implode(',', $tos);
+	}
+	
+	public function send()
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		$td = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR;
+
+		$mail = new PHPMailer();
+		$mail->CharSet = 'UTF-8';
+		$mail->IsHTML(true);
+		$mail->SMTPSecure = 'tls';
+		$mail->Host = 'mail.toplogistics.com.au';  // Specify main and backup SMTP servers
+        $mail->Port = 587;         
+        $mail->SMTPAuth = true; // Enable SMTP authentication
+		$mail->Sender   =  empty($this->mdata['from'])? (Yii::app()->user->email == 'admin@system'? 'test@orite.com' : Yii::app()->user->email) : $this->mdata['from'];
+		$mail->From     = empty($this->mdata['from'])? (Yii::app()->user->email == 'admin@system'? 'test@orite.com' : Yii::app()->user->email) : $this->mdata['from'];
+		$mail->FromName = empty($this->mdata['from_name'])? Yii::app()->user->name : $this->mdata['from_name'];
+		$mail->Username = 'imports@toplogistics.com.au'; // SMTP username
+		$mail->Password = 'mxK+fU$n&LDK';
+		$mail->Subject  = $this->subject;
+		$mail->Body = $this->body;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+		
+		foreach (preg_split('/[,;]+/', $this->mdata['to']) as $to) {
+			$mail->AddAddress(trim($to));
+		}
+		if (!empty($this->mdata['cc'])) {
+			foreach (preg_split('/[,;]+/', $this->mdata['cc']) as $to) {
+				$mail->AddCC(trim($to));
+			}
+		}
+		if (!empty($this->mdata['bcc'])) {
+			foreach (preg_split('/[,;]+/', $this->mdata['bcc']) as $to) {
+				$mail->AddBCC(trim($to));
+			}
+		}
+		switch ($this->type) {
+			case 10:
+			case 35:
+				if (empty($this->fobj)) $this->getFobj();
+
+				if ($invoice->type != 60) {
+					$mail->AddStringAttachment(oPDF::renderPDF('invoice', ['inv' => $this->fobj], 0), $this->fobj->no . '.pdf', 'base64', 'application/pdf');
+				} else {
+					$f1 = tempnam(Yii::app()->basePath."/runtime", "ivp");
+					$f2 = tempnam(Yii::app()->basePath."/runtime", "ivp");
+					oPDF::renderPDF('invoice', ['inv'=>$invoice], 2, $f1);
+					oPDF::renderPDF('invoice_detail', ['inv'=>$invoice], 2, $f2);
+					$mail->AddStringAttachment(oPDF::mergePDF([$f1, $f2], 0, true), $this->fobj->no . '.pdf', 'base64', 'application/pdf');
+				}
+			break;
+			case 20:
+				$mail->From = 'finance@toplogistics.com.au';
+				if (empty($this->fobj)) {
+					$this->getFobj();
+				}
+				$model=new Invoice('search');
+				$model->unsetAttributes();
+				$model->to_id = $this->fid;
+				$ec = new CDbCriteria;
+				//$ec->condition = "status IN (2,3,7)";
+				// $ec->condition = "status IN (2,3,7) AND type != 50"; // currently ignore EDI invoice
+				$ec->condition = "status IN (2,3,7)"; // currently ignore EDI invoice
+				$dp = $model->search(false, 0, 't.due ASC', $ec);
+				$rs = $dp->data;
+				$tf = tempnam($td, "stmt");
+				oPDF::renderPDF('statement', ['invs'=>$rs], 2, $tf);
+				$ps[] = $tf;
+				foreach ($rs as $r) {
+					$tf = tempnam($td, "stmt");
+					oPDF::renderPDF('invoice', ['inv'=>$r], 2, $tf);
+					$ps[] = $tf;
+				}
+				
+				$mail->AddStringAttachment(oPDF::mergePDF($ps, 3), 'Statement_'.$this->fid.'_'.date('Ymd').'.pdf', 'base64', 'application/pdf');
+				
+				$xls = new oExcel;
+				$i = 1;
+				$xls->addRow($i, ['No', 'Type','AWB', 'Date', 'Due', 'Total', 'Paid', 'Balance']);
+				$xls->setFont('A'.$i.':H'.$i, ['bold' => true]);
+				$i++;
+				$tot = [0,0,0];
+				foreach ($rs as $r) {
+					$paid = $r->paid();
+					if ($r->type == 10) { // for import invoice
+						$awb = '';
+						if (isset($r->lines[0]) && isset($r->lines[0]->mdata['items'])) {
+							foreach ($r->lines[0]->mdata['items'] as $si => $ri) {
+								$awb = $ri[0];
+								break;
+							}
+						}
+						$xls->addRow($i++, [$r->no, $r->getType(),$awb, $r->date, $r->due, AppHelper::money_format('%i', $r->total), AppHelper::money_format('%i', $paid), AppHelper::money_format('%i', $r->total - $paid)]);
+					} else {
+						$xls->addRow($i++, [$r->no, $r->getType(),'', $r->date, $r->due, AppHelper::money_format('%i', $r->total), AppHelper::money_format('%i', $paid), AppHelper::money_format('%i', $r->total - $paid)]);
+					}
+					$tot[0] += $r->total;
+					$tot[1] += $paid;
+					$tot[2] += $r->total - $paid;
+				}
+				
+				$xls->addRow($i++, ['', '', '','', 'Total:', AppHelper::money_format('%i', $tot[0]), AppHelper::money_format('%i', $tot[1]), AppHelper::money_format('%i', $tot[2])]);
+				$xls->addRow($i++, []);
+
+				foreach ($rs as $r) {
+					$xls->addRow($i++, [$r->no, $r->date]);
+					$xls->addRow($i, ['HBN', 'Shipper', 'Packages', 'Weight', 'Type', 'Rate', 'Amount']);
+					$xls->setFont('A'.$i.':G'.$i, ['bold' => true]);
+					$i++;
+					$qty = 0;
+					$wei = 0;
+					$cbm = 0;
+					$tot = 0;
+					foreach ($r->lines as $il) {
+						if (empty($il->mdata['items'])) {
+							continue;
+						}
+						foreach ($il->mdata['items'] as $si => $ri) {
+							// import has different data format with export invoice
+							if ($r->type == 10) {
+								// for import invoice
+								$charge_wei = round(empty($ri[9]) ? $ri[3] : $ri[9], 2);
+								if (preg_match('/LET\d{7}/i', $ri[0])) {
+									$p = ImParcel::model()->find('ref=:ref', [':ref' => $ri[0]]);
+									if (!empty($p)) {
+										$ri[0] .= '(' . $p->hbn . ')';
+									}
+								}
+								$xls->addRow($i++, [$ri[0], $ri[1], 1, $charge_wei, '', '', $ri[5]]);
+								$tot += $ri[5];
+								$qty ++;
+								$wei += $charge_wei;
+							} else { // for import invoice
+								$xls->addRow($i++, [$ri[0], $ri[1], 1, $ri[2], $ri[4] . '(' . $ri[5] . ')', $ri[6], $ri[7]]);
+								$tot += floatval($ri[7]);
+								$qty ++;
+								$wei += floatval($ri[2]);
+							}
+						}
+					}
+					$xls->addRow($i, ['', 'Total:', $qty, $wei, '', '', $tot]);
+					$xls->setFont('A'.$i.':G'.$i, ['bold' => true]);
+					$i++;
+					$xls->addRow($i++, []);
+				}
+
+				$mail->AddStringAttachment($xls->output(null, null, false), 'Statement_'.$this->fid.'_'.date('Ymd').'.xlsx', 'base64');
+			break;
+		}
+		
+		foreach ($this->attachments as $att) {
+			$mail->AddAttachment($att->getFile(), $att->name, 'base64', $att->mime);
+		}
+
+		if ($mail->Send()) {
+			$this->status = 30;
+			$this->save();
+			return true;
+		} else {
+			echo $this->id, ' - ', $this->mdata['to'], ', ', $mail->ErrorInfo;
+			return false;
+		}
+	}
+	
+	public function scheduleSend()
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+								
+		$mail = new PHPMailer();
+		$mail->CharSet = 'UTF-8';
+		$mail->IsHTML(true);
+		$mail->SMTPSecure = 'tls'; 
+        $mail->Port = 587;         
+        $mail->SMTPAuth = true;
+        $mail->Host = 'mail.toplogistics.com.au';
+        $mail->Username = 'imports@toplogistics.com.au'; // SMTP username
+		$mail->Password = 'mxK+fU$n&LDK';
+		$sender = User::model()->findByPk($this->from_id);
+		$mail->From     = $sender->email == 'admin@system'? 'test@orite.com' : $sender->email;
+		$mail->FromName = $sender->getName();
+		$mail->Subject  = $this->subject;
+		$mail->Body = $this->body;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+		//test $mail->AddAddress('test@orite.com');
+		
+		foreach (preg_split('/[,;]+/', $this->mdata['to']) as $to) {
+			$mail->AddAddress(trim($to));
+		}
+		if (!empty($this->mdata['cc'])) {
+			foreach (preg_split('/[,;]+/', $this->mdata['cc']) as $to) {
+				$mail->AddCC(trim($to));
+			}
+		}
+		if (!empty($this->mdata['bcc'])) {
+			foreach (preg_split('/[,;]+/', $this->mdata['bcc']) as $to) {
+				$mail->AddBCC(trim($to));
+			}
+		}
+		
+		switch ($this->type) {
+			case 40:
+			break;
+		}
+		
+		foreach ($this->getRelated('attachments', true) as $att) {
+			$mail->AddAttachment($att->getFile(), $att->name, 'base64', $att->mime);
+		}
+		
+		if ($mail->Send()) {
+			$this->status = 30;
+			$this->save();
+			return true;
+		} else {
+			$this->status = 90;
+			$this->save();
+			echo $this->id, ' - ', $this->mdata['to'], ', ', $mail->ErrorInfo;
+			return false;
+		}
+	}
+	public function customerServiceSend($files)
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		require_once('PHPMailer/PHPMailerAutoload.php');///SMTP
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->IsHTML(true);
+		$mail->From     = "importscs@toplogistics.com.au";
+		$mail->FromName = "importscs";
+
+		/***************SMTP*********/
+		$mail->isSMTP(); // Set mailer to use SMTP
+		$mail->Host = 'mail.toplogistics.com.au'; // Specify main and backup SMTP servers
+		$mail->SMTPSecure = 'tls'; // Enable TLS encryption, `ssl` also accepted
+		$mail->Port = 587; // TCP port to connect to
+		$mail->SMTPAuth = true; // Enable SMTP authentication
+		$mail->Username = 'imports@toplogistics.com.au'; // SMTP username
+		$mail->Password = 'mxK+fU$n&LDK';
+		/***************SMTP*********/
+
+		$mail->Subject = $this->subject;
+		$mail->Body = $this->body;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+		$o=['status'=>false,'msg'=>'Email address not valid!'];
+	
+		if (!empty($this->mdata['to'])) {
+			$mail->AddAddress(trim($this->mdata['to']));//add customer email address
+			
+			//CC
+			if (!empty($this->mdata['cc'])) {
+				foreach (preg_split("/[;,]+/i", $this->mdata['cc']) as $cc) {
+					if (filter_var(trim($cc), FILTER_VALIDATE_EMAIL)) {
+						$mail->AddCC(trim($cc));//add customer email address
+					}
+				}
+			}
+			if (!empty($files)) {
+				foreach ($files as $fn) {
+					$mail->AddAttachment($fn[0], basename($fn[1]), 'base64');
+				}
+			}
+			foreach ($this->attachments as $att) {
+				$mail->AddAttachment($att->getFile(), $att->name, 'base64', $att->mime);
+			}
+			if ($mail->Send()) {
+				$this->status = 30;
+				$this->save();
+				$o['status']=true;
+				$o['msg']='send successfully!';
+			} else {
+				$o['status']=false;
+				$o['msg']=$mail->ErrorInfo;
+			}
+		}
+		return $o;
+	}
+
+	public function imConsolSend($fn)
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		require_once('PHPMailer/PHPMailerAutoload.php');///SMTP
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->IsHTML(true);
+
+		/***************SMTP*********/
+		$mail->isSMTP(); // Set mailer to use SMTP
+		$mail->Host = 'mail.toplogistics.com.au'; // Specify main and backup SMTP servers
+		$mail->SMTPSecure = 'tls'; // Enable TLS encryption, `ssl` also accepted
+		$mail->Port = 587; // TCP port to connect to
+		$mail->SMTPAuth = true; // Enable SMTP authentication
+		$mail->Username = 'imports@toplogistics.com.au'; // SMTP username
+		$mail->Password = 'mxK+fU$n&LDK';
+		/***************SMTP*********/
+
+		$mail->From     = !empty(Yii::app()->user)?Yii::app()->user->email:Org::IM_EMAIL;
+		$mail->FromName = !empty(Yii::app()->user)?Yii::app()->user->name:Org::IM_EMAIL_NAME;
+		$mail->Subject = $this->subject;
+		$mail->Body = $this->body;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+		if(is_array($fn))
+		{
+			foreach ($fn as $key => $f) {
+				$mail->AddAttachment($f, basename($f), 'base64');
+			}
+		}else
+		{
+			$mail->AddAttachment($fn, basename($fn), 'base64');
+		}
+
+		if (!empty($this->to_id)) {
+			$org = Org::model()->findByPk($this->to_id);
+			if (!empty($org->extra['outturn_email'])) {
+				foreach (preg_split('/[,;]+/i', trim($org->extra['outturn_email'])) as $to) {
+					$mail->AddAddress(trim($to));
+				}
+				$to=Org::IM_EMAIL;
+				$mail->AddCC(trim($to));
+				if ($mail->Send()) {
+					$this->status = 30;
+					$this->save();
+					return true;
+				}
+				//                    else{
+//          echo $this->id, ' - ', $this->mdata['to'], ', ', $mail->ErrorInfo;
+//          return false;
+//      }
+			}
+		}
+	}
+		
+						
+	public function storageSend($fn)
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		require_once('PHPMailer/PHPMailerAutoload.php');///SMTP
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->IsHTML(true);
+		$mail->From     = !empty(Yii::app()->user)?Yii::app()->user->email:"finance@toplogistics.com.au";
+		$mail->FromName = !empty(Yii::app()->user)?Yii::app()->user->name:"finance";
+		$mail->Subject = $this->subject;
+		$mail->Body = $this->body;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+		$mail->AddAttachment($fn, basename($fn));
+		if (!empty($this->to_id)) {
+			$org = Org::model()->findByPk($this->to_id);
+			if (!empty($org->extra['outturn_email'])) {
+				$mail->AddAddress(trim($org->extra['outturn_email']));
+				$to="finance@toplogistics.com.au";
+				$mail->AddCC(trim($to));
+				if ($mail->Send()) {
+					$this->status = 30;
+					$this->save();
+					return true;
+				} else {
+					echo $mail->ErrorInfo;
+					return false;
+				}
+			}
+		}
+	}
+		
+	public function InvoiceSend($fn= null, $fn2='',$fn3 = null)
+	{
+		require_once('PHPMailer/PHPMailerAutoload.php');///SMTP
+		$o=['status'=>false,'msg'=>'Email address not valid!'];
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->IsHTML(true);
+	
+		/***************SMTP*********/
+		$mail->isSMTP(); // Set mailer to use SMTP
+		$mail->Host = 'mail.toplogistics.com.au'; // Specify main and backup SMTP servers
+		$mail->SMTPSecure = 'tls'; // Enable TLS encryption, `ssl` also accepted
+		$mail->Port = 587; // TCP port to connect to
+		$mail->SMTPAuth = true; // Enable SMTP authentication
+		$mail->Username = 'imports@toplogistics.com.au'; // SMTP username
+		$mail->Password = 'mxK+fU$n&LDK'; /***************SMTP*********/
+		
+		
+		$mail->Subject = $this->subject;
+		$mail->Body = $this->body;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+		$mail->AddAttachment($fn, basename($fn), 'base64');
+		if (!empty($fn2)) {
+			$mail->AddAttachment($fn2, basename($fn2), 'base64');
+		}
+		if (!empty($fn3)) {
+			$mail->AddAttachment($fn3, basename($fn3), 'base64');
+		}
+		if (empty($this->to_id)) return false;
+
+			$org = Org::model()->findByPk($this->to_id);
+			if (!empty($org->extra['client_billing_email']) && (empty($org->extra['invoice-feq']) || $org->extra['invoice-feq'] == 'no')) {
+				foreach (preg_split('/[,;]+/i', trim($org->extra['client_billing_email'])) as $to) {
+					if (empty(trim($to))) {
+						continue;
+					}
+					$mail->AddAddress(trim($to));
+				}
+			} else if (!empty($org->extra['invoice-rec'])) {
+				foreach (preg_split('/[,;]+/i', trim($org->extra['invoice-rec'])) as $to) {
+					if (empty(trim($to))) {
+						continue;
+					}
+					$mail->AddAddress(trim($to));
+				}
+			} else {
+				// pcaw set send invoice yes but no invoice recipient
+				return false;
+			}
+
+				$from='';
+				if (!empty($org->extra['op_id'])) {
+					$op=User::model()->findByPk($org->extra['op_id']);
+					if (!empty($op)) {
+						if (!empty($op->email)) {
+							$opEmail=$op->email;
+							$from=$opEmail;
+							$mail->AddCC(trim($opEmail));
+						}
+					}
+				}
+				if (!empty($org->extra['op_email'])) {
+					foreach (preg_split('/[,;]+/i', trim($org->extra['op_email'])) as $to) {
+						$mail->AddCC(trim($to));
+					}
+				}
+						
+				$mail->AddCC(trim('finance@toplogistics.com.au'));
+				$fromName='';
+				if (!empty($from)) {
+					$fromName=explode("@", $from)[0];
+				}
+				$mail->Sender     = "finance@toplogistics.com.au";
+				$mail->From     = "finance@toplogistics.com.au";
+				$mail->FromName = "TLA Finance";
+				if ($mail->Send()) {
+					$this->status = 30;
+					$this->save();
+					return true;
+				} else {
+					echo $mail->ErrorInfo;
+					return false;
+				}
+	}
+	
+
+	public function creditNoticeSendToCustomer()
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		require_once('PHPMailer/PHPMailerAutoload.php');///SMTP
+
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->IsHTML(true);
+								
+		/***************SMTP*********/
+		$mail->isSMTP(); // Set mailer to use SMTP
+		$mail->Host = 'mail.toplogistics.com.au'; // Specify main and backup SMTP servers
+		$mail->SMTPSecure = 'tls'; // Enable TLS encryption, `ssl` also accepted
+		$mail->Port = 587; // TCP port to connect to
+		$mail->SMTPAuth = true; // Enable SMTP authentication
+		$mail->Username = 'imports@toplogistics.com.au'; // SMTP username
+		$mail->Password = 'mxK+fU$n&LDK';
+		/***************SMTP*********/
+
+		if (!empty($this->to_id)) {
+			$org = Org::model()->findByPk($this->to_id);
+			if (!empty($org->extra['client_billing_email'])) {
+				$mail->Subject = $this->subject;
+				$mail->Body = $this->body;
+				$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+				foreach (preg_split('/[,;]+/i', trim($org->extra['client_billing_email'])) as $to) {
+					$mail->AddAddress(trim($to));
+				}
+				$from='';
+				$fromName='';
+				if (!empty($org->extra['op_id'])) {
+					$op=User::model()->findByPk($org->extra['op_id']);
+					if (!empty($op)) {
+						if (!empty($op->email)) {
+							$opEmail=$op->email;
+							$from=$opEmail;
+							$mail->AddCC(trim($opEmail));
+						}
+					}
+				}
+				if (!empty($org->extra['op_email'])) {
+					foreach (preg_split('/[,;]+/i', trim($org->extra['op_email'])) as $to) {
+						$mail->AddCC(trim($to));
+					}
+				}
+				if (!empty($from)) {
+					$fromName=explode("@", $from)[0];
+				}
+				$mail->Sender   = !empty($from)?$from:"finance@toplogistics.com.au";
+				$mail->From     = !empty($from)?$from:"finance@toplogistics.com.au";
+				$mail->FromName = !empty($fromName)?$fromName:"TLA Finance";
+				$mail->AddCC(trim('finance@toplogistics.com.au'));
+				if ($mail->Send()) {
+					$this->status = 30;
+					$this->save();
+					return true;
+				} else {
+					echo $mail->ErrorInfo;
+					return false;
+				}
+			}
+		}
+		return false;
+	}
+
+
+
+	public function creditNoticeSend()
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		require_once('PHPMailer/PHPMailerAutoload.php');///SMTP
+
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->IsHTML(true);
+								
+		/***************SMTP*********/
+		$mail->isSMTP(); // Set mailer to use SMTP
+		$mail->Host = 'mail.toplogistics.com.au'; // Specify main and backup SMTP servers
+		$mail->SMTPSecure = 'tls'; // Enable TLS encryption, `ssl` also accepted
+		$mail->Port = 587; // TCP port to connect to
+		$mail->SMTPAuth = true; // Enable SMTP authentication
+		$mail->Username = 'imports@toplogistics.com.au'; // SMTP username
+		$mail->Password = 'mxK+fU$n&LDK';
+		/***************SMTP*********/
+
+		if (!empty($this->to_id)) {
+			$org = Org::model()->findByPk($this->to_id);
+			if (!empty($org->extra['client_billing_email'])) {
+				$mail->Subject = $this->subject;
+				$mail->Body = $this->body;
+				$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+				foreach (preg_split('/[,;]+/i', trim($org->extra['client_billing_email'])) as $to) {
+					$mail->AddAddress(trim($to));
+				}
+				$from='';
+				$fromName='';
+				if (!empty($org->extra['op_id'])) {
+					$op=User::model()->findByPk($org->extra['op_id']);
+					if (!empty($op)) {
+						if (!empty($op->email)) {
+							$opEmail=$op->email;
+							$from=$opEmail;
+							$mail->AddCC(trim($opEmail));
+						}
+					}
+				}
+				if (!empty($org->extra['op_email'])) {
+					foreach (preg_split('/[,;]+/i', trim($org->extra['op_email'])) as $to) {
+						$mail->AddCC(trim($to));
+					}
+				}
+				if (!empty($from)) {
+					$fromName=explode("@", $from)[0];
+				}
+				$mail->Sender   = !empty($from)?$from:"finance@toplogistics.com.au";
+				$mail->From     = !empty($from)?$from:"finance@toplogistics.com.au";
+				$mail->FromName = !empty($fromName)?$fromName:"TLA Finance";
+				$mail->AddCC(trim('finance@toplogistics.com.au'));
+				if ($mail->Send()) {
+					$this->status = 30;
+					$this->save();
+					return true;
+				} else {
+					echo $mail->ErrorInfo;
+					return false;
+				}
+			}
+		}
+		return false;
+	}
+		
+		
+	public function requireHighValueDocumentsSend($file=[])
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		require_once('PHPMailer/PHPMailerAutoload.php');///SMTP
+
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->IsHTML(true);
+								
+		/***************SMTP*********/
+		$mail->isSMTP(); // Set mailer to use SMTP
+		$mail->Host = 'mail.toplogistics.com.au'; // Specify main and backup SMTP servers
+		$mail->SMTPSecure = 'tls'; // Enable TLS encryption, `ssl` also accepted
+		$mail->Port = 587; // TCP port to connect to
+		$mail->SMTPAuth = true; // Enable SMTP authentication
+		$mail->Username = 'imports@toplogistics.com.au'; // SMTP username
+		$mail->Password = 'mxK+fU$n&LDK';
+		/***************SMTP*********/
+				
+		$mail->Subject = $this->subject;
+		$mail->Body = $this->body;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+				
+		if (!empty($file)) {
+			foreach ($file as $fn) {
+				$mail->AddAttachment($fn, basename($fn), 'base64');
+			}
+		}
+		
+		if (!empty($this->to_id)) {
+			$org = Org::model()->findByPk($this->to_id);
+			if (!empty($org->extra['outturn_email'])) {
+				foreach (preg_split('/[,;]+/i', trim($org->extra['outturn_email'])) as $to) {
+					$mail->AddAddress(trim($to));
+				}
+				$mail->From     = "imports@toplogistics.com.au";
+				$mail->FromName ="TLA";
+				//              $mail->AddCC(trim('jerry@toplogistics.com.au'));
+				$mail->AddCC(trim('imports@toplogistics.com.au'));
+				if ($mail->Send()) {
+					$this->status = 30;
+					$this->save();
+					return true;
+				} else {
+					echo $mail->ErrorInfo;
+					return false;
+				}
+			}
+		}
+		return false;
+	}
+		
+	public function requireEmppDocuments()
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		require_once('PHPMailer/PHPMailerAutoload.php');///SMTP
+		$o=['status'=>false,'msg'=>'Email address not valid!'];
+
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->IsHTML(true);
+								
+		/***************SMTP*********/
+		$mail->isSMTP(); // Set mailer to use SMTP
+		$mail->Host = 'mail.toplogistics.com.au'; // Specify main and backup SMTP servers
+		$mail->SMTPSecure = 'tls'; // Enable TLS encryption, `ssl` also accepted
+		$mail->Port = 587; // TCP port to connect to
+		$mail->SMTPAuth = true; // Enable SMTP authentication
+		$mail->Username = 'imports@toplogistics.com.au'; // SMTP username
+		$mail->Password = 'mxK+fU$n&LDK';
+		/***************SMTP*********/
+
+		
+		$mail->Subject = $this->subject;
+		$mail->Body = $this->body;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+			
+		if (!empty($this->to_id)) {
+			$org = Org::model()->findByPk($this->to_id);
+			if (!empty($org->extra['outturn_email'])) {
+				foreach (preg_split('/[,;]+/i', trim($org->extra['outturn_email'])) as $to) {
+					$mail->AddAddress(trim($to));
+				}
+				$from='';
+			
+			
+				//              $mail->AddCC(trim('jerry@toplogistics.com.au'));
+				$mail->AddCC(trim('imports@toplogistics.com.au'));
+				$fromName='';
+				if (!empty($from)) {
+					$fromName=explode("@", $from)[0];
+				}
+				$mail->From     = !empty($from)?$from:"imports@toplogistics.com.au";
+				$mail->FromName = !empty($fromName)?$fromName:"Top Logistics Australia";
+				if ($mail->Send()) {
+					$this->status = 30;
+					$this->save();
+					$o['status']=true;
+					$o['msg']='send successfully!';
+				} else {
+					$o['status']=false;
+					$o['msg']=$mail->ErrorInfo;
+				}
+			}
+		}
+		return $o;
+	}
+	
+	/*
+	* @params  $files array,   component array( fileUrl,filename);
+	*/
+	
+	public function sendEmail($files=[])
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		require_once('PHPMailer/PHPMailerAutoload.php');///SMTP
+		$o=['status'=>false,'msg'=>'Email address not valid!'];
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->IsHTML(true);
+	
+		/***************SMTP*********/
+		$mail->isSMTP(); // Set mailer to use SMTP
+		$mail->Host = 'mail.toplogistics.com.au'; // Specify main and backup SMTP servers
+		$mail->SMTPSecure = 'tls'; // Enable TLS encryption, `ssl` also accepted
+		$mail->Port = 587; // TCP port to connect to
+		$mail->SMTPAuth = true; // Enable SMTP authentication
+		$mail->Username = 'importstest@toplogistics.com.au'; // SMTP username
+		$mail->Password = '3g%c2a#76ejiQu22'; /***************SMTP*********/
+		
+		$mail->Subject = $this->subject;
+		$mail->Body = $this->body;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+	
+		if (!empty($this->mdata['to'])) {
+			foreach (preg_split("/[;,]+/i", $this->mdata['to']) as $to) {
+				if (filter_var(trim($to), FILTER_VALIDATE_EMAIL)) {
+					$mail->AddAddress(trim($to));//add customer email address
+				}
+			}
+			
+			foreach (preg_split("/[;,]+/i", $this->mdata['from']) as $from) {
+				if (filter_var(trim($from), FILTER_VALIDATE_EMAIL)) {
+					$mail->Sender = trim($from);
+					$mail->From=trim($from);
+					$mail->FromName=!empty($this->mdata['fromName'])?$this->mdata['fromName']:(explode("@", $from)[0]);
+				}
+			}
+			
+			//CC
+			if (!empty($this->mdata['cc'])) {
+				foreach (preg_split("/[;,]+/i", $this->mdata['cc']) as $cc) {
+					if (filter_var(trim($cc), FILTER_VALIDATE_EMAIL)) {
+						$mail->AddCC(trim($cc));//add customer email address
+					}
+				}
+			}
+			//bcc
+			if (!empty($this->mdata['bcc'])) {
+				foreach (preg_split('/[,;]+/', $this->mdata['bcc']) as $bcc) {
+					if (filter_var(trim($bcc), FILTER_VALIDATE_EMAIL)) {
+						$mail->AddBCC(trim($bcc));
+					}
+				}
+			}
+
+			if (!empty($files))
+			{
+				foreach ($files as $fn) {
+					//replace broker name
+					if(preg_match('/^AUCustoms[ _\-]+Entry[ ]*Print.+\.pdf$/i', $fn[1])){//$f->type == 19 && 
+						$pdf = new modiPDF($fn[0]);
+						if(preg_match('/Email Cover Sheet/i', $pdf->rawText()) && $pdf->pageCount() > 1) $pdf->removePage(1);
+						if($pdf->replace(['FYN Logistics Australia Pty Lt', 'Mega-Top Cargo Pty Limited  ', 'Master Logistics Pty Ltd    ', 'Compliant Customs Pty Ltd   ','Autumn Customs Services Pty Lt'], ['TLA Appointed Broker  ', 'TLA Appointed Broker', 'TLA Appointed Broker', 'TLA Appointed Broker', 'TLA Appointed Broker'])){
+							$mail->AddStringAttachment($pdf->output(0), $fn[1], 'base64', 'application/pdf');
+						}
+					}else{
+						$mail->AddAttachment($fn[0], $fn[1], 'base64');
+					}
+				}
+			}
+			foreach ($this->attachments as $att) {
+				$mail->AddAttachment($att->getFile(), $att->name, 'base64', $att->mime);
+			}
+			if ($mail->Send()) {
+				$this->status = 30;
+				$this->save();
+				$o['status']=true;
+				$o['msg']='send successfully!';
+			} else {
+				$o['status']=false;
+				$o['msg']=$mail->ErrorInfo;
+			}
+		}
+		return $o;
+	}
+
+		/*
+	* @params  $files array,   component array( fileUrl,filename);
+	*/
+	
+	public function sendEmailPCAE($files=[])
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		require_once('PHPMailer/PHPMailerAutoload.php');///SMTP
+		$o=['status'=>false,'msg'=>'Email address not valid!'];
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->IsHTML(true);
+	
+		/***************SMTP*********/
+		$mail->isSMTP(); // Set mailer to use SMTP
+		$mail->Host = 'mail.pcaexpress.com.au'; // Specify main and backup SMTP servers
+		$mail->SMTPSecure = 'tls'; // Enable TLS encryption, `ssl` also accepted
+		$mail->Port = 587; // TCP port to connect to
+		$mail->SMTPAuth = true; // Enable SMTP authentication
+		$mail->Username = 'importstest@toplogistics.com.au'; // SMTP username
+		$mail->Password = '3g%c2a#76ejiQu22'; /***************SMTP*********/
+		
+		$mail->Subject = $this->subject;
+		$mail->Body = $this->body;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+	
+		if (!empty($this->mdata['to'])) {
+			foreach (preg_split("/[;,]+/i", $this->mdata['to']) as $to) {
+				if (filter_var(trim($to), FILTER_VALIDATE_EMAIL)) {
+					$mail->AddAddress(trim($to));//add customer email address
+				}
+			}
+			
+			foreach (preg_split("/[;,]+/i", $this->mdata['from']) as $from) {
+				if (filter_var(trim($from), FILTER_VALIDATE_EMAIL)) {
+					$mail->From=trim($from);
+					$mail->FromName=!empty($this->mdata['fromName'])?$this->mdata['fromName']:(explode("@", $from)[0]);
+				}
+			}
+			
+			//CC
+			if (!empty($this->mdata['cc'])) {
+				foreach (preg_split("/[;,]+/i", $this->mdata['cc']) as $cc) {
+					if (filter_var(trim($cc), FILTER_VALIDATE_EMAIL)) {
+						$mail->AddCC(trim($cc));//add customer email address
+					}
+				}
+			}
+			if (!empty($files)) {
+				foreach ($files as $fn) {
+					$mail->AddAttachment($fn[0], basename($fn[1]), 'base64');
+				}
+			}
+			foreach ($this->attachments as $att) {
+				$mail->AddAttachment($att->getFile(), $att->name, 'base64', $att->mime);
+			}
+			if ($mail->Send()) {
+				$this->status = 30;
+				$this->save();
+				$o['status']=true;
+				$o['msg']='send successfully!';
+			} else {
+				$o['status']=false;
+				$o['msg']=$mail->ErrorInfo;
+			}
+		}
+		return $o;
+	}
+
+	public function requireHighValueDocumentsSendCustomer($emailAddress, $file=[])
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		require_once('PHPMailer/PHPMailerAutoload.php');///SMTP
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->IsHTML(true);
+								
+		/***************SMTP*********/
+		$mail->isSMTP(); // Set mailer to use SMTP
+		$mail->Host = 'mail.toplogistics.com.au'; // Specify main and backup SMTP servers
+		$mail->SMTPSecure = 'tls'; // Enable TLS encryption, `ssl` also accepted
+		$mail->Port = 587; // TCP port to connect to
+		$mail->SMTPAuth = true; // Enable SMTP authentication
+		$mail->Username = 'imports@toplogistics.com.au'; // SMTP username
+		$mail->Password = 'mxK+fU$n&LDK';
+		/***************SMTP*********/
+				
+		$mail->Subject = $this->subject;
+		$mail->Body = $this->body;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+		if (!empty($file)) {
+			foreach ($file as $fn) {
+				$mail->AddAttachment($fn, basename($fn), 'base64');
+			}
+		}
+		foreach (preg_split('/[;,]+/i', $emailAddress) as $to) {
+			if (filter_var($to, FILTER_VALIDATE_EMAIL)) {
+				$mail->AddAddress(trim($to));
+			}//add customer email address
+		}
+		$mail->From     = "imports@toplogistics.com.au";
+		$mail->FromName = "Top Logistics Australia";
+						
+		$from='';
+		//         $mail->AddCC(trim('jerry@toplogistics.com.au'));
+		$mail->AddCC(trim('imports@toplogistics.com.au'));
+		if ($mail->Send()) {
+			$this->status = 30;
+			$this->save();
+			return true;
+		} else {
+			echo $mail->ErrorInfo;
+			return false;
+		}
+		return false;
+	}
+		
+	public function requireHVDCustomerLoa($emailAddress, $file=[])
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		require_once('PHPMailer/PHPMailerAutoload.php');///SMTP
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->IsHTML(true);
+								
+		/***************SMTP*********/
+		$mail->isSMTP(); // Set mailer to use SMTP
+		$mail->Host = 'mail.toplogistics.com.au'; // Specify main and backup SMTP servers
+		$mail->SMTPSecure = 'tls'; // Enable TLS encryption, `ssl` also accepted
+		$mail->Port = 587; // TCP port to connect to
+		$mail->SMTPAuth = true; // Enable SMTP authentication
+		$mail->Username = 'imports@toplogistics.com.au'; // SMTP username
+		$mail->Password = 'mxK+fU$n&LDK';
+		/***************SMTP*********/
+
+		$mail->Subject = $this->subject;
+		$mail->Body = $this->body;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+		if (!empty($file)) {
+			foreach ($file as $fn) {
+				$mail->AddAttachment($fn[0], basename($fn[1]), 'base64');
+			}
+		}
+				
+		foreach (preg_split('/[;,]+/i', $emailAddress) as $to) {
+			if (filter_var($to, FILTER_VALIDATE_EMAIL)) {
+				$mail->AddAddress(trim($to));
+			}//add customer email address
+		}
+		$mail->From     = "imports@toplogistics.com.au";
+		$mail->FromName = "Top Logistics AUstralia";
+						
+		$from='';
+		// $mail->AddCC(trim('jerry@toplogistics.com.au'));
+		$mail->AddCC(trim('imports@toplogistics.com.au'));
+		if ($mail->Send()) {
+			$this->status = 30;
+			$this->save();
+			return true;
+		} else {
+			echo $mail->ErrorInfo;
+			return false;
+		}
+		return false;
+	}
+		
+	public function sendToBroker($file=[])
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		require_once('PHPMailer/PHPMailerAutoload.php');///SMTP
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->IsHTML(true);
+								
+		/***************SMTP*********/
+		$mail->isSMTP(); // Set mailer to use SMTP
+		$mail->Host = 'mail.toplogistics.com.au'; // Specify main and backup SMTP servers
+		$mail->SMTPSecure = 'tls'; // Enable TLS encryption, `ssl` also accepted
+		$mail->Port = 587; // TCP port to connect to
+		$mail->SMTPAuth = true; // Enable SMTP authentication
+		$mail->Username = 'imports@toplogistics.com.au'; // SMTP username
+		$mail->Password = 'mxK+fU$n&LDK';
+		/***************SMTP*********/
+			
+		$mail->Subject = $this->subject;
+		$mail->Body = $this->body;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+		if (!empty($file)) {
+			foreach ($file as $fn) {
+				$mail->AddAttachment($fn[0], basename($fn[1]), 'base64');
+			}
+		}
+		if (!empty($this->to_id)) {
+			$org = Org::model()->findByPk($this->to_id);
+			if (!empty($org->extra['outturn_email'])) {
+				foreach (preg_split('/[,;]+/i', trim($org->extra['outturn_email'])) as $to) {
+					$mail->AddAddress(trim($to));
+				}
+			}
+			$mail->From     = "imports@toplogistics.com.au";
+			$mail->FromName = "Top Logistics Australia";
+						
+			$from='';
+			// $mail->AddCC(trim('jerry@toplogistics.com.au'));
+			$mail->AddCC(trim('imports@toplogistics.com.au'));
+			if ($mail->Send()) {
+				$this->status = 30;
+				$this->save();
+				return true;
+			} else {
+				echo $mail->ErrorInfo;
+				return false;
+			}
+		}
+		return false;
+	}
+		
+	public function sendToBrokerToPay($file=[])
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		require_once('PHPMailer/PHPMailerAutoload.php');///SMTP
+ 
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->IsHTML(true);
+						
+		/***************SMTP*********/
+		$mail->isSMTP(); // Set mailer to use SMTP
+		$mail->Host = 'mail.toplogistics.com.au'; // Specify main and backup SMTP servers
+		$mail->SMTPSecure = 'tls'; // Enable TLS encryption, `ssl` also accepted
+		$mail->Port = 587; // TCP port to connect to
+		$mail->SMTPAuth = true; // Enable SMTP authentication
+		$mail->Username = 'imports@toplogistics.com.au'; // SMTP username
+		$mail->Password = 'mxK+fU$n&LDK';
+		/***************SMTP*********/
+								
+		$mail->Subject = $this->subject;
+		$mail->Body = $this->body;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+		if (!empty($file)) {
+			foreach ($file as $fn) {
+				$mail->AddAttachment($fn[0], basename($fn[1]), 'base64');
+			}
+		}
+		if (!empty($this->to_id)) {
+			$org = Org::model()->findByPk($this->to_id);
+			if (!empty($org->extra['outturn_email'])) {
+				foreach (preg_split('/[,;]+/i', trim($org->extra['outturn_email'])) as $to) {
+					$mail->AddAddress(trim($to));
+				}
+			}
+			$mail->From     = "imports@toplogistics.com.au";
+			$mail->FromName = "Top Logistics Australia";
+						
+			$from='';
+			//$mail->AddCC(trim('jerry@toplogistics.com.au'));
+			$mail->AddCC(trim('imports@toplogistics.com.au'));
+			if ($mail->Send()) {
+				$this->status = 30;
+				$this->save();
+				return true;
+			} else {
+				echo $mail->ErrorInfo;
+				return false;
+			}
+		}
+		return false;
+	}
+		
+		
+	public function sendEntryToConfirm($emailAddress, $files=[])
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		require_once('PHPMailer/PHPMailerAutoload.php');///SMTP
+ 
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->IsHTML(true);
+						
+		/***************SMTP*********/
+		$mail->isSMTP(); // Set mailer to use SMTP
+		$mail->Host = 'mail.toplogistics.com.au'; // Specify main and backup SMTP servers
+		$mail->SMTPSecure = 'tls'; // Enable TLS encryption, `ssl` also accepted
+		$mail->Port = 587; // TCP port to connect to
+		$mail->SMTPAuth = true; // Enable SMTP authentication
+		$mail->Username = 'imports@toplogistics.com.au'; // SMTP username
+		$mail->Password = 'mxK+fU$n&LDK';
+		/***************SMTP*********/
+				
+		$mail->Subject = $this->subject;
+		$mail->Body = $this->body;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+		if (!empty($files)) {
+			foreach ($files as $fn) {
+				//replace broker name
+				if(preg_match('/^AUCustoms[ _\-]+Entry[ ]*Print.+\.pdf$/i', $fn[1])){//$f->type == 19 && 
+					$pdf = new modiPDF($fn[0]);
+					if(preg_match('/Email Cover Sheet/i', $pdf->rawText()) && $pdf->pageCount() > 1) $pdf->removePage(1);
+					if($pdf->replace(['FYN Logistics Australia Pty Lt', 'Mega-Top Cargo Pty Limited  ', 'Master Logistics Pty Ltd    ', 'Compliant Customs Pty Ltd   ','Autumn Customs Services Pty Lt'], ['TLA Appointed Broker  ', 'TLA Appointed Broker', 'TLA Appointed Broker', 'TLA Appointed Broker', 'TLA Appointed Broker'])){
+						$mail->AddStringAttachment($pdf->output(0), $fn[1], 'base64', 'application/pdf');
+					}
+				}else{
+					$mail->AddAttachment($fn[0], $fn[1], 'base64');
+				}
+			}
+		}
+					
+		foreach (preg_split('/[;,]+/i', $emailAddress) as $to) {
+			if (filter_var($to, FILTER_VALIDATE_EMAIL)) {
+				$mail->AddAddress(trim($to));
+			}//add customer email address
+		}
+		$mail->From     = Org::IM_EMAIL;
+		$mail->FromName = Org::IM_EMAIL_NAME;
+						
+		$from='';
+		//$mail->AddCC(trim('jerry@toplogistics.com.au'));
+		$mail->AddCC(trim(Org::IM_EMAIL));
+		if ($mail->Send()) {
+			$this->status = 30;
+			$this->save();
+			return true;
+		} else {
+			echo $mail->ErrorInfo;
+			return false;
+		}
+				
+		return false;
+	}
+	public function sendNoticeDelivery($emailAddress)
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		require_once('PHPMailer/PHPMailerAutoload.php');///SMTP
+		$o=['status'=>false,'msg'=>''];
+
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->IsHTML(true);
+								
+		/***************SMTP*********/
+		$mail->isSMTP(); // Set mailer to use SMTP
+		$mail->Host = 'mail.toplogistics.com.au'; // Specify main and backup SMTP servers
+		$mail->SMTPSecure = 'tls'; // Enable TLS encryption, `ssl` also accepted
+		$mail->Port = 587; // TCP port to connect to
+		$mail->SMTPAuth = true; // Enable SMTP authentication
+		$mail->Username = 'imports@toplogistics.com.au'; // SMTP username
+		$mail->Password = 'mxK+fU$n&LDK';
+		/***************SMTP*********/
+			
+		$mail->Subject = $this->subject;
+		$mail->Body = $this->body;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+		
+		foreach (preg_split('/[;,]+/i', $emailAddress) as $to) {
+			if (filter_var($to, FILTER_VALIDATE_EMAIL)) {
+				$mail->AddAddress(trim($to));
+			}//add customer email address
+		}
+		$mail->From     = Org::IM_EMAIL;
+		$mail->FromName = Org::IM_EMAIL_NAME;
+		// $mail->AddCC(trim('jerry@toplogistics.com.au'));
+		$mail->AddCC(trim(Org::IM_EMAIL));
+		if ($mail->Send()) {
+			$this->status = 30;
+			$this->save();
+			$o['status']=true;
+			$o['msg']='send succesfully!';
+		} else {
+			$o['status']=false;
+			$o['msg']=$mail->ErrorInfo;
+		}
+		return $o;
+	}
+		
+		
+	public function sendInformOp()
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		require_once('PHPMailer/PHPMailerAutoload.php');///SMTP
+
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->IsHTML(true);
+								
+		/***************SMTP*********/
+		$mail->isSMTP(); // Set mailer to use SMTP
+		$mail->Host = 'mail.toplogistics.com.au'; // Specify main and backup SMTP servers
+		$mail->SMTPSecure = 'tls'; // Enable TLS encryption, `ssl` also accepted
+		$mail->Port = 587; // TCP port to connect to
+		$mail->SMTPAuth = true; // Enable SMTP authentication
+		$mail->Username = 'imports@toplogistics.com.au'; // SMTP username
+		$mail->Password = 'mxK+fU$n&LDK';
+		/***************SMTP*********/
+		
+		$mail->Subject = $this->subject;
+		$mail->Body = $this->body;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+		$mail->AddAddress(trim("imports@toplogistics.com.au"));
+		$mail->From     = "imports@toplogistics.com.au";
+		$mail->FromName = "hvlv Notice";
+						
+		$from='';
+		//  $mail->AddCC(trim('jerry@toplogistics.com.au'));
+				
+		if ($mail->Send()) {
+			$this->status = 30;
+			$this->save();
+			return true;
+		} else {
+			return false;
+		}
+				
+		return false;
+	}
+		
+	public function wcaSend()
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		foreach (explode(',', $this->mdata['to']) as $to) {
+			$mail=new PHPmailer();
+			$mail->charSet="UTF-8";
+			$mail->IsHTML(true);
+			$mail->SMTPAuth = true; // Enable SMTP authentication
+			$mail->From     = Yii::app()->user->email == 'admin@system'? 'test@orite.com' : Yii::app()->user->email;
+			$mail->FromName = Yii::app()->user->name;
+			$mail->AddAddress(trim($to));
+			$mail->Subject = $this->subject;
+			$mail->Body = $this->body;
+			$client='';
+			$wca= WcaMembers::model()->find('email=:email', [':email'=>$to]);
+			if (!empty($wca)) {
+				$client=$wca->name;
+			}
+			$mail->Body= preg_replace("/client_name/i", $client, $mail->Body);
+			$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+			foreach ($this->attachments as $att) {
+				$mail->AddAttachment($att->getFile(), $att->name, 'base64', $att->mime);
+			}
+			if ($mail->Send()) {
+				$this->status = 30;
+				$wcaMember=WcaMembers::model()->find('email=:email', [':email'=>trim($to)]);
+				if (!empty($wcaMember)) {
+					$wcaMember->sent=1;
+					$wcaMember->save();
+				}
+				$this->save();
+				return true;
+			} else {
+				echo $this->id, ' - ', $this->mdata['to'], ', ', $mail->ErrorInfo;
+				return false;
+			}
+		}
+	}
+
+	public function sendWmsAPIemail()
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		$o = ['status' => false, 'msg' => ''];
+
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->Subject = $this->subject;
+		$mail->Body = $this->body;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+		$emailAddress = 'gero@toplogistics.com.au';
+		foreach (preg_split('/[;,]+/i', $emailAddress) as $to) {
+			if (filter_var($to, FILTER_VALIDATE_EMAIL)) {
+				$mail->AddAddress(trim($to));
+			}
+		}
+		$mail->From = 'gero@toplogistics.com.au';
+		$mail->FromName = "PCAE IT TEAM";
+		if ($mail->Send()) {
+			$this->status = 30;
+			$this->save();
+			$o['status'] = true;
+			$o['msg'] ='send succesfully!';
+		} else {
+			$o['status'] = false;
+			$o['msg'] = $mail->ErrorInfo;
+		}
+		return $o;
+	}
+
+	public function sendWmsComparisonReportEmail($fn)
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		$o = ['status' => false, 'msg' => ''];
+
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->Subject = $this->subject;
+		$mail->Body = $this->body;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+		$emailAddress = 'gero@toplogistics.com.au';
+		foreach (preg_split('/[;,]+/i', $emailAddress) as $to) {
+			if (filter_var($to, FILTER_VALIDATE_EMAIL)) {
+				$mail->AddAddress(trim($to));
+			}
+		}
+		if (!empty($fn)) {
+			$mail->AddAttachment($fn, basename($fn), 'base64');
+		}
+		$mail->From = 'gero@toplogistics.com.au';
+		$mail->FromName = "PCAE IT TEAM";
+		if ($mail->Send()) {
+			$this->status = 30;
+			$this->save();
+			$o['status'] = true;
+			$o['msg'] ='send succesfully!';
+		} else {
+			$o['status'] = false;
+			$o['msg'] = $mail->ErrorInfo;
+		}
+		return $o;
+	}
+
+	public function sendUFLShortReport($fn)
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		$o = ['status' => false, 'msg' => ''];
+
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->Subject = $this->subject;
+		$mail->Body = $this->body;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+		$emailAddress = 'gero@toplogistics.com.au;';
+		foreach (preg_split('/[;,]+/i', $emailAddress) as $to) {
+			if (filter_var($to, FILTER_VALIDATE_EMAIL)) {
+				$mail->AddAddress(trim($to));
+			}
+		}
+		if (!empty($fn)) {
+			$mail->AddAttachment($fn, basename($fn), 'base64');
+		}
+		$mail->From = 'gero@toplogistics.com.au';
+		$mail->FromName = "PCAE IT TEAM";
+		if ($mail->Send()) {
+			$this->status = 30;
+			$this->save();
+			$o['status'] = true;
+			$o['msg'] ='send succesfully!';
+		} else {
+			$o['status'] = false;
+			$o['msg'] = $mail->ErrorInfo;
+		}
+		return $o;
+	}
+
+	public function sendWmsStockCheckEmail()
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		$o = ['status' => false, 'msg' => ''];
+
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->Subject = $this->subject;
+		$mail->Body = $this->body;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+		$emailAddress = 'gero@toplogistics.com.au';
+		foreach (preg_split('/[;,]+/i', $emailAddress) as $to) {
+			if (filter_var($to, FILTER_VALIDATE_EMAIL)) {
+				$mail->AddAddress(trim($to));
+			}
+		}
+		$mail->From = 'gero@toplogistics.com.au';
+		$mail->FromName = "PCAE IT TEAM";
+		if ($mail->Send()) {
+			$this->status = 30;
+			$this->save();
+			$o['status'] = true;
+			$o['msg'] ='send succesfully!';
+		} else {
+			$o['status'] = false;
+			$o['msg'] = $mail->ErrorInfo;
+		}
+		return $o;
+	}
+
+	public function sendShopifySyncReport()
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		$o = ['status' => false, 'msg' => ''];
+
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->Subject = $this->subject;
+		$mail->Body = $this->body;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+		if (!empty($this->mdata['to'])) {
+			foreach (preg_split('/[;,]+/i', $this->mdata['to']) as $to) {
+				if (filter_var(trim($to), FILTER_VALIDATE_EMAIL)) {
+					$mail->AddAddress(trim($to));
+				}
+			}
+		}
+		if (!empty($this->mdata['cc'])) {
+			foreach (preg_split("/[;,]+/i", $this->mdata['cc']) as $cc) {
+				if (filter_var(trim($cc), FILTER_VALIDATE_EMAIL)) {
+					$mail->AddCC(trim($cc));
+				}
+			}
+		}
+		$mail->From = 'gero@toplogistics.com.au';
+		$mail->FromName = "PCAE IT TEAM";
+		if ($mail->Send()) {
+			$this->status = 30;
+			$this->save();
+			$o['status'] = true;
+			$o['msg'] ='send succesfully!';
+		} else {
+			$o['status'] = false;
+			$o['msg'] = $mail->ErrorInfo;
+		}
+		return $o;
+	}
+
+	public function sendWmsReport($fn)
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		$o = ['status' => false, 'msg' => ''];
+
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->Subject = $this->subject;
+		$mail->Body = $this->body;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+		if (!empty($this->mdata['to'])) {
+			foreach (preg_split('/[;,]+/i', $this->mdata['to']) as $to) {
+				if (filter_var(trim($to), FILTER_VALIDATE_EMAIL)) {
+					$mail->AddAddress(trim($to));
+				}
+			}
+		}
+		$mail->AddCC(trim('gero@toplogistics.com.au'));
+		if (!empty($fn)) {
+			$mail->AddAttachment($fn, basename($fn), 'base64');
+		}
+		$mail->From = 'gero@toplogistics.com.au';
+		$mail->FromName = "PCAE IT TEAM";
+		if ($mail->Send()) {
+			$this->status = 30;
+			$this->save();
+			$o['status'] = true;
+			$o['msg'] ='send succesfully!';
+		} else {
+			$o['status'] = false;
+			$o['msg'] = $mail->ErrorInfo;
+		}
+		return $o;
+	}
+
+	public function send3PLStatement()
+	{
+		include_once('PHPMailer/class.phpmailer.php');
+		$o = ['status' => false, 'msg' => ''];
+
+		// $mail = new PHPmailer();
+		// $mail->CharSet = "UTF-8";
+		// $mail->Subject = $this->subject;
+		// $mail->Body = $this->body;
+		// $mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+		// if (!empty($this->mdata['to'])) {
+		// 	foreach (preg_split('/[;,]+/i', $this->mdata['to']) as $to) {
+		// 		if (filter_var(trim($to), FILTER_VALIDATE_EMAIL)) {
+		// 			$mail->AddAddress(trim($to));
+		// 		}
+		// 	}
+		// }
+		// $mail->From = '3pl@toplogistics.com.au';
+		// $mail->FromName = "Top Logistics";
+		
+		
+		
+		
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->IsHTML(true);
+								
+		/***************SMTP*********/
+		$mail->isSMTP(); // Set mailer to use SMTP
+		$mail->Host = 'mail.toplogistics.com.au'; // Specify main and backup SMTP servers
+		$mail->SMTPSecure = 'tls'; // Enable TLS encryption, `ssl` also accepted
+		$mail->Port = 587; // TCP port to connect to
+		$mail->SMTPAuth = true; // Enable SMTP authentication
+		$mail->Username = 'imports@toplogistics.com.au'; // SMTP username //'3pl@toplogistics.com.au';
+		$mail->Password = 'mxK+fU$n&LDK';//'3pl@toplogistics.com.au';
+		/***************SMTP*********/
+		
+		$mail->Subject = $this->subject;
+		$mail->Body = $this->body;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($this->body));
+		// $mail->AddAddress(trim("imports@toplogistics.com.au"));
+		$mail->From     = "finance@toplogistics.com.au";//'3pl@toplogistics.com.au';
+		$mail->FromName = "TLA Finance";
+		
+		if (!empty($this->mdata['to'])) {
+			foreach (preg_split('/[;,]+/i', $this->mdata['to']) as $to) {
+				if (filter_var(trim($to), FILTER_VALIDATE_EMAIL)) {
+					$mail->AddAddress(trim($to));
+				}
+			}
+		}
+		
+		$model = new Invoice('search');
+		$model->unsetAttributes();
+		$model->to_id = $this->fid;
+		$ec = new CDbCriteria;
+		$ec->condition = 'status IN (2,3,7)';
+		$dp = $model->search(false, 0, 't.due ASC', $ec);
+		$rs = $dp->data;
+		$tf = tempnam($td, "stmt");
+		oPDF::renderPDF('statement', ['invs'=>$rs], 2, $tf);
+		$ps[] = $tf;
+		foreach ($rs as $r) {
+			$tf = tempnam($td, "stmt");
+			oPDF::renderPDF('invoice', ['inv'=>$r], 2, $tf);
+			$ps[] = $tf;
+		}
+		$mail->AddStringAttachment(oPDF::mergePDF($ps, 3), 'Statement_'.$this->fid.'_'.date('Ymd').'.pdf', 'base64', 'application/pdf');
+
+		if ($mail->Send()) {
+			$this->status = 30;
+			$this->save();
+			$o['status'] = true;
+			$o['msg'] ='send succesfully!';
+		} else {
+			$o['status'] = false;
+			$o['msg'] = $mail->ErrorInfo;
+		}
+		return $o;
+	}
+
+	public function log($m)
+	{
+		$this->body = $m->Body;
+		$this->subject = $m->Subject;
+		$this->dt = date('Y-m-d H:i:s');
+		$this->save();
+	}
+	
+	public function getFrom()
+	{
+		$t = User::model()->findByPk($this->from_id);
+		if (!empty($t)) {
+			return $t->fname;
+		} else if (!empty($this->mdata['from'])) {
+			return $this->mdata['from'];
+		} else {
+			return $this->from_id;
+		}
+	}
+	
+	public function getTo()
+	{
+		if (in_array($this->type, [40, 65])) {
+			$t = Org::model()->findByPk($this->to_id);
+			return empty($t) ? '' : $t->name.': '.$this->mdata['to'];
+		}
+		if (empty($this->to_id)) {
+			foreach ($this->mdata as $k => $v) {
+				if ($k == 'to') {
+					$es = explode(',', $v);
+					$esl = sizeof($es);
+					return  $esl > 3 ? implode(', ', array_slice($es, 3)).'('.($esl - 3).' more)' : $v;
+				}
+			}
+		}
+		$t = OrgContact::model()->findByPk($this->to_id);
+		return empty($t) ? '' : $t->name.' - '.$t->org->name;
+	}
+	
+	public function getType()
+	{
+		if ($this->type == 0) {
+			return 'Manual';
+		}
+		return self::$types[$this->type];
+	}
+	
+	public function getStatus()
+	{
+		return empty(self::$states[$this->status])? '' : self::$states[$this->status];
+	}
+	
+	public function getMeta()
+	{
+		$r = '';
+		foreach ($this->mdata as $k=>$v) {
+			if ($k == 'fr_att') {
+				continue;
+			}
+			$r .= '<p>'.ucfirst($k).': '.$v.'</p>';
+		}
+		return $r;
+	}
+	
+	public function showAtts()
+	{
+		return (empty($this->mdata['fr_att'])? '' : FileRepo::links($this->mdata['fr_att']).' ').FileRepo::links($this->attachments);
+	}
+
+	public function getInvNo()
+	{
+		return empty($this->mdata['invoice'])? 'N/A' : $this->mdata['invoice'];
+	}
+	
+	public function beforeSave()
+	{
+		if (!empty($this->mdata)) {
+			$this->meta = json_encode($this->mdata);
+		}
+		if (empty($this->from_id)) {
+			$this->from_id = empty(Yii::app()->user)?0:Yii::app()->user->id;
+		}
+		if (empty($this->dt)) {
+			$this->dt = date('Y-m-d H:i:s');
+		}
+		if (empty($this->status)) {
+			$this->status = 30;
+		}
+
+		if (!empty($this->fobj->consol) && strtotime($this->fobj->consol->eta) >= strtotime('2020-08-01')) {
+			if ($this->mdata['from'] == 'imports@pcaexpress.com.au') {
+				$this->mdata['from'] = 'imports@toplogistics.com.au';
+			}
+			if ($this->mdata['fromName'] == 'PCA imports') {
+				$this->mdata['fromName'] = 'Top Logistics Australia';
+			}
+		}
+
+		return true;
+	}
+	
+	public function afterFind()
+	{
+		if (!empty($this->meta)) {
+			$this->mdata = json_decode($this->meta, true);
+		}
+	}
+
+	/**
+	* Retrieves a list of models based on the current search/filter conditions.
+	*
+	* Typical usecase:
+	* - Initialize the model fields with values from filter form.
+	* - Execute this method to get CActiveDataProvider instance which will filter
+	* models according to data in model fields.
+	* - Pass data provider to CGridView, CListView or any similar widget.
+	*
+	* @return CActiveDataProvider the data provider that can return the models
+	* based on the search/filter conditions.
+	*/
+	public function search()
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('t.id', $this->id, true);
+		$criteria->compare('from_id', $this->from_id, true);
+		$criteria->compare('to_id', $this->to_id, true);
+		$criteria->compare('t.type', $this->type);
+		$criteria->compare('t.status', $this->status);
+		$criteria->compare('fid', $this->fid, true);
+		$criteria->compare('dt', $this->dt, true);
+		$criteria->compare('subject', $this->subject, true);
+		$criteria->compare('body', $this->body, true);
+		$criteria->compare('scheduled', $this->scheduled, true);
+		
+		$with = [];
+
+		if (!empty($this->to_name)) {
+			$with = ['to','to.org'];
+			$dcrit = new CDbCriteria;
+			$dcrit->compare('org.name', $this->to_name, true);
+			$dcrit->compare('to.name', $this->to_name, true, 'OR');
+			$dcrit->compare('t.meta', $this->to_name, true, 'OR');
+			$criteria->mergeWith($dcrit);
+		}
+		
+		if (!empty($this->from_name)) {
+			$with[] = 'from';
+			$dcrit = new CDbCriteria;
+			$dcrit->compare('from.name', $this->from_name, true);
+			$criteria->mergeWith($dcrit);
+		}
+
+		if (!empty($with)) {
+			$criteria->with = $with;
+			$criteria->together = true;
+		}
+
+		return new CActiveDataProvider($this, [
+			'criteria'=>$criteria,
+			'sort'=>[
+				'defaultOrder'=>'t.id DESC',
+			],
+			'pagination'=>[
+				'pageSize'=>'30',
+			],
+		]);
+	}
+		
+	public static function prepareLink($url)
+	{
+		$url= preg_replace('/&/', '&amp;', $url);
+		return "<a href='$url' >$url</a>";
+	}
+		
+	public static function sendEmailTo($email, $msg, $subject="pca")
+	{
+		if($msg=='{"from_name":["From Name cannot be blank."]}')
+		{
+			return true;
+		}
+		include_once('PHPMailer/class.phpmailer.php');
+		require_once('PHPMailer/PHPMailerAutoload.php');///SMTP
+		$o=['status'=>false,'msg'=>'Email address not valid!'];
+		$mail = new PHPmailer();
+		$mail->CharSet = "UTF-8";
+		$mail->IsHTML(true);
+	
+		/***************SMTP*********/
+		$mail->isSMTP(); // Set mailer to use SMTP
+		$mail->Host = 'mail.toplogistics.com.au'; // Specify main and backup SMTP servers
+		$mail->SMTPSecure = 'tls'; // Enable TLS encryption, `ssl` also accepted
+		$mail->Port = 587; // TCP port to connect to
+		$mail->SMTPAuth = true; // Enable SMTP authentication
+		$mail->Username = 'importstest@toplogistics.com.au'; // SMTP username
+		$mail->Password = '3g%c2a#76ejiQu22'; /***************SMTP*********/
+		$mail->Subject =$subject;
+		$mail->Body = $msg;
+		$mail->AltBody = preg_replace("/[\n\r\t]+/", "\n", strip_tags($msg));
+		foreach(preg_split('/[,;]+/', trim($email)) as $to){
+			$mail->AddAddress(trim($to));
+		}
+		$mail->From   = "imports@toplogistics.com.au";
+		$mail->Sender = "imports@toplogistics.com.au";
+		$mail->FromName = "imports";
+		$mail->send();
+	}
+
+	/**
+	* Returns the static model of the specified AR class.
+	* Please note that you should have this exact method in all your CActiveRecord descendants!
+	* @param string $className active record class name.
+	* @return Emailog the static model class
+	*/
+	public static function model($className=__CLASS__)
+	{
+		return parent::model($className);
+	}
+}

@@ -1,0 +1,1425 @@
+<div class="form">
+	<?php $form=$this->beginWidget('CActiveForm', array(
+				'id'=>'import-charge-code-form',
+				'enableClientValidation'=>true,
+				'clientOptions'=>array(
+						'validateOnSubmit'=>true,
+				),
+		));
+		?>
+ <div class="rowcol">
+				<?php echo $form->errorSummary($model); ?>
+				<label class="required" for="Importchargecode_owner_id" aria-required="true">Customer <span class="required" aria-required="true">*</span></label>
+				<?php echo $form->hiddenField($model,'org_id');
+				$acname1 = empty($_GET["tabid"])? 'imchgcode_owner_ac' : $_GET["tabid"].'imchgcode_owner_ac';
+				$ownername = empty($model->owner) ? '' : $model->owner->name;
+				$this->widget('zii.widgets.jui.CJuiAutoComplete', array(
+						'name' => $acname1,
+						'sourceUrl' => array('org/clientSuggest'),
+						'value' => $ownername,
+						'options' => array(
+								'showAnim' => 'fold',
+								'minLength' => 2,
+								'delay' => 200,
+								'select' => 'js:function(event, ui){ $(this).val(ui.item["label"]); $(this).prevAll("input[type=hidden]").val(ui.item["value"]).data("ov",ui.item["value"]); return false; }',
+								'change' => 'js:function(event, ui){ if(ui.item == null) $(this).prevAll("input[type=hidden]").val($(this).prevAll("input[type=hidden]").data("ov")); return false; }',
+						),
+						'htmlOptions' => array(
+								'size' => '30',
+						),
+				));
+				?>
+		</div>
+
+		<div class="row">
+				<div class="row rowcol rowcol-left">
+						<?php echo CHtml::label('Select Couriers','forimchgcode'); ?>
+						<div class="row">
+								<?php
+								$allOrgRates = OrgRate::model()->findAll("type = 5 and zone_id > 0 AND id!=44 AND json_value(meta,'$.invisible') is null");
+								$defSelected = $model->couriersObj;
+//                if ( empty($defSelected) ) {
+//                    foreach ($allOrgRates as $rate) {
+//                        $defSelected[] = $rate['id'];
+//                    }
+//                }
+								$rateList = CHtml::listData($allOrgRates,'id','name');
+								$mdataList = CHtml::listData($allOrgRates,'id','mdata');
+								$tempLists=[];
+								$tempRateRaw=[];
+								foreach ($rateList as $id=>$name){
+										if(empty($mdataList[$id]['ddpt_id']))
+										{
+											if(!in_array($id, ImportChargeCode::$unsetKeys)||in_array($id, $defSelected))
+											{
+												$tempLists["AU WIDE"][$id] = $name;
+											}
+										}else
+										{
+											if(!in_array($id, ImportChargeCode::$unsetKeys)||in_array($id, $defSelected))
+											{
+												$tempLists[$mdataList[$id]['ddpt_id']][$id] = $name;
+											}
+										}
+								}
+								ksort($tempLists);
+
+								foreach ($tempLists as $key => $tempList) {
+									echo "<div class='row '>";
+									$label = empty(Org::$importWarehouseList[$key])?$key:Org::$importWarehouseList[$key];
+									echo "<h3>$label</h3>";
+									echo CHtml::checkBoxList('selected_rates',$defSelected,$tempList,array(
+										'template'=>'{input}{label}',
+										'separator'=>'',
+										'labelOptions'=>array(
+												'style'=> 'padding-right:12px;min-width: 60px;float: left;'),
+										'style'=>'float:left;',) );
+									echo "</div>";
+								}
+								?>
+
+						</div>
+				</div>
+		</div>
+		<div class="row">
+				<div class="row rowcol rowcol-left">
+						 <?php echo CHtml::label('Select Charge Weight Method','charge_wt'); ?>
+						 <?php  echo $form->radioButtonList($model,'charge_wt',ImportChargeCode::$charge_weight,array('labelOptions' => array('class' => 'radio_label'), 'separator' => '&nbsp;&nbsp'));?>
+				</div>
+		</div>
+			<div class="row">
+				 <div class="row rowcol rowcol-left">
+						 <?php echo CHtml::label('Cubic Rate Factor','cubic_rate_factor'); ?>
+						 <?php  echo CHtml::radioButtonList('mdata[cubic_rate_factor]', empty($model->mdata['cubic_rate_factor'])?0:$model->mdata['cubic_rate_factor'],ImportChargeCode::$cubic_factors,array('labelOptions' => array('class' => 'radio_label'), 'separator' => '&nbsp;&nbsp'));?>
+				</div>
+			</div>
+				
+			 <div class="row">
+				<div class="row rowcol rowcol-left">
+						 <?php echo CHtml::label('Select status mode(default Manifiest)','status_mode'); ?>
+						 <?php  echo $form->radioButtonList($model,'status_mode', ImportChargeCode::$status_mode_types,array('labelOptions' => array('class' => 'radio_label'), 'separator' => '&nbsp;&nbsp'));?>
+			 </div>
+		 </div>
+		<div class="row">
+				 <div class="row rowcol rowcol-left">
+						 <?php echo CHtml::label('Select ignore sac','status_mode'); ?>
+						 <?php  echo $form->radioButtonList($model,'ignore_sac', ImportChargeCode::$ignore_sac_types,array('labelOptions' => array('class' => 'radio_label'), 'separator' => '&nbsp;&nbsp'));?>
+				</div>
+		</div>
+		<div class="row">
+				 <div class="row rowcol rowcol-left">
+						 <?php echo CHtml::label('Select Allow Remote','status_mode'); ?>
+						 <?php  echo CHtml::radioButtonList('mdata[can_remote]', empty($model->mdata['can_remote'])?0:$model->mdata['can_remote'], [0=>'Not Allow Remote',1=>'Allow Remote'],array('labelOptions' => array('class' => 'radio_label'), 'separator' => '&nbsp;&nbsp'));?>
+				</div>
+		</div>
+			<div class="row">
+				 <div class="row rowcol rowcol-left">
+						 <?php echo CHtml::label('Direct to Courier','direct_courier'); ?>
+						 <?php  echo CHtml::radioButtonList('mdata[direct_courier]', empty($model->mdata['direct_courier'])?0:$model->mdata['direct_courier'],ImportChargeCode::$direct_courier_types,array('labelOptions' => array('class' => 'radio_label'), 'separator' => '&nbsp;&nbsp'));?>
+				</div>
+			</div>
+			<div class="row">
+				 <div class="row rowcol rowcol-left">
+						 <?php echo CHtml::label('Custom Service Only','no_courier'); ?>
+						 <?php  echo CHtml::radioButtonList('mdata[no_courier]', empty($model->mdata['no_courier'])?0:$model->mdata['no_courier'],ImportChargeCode::$custom_service_only,array('labelOptions' => array('class' => 'radio_label'), 'separator' => '&nbsp;&nbsp'));?>
+						  <?php  echo CHtml::radioButtonList('mdata[no_calculate_invoice]', empty($model->mdata['no_calculate_invoice'])?0:$model->mdata['no_calculate_invoice'],ImportChargeCode::$no_calculate_invoice,array('labelOptions' => array('class' => 'radio_label'), 'separator' => '&nbsp;&nbsp'));?>
+				</div>
+			</div>
+			<div class="row">
+				 <div class="row rowcol rowcol-left">
+						 <?php echo CHtml::label('eParcel Single Item Only','eparcel_single'); ?>
+						 <?php  echo CHtml::radioButtonList('mdata[eparcel_single]', !empty($model->mdata['eparcel_single']), [0 => 'Allow Multiple', 1 => 'Single Only'], array('labelOptions' => array('class' => 'radio_label'), 'separator' => '&nbsp;&nbsp'));?>
+				</div>
+			</div>
+			
+			<div class="row">
+				<div class="row rowcol rowcol-left">
+						<?php echo CHtml::label('Service Types','selected_rates'); ?>
+						<div class="row">
+								<?php
+								$SelectedService = empty($model->mdata['selected_service'])?[]:$model->mdata['selected_service'];
+								echo CHtml::checkBoxList('mdata[selected_service]',$SelectedService, ImportChargeCode::$service_types,array(
+										'template'=>'{input}{label}',
+										'separator'=>'',
+										'labelOptions'=>array(
+												'style'=> 'padding-right:12px;min-width: 60px;float: left;'),
+										'style'=>'float:left;',) );
+								echo CHtml::checkBox('mdata[cm_address]',!isset($model->mdata['cm_address'])?0:$model->mdata['cm_address'],array("style"=>"padding-right:12px;min-width: 60px;float: left;")),'<label style="padding-right:12px;min-width: 60px;float: left;">Check And Modify Address</label>';
+								?>
+
+
+						</div>
+				</div>
+			</div>
+			<div class="row">
+				<div class="row rowcol rowcol-left divBorder">
+						<?php echo CHtml::label('General Surcharge','generate_surcharge'); ?>
+						<div class="row">
+							<div class="row">
+								<div class="row rowcol rowcol-left">
+
+									<?php echo CHtml::label('express ','express'); ?>
+									<?php echo CHtml::textField('mdata[truck_delivery][express]',isset($model->mdata['truck_delivery']['express'])?$model->mdata['truck_delivery']['express']:0,array('rows'=>5, 'cols' => 60))?>times
+
+									<?php echo CHtml::label('Extra express','Extra-express'); ?>
+									<?php echo CHtml::textField('mdata[truck_delivery][extra_express]',isset($model->mdata['truck_delivery']['extra_express'])?$model->mdata['truck_delivery']['extra_express']:0,array('rows'=>5, 'cols' => 60))?>times
+
+								</div>
+								<div class="row rowcol rowcol-left">
+									<?php echo CHtml::label('Extra Distance','Extra_Distance'); ?>
+									<?php echo CHtml::textField('mdata[truck_delivery][extra_distance]',isset($model->mdata['truck_delivery']['extra_distance'])?$model->mdata['truck_delivery']['extra_distance']:0,array('style'=>'width:100px'))?>KM
+									<?php echo CHtml::label('Extra Distance Fee','Extra_Distance_Fee'); ?>
+									<?php echo CHtml::textField('mdata[truck_delivery][extra_distance_fee]',isset($model->mdata['truck_delivery']['extra_distance_fee'])?$model->mdata['truck_delivery']['extra_distance_fee']:0,array('style'=>'width:100px'))?>AUD/
+									<?php echo CHtml::textField('mdata[truck_delivery][extra_distance_limit]',isset($model->mdata['truck_delivery']['extra_distance_limit'])?$model->mdata['truck_delivery']['extra_distance_limit']:0,array('style'=>'width:100px'))?>KM
+								</div>
+
+								<div class="row rowcol rowcol-left">
+									<?php echo CHtml::label('Extra Width','Extra_Width'); ?>
+									<?php echo CHtml::textField('mdata[truck_delivery][extra_width]',isset($model->mdata['truck_delivery']['extra_width'])?$model->mdata['truck_delivery']['extra_width']:0,array('rows'=>5, 'cols' => 60))?>CM
+
+									<?php echo CHtml::label('Extra Width Fee','Extra_Width_Fee'); ?>
+									<?php echo CHtml::textField('mdata[truck_delivery][extra_width_fee]',isset($model->mdata['truck_delivery']['extra_width_fee'])?$model->mdata['truck_delivery']['extra_width_fee']:0,array('rows'=>5, 'cols' => 60))?>AUD/CBM
+								</div>
+							</div>
+
+						</div>
+				</div>
+			</div>
+			</br>
+			<div class='row' style="margin-top:50px;">
+				<div class='row rowcol rowleft'>
+				<?php echo CHtml::radioButton("surcharge_select",1,['value'=>1,'id'=>'tld_selected']),'<span style="font-weight:BOLD;">TLD surcharge&nbsp;</span>'?>
+				</div>
+				<div class='row rowcol'>
+				<?php echo CHtml::radioButton("surcharge_select",0,['value'=>2,'id'=>'courier_selected']),'<span style="font-weight:BOLD;">Courier surcharge&nbsp;</span>'?>
+				</div>
+				<div class='row rowcol'>
+					<?php
+					$setZoneMapLink = '<a class="jqm_link" data-win-class="XL" href="org/chgsurcharge/'.$model->id.'.app"><div style="background-position:-16px 0" class="icon"></div>'.$this->t('Import Chargecode Surcharge').'</a> &nbsp;';
+						echo $setZoneMapLink;
+					?>
+				</div>
+			</div>
+			<div id = 'tld_surcharge'>
+				<div class="row">
+					<?php echo CHtml::label('fuel surcharge for top courier service','fuel_surcharge'); ?>
+					<?php echo CHtml::textField('mdata[truck_delivery][fuel_surcharge]',isset($model->mdata['truck_delivery']['fuel_surcharge'])?$model->mdata['truck_delivery']['fuel_surcharge']:0,array('rows'=>5, 'cols' => 60))?>(<?="System Default:".ImportsSystemFuel::getThisMonthFuel("",ImportsSystemFuel::KP_TYPE)?>)
+				</div>
+				<div class="row">
+					Using Price Enquiry System For MH fee
+				</div>		
+				<div class="row">
+					<div class="row rowcol rowcol-left divBorder">
+							<?php echo CHtml::label('TLD Oversize Fee','TLD_os_rates'); ?>
+							<div class="row">
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OS0','OS0') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS0][kgdwf]',isset($model->mdata['truck_delivery']['OS0']['kgdwf'])?$model->mdata['truck_delivery']['OS0']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS0][kgdwt]',isset($model->mdata['truck_delivery']['OS0']['kgdwt'])?$model->mdata['truck_delivery']['OS0']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS0][kgcwf]',isset($model->mdata['truck_delivery']['OS0']['kgcwf'])?$model->mdata['truck_delivery']['OS0']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS0][kgcwt]',isset($model->mdata['truck_delivery']['OS0']['kgcwt'])?$model->mdata['truck_delivery']['OS0']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS0][meterf]',isset($model->mdata['truck_delivery']['OS0']['meterf'])?$model->mdata['truck_delivery']['OS0']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS0][metert]',isset($model->mdata['truck_delivery']['OS0']['metert'])?$model->mdata['truck_delivery']['OS0']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+									
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS0][length]',isset($model->mdata['truck_delivery']['OS0']['length'])?$model->mdata['truck_delivery']['OS0']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS0][width]',isset($model->mdata['truck_delivery']['OS0']['width'])?$model->mdata['truck_delivery']['OS0']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS0][height]',isset($model->mdata['truck_delivery']['OS0']['height'])?$model->mdata['truck_delivery']['OS0']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS0][cbm]',isset($model->mdata['truck_delivery']['OS0']['cbm'])?$model->mdata['truck_delivery']['OS0']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[truck_delivery][OS0][p_piece]',isset($model->mdata['truck_delivery']['OS0']['p_piece'])?$model->mdata['truck_delivery']['OS0']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[truck_delivery][OS0][p_shipment]',isset($model->mdata['truck_delivery']['OS0']['p_shipment'])?$model->mdata['truck_delivery']['OS0']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+
+								</div>
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OS1','OS1') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS1][kgdwf]',isset($model->mdata['truck_delivery']['OS1']['kgdwf'])?$model->mdata['truck_delivery']['OS1']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS1][kgdwt]',isset($model->mdata['truck_delivery']['OS1']['kgdwt'])?$model->mdata['truck_delivery']['OS1']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS1][kgcwf]',isset($model->mdata['truck_delivery']['OS1']['kgcwf'])?$model->mdata['truck_delivery']['OS1']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS1][kgcwt]',isset($model->mdata['truck_delivery']['OS1']['kgcwt'])?$model->mdata['truck_delivery']['OS1']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS1][meterf]',isset($model->mdata['truck_delivery']['OS1']['meterf'])?$model->mdata['truck_delivery']['OS1']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS1][metert]',isset($model->mdata['truck_delivery']['OS1']['metert'])?$model->mdata['truck_delivery']['OS1']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+									
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS1][length]',isset($model->mdata['truck_delivery']['OS1']['length'])?$model->mdata['truck_delivery']['OS1']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS1][width]',isset($model->mdata['truck_delivery']['OS1']['width'])?$model->mdata['truck_delivery']['OS1']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS1][height]',isset($model->mdata['truck_delivery']['OS1']['height'])?$model->mdata['truck_delivery']['OS1']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS1][cbm]',isset($model->mdata['truck_delivery']['OS1']['cbm'])?$model->mdata['truck_delivery']['OS1']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[truck_delivery][OS1][p_piece]',isset($model->mdata['truck_delivery']['OS1']['p_piece'])?$model->mdata['truck_delivery']['OS1']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[truck_delivery][OS1][p_shipment]',isset($model->mdata['truck_delivery']['OS1']['p_shipment'])?$model->mdata['truck_delivery']['OS1']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+
+								</div>
+
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OS2','OS2') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS2][kgdwf]',isset($model->mdata['truck_delivery']['OS2']['kgdwf'])?$model->mdata['truck_delivery']['OS2']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS2][kgdwt]',isset($model->mdata['truck_delivery']['OS2']['kgdwt'])?$model->mdata['truck_delivery']['OS2']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS2][kgcwf]',isset($model->mdata['truck_delivery']['OS2']['kgcwf'])?$model->mdata['truck_delivery']['OS2']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS2][kgcwt]',isset($model->mdata['truck_delivery']['OS2']['kgcwt'])?$model->mdata['truck_delivery']['OS2']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS2][meterf]',isset($model->mdata['truck_delivery']['OS2']['meterf'])?$model->mdata['truck_delivery']['OS2']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS2][metert]',isset($model->mdata['truck_delivery']['OS2']['metert'])?$model->mdata['truck_delivery']['OS2']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+									
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS2][length]',isset($model->mdata['truck_delivery']['OS2']['length'])?$model->mdata['truck_delivery']['OS2']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS2][width]',isset($model->mdata['truck_delivery']['OS2']['width'])?$model->mdata['truck_delivery']['OS2']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS2][height]',isset($model->mdata['truck_delivery']['OS2']['height'])?$model->mdata['truck_delivery']['OS2']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS2][cbm]',isset($model->mdata['truck_delivery']['OS2']['cbm'])?$model->mdata['truck_delivery']['OS2']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[truck_delivery][OS2][p_piece]',isset($model->mdata['truck_delivery']['OS2']['p_piece'])?$model->mdata['truck_delivery']['OS2']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[truck_delivery][OS2][p_shipment]',isset($model->mdata['truck_delivery']['OS2']['p_shipment'])?$model->mdata['truck_delivery']['OS2']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+
+
+								</div>
+
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OS3','OS3') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS3][kgdwf]',isset($model->mdata['truck_delivery']['OS3']['kgdwf'])?$model->mdata['truck_delivery']['OS3']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS3][kgdwt]',isset($model->mdata['truck_delivery']['OS3']['kgdwt'])?$model->mdata['truck_delivery']['OS3']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS3][kgcwf]',isset($model->mdata['truck_delivery']['OS3']['kgcwf'])?$model->mdata['truck_delivery']['OS3']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS3][kgcwt]',isset($model->mdata['truck_delivery']['OS3']['kgcwt'])?$model->mdata['truck_delivery']['OS3']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS3][meterf]',isset($model->mdata['truck_delivery']['OS3']['meterf'])?$model->mdata['truck_delivery']['OS3']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS3][metert]',isset($model->mdata['truck_delivery']['OS3']['metert'])?$model->mdata['truck_delivery']['OS3']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS3][length]',isset($model->mdata['truck_delivery']['OS3']['length'])?$model->mdata['truck_delivery']['OS3']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS3][width]',isset($model->mdata['truck_delivery']['OS3']['width'])?$model->mdata['truck_delivery']['OS3']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS3][height]',isset($model->mdata['truck_delivery']['OS3']['height'])?$model->mdata['truck_delivery']['OS3']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS3][cbm]',isset($model->mdata['truck_delivery']['OS3']['cbm'])?$model->mdata['truck_delivery']['OS3']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[truck_delivery][OS3][p_piece]',isset($model->mdata['truck_delivery']['OS3']['p_piece'])?$model->mdata['truck_delivery']['OS3']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[truck_delivery][OS3][p_shipment]',isset($model->mdata['truck_delivery']['OS3']['p_shipment'])?$model->mdata['truck_delivery']['OS3']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+
+
+
+								</div>
+
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OS4','OS4') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS4][kgdwf]',isset($model->mdata['truck_delivery']['OS4']['kgdwf'])?$model->mdata['truck_delivery']['OS4']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS4][kgdwt]',isset($model->mdata['truck_delivery']['OS4']['kgdwt'])?$model->mdata['truck_delivery']['OS4']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS4][kgcwf]',isset($model->mdata['truck_delivery']['OS4']['kgcwf'])?$model->mdata['truck_delivery']['OS4']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS4][kgcwt]',isset($model->mdata['truck_delivery']['OS4']['kgcwt'])?$model->mdata['truck_delivery']['OS4']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS4][meterf]',isset($model->mdata['truck_delivery']['OS4']['meterf'])?$model->mdata['truck_delivery']['OS4']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS4][metert]',isset($model->mdata['truck_delivery']['OS4']['metert'])?$model->mdata['truck_delivery']['OS4']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS4][length]',isset($model->mdata['truck_delivery']['OS4']['length'])?$model->mdata['truck_delivery']['OS4']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS4][width]',isset($model->mdata['truck_delivery']['OS4']['width'])?$model->mdata['truck_delivery']['OS4']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS4][height]',isset($model->mdata['truck_delivery']['OS4']['height'])?$model->mdata['truck_delivery']['OS4']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS4][cbm]',isset($model->mdata['truck_delivery']['OS4']['cbm'])?$model->mdata['truck_delivery']['OS4']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[truck_delivery][OS4][p_piece]',isset($model->mdata['truck_delivery']['OS4']['p_piece'])?$model->mdata['truck_delivery']['OS4']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[truck_delivery][OS4][p_shipment]',isset($model->mdata['truck_delivery']['OS4']['p_shipment'])?$model->mdata['truck_delivery']['OS4']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+									
+
+								</div>
+
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OS5','OS5') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS5][kgdwf]',isset($model->mdata['truck_delivery']['OS5']['kgdwf'])?$model->mdata['truck_delivery']['OS5']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS5][kgdwt]',isset($model->mdata['truck_delivery']['OS5']['kgdwt'])?$model->mdata['truck_delivery']['OS5']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS5][kgcwf]',isset($model->mdata['truck_delivery']['OS5']['kgcwf'])?$model->mdata['truck_delivery']['OS5']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS5][kgcwt]',isset($model->mdata['truck_delivery']['OS5']['kgcwt'])?$model->mdata['truck_delivery']['OS5']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS5][meterf]',isset($model->mdata['truck_delivery']['OS5']['meterf'])?$model->mdata['truck_delivery']['OS5']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS5][metert]',isset($model->mdata['truck_delivery']['OS5']['metert'])?$model->mdata['truck_delivery']['OS5']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS5][length]',isset($model->mdata['truck_delivery']['OS5']['length'])?$model->mdata['truck_delivery']['OS5']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS5][width]',isset($model->mdata['truck_delivery']['OS5']['width'])?$model->mdata['truck_delivery']['OS5']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS5][height]',isset($model->mdata['truck_delivery']['OS5']['height'])?$model->mdata['truck_delivery']['OS5']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS5][cbm]',isset($model->mdata['truck_delivery']['OS5']['cbm'])?$model->mdata['truck_delivery']['OS5']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[truck_delivery][OS5][p_piece]',isset($model->mdata['truck_delivery']['OS5']['p_piece'])?$model->mdata['truck_delivery']['OS5']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[truck_delivery][OS5][p_shipment]',isset($model->mdata['truck_delivery']['OS5']['p_shipment'])?$model->mdata['truck_delivery']['OS5']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+									
+
+								</div>
+
+									<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OS6','OS6') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS6][kgdwf]',isset($model->mdata['truck_delivery']['OS6']['kgdwf'])?$model->mdata['truck_delivery']['OS6']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS6][kgdwt]',isset($model->mdata['truck_delivery']['OS6']['kgdwt'])?$model->mdata['truck_delivery']['OS6']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS6][kgcwf]',isset($model->mdata['truck_delivery']['OS6']['kgcwf'])?$model->mdata['truck_delivery']['OS6']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS6][kgcwt]',isset($model->mdata['truck_delivery']['OS6']['kgcwt'])?$model->mdata['truck_delivery']['OS6']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS6][meterf]',isset($model->mdata['truck_delivery']['OS6']['meterf'])?$model->mdata['truck_delivery']['OS6']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS6][metert]',isset($model->mdata['truck_delivery']['OS6']['metert'])?$model->mdata['truck_delivery']['OS6']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS6][length]',isset($model->mdata['truck_delivery']['OS6']['length'])?$model->mdata['truck_delivery']['OS6']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS6][width]',isset($model->mdata['truck_delivery']['OS6']['width'])?$model->mdata['truck_delivery']['OS6']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS6][height]',isset($model->mdata['truck_delivery']['OS6']['height'])?$model->mdata['truck_delivery']['OS6']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS6][cbm]',isset($model->mdata['truck_delivery']['OS6']['cbm'])?$model->mdata['truck_delivery']['OS6']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+
+
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[truck_delivery][OS6][p_piece]',isset($model->mdata['truck_delivery']['OS6']['p_piece'])?$model->mdata['truck_delivery']['OS6']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[truck_delivery][OS6][p_shipment]',isset($model->mdata['truck_delivery']['OS6']['p_shipment'])?$model->mdata['truck_delivery']['OS6']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+								</div>
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OS7','OS7') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS7][kgdwf]',isset($model->mdata['truck_delivery']['OS7']['kgdwf'])?$model->mdata['truck_delivery']['OS7']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS7][kgdwt]',isset($model->mdata['truck_delivery']['OS7']['kgdwt'])?$model->mdata['truck_delivery']['OS7']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS7][kgcwf]',isset($model->mdata['truck_delivery']['OS7']['kgcwf'])?$model->mdata['truck_delivery']['OS7']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS7][kgcwt]',isset($model->mdata['truck_delivery']['OS7']['kgcwt'])?$model->mdata['truck_delivery']['OS7']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS7][meterf]',isset($model->mdata['truck_delivery']['OS7']['meterf'])?$model->mdata['truck_delivery']['OS7']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS7][metert]',isset($model->mdata['truck_delivery']['OS7']['metert'])?$model->mdata['truck_delivery']['OS7']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS7][length]',isset($model->mdata['truck_delivery']['OS7']['length'])?$model->mdata['truck_delivery']['OS7']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS7][width]',isset($model->mdata['truck_delivery']['OS7']['width'])?$model->mdata['truck_delivery']['OS7']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS7][height]',isset($model->mdata['truck_delivery']['OS7']['height'])?$model->mdata['truck_delivery']['OS7']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS7][cbm]',isset($model->mdata['truck_delivery']['OS7']['cbm'])?$model->mdata['truck_delivery']['OS7']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+
+
+
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[truck_delivery][OS7][p_piece]',isset($model->mdata['truck_delivery']['OS7']['p_piece'])?$model->mdata['truck_delivery']['OS7']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[truck_delivery][OS7][p_shipment]',isset($model->mdata['truck_delivery']['OS7']['p_shipment'])?$model->mdata['truck_delivery']['OS7']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+								</div>
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OS8','OS8') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS8][kgdwf]',isset($model->mdata['truck_delivery']['OS8']['kgdwf'])?$model->mdata['truck_delivery']['OS8']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS8][kgdwt]',isset($model->mdata['truck_delivery']['OS8']['kgdwt'])?$model->mdata['truck_delivery']['OS8']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS8][kgcwf]',isset($model->mdata['truck_delivery']['OS8']['kgcwf'])?$model->mdata['truck_delivery']['OS8']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS8][kgcwt]',isset($model->mdata['truck_delivery']['OS8']['kgcwt'])?$model->mdata['truck_delivery']['OS8']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS8][meterf]',isset($model->mdata['truck_delivery']['OS8']['meterf'])?$model->mdata['truck_delivery']['OS8']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS8][metert]',isset($model->mdata['truck_delivery']['OS8']['metert'])?$model->mdata['truck_delivery']['OS8']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS8][length]',isset($model->mdata['truck_delivery']['OS8']['length'])?$model->mdata['truck_delivery']['OS8']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS8][width]',isset($model->mdata['truck_delivery']['OS8']['width'])?$model->mdata['truck_delivery']['OS8']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS8][height]',isset($model->mdata['truck_delivery']['OS8']['height'])?$model->mdata['truck_delivery']['OS8']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS8][cbm]',isset($model->mdata['truck_delivery']['OS8']['cbm'])?$model->mdata['truck_delivery']['OS8']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+
+
+
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[truck_delivery][OS8][p_piece]',isset($model->mdata['truck_delivery']['OS8']['p_piece'])?$model->mdata['truck_delivery']['OS8']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[truck_delivery][OS8][p_shipment]',isset($model->mdata['truck_delivery']['OS8']['p_shipment'])?$model->mdata['truck_delivery']['OS8']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+								</div>
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OS9','OS9') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS9][kgdwf]',isset($model->mdata['truck_delivery']['OS9']['kgdwf'])?$model->mdata['truck_delivery']['OS9']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS9][kgdwt]',isset($model->mdata['truck_delivery']['OS9']['kgdwt'])?$model->mdata['truck_delivery']['OS9']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS9][kgcwf]',isset($model->mdata['truck_delivery']['OS9']['kgcwf'])?$model->mdata['truck_delivery']['OS9']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS9][kgcwt]',isset($model->mdata['truck_delivery']['OS9']['kgcwt'])?$model->mdata['truck_delivery']['OS9']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS9][meterf]',isset($model->mdata['truck_delivery']['OS9']['meterf'])?$model->mdata['truck_delivery']['OS9']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS9][metert]',isset($model->mdata['truck_delivery']['OS9']['metert'])?$model->mdata['truck_delivery']['OS9']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS9][length]',isset($model->mdata['truck_delivery']['OS9']['length'])?$model->mdata['truck_delivery']['OS9']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS9][width]',isset($model->mdata['truck_delivery']['OS9']['width'])?$model->mdata['truck_delivery']['OS9']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS9][height]',isset($model->mdata['truck_delivery']['OS9']['height'])?$model->mdata['truck_delivery']['OS9']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS9][cbm]',isset($model->mdata['truck_delivery']['OS9']['cbm'])?$model->mdata['truck_delivery']['OS9']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+
+
+
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[truck_delivery][OS9][p_piece]',isset($model->mdata['truck_delivery']['OS9']['p_piece'])?$model->mdata['truck_delivery']['OS9']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[truck_delivery][OS9][p_shipment]',isset($model->mdata['truck_delivery']['OS9']['p_shipment'])?$model->mdata['truck_delivery']['OS9']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+								</div>
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OS10','OS10') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS10][kgdwf]',isset($model->mdata['truck_delivery']['OS10']['kgdwf'])?$model->mdata['truck_delivery']['OS10']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS10][kgdwt]',isset($model->mdata['truck_delivery']['OS10']['kgdwt'])?$model->mdata['truck_delivery']['OS10']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS10][kgcwf]',isset($model->mdata['truck_delivery']['OS10']['kgcwf'])?$model->mdata['truck_delivery']['OS10']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS10][kgcwt]',isset($model->mdata['truck_delivery']['OS10']['kgcwt'])?$model->mdata['truck_delivery']['OS10']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS10][meterf]',isset($model->mdata['truck_delivery']['OS10']['meterf'])?$model->mdata['truck_delivery']['OS10']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS10][metert]',isset($model->mdata['truck_delivery']['OS10']['metert'])?$model->mdata['truck_delivery']['OS10']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS10][length]',isset($model->mdata['truck_delivery']['OS10']['length'])?$model->mdata['truck_delivery']['OS10']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS10][width]',isset($model->mdata['truck_delivery']['OS10']['width'])?$model->mdata['truck_delivery']['OS10']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS10][height]',isset($model->mdata['truck_delivery']['OS10']['height'])?$model->mdata['truck_delivery']['OS10']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS10][cbm]',isset($model->mdata['truck_delivery']['OS10']['cbm'])?$model->mdata['truck_delivery']['OS10']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+
+
+
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[truck_delivery][OS10][p_piece]',isset($model->mdata['truck_delivery']['OS10']['p_piece'])?$model->mdata['truck_delivery']['OS10']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[truck_delivery][OS10][p_shipment]',isset($model->mdata['truck_delivery']['OS10']['p_shipment'])?$model->mdata['truck_delivery']['OS10']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+								</div>
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OS11','OS11') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS11][kgdwf]',isset($model->mdata['truck_delivery']['OS11']['kgdwf'])?$model->mdata['truck_delivery']['OS11']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS11][kgdwt]',isset($model->mdata['truck_delivery']['OS11']['kgdwt'])?$model->mdata['truck_delivery']['OS11']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS11][kgcwf]',isset($model->mdata['truck_delivery']['OS11']['kgcwf'])?$model->mdata['truck_delivery']['OS11']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS11][kgcwt]',isset($model->mdata['truck_delivery']['OS11']['kgcwt'])?$model->mdata['truck_delivery']['OS11']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS11][meterf]',isset($model->mdata['truck_delivery']['OS11']['meterf'])?$model->mdata['truck_delivery']['OS11']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS11][metert]',isset($model->mdata['truck_delivery']['OS11']['metert'])?$model->mdata['truck_delivery']['OS11']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS11][length]',isset($model->mdata['truck_delivery']['OS11']['length'])?$model->mdata['truck_delivery']['OS11']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS11][width]',isset($model->mdata['truck_delivery']['OS11']['width'])?$model->mdata['truck_delivery']['OS11']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS11][height]',isset($model->mdata['truck_delivery']['OS11']['height'])?$model->mdata['truck_delivery']['OS11']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS11][cbm]',isset($model->mdata['truck_delivery']['OS11']['cbm'])?$model->mdata['truck_delivery']['OS11']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+
+
+
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[truck_delivery][OS11][p_piece]',isset($model->mdata['truck_delivery']['OS11']['p_piece'])?$model->mdata['truck_delivery']['OS11']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[truck_delivery][OS11][p_shipment]',isset($model->mdata['truck_delivery']['OS11']['p_shipment'])?$model->mdata['truck_delivery']['OS11']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+								</div>
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OS12','OS12') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS12][kgdwf]',isset($model->mdata['truck_delivery']['OS12']['kgdwf'])?$model->mdata['truck_delivery']['OS12']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS12][kgdwt]',isset($model->mdata['truck_delivery']['OS12']['kgdwt'])?$model->mdata['truck_delivery']['OS12']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS12][kgcwf]',isset($model->mdata['truck_delivery']['OS12']['kgcwf'])?$model->mdata['truck_delivery']['OS12']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS12][kgcwt]',isset($model->mdata['truck_delivery']['OS12']['kgcwt'])?$model->mdata['truck_delivery']['OS12']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS12][meterf]',isset($model->mdata['truck_delivery']['OS12']['meterf'])?$model->mdata['truck_delivery']['OS12']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS12][metert]',isset($model->mdata['truck_delivery']['OS12']['metert'])?$model->mdata['truck_delivery']['OS12']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS12][length]',isset($model->mdata['truck_delivery']['OS12']['length'])?$model->mdata['truck_delivery']['OS12']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS12][width]',isset($model->mdata['truck_delivery']['OS12']['width'])?$model->mdata['truck_delivery']['OS12']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS12][height]',isset($model->mdata['truck_delivery']['OS12']['height'])?$model->mdata['truck_delivery']['OS12']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS12][cbm]',isset($model->mdata['truck_delivery']['OS12']['cbm'])?$model->mdata['truck_delivery']['OS12']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+
+
+
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[truck_delivery][OS12][p_piece]',isset($model->mdata['truck_delivery']['OS12']['p_piece'])?$model->mdata['truck_delivery']['OS12']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[truck_delivery][OS12][p_shipment]',isset($model->mdata['truck_delivery']['OS12']['p_shipment'])?$model->mdata['truck_delivery']['OS12']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+								</div>
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OS13','OS13') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS13][kgdwf]',isset($model->mdata['truck_delivery']['OS13']['kgdwf'])?$model->mdata['truck_delivery']['OS13']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS13][kgdwt]',isset($model->mdata['truck_delivery']['OS13']['kgdwt'])?$model->mdata['truck_delivery']['OS13']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS13][kgcwf]',isset($model->mdata['truck_delivery']['OS13']['kgcwf'])?$model->mdata['truck_delivery']['OS13']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS13][kgcwt]',isset($model->mdata['truck_delivery']['OS13']['kgcwt'])?$model->mdata['truck_delivery']['OS13']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS13][meterf]',isset($model->mdata['truck_delivery']['OS13']['meterf'])?$model->mdata['truck_delivery']['OS13']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS13][metert]',isset($model->mdata['truck_delivery']['OS13']['metert'])?$model->mdata['truck_delivery']['OS13']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS13][length]',isset($model->mdata['truck_delivery']['OS13']['length'])?$model->mdata['truck_delivery']['OS13']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS13][width]',isset($model->mdata['truck_delivery']['OS13']['width'])?$model->mdata['truck_delivery']['OS13']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS13][height]',isset($model->mdata['truck_delivery']['OS13']['height'])?$model->mdata['truck_delivery']['OS13']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS13][cbm]',isset($model->mdata['truck_delivery']['OS13']['cbm'])?$model->mdata['truck_delivery']['OS13']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+
+
+
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[truck_delivery][OS13][p_piece]',isset($model->mdata['truck_delivery']['OS13']['p_piece'])?$model->mdata['truck_delivery']['OS13']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[truck_delivery][OS13][p_shipment]',isset($model->mdata['truck_delivery']['OS13']['p_shipment'])?$model->mdata['truck_delivery']['OS13']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+								</div>
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OS14','OS14') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS14][kgdwf]',isset($model->mdata['truck_delivery']['OS14']['kgdwf'])?$model->mdata['truck_delivery']['OS14']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS14][kgdwt]',isset($model->mdata['truck_delivery']['OS14']['kgdwt'])?$model->mdata['truck_delivery']['OS14']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS14][kgcwf]',isset($model->mdata['truck_delivery']['OS14']['kgcwf'])?$model->mdata['truck_delivery']['OS14']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS14][kgcwt]',isset($model->mdata['truck_delivery']['OS14']['kgcwt'])?$model->mdata['truck_delivery']['OS14']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS14][meterf]',isset($model->mdata['truck_delivery']['OS14']['meterf'])?$model->mdata['truck_delivery']['OS14']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS14][metert]',isset($model->mdata['truck_delivery']['OS14']['metert'])?$model->mdata['truck_delivery']['OS14']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS14][length]',isset($model->mdata['truck_delivery']['OS14']['length'])?$model->mdata['truck_delivery']['OS14']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS14][width]',isset($model->mdata['truck_delivery']['OS14']['width'])?$model->mdata['truck_delivery']['OS14']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS14][height]',isset($model->mdata['truck_delivery']['OS14']['height'])?$model->mdata['truck_delivery']['OS14']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS14][cbm]',isset($model->mdata['truck_delivery']['OS14']['cbm'])?$model->mdata['truck_delivery']['OS14']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+
+
+
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[truck_delivery][OS14][p_piece]',isset($model->mdata['truck_delivery']['OS14']['p_piece'])?$model->mdata['truck_delivery']['OS14']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[truck_delivery][OS14][p_shipment]',isset($model->mdata['truck_delivery']['OS14']['p_shipment'])?$model->mdata['truck_delivery']['OS14']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+								</div>
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OS15','OS15') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS15][kgdwf]',isset($model->mdata['truck_delivery']['OS15']['kgdwf'])?$model->mdata['truck_delivery']['OS15']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS15][kgdwt]',isset($model->mdata['truck_delivery']['OS15']['kgdwt'])?$model->mdata['truck_delivery']['OS15']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS15][kgcwf]',isset($model->mdata['truck_delivery']['OS15']['kgcwf'])?$model->mdata['truck_delivery']['OS15']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS15][kgcwt]',isset($model->mdata['truck_delivery']['OS15']['kgcwt'])?$model->mdata['truck_delivery']['OS15']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS15][meterf]',isset($model->mdata['truck_delivery']['OS15']['meterf'])?$model->mdata['truck_delivery']['OS15']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OS15][metert]',isset($model->mdata['truck_delivery']['OS15']['metert'])?$model->mdata['truck_delivery']['OS15']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS15][length]',isset($model->mdata['truck_delivery']['OS15']['length'])?$model->mdata['truck_delivery']['OS15']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS15][width]',isset($model->mdata['truck_delivery']['OS15']['width'])?$model->mdata['truck_delivery']['OS15']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS15][height]',isset($model->mdata['truck_delivery']['OS15']['height'])?$model->mdata['truck_delivery']['OS15']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OS15][cbm]',isset($model->mdata['truck_delivery']['OS15']['cbm'])?$model->mdata['truck_delivery']['OS15']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+
+
+
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[truck_delivery][OS15][p_piece]',isset($model->mdata['truck_delivery']['OS15']['p_piece'])?$model->mdata['truck_delivery']['OS15']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[truck_delivery][OS15][p_shipment]',isset($model->mdata['truck_delivery']['OS15']['p_shipment'])?$model->mdata['truck_delivery']['OS15']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+								</div>
+
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OSC','OSC') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OSC][kgdwf]',isset($model->mdata['truck_delivery']['OSC']['kgdwf'])?$model->mdata['truck_delivery']['OSC']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OSC][kgdwt]',isset($model->mdata['truck_delivery']['OSC']['kgdwt'])?$model->mdata['truck_delivery']['OSC']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OSC][kgcwf]',isset($model->mdata['truck_delivery']['OSC']['kgcwf'])?$model->mdata['truck_delivery']['OSC']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OSC][kgcwt]',isset($model->mdata['truck_delivery']['OSC']['kgcwt'])?$model->mdata['truck_delivery']['OSC']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OSC][meterf]',isset($model->mdata['truck_delivery']['OSC']['meterf'])?$model->mdata['truck_delivery']['OSC']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[truck_delivery][OSC][metert]',isset($model->mdata['truck_delivery']['OSC']['metert'])?$model->mdata['truck_delivery']['OSC']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OSC][length]',isset($model->mdata['truck_delivery']['OSC']['length'])?$model->mdata['truck_delivery']['OSC']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OSC][width]',isset($model->mdata['truck_delivery']['OSC']['width'])?$model->mdata['truck_delivery']['OSC']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OSC][height]',isset($model->mdata['truck_delivery']['OSC']['height'])?$model->mdata['truck_delivery']['OSC']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[truck_delivery][OSC][cbm]',isset($model->mdata['truck_delivery']['OSC']['cbm'])?$model->mdata['truck_delivery']['OSC']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+
+
+
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[truck_delivery][OSC][p_piece]',isset($model->mdata['truck_delivery']['OSC']['p_piece'])?$model->mdata['truck_delivery']['OSC']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[truck_delivery][OSC][p_shipment]',isset($model->mdata['truck_delivery']['OSC']['p_shipment'])?$model->mdata['truck_delivery']['OSC']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+								</div>
+							</div>
+					</div>
+				</div> 
+				
+			</div>
+
+			<div id = 'courier_surcharge' style="display:none">
+				<div class="row">
+					<?php echo CHtml::label('fuel surcharge for courier','fuel_surcharge'); ?>
+					<?php echo CHtml::textField('mdata[courier_surcharge][fuel_surcharge]',isset($model->mdata['courier_surcharge']['fuel_surcharge'])?$model->mdata['courier_surcharge']['fuel_surcharge']:0,array('rows'=>5, 'cols' => 60))?>(<?="System Default:".ImportsSystemFuel::getThisMonthFuel("",ImportsSystemFuel::COURIER_TYPE)?>)
+				</div>
+				<div class="row">
+					<div class="row rowcol rowcol-left divBorder">
+							<?php echo CHtml::label('Courier Manual Handling Fee','courier_os_rates'); ?>
+							<div class="row">
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('MH0','MH0') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH0][kgdwf]',isset($model->mdata['courier_surcharge']['MH0']['kgdwf'])?$model->mdata['courier_surcharge']['MH0']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][MH0][kgdwt]',isset($model->mdata['courier_surcharge']['MH0']['kgdwt'])?$model->mdata['courier_surcharge']['MH0']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH0][kgcwf]',isset($model->mdata['courier_surcharge']['MH0']['kgcwf'])?$model->mdata['courier_surcharge']['MH0']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][MH0][kgcwt]',isset($model->mdata['courier_surcharge']['MH0']['kgcwt'])?$model->mdata['courier_surcharge']['MH0']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH0][meterf]',isset($model->mdata['courier_surcharge']['MH0']['meterf'])?$model->mdata['courier_surcharge']['MH0']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][MH0][metert]',isset($model->mdata['courier_surcharge']['MH0']['metert'])?$model->mdata['courier_surcharge']['MH0']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH0][length]',isset($model->mdata['courier_surcharge']['MH0']['length'])?$model->mdata['courier_surcharge']['MH0']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH0][width]',isset($model->mdata['courier_surcharge']['MH0']['width'])?$model->mdata['courier_surcharge']['MH0']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH0][height]',isset($model->mdata['courier_surcharge']['MH0']['height'])?$model->mdata['courier_surcharge']['MH0']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH0][cbm]',isset($model->mdata['courier_surcharge']['MH0']['cbm'])?$model->mdata['courier_surcharge']['MH0']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[courier_surcharge][MH0][p_piece]',isset($model->mdata['courier_surcharge']['MH0']['p_piece'])?$model->mdata['courier_surcharge']['MH0']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[courier_surcharge][MH0][p_shipment]',isset($model->mdata['courier_surcharge']['MH0']['p_shipment'])?$model->mdata['courier_surcharge']['MH0']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+								</div>
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('MH1','MH1') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH1][kgdwf]',isset($model->mdata['courier_surcharge']['MH1']['kgdwf'])?$model->mdata['courier_surcharge']['MH1']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][MH1][kgdwt]',isset($model->mdata['courier_surcharge']['MH1']['kgdwt'])?$model->mdata['courier_surcharge']['MH1']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH1][kgcwf]',isset($model->mdata['courier_surcharge']['MH1']['kgcwf'])?$model->mdata['courier_surcharge']['MH1']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][MH1][kgcwt]',isset($model->mdata['courier_surcharge']['MH1']['kgcwt'])?$model->mdata['courier_surcharge']['MH1']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH1][meterf]',isset($model->mdata['courier_surcharge']['MH1']['meterf'])?$model->mdata['courier_surcharge']['MH1']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][MH1][metert]',isset($model->mdata['courier_surcharge']['MH1']['metert'])?$model->mdata['courier_surcharge']['MH1']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+									
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH1][length]',isset($model->mdata['courier_surcharge']['MH1']['length'])?$model->mdata['courier_surcharge']['MH1']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH1][width]',isset($model->mdata['courier_surcharge']['MH1']['width'])?$model->mdata['courier_surcharge']['MH1']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH1][height]',isset($model->mdata['courier_surcharge']['MH1']['height'])?$model->mdata['courier_surcharge']['MH1']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH1][cbm]',isset($model->mdata['courier_surcharge']['MH1']['cbm'])?$model->mdata['courier_surcharge']['MH1']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[courier_surcharge][MH1][p_piece]',isset($model->mdata['courier_surcharge']['MH1']['p_piece'])?$model->mdata['courier_surcharge']['MH1']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[courier_surcharge][MH1][p_shipment]',isset($model->mdata['courier_surcharge']['MH1']['p_shipment'])?$model->mdata['courier_surcharge']['MH1']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+								</div>
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('MH2','MH2') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH2][kgdwf]',isset($model->mdata['courier_surcharge']['MH2']['kgdwf'])?$model->mdata['courier_surcharge']['MH2']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][MH2][kgdwt]',isset($model->mdata['courier_surcharge']['MH2']['kgdwt'])?$model->mdata['courier_surcharge']['MH2']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH2][kgcwf]',isset($model->mdata['courier_surcharge']['MH2']['kgcwf'])?$model->mdata['courier_surcharge']['MH2']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][MH2][kgcwt]',isset($model->mdata['courier_surcharge']['MH2']['kgcwt'])?$model->mdata['courier_surcharge']['MH2']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH2][meterf]',isset($model->mdata['courier_surcharge']['MH2']['meterf'])?$model->mdata['courier_surcharge']['MH2']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][MH2][metert]',isset($model->mdata['courier_surcharge']['MH2']['metert'])?$model->mdata['courier_surcharge']['MH2']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+									
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH2][length]',isset($model->mdata['courier_surcharge']['MH2']['length'])?$model->mdata['courier_surcharge']['MH2']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH2][width]',isset($model->mdata['courier_surcharge']['MH2']['width'])?$model->mdata['courier_surcharge']['MH2']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH2][height]',isset($model->mdata['courier_surcharge']['MH2']['height'])?$model->mdata['courier_surcharge']['MH2']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH2][cbm]',isset($model->mdata['courier_surcharge']['MH2']['cbm'])?$model->mdata['courier_surcharge']['MH2']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[courier_surcharge][MH2][p_piece]',isset($model->mdata['courier_surcharge']['MH2']['p_piece'])?$model->mdata['courier_surcharge']['MH2']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[courier_surcharge][MH2][p_shipment]',isset($model->mdata['courier_surcharge']['MH2']['p_shipment'])?$model->mdata['courier_surcharge']['MH2']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+								</div>
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('MH3','MH3') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH3][kgdwf]',isset($model->mdata['courier_surcharge']['MH3']['kgdwf'])?$model->mdata['courier_surcharge']['MH3']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][MH3][kgdwt]',isset($model->mdata['courier_surcharge']['MH3']['kgdwt'])?$model->mdata['courier_surcharge']['MH3']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH3][kgcwf]',isset($model->mdata['courier_surcharge']['MH3']['kgcwf'])?$model->mdata['courier_surcharge']['MH3']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][MH3][kgcwt]',isset($model->mdata['courier_surcharge']['MH3']['kgcwt'])?$model->mdata['courier_surcharge']['MH3']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH3][meterf]',isset($model->mdata['courier_surcharge']['MH3']['meterf'])?$model->mdata['courier_surcharge']['MH3']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][MH3][metert]',isset($model->mdata['courier_surcharge']['MH3']['metert'])?$model->mdata['courier_surcharge']['MH3']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+									
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH3][length]',isset($model->mdata['courier_surcharge']['MH3']['length'])?$model->mdata['courier_surcharge']['MH3']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH3][width]',isset($model->mdata['courier_surcharge']['MH3']['width'])?$model->mdata['courier_surcharge']['MH3']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH3][height]',isset($model->mdata['courier_surcharge']['MH3']['height'])?$model->mdata['courier_surcharge']['MH3']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][MH3][cbm]',isset($model->mdata['courier_surcharge']['MH3']['cbm'])?$model->mdata['courier_surcharge']['MH3']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[courier_surcharge][MH3][p_piece]',isset($model->mdata['courier_surcharge']['MH3']['p_piece'])?$model->mdata['courier_surcharge']['MH3']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[courier_surcharge][MH3][p_shipment]',isset($model->mdata['courier_surcharge']['MH3']['p_shipment'])?$model->mdata['courier_surcharge']['MH3']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+								</div>
+
+							</div>
+					</div>
+				</div>
+
+
+				<div class="row">
+					<div class="row rowcol rowcol-left divBorder">
+							<?php echo CHtml::label('Courier Oversize Fee','courier_os_rates'); ?>
+							<div class="row">
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OS0','OS0') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS0][kgdwf]',isset($model->mdata['courier_surcharge']['OS0']['kgdwf'])?$model->mdata['courier_surcharge']['OS0']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][OS0][kgdwt]',isset($model->mdata['courier_surcharge']['OS0']['kgdwt'])?$model->mdata['courier_surcharge']['OS0']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS0][kgcwf]',isset($model->mdata['courier_surcharge']['OS0']['kgcwf'])?$model->mdata['courier_surcharge']['OS0']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][OS0][kgcwt]',isset($model->mdata['courier_surcharge']['OS0']['kgcwt'])?$model->mdata['courier_surcharge']['OS0']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS0][meterf]',isset($model->mdata['courier_surcharge']['OS0']['meterf'])?$model->mdata['courier_surcharge']['OS0']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][OS0][metert]',isset($model->mdata['courier_surcharge']['OS0']['metert'])?$model->mdata['courier_surcharge']['OS0']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+									
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS0][length]',isset($model->mdata['courier_surcharge']['OS0']['length'])?$model->mdata['courier_surcharge']['OS0']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS0][width]',isset($model->mdata['courier_surcharge']['OS0']['width'])?$model->mdata['courier_surcharge']['OS0']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS0][height]',isset($model->mdata['courier_surcharge']['OS0']['height'])?$model->mdata['courier_surcharge']['OS0']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS0][cbm]',isset($model->mdata['courier_surcharge']['OS0']['cbm'])?$model->mdata['courier_surcharge']['OS0']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+
+
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[courier_surcharge][OS0][p_piece]',isset($model->mdata['courier_surcharge']['OS0']['p_piece'])?$model->mdata['courier_surcharge']['OS0']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[courier_surcharge][OS0][p_shipment]',isset($model->mdata['courier_surcharge']['OS0']['p_shipment'])?$model->mdata['courier_surcharge']['OS0']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+								</div>
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OS1','OS1') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS1][kgdwf]',isset($model->mdata['courier_surcharge']['OS1']['kgdwf'])?$model->mdata['courier_surcharge']['OS1']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][OS1][kgdwt]',isset($model->mdata['courier_surcharge']['OS1']['kgdwt'])?$model->mdata['courier_surcharge']['OS1']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS1][kgcwf]',isset($model->mdata['courier_surcharge']['OS1']['kgcwf'])?$model->mdata['courier_surcharge']['OS1']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][OS1][kgcwt]',isset($model->mdata['courier_surcharge']['OS1']['kgcwt'])?$model->mdata['courier_surcharge']['OS1']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS1][meterf]',isset($model->mdata['courier_surcharge']['OS1']['meterf'])?$model->mdata['courier_surcharge']['OS1']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][OS1][metert]',isset($model->mdata['courier_surcharge']['OS1']['metert'])?$model->mdata['courier_surcharge']['OS1']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS1][length]',isset($model->mdata['courier_surcharge']['OS1']['length'])?$model->mdata['courier_surcharge']['OS1']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS1][width]',isset($model->mdata['courier_surcharge']['OS1']['width'])?$model->mdata['courier_surcharge']['OS1']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS1][height]',isset($model->mdata['courier_surcharge']['OS1']['height'])?$model->mdata['courier_surcharge']['OS1']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS1][cbm]',isset($model->mdata['courier_surcharge']['OS1']['cbm'])?$model->mdata['courier_surcharge']['OS1']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+
+
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[courier_surcharge][OS1][p_piece]',isset($model->mdata['courier_surcharge']['OS1']['p_piece'])?$model->mdata['courier_surcharge']['OS1']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[courier_surcharge][OS1][p_shipment]',isset($model->mdata['courier_surcharge']['OS1']['p_shipment'])?$model->mdata['courier_surcharge']['OS1']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+								</div>
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OS2','OS2') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS2][kgdwf]',isset($model->mdata['courier_surcharge']['OS2']['kgdwf'])?$model->mdata['courier_surcharge']['OS2']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][OS2][kgdwt]',isset($model->mdata['courier_surcharge']['OS2']['kgdwt'])?$model->mdata['courier_surcharge']['OS2']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS2][kgcwf]',isset($model->mdata['courier_surcharge']['OS2']['kgcwf'])?$model->mdata['courier_surcharge']['OS2']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][OS2][kgcwt]',isset($model->mdata['courier_surcharge']['OS2']['kgcwt'])?$model->mdata['courier_surcharge']['OS2']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS2][meterf]',isset($model->mdata['courier_surcharge']['OS2']['meterf'])?$model->mdata['courier_surcharge']['OS2']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][OS2][metert]',isset($model->mdata['courier_surcharge']['OS2']['metert'])?$model->mdata['courier_surcharge']['OS2']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS2][length]',isset($model->mdata['courier_surcharge']['OS2']['length'])?$model->mdata['courier_surcharge']['OS2']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS2][width]',isset($model->mdata['courier_surcharge']['OS2']['width'])?$model->mdata['courier_surcharge']['OS2']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS2][height]',isset($model->mdata['courier_surcharge']['OS2']['height'])?$model->mdata['courier_surcharge']['OS2']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS2][cbm]',isset($model->mdata['courier_surcharge']['OS2']['cbm'])?$model->mdata['courier_surcharge']['OS2']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+
+
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[courier_surcharge][OS2][p_piece]',isset($model->mdata['courier_surcharge']['OS2']['p_piece'])?$model->mdata['courier_surcharge']['OS2']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[courier_surcharge][OS2][p_shipment]',isset($model->mdata['courier_surcharge']['OS2']['p_shipment'])?$model->mdata['courier_surcharge']['OS2']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+								</div>
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OS3','OS3') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS3][kgdwf]',isset($model->mdata['courier_surcharge']['OS3']['kgdwf'])?$model->mdata['courier_surcharge']['OS3']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][OS3][kgdwt]',isset($model->mdata['courier_surcharge']['OS3']['kgdwt'])?$model->mdata['courier_surcharge']['OS3']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS3][kgcwf]',isset($model->mdata['courier_surcharge']['OS3']['kgcwf'])?$model->mdata['courier_surcharge']['OS3']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][OS3][kgcwt]',isset($model->mdata['courier_surcharge']['OS3']['kgcwt'])?$model->mdata['courier_surcharge']['OS3']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS3][meterf]',isset($model->mdata['courier_surcharge']['OS3']['meterf'])?$model->mdata['courier_surcharge']['OS3']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][OS3][metert]',isset($model->mdata['courier_surcharge']['OS3']['metert'])?$model->mdata['courier_surcharge']['OS3']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS3][length]',isset($model->mdata['courier_surcharge']['OS3']['length'])?$model->mdata['courier_surcharge']['OS3']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS3][width]',isset($model->mdata['courier_surcharge']['OS3']['width'])?$model->mdata['courier_surcharge']['OS3']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS3][height]',isset($model->mdata['courier_surcharge']['OS3']['height'])?$model->mdata['courier_surcharge']['OS3']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS3][cbm]',isset($model->mdata['courier_surcharge']['OS3']['cbm'])?$model->mdata['courier_surcharge']['OS3']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+
+
+
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[courier_surcharge][OS3][p_piece]',isset($model->mdata['courier_surcharge']['OS3']['p_piece'])?$model->mdata['courier_surcharge']['OS3']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[courier_surcharge][OS3][p_shipment]',isset($model->mdata['courier_surcharge']['OS3']['p_shipment'])?$model->mdata['courier_surcharge']['OS3']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+								</div>
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OS4','OS4') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS4][kgdwf]',isset($model->mdata['courier_surcharge']['OS4']['kgdwf'])?$model->mdata['courier_surcharge']['OS4']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][OS4][kgdwt]',isset($model->mdata['courier_surcharge']['OS4']['kgdwt'])?$model->mdata['courier_surcharge']['OS4']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS4][kgcwf]',isset($model->mdata['courier_surcharge']['OS4']['kgcwf'])?$model->mdata['courier_surcharge']['OS4']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][OS4][kgcwt]',isset($model->mdata['courier_surcharge']['OS4']['kgcwt'])?$model->mdata['courier_surcharge']['OS4']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS4][meterf]',isset($model->mdata['courier_surcharge']['OS4']['meterf'])?$model->mdata['courier_surcharge']['OS4']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][OS4][metert]',isset($model->mdata['courier_surcharge']['OS4']['metert'])?$model->mdata['courier_surcharge']['OS4']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS4][length]',isset($model->mdata['courier_surcharge']['OS4']['length'])?$model->mdata['courier_surcharge']['OS4']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS4][width]',isset($model->mdata['courier_surcharge']['OS4']['width'])?$model->mdata['courier_surcharge']['OS4']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS4][height]',isset($model->mdata['courier_surcharge']['OS4']['height'])?$model->mdata['courier_surcharge']['OS4']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS4][cbm]',isset($model->mdata['courier_surcharge']['OS4']['cbm'])?$model->mdata['courier_surcharge']['OS4']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+
+
+
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[courier_surcharge][OS4][p_piece]',isset($model->mdata['courier_surcharge']['OS4']['p_piece'])?$model->mdata['courier_surcharge']['OS4']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[courier_surcharge][OS4][p_shipment]',isset($model->mdata['courier_surcharge']['OS4']['p_shipment'])?$model->mdata['courier_surcharge']['OS4']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+								</div>
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OS5','OS5') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS5][kgdwf]',isset($model->mdata['courier_surcharge']['OS5']['kgdwf'])?$model->mdata['courier_surcharge']['OS5']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][OS5][kgdwt]',isset($model->mdata['courier_surcharge']['OS5']['kgdwt'])?$model->mdata['courier_surcharge']['OS5']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS5][kgcwf]',isset($model->mdata['courier_surcharge']['OS5']['kgcwf'])?$model->mdata['courier_surcharge']['OS5']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][OS5][kgcwt]',isset($model->mdata['courier_surcharge']['OS5']['kgcwt'])?$model->mdata['courier_surcharge']['OS5']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS5][meterf]',isset($model->mdata['courier_surcharge']['OS5']['meterf'])?$model->mdata['courier_surcharge']['OS5']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][OS5][metert]',isset($model->mdata['courier_surcharge']['OS5']['metert'])?$model->mdata['courier_surcharge']['OS5']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS5][length]',isset($model->mdata['courier_surcharge']['OS5']['length'])?$model->mdata['courier_surcharge']['OS5']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS5][width]',isset($model->mdata['courier_surcharge']['OS5']['width'])?$model->mdata['courier_surcharge']['OS5']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS5][height]',isset($model->mdata['courier_surcharge']['OS5']['height'])?$model->mdata['courier_surcharge']['OS5']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS5][cbm]',isset($model->mdata['courier_surcharge']['OS5']['cbm'])?$model->mdata['courier_surcharge']['OS5']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+
+
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[courier_surcharge][OS5][p_piece]',isset($model->mdata['courier_surcharge']['OS5']['p_piece'])?$model->mdata['courier_surcharge']['OS5']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[courier_surcharge][OS5][p_shipment]',isset($model->mdata['courier_surcharge']['OS5']['p_shipment'])?$model->mdata['courier_surcharge']['OS5']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+								</div>
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OS6','OS6') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS6][kgdwf]',isset($model->mdata['courier_surcharge']['OS6']['kgdwf'])?$model->mdata['courier_surcharge']['OS6']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][OS6][kgdwt]',isset($model->mdata['courier_surcharge']['OS6']['kgdwt'])?$model->mdata['courier_surcharge']['OS6']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS6][kgcwf]',isset($model->mdata['courier_surcharge']['OS6']['kgcwf'])?$model->mdata['courier_surcharge']['OS6']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][OS6][kgcwt]',isset($model->mdata['courier_surcharge']['OS6']['kgcwt'])?$model->mdata['courier_surcharge']['OS6']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS6][meterf]',isset($model->mdata['courier_surcharge']['OS6']['meterf'])?$model->mdata['courier_surcharge']['OS6']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][OS6][metert]',isset($model->mdata['courier_surcharge']['OS6']['metert'])?$model->mdata['courier_surcharge']['OS6']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS6][length]',isset($model->mdata['courier_surcharge']['OS6']['length'])?$model->mdata['courier_surcharge']['OS6']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS6][width]',isset($model->mdata['courier_surcharge']['OS6']['width'])?$model->mdata['courier_surcharge']['OS6']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS6][height]',isset($model->mdata['courier_surcharge']['OS6']['height'])?$model->mdata['courier_surcharge']['OS6']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS6][cbm]',isset($model->mdata['courier_surcharge']['OS6']['cbm'])?$model->mdata['courier_surcharge']['OS6']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+
+
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[courier_surcharge][OS6][p_piece]',isset($model->mdata['courier_surcharge']['OS6']['p_piece'])?$model->mdata['courier_surcharge']['OS6']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[courier_surcharge][OS6][p_shipment]',isset($model->mdata['courier_surcharge']['OS6']['p_shipment'])?$model->mdata['courier_surcharge']['OS6']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+								</div>
+								<div class="row rowcol rowcol-left" style="margin-top: 20px;">
+									<?php echo CHtml::label('OS7','OS7') ?>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS7][kgdwf]',isset($model->mdata['courier_surcharge']['OS7']['kgdwf'])?$model->mdata['courier_surcharge']['OS7']['kgdwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][OS7][kgdwt]',isset($model->mdata['courier_surcharge']['OS7']['kgdwt'])?$model->mdata['courier_surcharge']['OS7']['kgdwt']:0,array('style'=>'width:30px')),'KG Dead Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS7][kgcwf]',isset($model->mdata['courier_surcharge']['OS7']['kgcwf'])?$model->mdata['courier_surcharge']['OS7']['kgcwf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][OS7][kgcwt]',isset($model->mdata['courier_surcharge']['OS7']['kgcwt'])?$model->mdata['courier_surcharge']['OS7']['kgcwt']:0,array('style'=>'width:30px')),'KG Cubic Weight'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS7][meterf]',isset($model->mdata['courier_surcharge']['OS7']['meterf'])?$model->mdata['courier_surcharge']['OS7']['meterf']:0,array('style'=>'width:30px')),'-',CHtml::textField('mdata[courier_surcharge][OS7][metert]',isset($model->mdata['courier_surcharge']['OS7']['metert'])?$model->mdata['courier_surcharge']['OS7']['metert']:0,array('style'=>'width:30px')),'M Diagonal Length'?>
+										
+									</p>
+
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS7][length]',isset($model->mdata['courier_surcharge']['OS7']['length'])?$model->mdata['courier_surcharge']['OS7']['length']:0,array('style'=>'width:30px')),'M length'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS7][width]',isset($model->mdata['courier_surcharge']['OS7']['width'])?$model->mdata['courier_surcharge']['OS7']['width']:0,array('style'=>'width:30px')),'M width'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS7][height]',isset($model->mdata['courier_surcharge']['OS7']['height'])?$model->mdata['courier_surcharge']['OS7']['height']:0,array('style'=>'width:30px')),'M height'?>
+										
+									</p>
+									<p>
+									<?php echo CHtml::textField('mdata[courier_surcharge][OS7][cbm]',isset($model->mdata['courier_surcharge']['OS7']['cbm'])?$model->mdata['courier_surcharge']['OS7']['cbm']:0,array('style'=>'width:30px')),'cbm'?>
+									</p>
+
+
+
+									<p>_________________________________________</p>
+									<p>
+									<?php echo '$',CHtml::textField('mdata[courier_surcharge][OS7][p_piece]',isset($model->mdata['courier_surcharge']['OS7']['p_piece'])?$model->mdata['courier_surcharge']['OS7']['p_piece']:0,array('style'=>'width:30px')),'/piece or ',CHtml::textField('mdata[courier_surcharge][OS7][p_shipment]',isset($model->mdata['courier_surcharge']['OS7']['p_shipment'])?$model->mdata['courier_surcharge']['OS7']['p_shipment']:0,array('style'=>'width:30px')),'/shipment'?>
+										
+									</p>
+								</div>
+
+
+
+
+
+							</div>
+					</div>
+				</div>
+			</div>
+
+			
+
+			</br>
+		
+		<div class="row" style="margin-top:100px;">
+				<?php echo $form->labelEx($model,'note'); ?>
+				<?php echo $form->textArea($model,'note',array('rows'=>5, 'cols' => 60)); ?>
+		</div>
+
+		<div class="row" style="margin-top:100px;">
+				<?php echo $form->labelEx($model,'description'); ?>
+				<?php echo $form->textArea($model,'description',array('rows'=>5, 'cols' => 60)); ?>
+		</div>
+
+		<div class="row">
+				<?php echo CHtml::label('Invoice Rate:','forinvoice_rate'); ?>
+				<?php
+				if ( !$model->isNewRecord ) {
+						$setZoneMapLink = '<a class="jqm_link" data-win-class="XL" href="org/chgcodezonemap/'.$model->id.'.app"><div style="background-position:-16px 0" class="icon"></div>'.$this->t('Import Zone Map').'</a> &nbsp;';
+						echo $setZoneMapLink;
+						$setFlexRateLink = '<a class="jqm_link" data-win-class="XL" href="import/pcarate/' . $model->id . '.app"><div style="background-position:-16px 0" class="icon"></div>' . $this->t('Flex Rate By Zone') . '</a> &nbsp;';
+						echo $setFlexRateLink;
+
+						$setRemoetChargeRateLink = '<a class="jqm_link" data-win-class="XL" href="org/chgcodeRemoteChargeRate/' . $model->id . '.app"><div style="background-position:-16px 0" class="icon"></div>' . $this->t('Remote Charge Rate') . '</a>';
+						echo $setRemoetChargeRateLink;
+				}
+				?>
+		</div>
+
+
+		<div class="row imex">
+				<?php echo $form->radioButtonList($model,'status', Chargecode::$switch, array('labelOptions' => array('class' => 'radio_label'), 'separator' => '&nbsp;&nbsp')); ?>
+		</div>
+
+
+		<div class="row buttons">
+				<?php echo CHtml::submitButton($this->t($model->isNewRecord ? 'Create' : 'Save')); ?>
+		</div>
+
+		<?php $this->endWidget(); ?>
+
+</div><!-- form -->
+
+<script type="text/javascript">
+		$(function(){
+				var tab = $('#<?=$_GET["tabid"];?>');
+				var panel = tab.data('panel');
+				$("input[name='surcharge_select']",panel).on('change',function(){
+					 if($(this).val()==1)
+					 {
+					 	$("#tld_surcharge",panel).show();
+					 	$("#courier_surcharge",panel).hide();
+					 }else
+					 {
+					 	$("#tld_surcharge",panel).hide();
+					 	$("#courier_surcharge",panel).show();
+					 }
+				 });
+
+		});
+</script>

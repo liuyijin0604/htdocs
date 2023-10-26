@@ -1,0 +1,37 @@
+<?php 
+class BwtrunkService extends Service
+{
+    private $api;
+    private $model;
+
+    public function __construct()
+    {
+        $this->api = new BwtrunkAPI();
+        $this->model = new Bwtrunk();
+    }
+
+    public function updateData()
+    {
+        $data = $this->api->getData();
+        if (!empty($data)) {
+            foreach ($data as $item) {
+                $model = $this->model->findByAttributes(array('MAWB_number' => $item['MAWB_number']));
+                if (empty($model)) {
+                    $model = new Bwtrunk();
+                }
+                $model->MAWB_number = $item['MAWB_number'];
+                $model->pieces_pick_up = $item['pieces_pick_up'];
+                $model->CTO_start = $item['CTO_start'];
+                $model->CTO_finish = $item['CTO_finish'];
+                $model->Client_start = $item['Client_start'];
+                $model->Client_finish = $item['Client_finish'];
+                $model->save();
+            }
+        }
+    }
+}
+
+$service = new BwtrunkService();
+
+$data = $service->getDate();
+print_r($data);

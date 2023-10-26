@@ -1,0 +1,82 @@
+<!doctype html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Top Logistics WMS API Documentation</title>
+<style type="text/css">
+body {
+	font: 12px Montserrat, sans-serif;
+	margin: 0;
+	padding-top: 36px;
+}
+nav {
+	position: fixed;
+	top: 0;
+	width: 100%;
+	z-index: 100;
+}
+#links_container {
+	margin: 0;
+	padding: 0;
+	background-color: #0033a0;
+	list-style: none;
+	text-align: right;
+}
+#links_container li {
+	display: inline-block;
+	padding: 10px;
+	color: white;
+	cursor: pointer;
+}
+#links_container li.hi {
+	background: white;
+	color: #0033a0;
+	font-weight: bold;
+	font-size: 1.2em;
+}
+.api-content ol {
+	counter-reset: item;
+	padding-left: 10px;
+}
+.api-content ol li {
+	display: block;
+}
+.api-content ol li:before {
+	content: counters(item, ".") " ";
+	counter-increment: item
+}
+</style>
+</head>
+<body>
+<!-- Top navigation placeholder -->
+<nav>
+	<ul id="links_container"></ul>
+</nav>
+<redoc></redoc>
+<script
+  src="https://code.jquery.com/jquery-3.4.1.slim.min.js"
+  integrity="sha256-pasqAKBDmFT4eHoN2ndd6lN370kFiGUFyTiUHWhU7k8="
+  crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/redoc/bundles/redoc.standalone.js"></script>
+<script type="text/javascript">
+	var apis = [
+	{
+		name: 'Eng',
+		url: 'wms_v1.json'
+	},
+	];
+
+	apis.forEach(function(api) {
+		var listitem = $('<li>'+api.name+'</li>').data('link', api.url).on('click', function(){
+			Redoc.init($(this).data('link'));
+			$('#links_container li').removeClass('hi');
+			$(this).addClass('hi');
+		});
+		$('#links_container').append(listitem);
+	});
+	$('#links_container li:first-child').addClass('hi');
+	Redoc.init(apis[0].url);
+</script>
+</body>
+</html>

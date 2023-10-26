@@ -1,0 +1,91 @@
+<?php
+echo '<h1>Shipment RTS Received/Waiting RTC List</h1>';
+?>
+
+<?php   echo CHtml::button('Submit RTC List',array('id'=>'submit_rtc_list'));?>
+
+<?php $this->widget('zii.widgets.grid.CGridView',array(
+    'cssFile' => false,
+    'id'=>$_GET["tabid"].'_rts_received_grid_view',
+    'filter'=>$model,
+    'dataProvider'=>$model->search(false,50,false,true,true),
+    'template' => "{summary}\n{items}\n{pager}",
+    'columns'=>array(
+            array('header'=>'all','type'=>'raw','value'=>'CHtml::checkBox("shipmentId",true,["value"=>"$data->id"])','filter'=>'<input id="select_all" type="checkbox" value="1" name="select All">'),
+            array('header' => 'Location','type'=>'raw','value'=>'$data->getRTSLocation(true)'),
+            array('name' => 'hbn'),
+            array('name' => 'ref'),
+            array('header' => 'Warehouse','type'=>'raw','value'=>'$data->getRTSWarehouse(true)','filter'=>CHtml::dropDownList(get_class($model).'[warehouse_id]', $model->warehouse_id, $this->t(Org::dptList()), ['prompt'=>$this->t('All')])),
+            array('header' => 'barcode','type'=>'raw','value'=>'$data->getRTSBarcodes(true,true))'),
+            array('header' => 'RTS Reasons','type'=>'raw','value'=>'$data->getRTSReasons(true)'),
+            array('header' => 'RTS Images','type'=>'raw','value'=>'$data->getRTSImages(true)'),
+            array('name' => 'rts_scan_date','type'=>'raw','value'=>'$data->getRTSRecordTime(true)'),
+            ['header' => 'status', 'value' => '$data->getStatus()']
+        ),
+    )
+    
+);
+
+?>
+
+<script type="text/javascript">
+$(function() {
+    var tab = $('#<?=$_GET["tabid"];?>');
+    var panel = tab.data('panel');
+    let ccheck= 1;
+    
+    tab.unbind('reload_rtc_list_grid').bind('reload_rtc_list_grid', function(){
+        $('#<?=$_GET["tabid"];?>_rts_received_grid_view', tab.data('panel')).yiiGridView('update');
+        return false;
+    });
+
+    $('#select_all',panel).on('click',function()
+    {
+        if(ccheck==0)
+        {
+            $("input[name='shipmentId']").click();
+            ccheck = 1;
+        }else
+        {
+            $("input[name='shipmentId']").removeAttr("checked");
+            ccheck = 0;
+        }
+        return false;
+    });
+
+    $('#submit_rtc_list',panel).on('click',function(){
+        if( confirm('Are you sure to submit all selected shipments to be RTC?')){
+            var selectedIds = "";
+            $('input:checkbox[name=shipmentId]:checked',panel).each(function(i){
+               if(0==i){
+                selectedIds = $(this).val();
+               }else{
+                selectedIds += (","+$(this).val());
+               }
+            });
+
+            let form = {'selectedIds':selectedIds};
+             $.ajax({
+                        url: '<?=$this->createUrl("rtsProcess/submitRTCList")?>',
+                        type: "post",
+                        data: form,
+                        success: function(r) {
+                            if(r=='done')
+                             {
+                                myApp.notice('Done', 5000);
+                             }else
+                             {
+                                myApp.alert(r, false);   
+                             }
+                             tab.trigger('reload_rtc_list_grid');
+                         },
+                        error: function(e) {
+                            console.log(e);
+                        }
+                    });         
+        }
+        return false;
+    });
+
+});
+</script>

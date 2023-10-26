@@ -1,0 +1,250 @@
+<?php
+
+class SupayController extends PController
+{
+	public function actionSupay() {
+		Yii::log(json_encode($_SERVER['QUERY_STRING']), 'warning', 'trace');
+		// Yii::log(json_encode($_GET), 'warning', 'trace');
+		Yii::log(Yii::app()->name, 'warning', 'trace');
+		if (Yii::app()->name == 'TLA') {
+			$supay = new SupayAPI(
+				'',
+				'',
+				'72795',
+				'lkjh678jGQDJokl9XQHaHIyfuytttqqq'
+			);
+		} else {
+			$supay = new SupayAPI();
+		}
+		$veri_result = $supay->verifyNotification($_GET);
+
+		if (substr($_GET['merchant_trade_no'], 0, 5) != 'SUPAY') {
+			$invoice = Invoice::model()->find('no = :no', array(':no' => $_GET['merchant_trade_no']));
+			if (empty($invoice)) {
+				[$app_name, Yii::app()->name] = [Yii::app()->name, 'TLA'];
+				$invoice = Invoice::model()->find('no = :no', array(':no' => $_GET['merchant_trade_no']));
+			}
+			Yii::log($invoice->id, 'warning', 'trace');
+			if (!empty($invoice) && $veri_result) {
+				$result = $supay->checkoutResult($invoice->no);
+				if ($result) {
+					$this->afterPaymentPaid($invoice, array('notice_id' => $_GET['notice_id'], 'amount' => $invoice->total), 'SUPAY');
+				} else {
+				  echo "invoice is wrong";
+				}
+			} else {
+				return "can't find the invoice";
+			}
+		} else {
+			$invoices = Invoice::model()->findAll('JSON_VALUE(meta, "$.supay_invoices_id") = :no', [':no' => $_GET['merchant_trade_no']]);
+			if (empty($invoices)) {
+				[$app_name, Yii::app()->name] = [Yii::app()->name, 'TLA'];
+				$invoices = Invoice::model()->findAll('JSON_VALUE(meta, "$.supay_invoices_id") = :no', [':no' => $_GET['merchant_trade_no']]);
+			}
+			$total = 0;
+			foreach ($invoices as $invoice) {
+				$total += $invoice->totak;
+			}
+			// Yii::log($invoice->id, 'warning', 'trace');
+			if (!empty($invoices) && $veri_result) {
+				$result = $supay->checkoutResult($_GET['merchant_trade_no']);
+				if ($result) {
+					$this->afterPaymentPaidForInvoices($invoices, array('notice_id' => $_GET['notice_id'], 'amount' => $total), 'SUPAY');
+				} else {
+				  echo "invoice is wrong";
+				}
+			} else {
+				return "can't find the invoice";
+			}
+		}
+	}
+
+	private function afterPaymentPaid($invoice, $trnInfo, $type) {
+		if (!empty($trnInfo['notice_id'])) {
+			$trn = $trnInfo['notice_id'];
+			$amount = $trnInfo['amount'];
+		}
+
+		$payment_gateway_history_model = PaymentGatewayHistory::model()->find('trn = :trn', array(':trn' => $trn));
+		if ( !isset($payment_gateway_history_model) ) {
+			$payment_gateway_history_model = new PaymentGatewayHistory();
+			$payment_gateway_history_model->trn = $trn;
+			$payment_gateway_history_model->invoice_id = $invoice->id;
+			$payment_gateway_history_model->type = constant('PaymentGatewayHistory::PAYMENT_GATEWAY_TYPE_'. $type);
+			$payment_gateway_history_model->token = $trn;
+			$payment_gateway_history_model->meta = json_encode($trnInfo);
+			$payment_gateway_history_model->result = 'success';
+			$payment_gateway_history_model->payed_time = new CDbExpression('NOW()');
+			$payment_gateway_history_model->save();
+		} else {
+			if ( $payment_gateway_history_model->result == 'success' && !empty($payment_gateway_history_model->payed_time) ) {
+				echo 'you have paid the invoice successfully already before!';
+				return;
+			}
+		}
+
+		// get original invoice data
+		if ( !empty($invoice) ) {
+			// 9 : paid
+			// 10 : cancelled
+			if ( $invoice->status != Invoice::INVOICE_STATUS_PAID &&
+				$invoice->status != Invoice::INVOICE_STATUS_CACELLED ) {
+
+				// create a payment
+				$payment = new Payment();
+				$payment->org_id = $invoice->to_id;
+				$payment->amount = $amount;
+				$payment->ref = $type . ' TRN: ' . $trn;
+				$payment->date = date('Y-m-d', time());
+				$payment->type = constant('Payment::PAYMENT_TYPE_'. $type);
+				$payment->bank = array_search('Westpac AUD', Payment::$banks); // westbank
+				$payment->mdata['bankcharge'] = $invoice->total - (double)$payment->amount;
+				$payment->currency = 1; // AUD
+				$payment->status = Payment::PAYMENT_STATUS_POSTED; // posted status ? paid finish?
+				$payment->save();
+
+				// link payment with invoice table
+				$pi = new PayInv();
+				$pi->inv_id = $invoice->id;
+				$pi->pay_id = $payment->id;
+				$pi->amount = $payment->amount;
+				$pi->save();
+
+				// update invoice status
+				$invoice->status = Invoice::INVOICE_STATUS_PAID;
+				$invoice->save();
+
+				if (Yii::app()->user->isGuest) return 'SUCCESS';
+				$this->redirect($this->createUrl('order/finish', array('result' => 'success')));
+			} else {
+			  echo 'Invoice already paid';
+			}
+		} else {
+		  echo 'Invoice does not exits';
+		}
+	}
+
+	private function afterPaymentPaidForInvoices($invoices, $trnInfo, $type) {
+		if (!empty($trnInfo['notice_id'])) {
+			$trn = $trnInfo['notice_id'];
+			$amount = $trnInfo['amount'];
+		}
+
+		foreach ($invoices as $invoice) {
+			$payment_gateway_history_model = PaymentGatewayHistory::model()->find('trn = :trn AND invoice_id = :inv_id', array(':trn' => $trn, ':inv_id' => $invoice->id));
+			if ( !isset($payment_gateway_history_model) ) {
+				$payment_gateway_history_model = new PaymentGatewayHistory();
+				$payment_gateway_history_model->trn = $trn;
+				$payment_gateway_history_model->invoice_id = $invoice->id;
+				$payment_gateway_history_model->type = constant('PaymentGatewayHistory::PAYMENT_GATEWAY_TYPE_'. $type);
+				$payment_gateway_history_model->token = $trn;
+				$payment_gateway_history_model->meta = json_encode($trnInfo);
+				$payment_gateway_history_model->result = 'success';
+				$payment_gateway_history_model->payed_time = new CDbExpression('NOW()');
+				$payment_gateway_history_model->save();
+			} else {
+				if ( $payment_gateway_history_model->result == 'success' && !empty($payment_gateway_history_model->payed_time) ) {
+					echo 'you have paid the invoice successfully already before!';
+					return;
+				}
+			}
+
+			// get original invoice data
+			if ( !empty($invoice) ) {
+				// 9 : paid
+				// 10 : cancelled
+				if ( $invoice->status != Invoice::INVOICE_STATUS_PAID &&
+					$invoice->status != Invoice::INVOICE_STATUS_CACELLED ) {
+
+					// create a payment
+					$payment = Payment::model()->find('ref = :ref', [':ref' => $type . ' TRN: ' . $trn]);
+					if (empty($payment)) {
+						$payment = new Payment();
+						$payment->org_id = $invoice->to_id;
+						$payment->amount = $amount;
+						$payment->ref = $type . ' TRN: ' . $trn;
+						$payment->date = date('Y-m-d', time());
+						$payment->type = constant('Payment::PAYMENT_TYPE_'. $type);
+						$payment->bank = array_search('Westpac AUD', Payment::$banks); // westbank
+						$payment->mdata['bankcharge'] = $invoice->total - (double)$payment->amount;
+						$payment->currency = 1; // AUD
+						$payment->status = Payment::PAYMENT_STATUS_POSTED; // posted status ? paid finish?
+						$payment->save();
+					}
+
+					// link payment with invoice table
+					$pi = new PayInv();
+					$pi->inv_id = $invoice->id;
+					$pi->pay_id = $payment->id;
+					$pi->amount = $invoice->total;
+					$pi->save();
+
+					// update invoice status
+					$invoice->status = Invoice::INVOICE_STATUS_PAID;
+					$invoice->save();
+					Invoice::funcChangeAddress($invoice);
+
+					if (Yii::app()->user->isGuest) return 'SUCCESS';
+					$this->redirect($this->createUrl('order/finish', array('result' => 'success')));
+				} else {
+				  echo 'Invoice already paid';
+				}
+			} else {
+			  echo 'Invoice does not exits';
+			}
+		}
+	}
+
+	public function actionMakeSupay($id, $act)
+	{
+		$invoice = Invoice::model()->findByPk($id);
+		$callback_notification_url = Yii::app()->request->hostInfo . $this->createUrl('supay/supay');
+		if (Yii::app()->name == 'TLA') {
+			$supay = new SupayAPI(
+				$callback_notification_url,
+				'',
+				'72795',
+				'lkjh678jGQDJokl9XQHaHIyfuytttqqq'
+			);
+		} else {
+			$supay = new SupayAPI(
+				$callback_notification_url
+			);
+		}
+		if ($act == 'Wechat') {
+			$url = $supay->checkoutByWechatPay('invoice ' . $invoice->no, $invoice->no, 'AUD', round($invoice->total * 1, 2));
+		} elseif ($act == 'Alipay') {
+			$url = $supay->checkoutByAliPay('invoice ' . $invoice->no, $invoice->no, 'AUD', round($invoice->total * 1, 2));
+		} elseif ($act == 'Poli') {
+			$url = $this->createPaylink(['invoice_id' => $invoice->id]);
+		} elseif ($act == 'Paypal'){
+			$url = $this->createPaypallink(['invoice_id' => $invoice->id]);
+		}
+		echo json_encode(['success' => true, 'msg' => 'success', 'url' => $url]);
+	}
+
+	private function createPaylink($data)
+	{
+		$paylink = Yii::app()->createAbsoluteUrl('/') . '/payInvoice/pay.app?token=';
+		$iv = str_repeat("\x00", openssl_cipher_iv_length('AES-256-CBC'));
+		$token = base64_encode(openssl_encrypt(json_encode($data), 'AES-128-CBC', md5(PoliPaymentApi::PAYLINK_KEY), 0, $iv));
+		$paylink .= trim($this->safe_b64encode($token));
+		return $paylink;
+	}
+
+	private function createPaypallink($data){
+		$paylink = Yii::app()->createAbsoluteUrl('/') . '/payInvoice/paypal.app?token=';
+		$iv = str_repeat("\x00", openssl_cipher_iv_length('AES-256-CBC'));
+		$token = base64_encode(openssl_encrypt(json_encode($data), 'AES-128-CBC', md5(PoliPaymentApi::PAYLINK_KEY), 0, $iv));
+		$paylink .= trim($this->safe_b64encode($token));
+		return $paylink;
+	}
+
+	private function safe_b64encode($string)
+	{
+		$data = base64_encode($string);
+		$data = str_replace(['+', '/', '='], ['-', '_', ''], $data);
+		return $data;
+	}
+
+}

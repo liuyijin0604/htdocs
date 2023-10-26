@@ -1,0 +1,71 @@
+<h3><?=$name?></h3>
+<style>
+    .cloumn_notify{
+        background-color:yellow;
+    }   
+   .column_direct{
+        color: green;
+        font-weight: bold;
+    }
+</style>
+<?php 
+$defaultOrder='process.airport DESC';
+$this->widget('zii.widgets.grid.CGridView', array(
+	'id'=>'sea_consol_process_grid'.$_GET['tabid'],
+	'cssFile' => false,
+	'dataProvider'=>$consol->search(true,30,false,false,false,$defaultOrder),
+	'filter'=>$consol,
+	'columns'=>array(
+		array('name' => 'no', 'type' => 'raw','cssClassExpression' => '$data->type==70?"column_direct" : ""',
+                    'value' => '"<a href=\"".Yii::app()->createURL(($data->type==15)?"imcoConsol/update":"dmawbConsol/update", array("id" => $data->id))."\" class=\"tab_link\" title=\"".$data->no."\">".$data->no."</a>"',),
+		['name' => 'awb', 'type' => 'raw', 'value' => '$data->AwbTracking()'],
+        array('header'=>'Customer','name' => 'owner_name','value' => '$data->getOwnerName()'),
+		array('name' => 'status', 'value' => '$data->getStatus()', 
+			'filter'=>CHtml::dropDownList('ImcoConsol[status]', $consol->status, $this->t($consol::$states), array('prompt'=>$this->t('All'))),),
+	        array('name'=>'process_status','value'=>'$data->getProcessStatus()','cssClassExpression' => '$data->process->status== 21? "cloumn_notify" : ""','filter'=>CHtml::dropDownList('ImcoConsol[process_status]', $consol->process_status, $this->t(ConsolProcess::$states), array('prompt'=>$this->t('All'))),),
+	        array('name' => 'dpt_id', 'value' => '$data->depot->name', 
+			'filter'=>CHtml::dropDownList('ImcoConsol[dpt_id]', $consol->dpt_id, $this->t(Org::dptList()), array('prompt'=>$this->t('All'))),),
+                array('name'=>'process_airport','header'=>'Pick Up Airport','value'=>'@$data->process->airport'),
+                array('name'=>'process_airport_dead','header'=>'Pick Up Dead time','value'=>'@$data->process->pick_dead_date'),
+		'flight',
+		'pol',
+		'pod',
+		'eta',
+                array('header' => 'Notes', 'value' => '@$data->process->mdata["process_note"]'),
+		array('header' => 'Shipments', 'value' => '$data->totShipments()'),
+		array('header' => 'Weight', 'value' => '$data->totWeight()'),
+		['header' => 'B/L pcs', 'value' => '$data->getBLpcs()'],
+                array('header' => 'UnScanPacks', 'value' => '$data->totLeftPacks()'),
+                array(
+			'class'=>'oButtonColumn',
+			'template'=>'{operate}&nbsp;{log}',
+			'buttons'=>array
+			(
+				 'operate' => array(
+                                        'url'=>'Yii::app()->createURL("consolProcess/operation",array("id"=>$data->id))',
+					'imageUrl'=>false,
+					'visible'=>'true',
+					'options' => array('class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => '$data->no'),
+				),
+                             'log' => array(
+                                 'imageUrl'=>false,
+                                 'options' => array('class' => 'jqm_link grid_view_btn', 'label' => 'Log', 'data-win-class' => 'L'),
+                                 'visible' => 'true',
+                                  'url' => 'Yii::app()->createUrl("consolProcess/log", ["id" => $data->id])',
+                                 'label' => 'Log'
+                ),
+			),
+		),
+	),
+)); ?>
+
+<script>
+    $(function(){
+        var tab=$('#<?=$_GET['tabid']?>');
+        var panel=tab.data('panel');
+          tab.unbind('reload_sea_consol_process_grid').bind('reload_sea_consol_process_grid', function(){
+		$('#sea_consol_process_grid<?=$_GET['tabid']?>',panel).yiiGridView('update');
+		return false;
+	});
+    })
+</script>

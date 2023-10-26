@@ -1,0 +1,508 @@
+<?php
+class ModelReport{
+	private $strTimeFrom = null;
+	private $strTimeTo = null;
+	private $listStatus =[];
+	private $listAirSea =[];
+	private $strConsolId = null;
+	private $strOwnerId = null;
+	private $strState = null;
+	private $strByUrgent = null;
+	private $isSetCompleteTime = null; //mdata[ctn_comp_time]
+	
+	function __construct($strTimeFrom,$strTimeTo, $listStatus,$listAirSea,$strConsolId,$strOwnerId ,$strState,$strByUrgent,$isSetCompleteTime)
+	{
+		$this->strTimeFrom = $strTimeFrom;
+		$this->strTimeTo = $strTimeTo;
+		$this->listStatus = $listStatus;
+		$this->listAirSea = $listAirSea;
+		$this->strConsolId = $strConsolId;
+		$this->strOwnerId = $strOwnerId;
+		$this->strState = $strState;
+		$this->strByUrgent = $strByUrgent;
+		$this->isSetCompleteTime = $isSetCompleteTime;
+	}
+	
+	
+	public function funcRecords(){
+		$listRecords = [];
+		
+		$strSqlJoinTable ='select * from (select id_consol,no,consol_owner_id,service,awb,airline,pod,pol,etd,eta,container_no,consol_pickup,arrival_cfs,id_shipment,agent_id,scan_time,org_name,org_code,shipment_org_name,shipment_org_code,id_consol_process,MIN(log_time) as log_time from (select id_consol,no,consol_owner_id,service,awb,airline,pod,pol,etd,eta,container_no,consol_pickup,arrival_cfs,id_shipment,agent_id,scan_time,org_name,org_code,shipment_org_name,shipment_org_code,id_consol_process,log.time as log_time from (select id_consol,no,consol_owner_id,service,awb,airline,pod,pol,etd,eta,container_no,consol_pickup,arrival_cfs,id_shipment,agent_id,scan_time,org_name,org_code,shipment_org_name,shipment_org_code,consol_process.id as id_consol_process  from (select id_consol,no,consol_owner_id,service,awb,airline,pod,pol,etd,eta,container_no,consol_pickup,arrival_cfs,id_shipment,agent_id,scan_time,org_name,org_code,org.name as shipment_org_name,org.code as shipment_org_code  from (select id_consol,no,consol_owner_id,service,awb,airline,pod,pol,etd,eta,container_no,consol_pickup,arrival_cfs,id_shipment,agent_id,scan_time,org.name as org_name,org.code as org_code from (select id_consol,no,consol_owner_id,service,awb,airline,pod,pol,etd,eta,container_no,consol_pickup,arrival_cfs,shipment.id as id_shipment,shipment.agent_id,MIN(IF(JSON_UNQUOTE(JSON_EXTRACT(shipment.meta, "$.scan_time"))="",NULL,JSON_UNQUOTE(JSON_EXTRACT(shipment.meta, "$.scan_time")))) scan_time from ((select id as id_consol,no,owner_id as consol_owner_id,service,awb,airline,pod,pol,etd,eta,JSON_UNQUOTE(JSON_EXTRACT(consol.meta, "$.container_no")) container_no,JSON_UNQUOTE(JSON_EXTRACT(consol.meta, "$.pickup")) consol_pickup,JSON_UNQUOTE(JSON_EXTRACT(consol.meta, "$.arrival_cfs")) arrival_cfs from consol  where eta >="'.$this->strTimeFrom.'" and eta <= "'.$this->strTimeTo.'" and status !='.ImcoConsol::Status_Cancelled.') t_consol left join shipment on t_consol.id_consol = shipment.consol_id) GROUP BY id_consol ) t_consol_shipment left join org on t_consol_shipment.consol_owner_id = org.id) t_consol_shipment_org left join org on t_consol_shipment_org.agent_id = org .id) t_consol_shipment_org_org left join consol_process on t_consol_shipment_org_org.id_consol = consol_process.fid) t_consol_shipment_org_org_process left join log on t_consol_shipment_org_org_process.id_consol_process = log.lid and meta =\'{"status":"Wating for WH scan"}\') t_consol_shipment_org_org_process_log0 GROUP BY id_consol)t_consol_shipment_org_org_process_log';
+		
+		
+		$listWhere =[];
+		if(!empty($this->listAirSea)){
+			$strSqlAirSea = 'service in ( ';
+			foreach($this->listAirSea as $i=>$strAirSea){
+				$strSqlAirSea.=$strAirSea;
+				if($i != sizeof($this->listAirSea)-1){
+					$strSqlAirSea.=',';
+				}
+			}
+			$strSqlAirSea .= ' ) ';
+			$listWhere[] = $strSqlAirSea;
+		}
+		
+		// if(!empty($this->strOwnerId)){
+		// 	$listWhere[] = 'org_code = "'. $this->strOwnerId.'"';
+		// }
+		if(!empty($this->strOwnerId)){
+			$listWhere[] = 'shipment_org_code = "'. $this->strOwnerId.'"';
+		}
+		
+		if(!empty($this->strState)){
+			$listWhere[] = 'pod = "'. $this->strState.'"';
+		}
+		
+		if(!empty($this->strConsolId)){
+			$listWhere[] = 'no like "%'.$this->strConsolId.'%"';
+		}
+		
+		
+		if(sizeof($listWhere) !=0){
+			$strSqlWhere = ' where ';
+			foreach($listWhere as $i=>$strWhere){
+				$strSqlWhere.=$strWhere;
+				if($i != sizeof($listWhere)-1){
+					$strSqlWhere.=' and ';
+				}
+			}
+			$strSqlJoinTable.=$strSqlWhere;
+		}
+		
+		
+		$listRows =Yii::app()->db->createCommand($strSqlJoinTable)->queryAll();
+		
+        foreach($listRows as $objRow){
+
+			$objRecord = new stdClass;
+			$objRecord->id = $objRow['id_consol'];
+			$objRecord->customer = $objRow['shipment_org_name'];
+			$objRecord->owner_id = $objRow['consol_owner_id'];
+			$objRecord->agent_id = $objRow['agent_id'];
+
+			$objRecord->no = $objRow['no'];
+			// $objRecord->status = $objConsol->status;
+			$objRecord->pod = $objRow['pod'];
+			$objRecord->pol = $objRow['pol'];
+			$objRecord->service = $objRow['service'];
+			$objRecord->awb = $objRow['awb'];
+			if($objRecord->service == Consol::SEACONSOL){
+				$objRecord->awb = $objRow['container_no'];
+			}
+			$objRecord->arrival_cfs = $objRow['arrival_cfs'];
+			$objRecord->airline = $objRow['airline'];
+			$objRecord->etd = $objRow['etd'];
+			$objRecord->eta = $objRow['eta'];
+			$mawb = $objRow['awb'];
+            $sql = "SELECT CTO_start, CTO_finish, Client_start, Client_finish FROM bwtrunk WHERE MAWB_number=:mawb";
+            $result = Yii::app()->db->createCommand($sql)->bindValue(":mawb", $mawb)->queryRow();
+    
+            if (!empty($result)) {
+            $objRecord->cto_start = $result['CTO_start'];
+            $objRecord->cto_finish = $result['CTO_finish'];
+            $objRecord->client_start = $result['Client_start'];
+            $objRecord->client_finish = $result['Client_finish'];
+            } else {
+             $objRecord->cto_start = null;
+             $objRecord->cto_finish = null;
+             $objRecord->client_start = null;
+             $objRecord->client_finish = null;
+            }
+			// $objRecord->discharge = date("Y-m-d", strtotime('+2 day', strtotime($objConsol->eta)));
+			// add 1 day for air ， 2 day for sea
+			if($objRecord->service == Consol::AIRCONSOL){
+				$objRecord->discharge = date("Y-m-d", strtotime('+1 day', strtotime($objRow['eta'])));
+			}
+			else{
+				$objRecord->discharge = date("Y-m-d", strtotime('+2 day', strtotime($objRow['eta'])));
+			}
+			
+			$objRecord->pickup = null;
+			$objRecord->unpack = null;
+			$objRecord->days_pickup = null;
+			$objRecord->days_unpack = null;
+
+			// for air , use log_time as pickup time
+			if($objRecord->service == Consol::AIRCONSOL){
+				if($objRow['log_time'] != null){
+					// if after 17:00,+1 day
+					$strLogtime = $objRow['log_time'];
+					$numLogtime = strtotime($strLogtime);
+					$strLogtimeDay = date('Y-m-d',$numLogtime);
+					$numLogtimeDay = strtotime($strLogtimeDay);
+					if($numLogtime-$numLogtimeDay>61200){// if after 17:00,+1 day
+						$objRecord->pickup = date("Y-m-d",$numLogtimeDay+86400);
+					}
+					else{
+						$objRecord->pickup = $strLogtimeDay ;
+					}
+
+					// $objRecord->pickup = date("Y-m-d", strtotime($objRow['log_time']));
+					$objRecord->days_pickup = floor((strtotime($objRecord->pickup )-strtotime($objRecord->discharge))/86400);
+				}
+			}
+
+			// for sea , except SYD , pick up = Discharge+2 
+			if($objRecord->service == Consol::SEACONSOL){
+				if($objRecord->pod != Consol::POD_AUSYD){
+					$objRecord->pickup = date("Y-m-d", strtotime('+2 day', strtotime($objRecord->discharge)));
+					$objRecord->days_pickup = 2;
+				}
+			}
+
+			if(!empty($objRow['consol_pickup'])){
+				$objRecord->pickup = $objRow['consol_pickup'];
+				$objRecord->days_pickup = floor((strtotime($objRecord->pickup )-strtotime($objRecord->discharge))/86400);
+			}
+
+			//if pickup <0 , set pickup = discharge
+			if($objRecord->days_pickup <0){
+				$objRecord->pickup = $objRecord->discharge;
+				$objRecord->days_pickup = 0;
+			}
+
+			if(!empty($objRow['scan_time'])){
+				$objRecord->unpack = date("Y-m-d", strtotime($objRow['scan_time']));
+				// report 部分 Air Consol Report， MEL, PER, BNE的unpack时间从系统读出来之后，默认-1，SYD的不要动
+				if($objRow['service'] == Consol::AIRCONSOL && in_array($objRow['pod'],['AUMEL','AUPER','AUBNE'])){
+					$objRecord->unpack = date("Y-m-d", strtotime('-1 day', strtotime($objRecord->unpack)));
+				}
+				$objRecord->days_unpack = floor((strtotime($objRecord->unpack )-strtotime($objRecord->discharge))/86400);
+			}
+			
+			if($objRecord->days_pickup === null){
+				$objRecord->days_pickup = floor((strtotime(date("Y-m-d") )-strtotime($objRecord->discharge))/86400);
+			}
+			if($objRecord->days_unpack === null){
+				$objRecord->days_unpack = floor((strtotime(date("Y-m-d") )-strtotime($objRecord->discharge))/86400);
+			}
+			
+			
+			$listRecords[] = $objRecord;
+			
+			
+		}
+		
+		// Filter
+		$listRecords = $this->funcFilterServiceSeaAir($listRecords);
+		$listRecords = $this->funcFilterPolAUSYD($listRecords);
+		$listRecords = $this->funcFilterDischarge($listRecords);
+		$listRecords = $this->funcFilterSYD($listRecords);
+		$listRecords = $this->funcFilterSeaNoArrival_cfs($listRecords);
+		$listRecords = $this->funcFilterOrg3494($listRecords);
+		$listRecords = $this->funcLocalArrivalFilter($listRecords);
+		
+		 
+
+		// sort
+		$dicDays2ListRecords=[];
+		foreach($listRecords as $i=>$objRecord){
+			$numDays = $objRecord->days_pickup + $objRecord->days_unpack ;
+			if(!isset($dicDays2ListRecords[$numDays])){
+				$dicDays2ListRecords[$numDays] = [];
+			}
+			$dicDays2ListRecords[$numDays][] = $objRecord;
+		}
+		
+		if($this->strByUrgent=='asc'){
+			ksort($dicDays2ListRecords);
+		}
+		else{
+			krsort($dicDays2ListRecords);
+		}
+		
+		$listResult=[];
+		foreach($dicDays2ListRecords as $i=>$ListRecords){
+			foreach($ListRecords as $j=>$objRecord){
+				$listResult[] = $objRecord;
+			}
+		}
+		
+		return $listResult;		
+	}
+	
+	private function funcLocalArrivalFilter($listConsol){
+		if(sizeof($listConsol)==0){
+			return $listConsol;
+		}
+		$listResult =[];
+		$listConsolId = [];
+		$dicConsolId2IsLocalArrival=[];
+		foreach ($listConsol as $i=> $objConsol){
+			$listConsolId[]=$objConsol->id;
+			// $dicConsolId2IsLocalArrival[$objConsol->id]= true;
+			$dicConsolId2IsLocalArrival[$objConsol->id]= false;
+		}
+		
+		$strSql = 'consol_id in ( ';
+		foreach ($listConsolId as $i=>$strConsolId){
+			$strSql.=$strConsolId;
+			if($i != sizeof($listConsolId) -1){
+				$strSql .= ',';
+			}
+		}
+		$strSql .= ' )';
+		
+		$listShipmentId = [];
+		$dicShipment2IsLocalArrival=[];
+		$listImparcel = ImParcel::model()->findAll($strSql);
+		foreach($listImparcel as $i=>$objImparcel){
+			// if($objImparcel->status != ImParcel::STATE_LOCAL_ARRIVAL){
+			// 	$dicConsolId2IsLocalArrival[$objImparcel->consol_id]= false;
+			// }
+			$listShipmentId[] = $objImparcel->id;
+			$dicShipment2IsLocalArrival[$objImparcel->id] = false;
+		}
+		
+		if(sizeof($listShipmentId)==0){
+			return $listConsol;
+		}
+		$strSql = 'lid in ( ';
+		foreach ($listShipmentId as $i=>$strShipmentId){
+			$strSql.=$strShipmentId;
+			if($i != sizeof($listShipmentId) -1){
+				$strSql .= ',';
+			}
+		}
+		// $strSql .= ' ) and meta like \'{"status":"Local%\'';
+			$strSql .= ' ) and meta like "%Local%"';	
+		$listLog = Log::model()->findAll($strSql);
+		foreach($listLog as $i=>$objLog){
+			$dicShipment2IsLocalArrival[$objLog->lid] = true;
+		}
+		
+		foreach($listImparcel as $i=>$objImparcel){
+			if($dicShipment2IsLocalArrival[$objImparcel->id]){
+				$dicConsolId2IsLocalArrival[$objImparcel->consol_id]= true;
+			}
+		}
+		
+		foreach ($listConsol as $i=> $objConsol){
+			if(!$dicConsolId2IsLocalArrival[$objConsol->id]){
+				$listResult[]=$objConsol;
+			}
+		}
+		
+		return $listResult;
+	}
+	
+	
+	private function funcFilterSYD($listConsol){
+		$listResult =[];
+		foreach ($listConsol as $i=> $objConsol){
+			$strStart = substr($objConsol->no,0,3);
+			$strEnd = substr($objConsol->no,-3);
+			
+			if($strEnd=="SYD" && $strStart != 'TDW' ){
+				
+			}
+			else{
+				$listResult[]=$objConsol;
+			}
+		}
+		
+		return $listResult;
+	}
+	
+	
+	// exclude 3494 Top Logistics IMPORTS-CASUAL CUSTOMER-Clearance Only
+	private function funcFilterOrg3494($listConsol){
+		$listResult =[];
+		foreach ($listConsol as $i=> $objConsol){
+			if($objConsol->agent_id != 3494 && $objConsol->owner_id != 3494){
+				$listResult[]=$objConsol;
+			}
+		}
+		return $listResult;
+	}
+	
+	private function funcFilterDischarge($listConsol){
+		$listResult =[];
+		foreach ($listConsol as $i=> $objConsol){
+			$numDays = null;
+			if($objConsol->service == Consol::AIRCONSOL){
+				if(empty($objConsol->discharge)){
+					$numDays = -1;
+				}
+				else{
+					$numDays = floor((strtotime(date("Y-m-d") )-strtotime(date("Y-m-d",  strtotime($objConsol->discharge))))/86400);
+				}
+			}
+			else{
+				$numDays = floor((strtotime(date("Y-m-d") )-strtotime(date("Y-m-d", strtotime($objConsol->discharge))))/86400);
+			}
+			if($numDays >=0){
+				$listResult[]=$objConsol;
+			}
+		}
+		
+		
+		return $listResult;
+	}
+	
+	private function funcFilterSeaNoArrival_cfs($listConsol){
+		$listResult =[];
+		foreach ($listConsol as $i=> $objConsol){
+			if($objConsol->service == Consol::SEACONSOL && empty($objConsol->arrival_cfs)){
+
+			}
+			else{
+				$listResult[] = $objConsol;
+			}
+		}
+		
+		
+		return $listResult;
+	}
+
+	private function funcFilterServiceSeaAir($listConsol){
+		$listResult =[];
+		foreach ($listConsol as $i=> $objConsol){
+			if($objConsol->service == Consol::SEACONSOL || $objConsol->service == Consol::AIRCONSOL){
+				$listResult[] = $objConsol;
+			}
+		}
+		return $listResult;
+	}
+
+	private function funcFilterPolAUSYD($listConsol){
+		$listResult =[];
+		foreach ($listConsol as $i=> $objConsol){
+			if($objConsol->pol != 'AUSYD'){
+				$listResult[] = $objConsol;
+			}
+		}
+		return $listResult;
+	}
+
+	public function funcListRecords2HTML($listRecords){
+		
+		$strHtml ='<table class="items"><thead><tr><th>Customer</th><th>No.</th><th>State</th><th>Air/Sea</th><th>awb/container_no</th><th>Airline/Vessel</th><th>ETD</th><th>ETA</th><th>Discharge</th><th>Pickup</th><th>Unpack</th></tr></thead><tbody id="table_records">';
+		$strHtml .=$this->funcListRecords2Tbody($listRecords);
+		$strHtml .='</tbody></table>';
+		return $strHtml;
+	}
+	
+	public function funcListRecords2Tbody($listRecords,$isShowLink = false ){
+		$dicPort2State = [
+			'AUSYD' => 'NSW',
+			'AUMEL' => 'VIC',
+			'AUBNE' => 'QLD',
+			'AUPER' => 'WA',
+			'AUADL' => 'SA',
+			'AUFRE' => 'WA',
+			// 'AUOOL'=>'AUOOL',
+			// 'EGCAI'=>'EGCAI',
+			// 'KRPUS'=>'KRPUS',
+			// 'NZAKL'=>'NZAKL',
+			// 'THBKK'=>'THBKK',
+			// 'USEWR'=>'USEWR',
+			// 'USSFO'=>'USSFO',
+		];
+		$strHtml = '';
+		foreach ($listRecords as $i => $objRecord) {
+			$strHtml .= '<tr class="' . ($i % 2 == 0 ? 'odd' : 'even') . '">';
+			$strHtml .= '<td>' . $objRecord->customer . '</td>';
+			// $strHtml .= '<td>' . $objRecord->no . '</td>';
+			if($isShowLink){
+				$strNo = '<a href="'.Yii::app()->createURL("imcoConsol/update", array("id" => $objRecord->id)).'" class="tab_link" title="'.$objRecord->no. '" >'.$objRecord->no.'</a>';
+			}
+			else{
+				$strNo = $objRecord->no;
+			}
+			$strHtml .= '<td>' . $strNo . '</td>';
+			$strHtml .= '<td>' . $dicPort2State[$objRecord->pod] . '</td>';
+			// $strService = '0';
+			// if(isset(Imcoconsol::$services[$objRecord->service])){
+			// 	$strService = Imcoconsol::$services[$objRecord->service];
+			// }
+			$strService = Imcoconsol::$services[$objRecord->service];
+			$strHtml .= '<td>' . $strService. '</td>';
+			$strHtml .= '<td>' . $objRecord->awb . '</td>';
+			$strHtml .= '<td>' . $objRecord->airline . '</td>';
+			$strHtml .= '<td>' . date("Y-m-d", strtotime($objRecord->etd)) . '</td>';
+			$strHtml .= '<td>' . date("Y-m-d", strtotime($objRecord->eta)) . '</td>';
+			$strHtml .= '<td>' . $objRecord->cto_start .'</td>';
+			$strHtml .= '<td>' . $objRecord->cto_finish.'</td>';
+			$strHtml .= '<td>' . $objRecord->client_start.'</td>';
+			$strHtml .= '<td>' . $objRecord->client_finish.'</td>';
+			$strHtml .= '<td>' . date("Y-m-d", strtotime($objRecord->discharge)) . '</td>';
+		
+			$numDayPickup = $objRecord->days_pickup;
+			$numDayUnpack = $objRecord->days_unpack;
+		
+			$strColorPickup = 'black';
+			$strColorUnpack = 'black';
+			
+			if($objRecord->service == ImcoConsol::AIRCONSOL){
+				if ($numDayPickup > 2) {
+					$strColorPickup = 'red';
+				} else if ($numDayPickup > 1) {
+					$strColorPickup = 'orange';
+				} else if ($numDayPickup > 0) {
+					$strColorPickup = '#BBBB00';
+				}
+				if ($numDayUnpack > 3) {
+					$strColorUnpack = 'red';
+				} else if ($numDayUnpack > 2) {
+					$strColorUnpack = 'orange';
+				} else if ($numDayUnpack > 1) {
+					$strColorUnpack = '#BBBB00';
+				}
+			}
+		
+			if ($objRecord->service == ImcoConsol::SEACONSOL) {
+				if ($numDayPickup > 5) {
+					$strColorPickup = 'red';
+				} else if ($numDayPickup > 4) {
+					$strColorPickup = 'orange';
+				} else if ($numDayPickup > 3) {
+					$strColorPickup = '#BBBB00';
+				}
+				if ($numDayUnpack > 6) {
+					$strColorUnpack = 'red';
+				} else if ($numDayUnpack > 5) {
+					$strColorUnpack = 'orange';
+				} else if ($numDayUnpack > 4) {
+					$strColorUnpack = '#BBBB00';
+				}
+			}
+			
+			$strHtml .= '<td>' ;
+			if (!empty($objRecord->pickup)) {
+				$strHtml .=  date("m-d", strtotime($objRecord->pickup));
+			}
+
+			if(empty($objRecord->pickup)&&!empty($objRecord->unpack)){
+			}
+			else{
+				// if($numDayPickup >=0){
+					$strHtml .= ' <span style="color:' . $strColorPickup . '">(' . $numDayPickup . 'D)</span></td>';
+				// }
+			}
+			$strHtml .= '</td>';
+		
+			
+			$strHtml .= '<td>';
+			if (!empty($objRecord->unpack)) {
+				$strHtml .= date("m-d", strtotime($objRecord->unpack));
+			}
+			// if($numDayUnpack >=0){
+				$strHtml .= ' <span style="color:' . $strColorUnpack . '">(' . $numDayUnpack . 'D)</span></td>';
+			// }
+			
+			$strHtml .= '</td>';
+		
+			$strHtml .= '</tr>';
+		}
+		
+		$strHtml .='</tbody></table>';
+		return $strHtml;
+	}
+	
+	
+	
+	
+}
+

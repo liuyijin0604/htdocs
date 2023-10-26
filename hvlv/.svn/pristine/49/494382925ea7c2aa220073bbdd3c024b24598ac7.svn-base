@@ -1,0 +1,1031 @@
+<?php
+
+
+class BookingController extends Controller
+{
+	public $skipAcl = ['deliveryBooking', 'generateUUid', 'cancelBooking', 'editBooking', 'deliveryBooking', 'checkList', 'createBooking', 'selectTime', 'winitBooking', 'cargoConfirm','cargoConfirmValidate', 'makeSupay', 'changeAddressFee', 'availableJob', 'customerView'];
+
+	public $defaultAction = 'deliveryBooking';
+
+	public function actionGetDeliveryRecordList()
+	{
+		$model = new DeliveryRecord('search');
+		$model->unsetAttributes();
+		$this->render('deliveryRecordList', ["model" => $model]);
+	}
+
+	public function actionDeliveryBooking()
+	{
+		$this->layout = 'wmaBooking';
+		$model = new DeliveryRecord('search');
+		$model->unsetAttributes();
+		if (!empty($_GET['DeliveryRecord'])) {
+			$model->setAttributes($_GET['DeliveryRecord']);
+		}
+
+		$model->uuid = empty($_GET['DeliveryRecord']['uuid']) ? "undefined" : $_GET['DeliveryRecord']['uuid'];
+		$this->render('deliveryBooking', ["model" => $model]);
+	}
+
+	public function actionWinitBooking()
+	{
+		if (!empty($_POST['caref'])) {
+			$caref = $_POST['caref'];
+			$p = ImParcel::model()->find('ref = :ref', [":ref" => $caref]);
+			if (!empty($p)) {
+				$cargoProcess = $p->cargo_process;
+			} else {
+				$cargoProcess = CargoProcess::model()->find("json_value(t.meta,'$.caref') = :caref", [":caref" => $caref]);
+			}
+			if (!empty($cargoProcess) && empty($cargoProcess->mdata['confirm_winit_booking'])) {
+				$cargoProcess->mdata['confirm_winit_booking'] = 1;;
+				$cargoProcess->save();
+				echo '<script>alert("Done");</script>';
+				return;
+			} else {
+				echo '<script>alert("Done");</script>';
+				return;
+			}
+		}
+
+		if (!empty($_GET['caref'])) {
+			$caref = $_GET['caref'];
+			$this->layout = 'wmaWinitBooking';
+			$p = ImParcel::model()->find('ref = :ref', [":ref" => $caref]);
+			if (!empty($p)) {
+				$cargoProcess = $p->cargo_process;
+			} else {
+				$cargoProcess = CargoProcess::model()->find("json_value(t.meta,'$.caref') = :caref", [":caref" => $caref]);
+			}
+
+			if (!empty($cargoProcess)) {
+
+				$warehouseCName = SystemSetting::getWarehouseCNameArr();
+
+				if (in_array($cargoProcess->shipment->mdata['delivery_address'], SystemSetting::getWinitDeliveryAddressArr())) {
+					$this->render('winitBooking', ["model" => $cargoProcess, "CNAME" => $warehouseCName[0]->CName, "NAME" => $warehouseCName[0]->Name]);
+				} elseif (in_array($cargoProcess->shipment->mdata['delivery_address'], SystemSetting::get4PXDeliveryAddressArr())) {
+					$this->render('winitBooking', ["model" => $cargoProcess, "CNAME" => $warehouseCName[1]->CName, "NAME" => $warehouseCName[1]->Name]);
+				} elseif (in_array($cargoProcess->shipment->mdata['delivery_address'], SystemSetting::getPadstowDeliveryAddressArr())) {
+					$this->render('winitBooking', ["model" => $cargoProcess, "CNAME" => $warehouseCName[2]->CName, "NAME" => $warehouseCName[2]->Name]);
+				} elseif (in_array($cargoProcess->shipment->mdata['delivery_address'], SystemSetting::getGoodCangDeliveryAddressArr())) {
+					$this->render('winitBooking', ["model" => $cargoProcess, "CNAME" => $warehouseCName[3]->CName, "NAME" => $warehouseCName[3]->Name]);
+				} else {
+					$this->render('winitBooking', ["model" => $cargoProcess, "CNAME" => $warehouseCName[4]->CName, "NAME" => $warehouseCName[4]->Name]);
+				}
+				//$this->render('winitBooking', ["model" => $cargoProcess]);
+			}
+		}
+	}
+
+	public function actionAvailableJob()
+	{
+		if (isset($_POST['delivery_time'])) {
+			$caref = $_GET['caref'];
+			$p = ImParcel::model()->find('ref = :ref', [":ref" => $caref]);
+			$cargoProcess = $p->cargo_process;
+			// C-job Delivery Time
+			if (!isset($cargoProcess->mdata['customer_confirmed']['catgo_process_job'])) {
+				$numJobId = $_POST['delivery_time'];
+				$objJob = CargoProcessJob::model()->findByPk($numJobId);
+				$objVehicle = CargoProcessVehicle::model()->findByPk($objJob->vehicle_id);
+				$numMaxCbm = $objVehicle->max_cbm;
+
+				$numCurrentCbm = $cargoProcess->getTotalCBM();
+				$listRelation = CargoProcessJobRelations::model()->findAll('job_id = :job_id and active = 1', [':job_id' => $objJob->id]);
+
+				foreach ($listRelation as $objRelation) {
+					$objCargoProcess = $objRelation->cargo_process;
+					$numCurrentCbm += $objCargoProcess->getTotalCBM();
+				}
+
+				if ($numCurrentCbm > $numMaxCbm) {
+					echo json_encode(['isSuccess' => false, 'strMessage' => 'delivery_time']);
+					return;
+				}
+
+				// save to relation
+				$objCargoProcessJobRelations = new CargoProcessJobRelations;
+				$objCargoProcessJobRelations->job_id = $objJob->id;
+				$objCargoProcessJobRelations->cargo_process_id = $cargoProcess->id;
+				$objCargoProcessJobRelations->created = date('Y-m-d h:i:s');
+				$objCargoProcessJobRelations->sequence = 1;
+				$objCargoProcessJobRelations->save();
+
+				$cargoProcess->mdata['customer_confirmed']['catgo_process_job'] = $objJob->job_no;
+				$cargoProcess->mdata['pickup_booking_time']= $objJob->created;
+				$cargoProcess->status = CargoProcess::WAITINGDELIVERY;
+				$cargoProcess->save();
+				echo json_encode(['isSuccess' => true,]);
+			}
+			return;
+		}
+
+		$caref = $_GET['caref'];
+		$p = ImParcel::model()->find('ref = :ref', [":ref" => $caref]);
+		$cargoProcess = $p->cargo_process;
+
+		$objCargoProcessJob = new CargoProcessJob;
+		$listJob = $objCargoProcessJob->getAvailableJob($cargoProcess->id);
+		echo json_encode(['isSuccess' => true, 'listJob' => $listJob]);
+	}
+
+	public function actionCustomerView()
+	{
+
+		$this->layout = 'wmaCustomerCheck';
+
+		if (!empty($_POST['postcode'])) {
+			$caref = $_GET['caref'];
+			$p = ImParcel::model()->find('ref = :ref', [":ref" => $caref]);
+			if (!empty($p)) {
+				//4352
+				if ($p->postcode == $_POST['postcode']) {
+					$cargoProcess = $p->cargo_process;
+					if (!empty($cargoProcess)) {
+						// already manually add to c job
+						if (CargoProcessJobRelations::model()->find('cargo_process_id=:cid and active = 1', [':cid' => $cargoProcess->id]) != null) {
+							$this->render('cargo_customer_check', ["caref" => $caref, "model" => $cargoProcess]);
+							return;
+						}
+					}
+				} else {
+					$message = 'The postcode you provided is not matching. Please input the correct one.';
+					$this->render('cargo_customer_check', ["caref" => $caref, "message" => $message]);
+					return;
+				}
+			} else {
+				$message = 'The tracking number you provided is not found.';
+				$this->render('cargo_customer_check', ["caref" => $caref, "message" => $message, "inputpostcode" => 'false']);
+				return;
+			}
+		}
+
+		if (!empty($_GET['caref'])) {
+			$caref = $_GET['caref'];
+			$p = ImParcel::model()->find('ref = :ref', [":ref" => $caref]);
+			if (!empty($p)) {
+				$cargoProcess = $p->cargo_process;
+			} else {
+				$cargoProcess = CargoProcess::model()->find("json_value(t.meta,'$.caref') = :caref", [":caref" => $caref]);
+			}
+
+			if (!empty($cargoProcess)) {
+				// already manually add to c job
+				if (CargoProcessJobRelations::model()->find('cargo_process_id=:cid and active = 1', [':cid' => $cargoProcess->id]) != null) {
+					$this->render('cargo_customer_check', ["caref" => $caref]);
+					return;
+				}
+			} else {
+				$message = 'The tracking number you provided is not found.';
+				$this->render('cargo_customer_check', ["caref" => $caref, "message" => $message, "inputpostcode" => 'false']);
+				return;
+			}
+		}
+	}
+	public function actionCargoConfirmValidate()
+	{
+		$this->layout = 'wmaWinitBooking';
+		$caref = $_GET['caref'];
+		$p = ImParcel::model()->find('ref = :ref', [":ref" => $caref]);
+		echo "<script>function postcodeVeryfi() {
+        var postcode;
+        var systempostcode = '{$p->cnee->postcode}'
+        postcode = prompt('Enter Your Postcode.')
+        if (systempostcode == postcode) {
+            window.location.href='https://book.toplogistics.com.au/cargoConfirm?caref={$caref}';
+        } else {
+            return false;
+        }
+        return false;
+    }
+    postcodeVeryfi();</script>";
+	}
+
+	public function actionCargoConfirm()
+	{
+		$this->layout = 'wmaWinitBooking';
+
+		if (!empty($_POST['caref'])) {
+			$caref = $_POST['caref'];
+			$p = ImParcel::model()->find('ref = :ref', [":ref" => $caref]);
+			if (!empty($p)) {
+				$cargoProcess = $p->cargo_process;
+			} else {
+				$cargoProcess = CargoProcess::model()->find("json_value(t.meta,'$.caref') = :caref", [":caref" => $caref]);
+			}
+
+			if (empty($cargoProcess->mdata['customer_confirmed'])) {
+				$cargoProcess->mdata['customer_confirmed'] = [];
+				$cargoProcess->mdata['customer_confirmed']['address_type'] = $_POST['address_type'];
+
+				if(!empty($_POST['preferred_date'])){
+					$cargoProcess->mdata['customer_confirmed']['preferred_date'] = $_POST['preferred_date'];
+				}
+				if(!empty($_POST['preferred_time'])){
+					$cargoProcess->mdata['customer_confirmed']['preferred_time'] = $_POST['preferred_time'];
+				}
+
+				// if ($_POST['inputIsUnloadingResidentialWeight']) {
+				// 	if ($_POST['residential_unloading'] == 'hand_unloading_service') {
+				// 		$cargoProcess->mdata['customer_confirmed']['residential_unloading'] = 'We need hand unloading service';
+				// 	} else if ($_POST['residential_unloading'] == 'self') {
+				// 		$cargoProcess->mdata['customer_confirmed']['residential_unloading'] = 'We can unload ourselves';
+				// 	} else if ($_POST['residential_unloading'] == 'unloading_service_overweight') {
+				// 		$cargoProcess->mdata['customer_confirmed']['residential_unloading'] = 'We need hand unloading service, over weight';
+				// 	}
+				// }
+
+				if ($_POST['inputIsUnloadingResidential']) {
+					$cargoProcess->mdata['customer_confirmed']['leave_at_address'] = 'Leave at address : ' . $_POST['leave_at_address'];
+				}
+
+				if ($_POST['inputIsUnloadingBusiness']) {
+					if ($_POST['business_unloading'] == 'fork') {
+						$cargoProcess->mdata['customer_confirmed']['business_unloading'] = 'We have forklift';
+					} else if ($_POST['business_unloading'] == 'self') {
+						$cargoProcess->mdata['customer_confirmed']['business_unloading'] = 'We can unload ourselves';
+					} else if ($_POST['business_unloading'] == 'hand_unloading_service') {
+						$cargoProcess->mdata['customer_confirmed']['business_unloading'] = 'We need hand unloading service';
+					} else if ($_POST['business_unloading'] == 'unloading_service_overweight') {
+						$cargoProcess->mdata['customer_confirmed']['business_unloading'] = 'We need hand unloading service, over weight';
+					} else if ($_POST['business_unloading'] == 'hand_unloading_service_oversize'){
+						$cargoProcess->mdata['customer_confirmed']['business_unloading'] = 'We need hand unloading service, over size';
+						$cargoProcess->sub_type = 8192;
+					}
+				}
+
+				if (isset($_POST['cb_unloading_street'])) {
+					$cargoProcess->mdata['customer_confirmed']['unloading_street'] = 'Manually unloading only to street level';
+				}
+				if (isset($_POST['cb_unloading_unpack'])) {
+					$cargoProcess->mdata['customer_confirmed']['unloading_unpack'] = 'Unpack boxes';
+				}
+				if (isset($_POST['cb_unloading_rabbish'])) {
+					$cargoProcess->mdata['customer_confirmed']['unloading_rabbish'] = 'Dumping rabbish';
+				}
+
+				if (!empty($_POST['other_inquery'])) {
+					$cargoProcess->mdata['customer_confirmed']['OtherInquery'] = $_POST['other_inquery'];
+					$cargoProcess->mdata['other_inquery'] = $_POST['other_inquery'];
+				}
+
+				if (isset($_POST['current_delivery_time'])) {
+					$cargoProcess->mdata['customer_confirmed']['current_delivery_time'] = $_POST['current_delivery_time'];
+				}
+
+
+				$cargoProcess->mdata['customer_confirmed_summary'] = $_POST['summary'];
+
+				// create invoice if surcharge
+				if (
+					$_POST['inputIsChangeAddress'] ||
+					isset($_POST['cb_unloading_street']) ||
+					isset($_POST['cb_unloading_unpack']) ||
+					isset($_POST['cb_unloading_rabbish']
+					)
+				) {
+					$objInvoice = new Invoice;
+					$objInvoice->to_id = Org::ORGID_IMPORT_CASUAL_CUSTOMER; //Org TLA casual
+					$objInvoice->dpt_id = $p->ddpt_id;
+					$objInvoice->dpmt = Invoice::DPMT_COURIER_SERVICE;
+					$objInvoice->status = Invoice::INVOICE_STATUS_POSTED;
+					$objInvoice->type = Invoice::INVOICE_TYPE_OTHERS;
+					$objInvoice->currency = Invoice::CURRENCY_AUD;
+
+					// paypal redirect
+					$strUrlPrefix = 'https://' . $_SERVER['HTTP_HOST'];
+					if ($strUrlPrefix == 'https://localhost:82') {
+						$strUrlPrefix = 'http://localhost:82/wma/booking';
+					}
+					$strUrl = $strUrlPrefix . '/cargoConfirm?caref=' . $_POST['caref'];
+					$objInvoice->setPaypalRedirect($strUrl);
+
+					$objInvoice->save();
+					$objInvoice->refresh();
+
+					$numTotal = 0;
+
+					if ($_POST['inputIsChangeAddress']) {
+						$numPostcode = $p->receiver->postcode;
+						$strState = $p->receiver->state;
+						$numchange_address_weight = $p->chargeWeight();
+
+						$numChargecode = $p->mdata['chargecode'];
+						$numPostcodeNew = $_POST['address_postcode'];
+
+						$objResult = $this->funcChangeAddress($numChargecode, $strState, $numPostcode, $numPostcodeNew,$numchange_address_weight);
+
+						$objInvLine = new InvLine;
+						$objInvLine->inv_id = $objInvoice->id;
+						$objInvLine->ccode = 'Change Address';
+						$numFee = $objResult['numFee'];
+						$objInvLine->amount = $numFee + round($numFee / 10, 2);
+						$objInvLine->gst = round($numFee / 10, 2);
+						$objInvLine->det = $p->hbn . ' Change Address';
+						$objInvLine->qty = 1;
+						$objInvLine->tax = Invoice::Tax_Rate_Output;
+						$objInvLine->linkto = $cargoProcess->shipment->ref;
+						$objInvLine->save();
+
+						$numTotal += $numFee;
+
+						// set change info to invoice
+						$objInvoice->mdata['change_address'] = [];
+						$objInvoice->mdata['change_address']['address'] = $_POST['address_line'] . ' ' . $_POST['address_street'];
+						$objInvoice->mdata['change_address']['suburb'] = $_POST['address_suburb'];
+						$objInvoice->mdata['change_address']['postcode'] =  $_POST['address_postcode'];
+						$objInvoice->mdata['change_address']['ip'] =  $_SERVER['REMOTE_ADDR'];
+						$objInvoice->mdata['change_address']['shipment_id'] =  $p->id;
+						$objInvoice->mdata['change_address']['cargo_process_id'] =  $cargoProcess->id;
+					}
+
+
+					if (isset($_POST['cb_unloading_street'])) {
+						$objInvLine = new InvLine;
+						$objInvLine->inv_id = $objInvoice->id;
+						$objInvLine->ccode = 'Unloading Service';
+						$numFee = $this->funcUnloadingFee($p);
+						$objInvLine->amount = $numFee + round($numFee / 10, 2);
+						$objInvLine->gst = round($numFee / 10, 2);
+						$objInvLine->det = $p->hbn . ' Unloading Service';
+						$objInvLine->qty = 1;
+						$objInvLine->tax = Invoice::Tax_Rate_Output;
+						$objInvLine->linkto = $cargoProcess->shipment->ref;
+						$objInvLine->save();
+
+						$numTotal += $numFee;
+					}
+
+					if (isset($_POST['cb_unloading_unpack'])) {
+						$objInvLine = new InvLine;
+						$objInvLine->inv_id = $objInvoice->id;
+						$objInvLine->ccode = 'Unpacking Boxes';
+						$numFee = $this->funcUnpackFee($p);
+						$objInvLine->amount = $numFee + round($numFee / 10, 2);
+						$objInvLine->gst = round($numFee / 10, 2);
+						$objInvLine->det = $p->hbn . ' Unpacking Boxes';
+						$objInvLine->qty = 1;
+						$objInvLine->tax = Invoice::Tax_Rate_Output;
+						$objInvLine->linkto = $cargoProcess->shipment->ref;
+						$objInvLine->save();
+
+						$numTotal += $numFee;
+					}
+
+					if (isset($_POST['cb_unloading_rabbish'])) {
+						$objInvLine = new InvLine;
+						$objInvLine->inv_id = $objInvoice->id;
+						$objInvLine->ccode = 'Dumping Rabbish';
+						$numFee = $this->funcRabbishFee($p);
+						$objInvLine->amount = $numFee + round($numFee / 10, 2);
+						$objInvLine->gst = round($numFee / 10, 2);
+						$objInvLine->det = $p->hbn . ' Dumping Rabbish';
+						$objInvLine->qty = 1;
+						$objInvLine->tax = Invoice::Tax_Rate_Output;
+						$objInvLine->linkto = $cargoProcess->shipment->ref;
+						$objInvLine->save();
+
+						$numTotal += $numFee;
+					}
+
+					$numGst = round($numTotal / 10, 2);
+					$numAmount = $numTotal + $numGst;
+					$objInvoice->total = $numAmount;
+					$objInvoice->gst = $numGst;
+
+					$objInvoice->date = date('Y-m-d');
+					$objInvoice->due = date('Y-m-d');
+					$objInvoice->mdata['payterm'] = 'COD';
+
+					$objInvoice->save();
+
+
+					$strFolder = Yii::app()->basePath . DIRECTORY_SEPARATOR . 'runtime' . DIRECTORY_SEPARATOR . 'temp';
+					if (!file_exists($strFolder)) {
+						mkdir($strFolder);
+					}
+					$strFile = $strFolder . DIRECTORY_SEPARATOR . $objInvoice->no . '.pdf';
+					oPDF::renderPDF('invoice', ['inv' => $objInvoice], 2, $strFile);
+
+					$numId = FileRepo::storeFile($strFile, $objInvoice->no, FileRepo::CARGOPROCESSFILETYPE, $cargoProcess->id);
+					$objFileRepo = FileRepo::model()->findByPk($numId);
+
+					$strUrlPrefix = 'https://os.toplogistics.com.au';
+					if ($_SERVER['HTTP_HOST'] == 'localhost:82') {
+						$strUrlPrefix = 'http://localhost:82';
+					}
+					$strUrl = $strUrlPrefix . '/filerepo/' . $objFileRepo->hash . '/' . $objFileRepo->name;
+
+					$cargoProcess->mdata['customer_confirmed']['surcharge_invoice_download'] = $strUrl;
+
+					$cargoProcess->mdata['customer_confirmed']['surcharge_invoice'] = $objInvoice->id;
+				}
+
+				$cargoProcess->log('old sub_type = ' . $cargoProcess->sub_type);
+				
+				if ($_POST['business_unloading'] == 'hand_unloading_service_oversize'){
+					$cargoProcess->sub_type = CargoProcess::OVERSIZE_SERVICE;
+				}else{
+					$cargoProcess->sub_type = CargoProcess::RECEIVED_SMS_STYPE;
+				}
+
+				//customer confirm has forklift
+				if ($_POST['business_unloading'] == 'self' || $_POST['business_unloading'] == 'fork'){
+					$cargoProcess->mdata['custconfirmforklift'] = 1;
+				}
+
+				$cargoProcess->mdata['responsed_notice'] = 1;
+				$cargoProcess->status = 20;
+				$cargoProcess->save();
+
+				echo json_encode(['isSuccess' => true]);
+				return;
+
+				// // echo '<script>alert("Done");</script>'; 
+				// if(isset($cargoProcess->mdata['customer_confirmed']['surcharge_invoice'])){
+				// 	$this->render('cargo_confirm_surcharge',["model"=>$cargoProcess,'numUnloadingFee'=>$this->funcUnloadingFee($p)]);
+				// 	return;
+				// }
+				// else{
+				// 	$this->render('cargo_confirm_summary',["model"=>$cargoProcess]);
+				// 	return;
+				// }
+
+			}
+		}
+
+		if (!empty($_GET['caref'])) {
+			$caref = $_GET['caref'];
+			$p = ImParcel::model()->find('ref = :ref', [":ref" => $caref]);
+			if (!empty($p)) {
+				$cargoProcess = $p->cargo_process;
+			} else {
+				$cargoProcess = CargoProcess::model()->find("json_value(t.meta,'$.caref') = :caref", [":caref" => $caref]);
+			}
+
+			if (!empty($cargoProcess)) {
+				// already manually add to c job
+				if (CargoProcessJobRelations::model()->find('cargo_process_id=:cid and active = 1', [':cid' => $cargoProcess->id]) != null) {
+					$this->render('cargo_confirm_summary', ["model" => $cargoProcess]);
+					return;
+				}
+				if (empty($cargoProcess->mdata['customer_confirmed'])) {
+					// $this->render('cargoConfirm', [
+					$this->render('cargo_confirm', [
+						"model" => $cargoProcess,
+						'numUnloadingFee' => $this->funcUnloadingFee($p),
+						'numUnpackFee' => $this->funcUnpackFee($p),
+						'numRabbishFee' => $this->funcRabbishFee($p),
+					]);
+					return;
+				}
+				if (isset($cargoProcess->mdata['customer_confirmed']['surcharge_invoice'])) {
+					$objInvoice = Invoice::model()->findByPk($cargoProcess->mdata['customer_confirmed']['surcharge_invoice']);
+					if ($objInvoice->status != Invoice::INVOICE_STATUS_PAID&&$objInvoice->status != Invoice::INVOICE_STATUS_PENDING_PAID) {
+						$this->render('cargo_confirm_surcharge', ["model" => $cargoProcess, 'numUnloadingFee' => $this->funcUnloadingFee($p)]);
+						return;
+					}
+				}
+				$objCargoProcessJob = new CargoProcessJob;
+				$listJob = $objCargoProcessJob->getAvailableJob($cargoProcess->id);
+				if (!isset($cargoProcess->mdata['customer_confirmed']['catgo_process_job']) && $cargoProcess->dpt_id == Org::TLA_DEPARTMENT_SYDNEY && !empty($listJob) && $cargoProcess->mdata['customer_confirmed']['business_unloading'] != 'We need hand unloading service, over size') {
+					$numCurrentJobId = $cargoProcess->mdata['customer_confirmed']['current_delivery_time'];
+					$objJob = CargoProcessJob::model()->findByPk($numCurrentJobId);
+
+					$objCargoProcessJob = new CargoProcessJob;
+					$listJob = $objCargoProcessJob->getAvailableJob($cargoProcess->id);
+
+					if (!isset($listJob[$numCurrentJobId]) && $cargoProcess->shipment->scanCount()>0) {
+						$this->render('cargo_confirm_job', ["ref" => $_GET['caref'], 'strDeliveryNote' => 'time slot has been taken,please select another one.<br/><br/>']);
+						return;
+					}else{
+						$this->render('cargo_confirm_summary', ["model" => $cargoProcess]);
+						return;
+					}
+
+					// save to relation
+					$objCargoProcessJobRelations = new CargoProcessJobRelations;
+					$objCargoProcessJobRelations->job_id = $objJob->id;
+					$objCargoProcessJobRelations->cargo_process_id = $cargoProcess->id;
+					$objCargoProcessJobRelations->created = date('Y-m-d h:i:s');
+					$objCargoProcessJobRelations->sequence = 1;
+					$objCargoProcessJobRelations->save();
+
+					$cargoProcess->mdata['customer_confirmed']['catgo_process_job'] = $objJob->job_no;
+					$cargoProcess->mdata['AutoIntoJob']=1;
+					$cargoProcess->status = CargoProcess::WAITINGDELIVERY;
+					$cargoProcess->save();
+
+					$cargoProcess->shipment->addTracking(19, 'Received your reply. You booked delivery: '.$objJob->funcParseDeliveryTime($objJob->created,$objJob->mdata['time'],''), Org::model()->findByPk($cargoProcess->dpt_id)->name, date('Y-m-d h:i:s', time()));
+					$emailService = new EmailService();
+					$emailService->sendReceivedConfirm($cargoProcess);
+				}else{
+					$cargoProcess->shipment->addTrackingLimited(72, 'Received your reply. Waiting for assign driver.');
+					$emailService = new EmailService();
+					$emailService->sendReceiveConfirm($cargoProcess);
+				}
+				$this->render('cargo_confirm_summary', ["model" => $cargoProcess]);
+			}
+		}
+	}
+
+	private function funcUnloadingFee($objShipment)
+	{
+		//use chargecode to calculate unload fee. fixed chargecode.  need change if the chargecode change.
+		$numHasFork = $objShipment->getChargeByChargecode(8888);
+		$numNoFork = $objShipment->getChargeByChargecode(2563);
+		return max($numHasFork-$numNoFork,10);
+
+		// $numWeightCBM = $objShipment->weight / 250;
+		// $numCBM = $objShipment->getTotalCBM();
+		// $numMaxCBM = max($numWeightCBM, $numCBM);
+		// $strPostcode = $objShipment->cnee->postcode;
+
+		// $numDepotId = $objShipment->cargo_process->dpt_id;
+
+		// if ($numDepotId == Org::PCAE_DEPARTMENT_BRISBANE) {
+		// 	$objUnloadingPrice = FactoryCourierPrice::funcUnloadingPriceBNE([], false);
+		// } else {
+		// 	$objUnloadingPrice = FactoryCourierPrice::funcUnloadingPrice([], false);
+		// }
+
+		// $objUnloadingPrice->funcPostcode2ZoneLevel('4237', $strPostcode);
+		// $numPriceMin = $objUnloadingPrice->funcPriceMin();
+		// $numPriceCBM = $objUnloadingPrice->funcPricePerCBM($numMaxCBM);
+		// return max($numPriceMin, $numPriceCBM);
+	}
+
+	private function funcUnpackFee($objShipment)
+	{
+		$numPkg = $objShipment->pkg;
+		$numUnpackFee = $numPkg * 30;
+		return $numUnpackFee;
+	}
+
+	private function funcRabbishFee($objShipment)
+	{
+		$numWeight = $objShipment->weight;
+		$numRabbishFee = 35 + $numWeight * 0.8;
+		return $numRabbishFee;
+	}
+
+	public function actionChangeAddressFee()
+	{
+		$strRef = $_POST['caref'];
+		$numPostcodeNew = $_POST['numPostcodeNew'];
+		$strSuburb = $_POST['strSuburb'];
+
+		$objPostcode = Postcode::model()->find('postcode=:postcode and suburb=:suburb', [':postcode' => $numPostcodeNew, ':suburb' => strtoupper($strSuburb)]);
+		if ($objPostcode == null) {
+			$objResponce = [
+				'isSuccess' => false,
+				'strMessage' => 'postcode and suburb not match',
+			];
+			echo json_encode($objResponce);
+			return;
+		}
+
+		$objShipment = ImParcel::model()->find('ref=:ref', [':ref' => $strRef]);
+
+		$numWeight = $objShipment->weight;
+		$numPostcode = $objShipment->cnee->postcode;
+		$strState = $objShipment->cnee->state;
+		$numchange_address_weight = $objShipment->chargeWeight();
+
+		$numChargecode = $objShipment->mdata['chargecode'];
+
+		$objResult = $this->funcChangeAddress($numChargecode, $strState, $numPostcode, $numPostcodeNew,$numchange_address_weight);
+
+		if ($objResult['isError']) {
+			$objResponce = [
+				'isSuccess' => false,
+				'strMessage' => $objResult['strMessage']
+			];
+			echo json_encode($objResponce);
+			return;
+		} else {
+			$objResponce = [
+				'isSuccess' => true,
+				'strMessage' => $objResult['strMessage'],
+				'numFee' => $objResult['numFee'],
+			];
+			echo json_encode($objResponce);
+			return;
+		}
+	}
+
+	private function funcChangeAddress($strChargecode, $strState, $numPostcodeOrigin, $numPostcodeNew,$numchange_address_weight)
+	{
+		$objResult = [
+			'isError' => false,
+			'numFee' => 30,
+			'strMessage' => '',
+		];
+
+		if (substr($numPostcodeOrigin, 0, 1) != substr($numPostcodeNew, 0, 1)) {
+			$objResult['isError'] = true;
+			$objResult['strMessage'] = 'new address is in another state';
+			return $objResult;
+		}
+		$chargecodeInfo = ImportChargeCode::model()->find('chargecode = :cid', [':cid' => $strChargecode]);
+		$objZonMapNew = ZoneMap::model()->find('chargecode_id = :cid AND pc_lo <= :pc AND pc_hi >= :pc', [':cid' => $chargecodeInfo['id'], ':pc' => $numPostcodeNew]);
+
+		if ($objZonMapNew == null) {
+			$objResult['isError'] = true;
+			$objResult['strMessage'] = 'new address is not in delivery zone';
+
+			return $objResult;
+		}
+
+		$objZoneMap = ZoneMap::model()->find('chargecode_id = :cid AND pc_lo <= :pc AND pc_hi >= :pc', [':cid' => $chargecodeInfo['id'], ':pc' => $numPostcodeOrigin]);
+
+
+		$dicStr2Num = [
+			'N1' => 1,
+			'N2' => 2,
+			'N3' => 3,
+			'N4' => 4,
+			'V1' => 5,
+			'V2' => 6,
+			'V3' => 7,
+			'Q1' => 8,
+			'Q2' => 9,
+			'Q3' => 10,
+		];
+		$strZone = $objZoneMap->z1;
+		$strZoneNew = $objZonMapNew->z1;
+
+		if ($strZoneNew == 'N4') {
+			$objResult['isError'] = true;
+			$objResult['strMessage'] = 'new address is not in delivery zone';
+			return $objResult;
+		}
+
+		$numGap = $dicStr2Num[$strZoneNew] - $dicStr2Num[$strZone];
+
+
+		// $dicState2Gap2Fee = [
+		// 	'NSW' => [
+		// 		1 => 30,
+		// 		2 => 60,
+		// 	],
+		// 	'VIC' => [
+		// 		1 => 30,
+		// 		2 => 60,
+		// 	],
+		// 	'QLD' => [
+		// 		1 => 80,
+		// 		2 => 120,
+		// 	]
+		// ];
+
+		// if ($numGap > 0 && $numGap < 3) {
+		// 	$objResult['numFee'] += $dicState2Gap2Fee[$strState][$numGap];
+		// }
+
+		$numTempCost = 0;
+		$numAmountNew = self::calculateNormalByWeight($numchange_address_weight,$chargecodeInfo,$numPostcodeNew);
+		$numAmountOld = self::calculateNormalByWeight($numchange_address_weight,$chargecodeInfo,$numPostcodeOrigin);
+
+		$numTempCost = $numAmountNew - $numAmountOld;
+		if($numTempCost<=0){
+			$objResult['numFee'] = 30;
+		}else{
+			$objResult['numFee'] = 30 + round($numTempCost,2);
+		}
+
+		return $objResult;
+	}
+
+	private function calculateNormalByWeight($myWeight, $chargecodeInfo,$postcode, &$selectedRate = null){
+		$zoneMaps = ZoneMap::model()->findAll('chargecode_id = :cid AND pc_lo <= :pc AND pc_hi >= :pc', [':cid' => $chargecodeInfo['id'], ':pc' => $postcode]);
+		$amount = 0;
+		foreach ($zoneMaps as $zoneMapKey => $zoneMap) 
+		{
+			$amount = 0;
+			$checkWeight = $myWeight;
+
+			if ($checkWeight<0.5) {
+				$checkWeight = ceil($checkWeight * 1000) / 1000;
+			} else {
+				$checkWeight = ceil($checkWeight * 10) / 10;
+			}
+
+			if (!empty($zoneMap)) {
+				$zoneRates = ZoneRate::model()->findAll('chargecode_id = :cid AND weight_lo <:w AND weight_hi >= :w AND zone = :z AND base+item+perkg > 0', [':cid' => $chargecodeInfo['id'], ':w' => $checkWeight, ':z' => $zoneMap['z1']]);
+				if (empty($zoneRates)) {
+					$zoneRates = ZoneRate::model()->findAll('chargecode_id = :cid AND weight_lo <=:w AND weight_hi >= :w AND zone = :z AND base+item+perkg > 0', [':cid' => $chargecodeInfo['id'], ':w' => $checkWeight, ':z' => $zoneMap['z1']]);
+				}
+			}
+			foreach ($zoneRates as $zoneRate) {
+				$itemPrice = $zoneRate['item'];
+
+				if ($zoneRate['nkg'] > 0) {
+					$temp = $zoneRate['base'] + $itemPrice+ $zoneRate['perkg'] * ($zoneRate['nkg'] - fmod($myWeight, $zoneRate['nkg']) + $myWeight);
+				} else {
+					$temp = $zoneRate['base'] + $itemPrice + $zoneRate['perkg'] * $myWeight;
+				}
+				if ($zoneRate['minimum'] > 0) {
+					$temp = max($temp, $zoneRate['minimum']);
+				}
+				if ($temp>$amount) {
+					//$tempAmount = $temp;
+					$selectedRate = $zoneRate;
+				}
+				$amount = max($amount, $temp);
+			}
+			if($amount>0)
+			{
+				break;
+			}
+		}
+		return $amount;
+	}
+
+	public function actionEditBooking($id)
+	{
+		$this->layout = 'wmaBooking';
+		$model = DeliveryRecord::model()->findByPk($id);
+		if (!empty($_POST['name'])) {
+			if (!empty($_POST['uuid'])) {
+				$bookingDate = date('Y-m-d', strtotime($_POST['bookingDate']));
+				if (!empty($_POST['bookingTime'])) {
+					$model->booking_time = $bookingDate . " " . $_POST['bookingTime'];
+				}
+
+				if (empty($_POST['mdata']['company_name'])) {
+					$model->addError('please input company name', 'please input company name');
+					$this->ajaxResult($model);
+					return "";
+				}
+
+				if (!isset($_POST['mdata']['booking_type'])) {
+					$model->addError('please select booking type', 'please select booking type');
+					$this->ajaxResult($model);
+					return "";
+				}
+
+				if (!empty($model->booking_time)) {
+					$day = date("Y-m-d", strtotime($model->booking_time));
+
+					$regoSameDayRecords = DeliveryRecord::model()->findAll(' booking_time like "%' . $day . '%" and rego = :rego and status != :status and id != :pid', [":rego" => $model->rego, ":status" => DeliveryRecord::CANCELSTATE, ":pid" => $model->id]);
+					if (!empty($regoSameDayRecords)) {
+						$timeNow = strtotime($model->booking_time);
+						foreach ($regoSameDayRecords as $key => $regoSameDayRecord) {
+							$thisTime = strtotime($regoSameDayRecord->booking_time);
+							$timeBegin = strtotime("-118 minute", $thisTime);
+							$timeEnd = strtotime("+118 minute", $thisTime);
+							if ($timeBegin <= $timeNow && $timeEnd >= $timeNow) {
+								$model->addError("Your rego is allocated in this time period", "Your Rego is allocated in this time period");
+								$this->ajaxResult($model);
+							}
+						}
+					}
+				}
+
+				$deliveryBooking = DeliveryRecord::model()->findAll(' booking_time = :booking_type and status != :status and id != :id', [":booking_type" => $model->booking_time, ":status" => DeliveryRecord::CANCELSTATE, ":id" => $model->id]);
+				if (!empty($deliveryBooking)) {
+					if (sizeof($deliveryBooking) >= 2) {
+						$model->addError("Booking is full", "Booking is full");
+					} else {
+						foreach ($deliveryBooking as $key => $db) {
+							if ($db->rego == @$_POST['rego'] || $db->uuid == @$_POST['uuid']) {
+								$model->addError("You have booked this time", "You have booked this time");
+								$this->ajaxResult($model);
+							}
+						}
+					}
+				}
+
+
+				$model->mobile = @$_POST['mobile'];
+				$model->rego = @$_POST['rego'];
+				$model->plt =  empty($_POST['plt']) ? 0 : $_POST['plt'];
+				$model->pkg = empty($_POST['pkg']) ? 0 : $_POST['pkg'];
+				$model->name = @$_POST['name'];
+				$model->note = @$_POST['note'];
+				$model->task = 'deliveryBooking';
+				$model->created = date('Y-m-d H:i:s');
+				$model->op_id = 0;
+				$model->damage = 0;
+				$model->status = DeliveryRecord::NEWSTATE;
+				$model->savePOSTMeta($_POST);
+				$model->save();
+			}
+			$this->ajaxResult($model);
+		}
+
+		$this->render('_form', ["model" => $model]);
+	}
+
+	public function actionCheckList($id)
+	{
+		$model = DeliveryRecord::model()->findByPk($id);
+		if (!empty($_GET['uuid'])) {
+			$listInfo = $model->getListInfo();
+			echo JsonResponsePacking::packing(true, $listInfo, "success");
+		} else {
+			echo JsonResponsePacking::packing(false, "");
+		}
+
+		return "";
+	}
+
+	public function actionCancelBooking($id)
+	{
+		$model = DeliveryRecord::model()->findByPk($id);
+		if (!empty($_GET['uuid'])) {
+			$model->status = DeliveryRecord::CANCELSTATE;
+			$model->save();
+		}
+
+		$this->ajaxResult($model);
+	}
+
+	public function actionCreateBooking()
+	{
+		$this->layout = 'wmaBooking';
+		$model = new DeliveryRecord('create');
+		$model->unsetAttributes();
+		if (!empty($_POST['uuid']) || isset($_POST['yt0'])) {
+			$date = date('Y-m-d', strtotime($_POST['bookingDate'])) . " " . $_POST['bookingTime'];
+			if (empty($_POST['bookingDate']) || empty($_POST['bookingTime'])) {
+				$model->booking_time = "";
+			} else {
+				$model->booking_time = $date;
+			}
+			if (empty($_POST['mdata']['company_name'])) {
+				$model->addError('please input company name', 'please input company name');
+				$this->ajaxResult($model);
+				return "";
+			}
+
+			if (!isset($_POST['mdata']['booking_type'])) {
+				$model->addError('please select booking type', 'please select booking type');
+				$this->ajaxResult($model);
+				return "";
+			}
+
+			if (!empty($model->booking_time)) {
+				$day = date("Y-m-d", strtotime($model->booking_time));
+
+				$regoSameDayRecords = DeliveryRecord::model()->findAll(' booking_time like "%' . $day . '%" and rego = :rego and status != :status', [":rego" => @$_POST['rego'], ":status" => DeliveryRecord::CANCELSTATE]);
+
+				if (!empty($regoSameDayRecords)) {
+					$timeNow = strtotime($model->booking_time);
+					foreach ($regoSameDayRecords as $key => $regoSameDayRecord) {
+						$thisTime = strtotime($regoSameDayRecord->booking_time);
+						$timeBegin = strtotime("-118 minute", $thisTime);
+						$timeEnd = strtotime("+118 minute", $thisTime);
+						if ($timeBegin <= $timeNow && $timeEnd >= $timeNow) {
+							$model->addError("Your Booking is allocated in this time", "Your Booking is allocated in this time");
+							$this->ajaxResult($model);
+						}
+					}
+				}
+			}
+
+			$deliveryBooking = DeliveryRecord::model()->findAll(' booking_time = :booking_type and status != :status', [":booking_type" => $model->booking_time, ":status" => DeliveryRecord::CANCELSTATE]);
+			if (!empty($deliveryBooking)) {
+				if (sizeof($deliveryBooking) >= 2) {
+					$model->addError("Booking is full", "Booking is full");
+				} else {
+					foreach ($deliveryBooking as $key => $db) {
+						if ($db->rego == @$_POST['rego'] || $db->uuid == @$_POST['uuid']) {
+							$model->addError("You have booked this time", "You have booked this time");
+							$this->ajaxResult($model);
+						}
+					}
+				}
+			}
+
+			$model->mobile = @$_POST['mobile'];
+			$model->rego = @$_POST['rego'];
+			$model->plt =  empty($_POST['plt']) ? 0 : $_POST['plt'];
+			$model->pkg = empty($_POST['pkg']) ? 0 : $_POST['pkg'];
+			$model->name = @$_POST['name'];
+			$model->note = @$_POST['note'];
+			$model->task = 'deliveryBooking';
+			$model->created = date('Y-m-d H:i:s');
+			$model->op_id = 0;
+			$model->damage = 0;
+			$model->status = DeliveryRecord::NEWSTATE;
+			$model->uuid =  @$_POST['uuid'];
+			$model->savePOSTMeta($_POST);
+			$model->save();
+			$model->genNo();
+			$this->ajaxResult($model);
+		}
+		$this->render('_form', ["model" => $model]);
+	}
+
+	public function actionGenerateUUid()
+	{
+		$uuid = UUidGenerator::guid();
+		if (!empty($uuid)) {
+			echo JsonResponsePacking::packing(true, $uuid, "success");
+			Yii::app()->end();
+		} else {
+			echo JsonResponsePacking::packing(false, $uuid);
+			Yii::app()->end();
+		}
+	}
+
+	public function actionSelectTime()
+	{
+		$filtersForm = new FiltersForm;
+		$this->layout = 'wmaBooking';
+		$model = new DeliveryRecord('search');
+		$model->unsetAttributes();
+		if (!empty($_GET['date'])) {
+			$provide = $model->getTimeSelectArr($_GET['date']);
+		} else {
+			$provide = $model->getTimeSelectArr(date('Y-m-d'));
+		}
+		$filteredData = $filtersForm->filter($provide);
+		$dataprovider = new CArrayDataProvider($filteredData);
+		$dataprovider->pagination = ['pageSize' => 3000,];
+		$sort = new CSort();
+		$sort->attributes = [
+			'datetime' => [
+				'asc' => 'datetime ASC',
+				'desc' => 'datetime DESC',
+			]
+		];
+		$sort->defaultOrder = "datetime ASC";
+		$dataprovider->sort = $sort;
+
+		$this->render('timeSelector', ['dataProvider' => [$dataprovider, $filtersForm]]);
+	}
+
+
+
+	public function actionMakeSupay($id, $act)
+	{
+		Yii::app()->name = 'TLA';
+
+		$invoice = Invoice::model()->findByPk($id);
+		$strUrlPrefix = 'https://os.toplogistics.com.au';
+		if ($_SERVER['HTTP_HOST'] == 'localhost:82') {
+			$strUrlPrefix = 'http://localhost:82';
+		}
+		$callback_notification_url = $strUrlPrefix . '/top/supay/supay.app';
+
+		if (Yii::app()->name == 'TLA') {
+			$supay = new SupayAPI(
+				$callback_notification_url,
+				'',
+				'72795',
+				'lkjh678jGQDJokl9XQHaHIyfuytttqqq'
+			);
+		} else {
+			$supay = new SupayAPI(
+				$callback_notification_url
+			);
+		}
+		if ($act == 'Wechat') {
+			$url = $supay->checkoutByWechatPay('invoice ' . $invoice->no, $invoice->no, 'AUD', round($invoice->total * 1, 2));
+		} elseif ($act == 'Alipay') {
+			$url = $supay->checkoutByAliPay('invoice ' . $invoice->no, $invoice->no, 'AUD', round($invoice->total * 1, 2));
+		} elseif ($act == 'Poli') {
+			$url = $this->createPaylink(['invoice_id' => $invoice->id]);
+		} elseif ($act == 'Paypal') {
+			$url = $this->createPaypallink(['invoice_id' => $invoice->id]);
+		}
+		echo json_encode(['success' => true, 'msg' => 'success', 'url' => $url]);
+	}
+
+	private function createPaylink($data)
+	{
+		$strUrlPrefix = 'https://os.toplogistics.com.au';
+		if ($_SERVER['HTTP_HOST'] == 'localhost:82') {
+			$strUrlPrefix = 'http://localhost:82';
+		}
+		$paylink = $strUrlPrefix . '/top/payInvoice/pay.app?token=';
+		$iv = str_repeat("\x00", openssl_cipher_iv_length('AES-256-CBC'));
+		$token = base64_encode(openssl_encrypt(json_encode($data), 'AES-128-CBC', md5(PoliPaymentApi::PAYLINK_KEY), 0, $iv));
+		$paylink .= trim($this->safe_b64encode($token));
+		return $paylink;
+	}
+
+	private function createPaypallink($data)
+	{
+		$strUrlPrefix = 'https://os.toplogistics.com.au';
+		if ($_SERVER['HTTP_HOST'] == 'localhost:82') {
+			$strUrlPrefix = 'http://localhost:82';
+		}
+		$paylink = $strUrlPrefix . '/top/payInvoice/paypal.app?token=';
+		$iv = str_repeat("\x00", openssl_cipher_iv_length('AES-256-CBC'));
+		$token = base64_encode(openssl_encrypt(json_encode($data), 'AES-128-CBC', md5(PoliPaymentApi::PAYLINK_KEY), 0, $iv));
+		$paylink .= trim($this->safe_b64encode($token));
+		return $paylink;
+	}
+
+	private function safe_b64encode($string)
+	{
+		$data = base64_encode($string);
+		$data = str_replace(['+', '/', '='], ['-', '_', ''], $data);
+		return $data;
+	}
+}

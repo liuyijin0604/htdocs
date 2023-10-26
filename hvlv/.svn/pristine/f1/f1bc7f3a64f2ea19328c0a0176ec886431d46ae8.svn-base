@@ -1,0 +1,2038 @@
+<?php
+
+/*
+ * To change this license header, choose License Headers in Project Properties.
+ * To change this template file, choose Tools | Templates
+ * and open the template in the editor.
+ */
+
+class WmsInvoice
+{
+	public static function genWmsService($org, $fd, $ttl, $dpt_id)
+	{
+		$errors = [];
+		$aid = $org->id;
+		$owner = Org::model()->findByPk($aid);
+		// fd start from saturday
+		$fdts = strtotime($fd);
+		$wd = date('N', $fdts);
+		if ($wd != 6) {
+			// $fdts = strtotime($fd . ' -' . ($wd + 1) . ' day');
+			// fix regenerate last week invoice
+			$fdts = strtotime($fd . ' -' . (($wd + 1) % 7) . ' day');
+			$fd = date('Y-m-d', $fdts);
+		}
+		// generate invoice
+		$stot = 0;
+		while (strtotime($fd) < strtotime($ttl)) {
+			$td = date('Y-m-d', strtotime($fd . ' +7 day'));
+			$bd = date('Y-m-d', strtotime($fd . ' +9 day'));
+			// only create invoice when date after trigger date
+			if ($td > date('Y-m-d')) {
+				break;
+			}
+			/*
+			1.    when old invoice status in (1,2,3), credit old invoice and create new invoice
+			2.    one time period only have one invoice
+			but would cause problem, when override in later month
+			need to cancel new create invoice then run genWmsInvoice for that time period
+			3.    when old invoice status > 3, there is "check dup below"
+			 */
+			if ($owner->by == 1) {
+				$oldInvoice = Invoice::model()->find(['condition' => 'type = 70 AND to_id = :aid AND date = :bd AND status != 10 AND dpt_id =:dpt_id', 'params' => [':aid' => $aid, ':bd' => $bd, ':dpt_id' => $dpt_id], 'order' => 'id DESC']);
+			} else {
+				$oldInvoice = Invoice::model()->find(['condition' => 'type = 70 AND to_id = :aid AND date = :bd AND status != 10 AND dpt_id =:dpt_id AND JSON_VALUE(meta, "$.suborg") = :suborg', 'params' => [':aid' => $owner->by, ':suborg' => $aid, ':bd' => $bd, ':dpt_id' => $dpt_id], 'order' => 'id DESC']);
+			}
+			if (!empty($oldInvoice) && in_array($oldInvoice->status, [1, 2, 3])) {
+				$oldInvoice->createCreditForMe();
+			}
+			$inv = new Invoice;
+			$inv->type = Invoice::INVOICE_TYPE_WMS_INVOICE;
+			$inv->dpmt = Invoice::DPMT_3PL;
+			if (in_array($aid, Org::$airsea_wh)) {
+				$inv->dpmt = Invoice::DPMT_AIRSEA;
+			}
+			$inv->currency = 1;
+			$inv->to_id = $aid;
+			$inv->date = $bd;
+			$inv->status = Invoice::INVOICE_STATUS_PENDING;
+			if (!empty($oldInvoice)) {
+				if ($oldInvoice->status != 10) {
+					$inv->no = Invoice::genNewInvoiceNo($oldInvoice->no);
+				} else {
+					$inv->no = $oldInvoice->no;
+				}
+			}
+			$inv->dpt_id = $dpt_id;
+			$inv->mdata['name'] = $owner->name;
+			$inv->mdata['address'] = $owner->getAddress();
+			$inv->mdata['payterm'] = empty($owner->extra['payterm']) ? 'COD' : $owner->extra['payterm'] . ' days';
+			$inv->mdata['paytype'] = empty($owner->extra['paytype']) ? '' : $owner->extra['paytype'];
+			$inv->mdata['billfrom'] = $fd;
+			$inv->mdata['billto'] = $td;
+			$inv->due = $inv->date;
+			if (!empty($owner->extra['payterm'])) {
+				$inv->due = date('Y-m-d', strtotime($inv->date . ' + ' . $owner->extra['payterm'] . ' days'));
+			}
+			$inv->total = 0;
+			$inv->gst = 0;
+			$inv->save();
+			if ($inv->getErrors()) {
+				// if new invoice create in later month
+				$inv->date = date('Y-m-d');
+				$inv->due = date('Y-m-d');
+				$inv->posted = date('Y-m-d');
+				$inv->save();
+			}
+
+			$quote = WmsOrgQuote::model()->find(['condition' => 'org_id = :org_id AND status = 1 AND (JSON_VALUE(meta, "$.whole_sale") IS NULL OR JSON_VALUE(meta, "$.whole_sale") = 0)', 'params' => [':org_id' => $aid], 'order' => 'id DESC']);
+			if (empty($quote) && $owner->by != 1) {
+				$quote = WmsOrgQuote::model()->find(['condition' => 'org_id = :org_id AND status = 1', 'params' => [':org_id' => $owner->by], 'order' => 'id DESC']);
+			}
+			if (empty($quote)) {
+				$inv->status = Invoice::INVOICE_STATUS_CACELLED;
+				$inv->save();
+				$errors[] = "10003 - Please set up a valid charge rate quote in the Rate Management";
+				return $errors;
+			}
+
+			// $min_id = 12000;
+			// switch ($aid) {
+			// 	case Org::ORGID_3PL_AUSRIVER:
+			// 		$min_id = 10000;
+			// 		break;
+			// 	case Org::ORGID_3PL_ECOMATTERS:
+			// 		$min_id = 7500;
+			// 		break;
+			// 	case Org::ORGID_3PL_SUNNYA:
+			// 		$min_id = 212425;
+			// 		break;
+			// 	case Org::ORGID_3PL_COBAYER:
+			// 		$min_id = 350000;
+			// 		break;
+			// 	case Org::ORGID_3PL_AUSTRALIA_888:
+			// 		$min_id = 497457;
+			// 		break;
+			// }
+
+			$min_id = 0;
+
+			if (!empty($org->extra['3pl_invoice_task_min_id'])) {
+				$min_id = $org->extra['3pl_invoice_task_min_id'];
+			}
+			// bwf & 4 - task auto completed before 2019-07-01, bwf & 16 - task invisible to customer which is stock change
+			// $tasks = WmsTask::model()->with('job', 'mainTask')->findAll(['condition' => 'job.org_id = :org_id and mainTask.status = :status and mainTask.compl_time < :to and mainTask.id > :min_id and mainTask.bwf & 4 = 0 and mainTask.bwf & 16 = 0', 'order' => 'mainTask.compl_time ASC', 'params' => [':org_id' => $aid, ':status' => array_search("Completed", WmsTask::$states), ':to' => date('Y-m-d', strtotime($td . ' + 1 day')), ':min_id' => $min_id]]);
+			$tasks = WmsTask::model()->with('job', 'mainTask')->findAll(['condition' => 'job.org_id = :org_id and mainTask.status = :status and mainTask.compl_time >= :from and mainTask.compl_time < :to and mainTask.id > :min_id and mainTask.bwf & 4 = 0 and mainTask.bwf & 16 = 0 and mainTask.dpt_id = :dpt_id', 'order' => 'mainTask.compl_time ASC', 'params' => [':org_id' => $aid, ':status' => array_search("Completed", WmsTask::$states), ':from' => date('Y-m-d', strtotime($fd . ' + 1 day')), ':to' => date('Y-m-d', strtotime($td . ' + 1 day')), ':min_id' => $min_id, ':dpt_id' => $dpt_id]]);
+
+
+
+			foreach ($tasks as $task) {
+				$items = [];
+
+
+				// Main Task
+				if (!empty($task->mainTask) && $task->id == $task->mainTask->actionTask->id && in_array($owner->extra['wms_invoice'], ['all', 'fix_rate'])) {
+					$mainTask = $task->mainTask;
+
+					if (!empty($oldInvoice) && in_array($oldInvoice->status, [8, 10])) {
+						if ($oldInvoice->status == 8 && count($oldInvoice->payments) == 1 && $oldInvoice->payments[0]->payment->bank != 91) {
+							$inv_lines = InvLine::model()->findAll('fid = :id AND model = "WmsInvoiceLine" AND inv_id = :old', array(':id' => $mainTask->id, ':old' => $oldInvoice->id));
+						} else {
+							$inv_lines = InvLine::model()->findAll('fid = :id AND model = "WmsInvoiceLine" AND inv_id = :old', array(':id' => $mainTask->id, ':old' => $oldInvoice->id));
+						}
+					} else {
+						$inv_lines = [];
+					}
+					$inv_lines += InvLine::model()->findAll('fid = :id AND model = "WmsInvoiceLine" AND inv_id = 0', array(':id' => $mainTask->id));
+					foreach ($inv_lines as $inv_line) {
+						if ($inv_line->inv_id == 0) {
+							$inv_line->inv_id = $inv->id;
+							$inv_line->update('inv_id');
+						} else {
+							// override invoice cause line lost
+							$clone_line = new InvLine;
+							$clone_line->inv_id = $inv->id;
+							$clone_line->model = $inv_line->model;
+							$clone_line->fid = $inv_line->fid;
+							$clone_line->ccode = $inv_line->ccode;
+							$clone_line->amount = $inv_line->amount;
+							$clone_line->gst = $inv_line->gst;
+							$clone_line->det = $inv_line->det;
+							$clone_line->qty = $inv_line->qty;
+							$clone_line->tax = $inv_line->tax;
+							$clone_line->mdata = $inv_line->mdata;
+							$clone_line->save();
+						}
+					}
+
+					// plain
+					if (!empty($mainTask->mdata['other_plain'])) {
+						$line = InvLine::model()->find('fid = :id AND model = "WmsInvoiceLine" AND ccode = "plain"', array(':id' => $mainTask->id));
+						if ($line->inv_id == 0) {
+							$line->inv_id = $inv->id;
+							$line->update('inv_id');
+						}
+					}
+
+					// chep
+					if (!empty($mainTask->mdata['other_chep'])) {
+						$line = InvLine::model()->find('fid = :id AND model = "WmsInvoiceLine" AND ccode = "chep"', array(':id' => $mainTask->id));
+						if ($line->inv_id == 0) {
+							$line->inv_id = $inv->id;
+							$line->update('inv_id');
+						}
+					}
+
+					// wood
+					if (!empty($mainTask->mdata['other_wood'])) {
+						$line = InvLine::model()->find('fid = :id AND model = "WmsInvoiceLine" AND ccode = "wood"', array(':id' => $mainTask->id));
+						if ($line->inv_id == 0) {
+							$line->inv_id = $inv->id;
+							$line->update('inv_id');
+						}
+					}
+
+					// return
+					if (!empty($mainTask->mdata['return'])) {
+						$line = InvLine::model()->find('fid = :id AND model = "WmsInvoiceLine" AND ccode = "return"', array(':id' => $mainTask->id));
+						if (empty($line) || ($line->inv_id != $inv->id && in_array($line->invoice, [8, 10]))) {
+							$line = new InvLine;
+							$line->inv_id = $inv->id;
+							$line->amount = 11;
+							$line->model = 'WmsInvoiceLine';
+							$line->gst = 1;
+							$line->mdata['items'][] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Return fee', 10, 1, 10];
+							$line->ccode = 'return';
+							$line->det = $mainTask->getType();
+							$line->qty = 1;
+							$line->fid = $mainTask->id;
+							$line->tax = 'OUTPUT';
+							$line->save();
+						}
+						if ($line->inv_id == $inv->id) {
+							$line = InvLine::model()->find('fid = :id AND model = "WmsInvoiceLine" AND ccode = "return_unit"', array(':id' => $mainTask->id));
+							if (empty($line)) {
+								$price = 0.45;
+								if (in_array($mainTask->type, [3030])) {
+									$unit = sizeof($mainTask->deliveryTask->mdata['shipment_id']);
+								} else if (in_array($mainTask->type, [1010])) {
+									$unit = sizeof($mainTask->items);
+								}
+								$line = new InvLine;
+								$line->inv_id = $inv->id;
+								$line->amount = $price * $unit * 1.1;
+								$line->model = 'WmsInvoiceLine';
+								$line->gst = $price * $unit * 0.1;
+								$line->mdata['items'][] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Return Goods', $price, $unit, $price * $unit];
+								$line->ccode = 'return_unit';
+								$line->det = $mainTask->getType();
+								$line->qty = 1;
+								$line->fid = $mainTask->id;
+								$line->tax = 'OUTPUT';
+								$line->save();
+							}
+						}
+					}
+				}
+
+
+				// if (in_array($task->getType(), ['Pick Pallet']) && !empty($task->mainTask) && in_array($owner->extra['wms_invoice'], ['all', 'fix_rate'])) {
+				// 	$quote_type = WmsOrgQuote::QUOTE_PALLET_OUT;
+				// 	if (empty($quote->mdata[WmsOrgQuote::QUOTE_PALLET_OUT])) {
+				// 		$errors[] = "10003 - Please set up a valid charge rate for Pallet Out in the Rate Management";
+				// 		continue;
+				// 	} else {
+				// 		$price = floatval($quote->mdata[WmsOrgQuote::QUOTE_PALLET_OUT]);
+				// 		$pallets = [];
+				// 		foreach ($task->items as $item) {
+				// 			$pallets[] = $item->mdata['pli'];
+				// 		}
+				// 		$pallets = sizeof(array_unique($pallets));
+				// 		$stot = $pallets * $price;
+				// 		$items = [[$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Pallets Out', $price, $pallets, $pallets * $price]];
+				// 	}
+				// 	// Pickup
+				// } else if ($task->getType() == 'Pickup' && !empty($task->mainTask) && in_array($owner->extra['wms_invoice'], ['all', 'fix_rate']) && !in_array($owner->id, [Org::ORGID_3PL_ECOMATTERS])) {
+				// 	if (isset($quote->mdata[WmsOrgQuote::QUOTE_MISC_PICKUP_DELIVERY_MIN_CHARGE])) {
+				// 		$stot = 0;
+				// 		$items = [];
+				// 		if ($quote->mdata[WmsOrgQuote::QUOTE_MISC_PICKUP_DELIVERY_MIN_CHARGE] > 0) {
+				// 			$quote_type = WmsOrgQuote::QUOTE_MISC_PICKUP_DELIVERY_MIN_CHARGE;
+
+				// 			$stot = 1 * $quote->mdata[WmsOrgQuote::QUOTE_MISC_PICKUP_DELIVERY_MIN_CHARGE];
+				// 			$items[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, $task->getType(), $quote->mdata[WmsOrgQuote::QUOTE_MISC_PICKUP_DELIVERY_MIN_CHARGE], 1, 1 * $quote->mdata[WmsOrgQuote::QUOTE_MISC_PICKUP_DELIVERY_MIN_CHARGE]];
+				// 		}
+				// 	} else {
+				// 		$errors[] = "10003 - Please set up a valid charge rate for Pickup or Delivery Minimum Charge in the Rate Management";
+				// 		continue;
+				// 	}
+
+				// 	// Container Unload
+				// } else if ($task->getType() == 'Container Unload' && !empty($task->mainTask) && in_array($owner->extra['wms_invoice'], ['stock_in_only', 'all', 'fix_rate']) && !in_array($owner->id, [Org::ORGID_3PL_ECOMATTERS])) {
+				// 	if ($owner->extra['wms_invoice'] != 'fix_rate') {
+				// 		// if same rate for both ctn size
+				// 		if (empty($task->mainTask->mdata['ctn_size']) && !empty($quote->mdata[WmsOrgQuote::QUOTE_UNLOAD_20FT_CONTAINER]) && !empty($quote->mdata[WmsOrgQuote::QUOTE_UNLOAD_40FT_CONTAINER]) && $quote->mdata[WmsOrgQuote::QUOTE_UNLOAD_20FT_CONTAINER] == $quote->mdata[WmsOrgQuote::QUOTE_UNLOAD_40FT_CONTAINER]) {
+				// 			$task->mainTask->mdata['ctn_size'] = 4;
+				// 		}
+				// 		if (!isset($task->mainTask->mdata['ctn_size'])) {
+				// 			$errors[] = "10003 - Please choose container size for task " . $task->mainTask->getNo();
+				// 			continue;
+				// 		} else {
+				// 			$size = substr($task->mainTask->mdata['ctn_size'], 0, 1);
+				// 			if ($size == 2) {
+				// 				if ($quote->mdata[WmsOrgQuote::QUOTE_UNLOAD_20FT_CONTAINER]) {
+				// 					$quote_type = WmsOrgQuote::QUOTE_UNLOAD_20FT_CONTAINER;
+
+				// 					$stot = 1 * floatval($quote->mdata[WmsOrgQuote::QUOTE_UNLOAD_20FT_CONTAINER]);
+				// 					$items = [];
+				// 					$items[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, $task->getType(), $quote->mdata[WmsOrgQuote::QUOTE_UNLOAD_20FT_CONTAINER], 1, 1 * floatval($quote->mdata[WmsOrgQuote::QUOTE_UNLOAD_20FT_CONTAINER])];
+				// 				} else {
+				// 					$errors[] = "10003 - Please set up a valid charge rate for Unload 20ft Container";
+				// 					continue;
+				// 				}
+				// 			} else if ($size == 4) {
+				// 				if ($quote->mdata[WmsOrgQuote::QUOTE_UNLOAD_40FT_CONTAINER]) {
+				// 					$quote_type = WmsOrgQuote::QUOTE_UNLOAD_40FT_CONTAINER;
+
+				// 					$stot = 1 * floatval($quote->mdata[WmsOrgQuote::QUOTE_UNLOAD_40FT_CONTAINER]);
+				// 					$items = [];
+				// 					$items[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, $task->getType(), $quote->mdata[WmsOrgQuote::QUOTE_UNLOAD_40FT_CONTAINER], 1, 1 * floatval($quote->mdata[WmsOrgQuote::QUOTE_UNLOAD_40FT_CONTAINER])];
+				// 				} else {
+				// 					$errors[] = "10003 - Please set up a valid charge rate for Unload 40ft Container";
+				// 					continue;
+				// 				}
+				// 			}
+				// 		}
+				// 		if (!empty($quote->mdata[WmsOrgQuote::QUOTE_UNLOAD_CHARGE_PALLET_IN])) {
+				// 			$quote_type = WmsOrgQuote::QUOTE_PALLET_IN;
+				// 			$pallets = [];
+				// 			foreach ($task->items as $item) {
+				// 				$pallets[$item->mdata['pl']][] = $item;
+				// 			}
+				// 			$price = floatval($quote->mdata[WmsOrgQuote::QUOTE_PALLET_IN]);
+				// 			$stot += sizeof($pallets) * $price;
+				// 			$items[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Pallets In', $price, sizeof($pallets), sizeof($pallets) * $price];
+				// 		}
+				// 	} else {
+				// 		// TODO
+				// 		continue;
+				// 	}
+
+				// 	// Container Load
+				// } else if ($task->getType() == 'Container Load' && !empty($task->mainTask) && in_array($owner->extra['wms_invoice'], ['stock_in_only', 'all', 'fix_rate'])) {
+				// 	// sunnya not charge
+				// 	if (in_array($aid, [Org::ORGID_3PL_SUNNYA])) {
+				// 		continue;
+				// 	}
+
+				// 	if ($owner->extra['wms_invoice'] != 'fix_rate') {
+				// 		// if same rate for both ctn size
+				// 		if (empty($task->mainTask->mdata['ctn_size']) && !empty($quote->mdata[WmsOrgQuote::QUOTE_LOAD_20FT_CONTAINER]) && !empty($quote->mdata[WmsOrgQuote::QUOTE_LOAD_40FT_CONTAINER]) && $quote->mdata[WmsOrgQuote::QUOTE_LOAD_20FT_CONTAINER] == $quote->mdata[WmsOrgQuote::QUOTE_LOAD_40FT_CONTAINER]) {
+				// 			$task->mainTask->mdata['ctn_size'] = 4;
+				// 		}
+				// 		if (!isset($task->mainTask->mdata['ctn_size'])) {
+				// 			$errors[] = "10003 - Please choose container size for task " . $task->mainTask->getNo();
+				// 			continue;
+				// 		} else {
+				// 			$size = substr($task->mainTask->mdata['ctn_size'], 0, 1);
+				// 			if ($size == 2) {
+				// 				if ($quote->mdata[WmsOrgQuote::QUOTE_LOAD_20FT_CONTAINER]) {
+				// 					$quote_type = WmsOrgQuote::QUOTE_LOAD_20FT_CONTAINER;
+
+				// 					$stot = 1 * floatval($quote->mdata[WmsOrgQuote::QUOTE_LOAD_20FT_CONTAINER]);
+				// 					$items = [];
+				// 					$items[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, $task->getType(), $quote->mdata[WmsOrgQuote::QUOTE_LOAD_20FT_CONTAINER], 1, 1 * floatval($quote->mdata[WmsOrgQuote::QUOTE_LOAD_20FT_CONTAINER])];
+				// 				} else {
+				// 					$errors[] = "10003 - Please set up a valid charge rate for Load 20ft Container";
+				// 					continue;
+				// 				}
+				// 			} else if ($size == 4) {
+				// 				if ($quote->mdata[WmsOrgQuote::QUOTE_LOAD_40FT_CONTAINER]) {
+				// 					$quote_type = WmsOrgQuote::QUOTE_LOAD_40FT_CONTAINER;
+
+				// 					$stot = 1 * floatval($quote->mdata[WmsOrgQuote::QUOTE_LOAD_40FT_CONTAINER]);
+				// 					$items = [];
+				// 					$items[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, $task->getType(), $quote->mdata[WmsOrgQuote::QUOTE_LOAD_40FT_CONTAINER], 1, 1 * floatval($quote->mdata[WmsOrgQuote::QUOTE_LOAD_40FT_CONTAINER])];
+				// 				} else {
+				// 					$errors[] = "10003 - Please set up a valid charge rate for Load 40ft Container";
+				// 					continue;
+				// 				}
+				// 			}
+				// 		}
+				// 		// for hh china and swisse pallets out already charged on transfer task
+				// 		if (!empty($quote->mdata[WmsOrgQuote::QUOTE_LOAD_CHARGE_PALLET_OUT]) && $aid == Org::ORGID_AIRSEA_FARMLAND) {
+				// 			$quote_type = WmsOrgQuote::QUOTE_PALLET_OUT;
+				// 			$pallets = [];
+				// 			foreach ($task->items as $item) {
+				// 				$pallets[$item->mdata['pl']][] = $item;
+				// 			}
+				// 			$price = floatval($quote->mdata[WmsOrgQuote::QUOTE_PALLET_OUT]);
+				// 			$stot += sizeof($pallets) * $price;
+				// 			$items[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Pallets Out', $price, sizeof($pallets), sizeof($pallets) * $price];
+				// 		}
+				// 	} else {
+				// 		// TODO
+				// 		continue;
+				// 	}
+
+				// } else {
+				// 	continue;
+				// }
+
+
+				// task 2 invoice
+				$objCTask2Invoice = FactoryTask2Invoice::Create($task, $quote, $org);
+				if ($objCTask2Invoice != null) {
+					$objCTask2Invoice->funcToInvoice();
+					if ($objCTask2Invoice->funcIsEmptyErrors()) {
+						$items = $objCTask2Invoice->getListItems();
+						$stot = $objCTask2Invoice->getNumSubtotal();
+						$quote_type = $objCTask2Invoice->getNumQuoteType();
+					} else {
+						$errors = $objCTask2Invoice->getListErrors();
+					}
+				}
+
+
+				// Calculate
+				if ($stot == 0 || empty($items)) {
+					continue;
+				}
+				// delete empty item
+				foreach ($items as $kk => $item) {
+					if ($item[6] == 0) {
+						unset($items[$kk]);
+					}
+				}
+				// check dup
+				$pre_ils = InvLine::model()->with('invoice')->findAll('fid = :id AND model = "WmsInvoiceLine" AND inv_id != :inv_id AND invoice.status != 10', [':id' => $task->id, ':inv_id' => $inv->id]);
+				if (!empty($pre_ils)) {
+					// pending, posted, overdue, paid with partly credit, partially paid, paid
+					foreach ($pre_ils as $pre_il) {
+						if ($pre_il->invoice->status != 8) {
+							continue 2;
+						}
+					}
+					// manually fully credit
+					foreach ($pre_ils as $pre_il) {
+						foreach ($pre_il->invoice->payments as $payInv) {
+							if ($payInv->payment->type == 5 && $payInv->payment->bank == 91) {
+								continue 3;
+							}
+						}
+					}
+				}
+				// cobayer avoid items in one task charge in two invoices
+				if (in_array($task->getType(), ['Pack Order', 'Pickup', 'Pick Pallet']) && !empty($task->mainTask)) {
+					$other_invs = [];
+					foreach ($task->mainTask->subTasks as $subtask) {
+						$il_other = InvLine::model()->find('fid = :id AND model = "WmsInvoiceLine"', [':id' => $subtask->id]);
+						if (!empty($il_other) && !empty($il_other->invoice) && $il_other->invoice->id != $inv->id && !in_array($il_other->invoice->status, [8, 10])) {
+							$other_invs[] = $il_other->inv_id;
+						}
+					}
+
+					if (sizeof(array_unique($other_invs)) > 0) {
+						continue;
+					}
+				}
+				$tax = 'OUTPUT';
+				if (in_array($task->getType(), ['Delivery', 'Re-delivery']) && !empty($task->mdata['cnee']['country']) && $task->mdata['cnee']['country'] != 'AU') {
+					$tax = 'EXEMPTOUTPUT';
+				}
+				if (in_array($inv->to_id, Org::$airsea_heshengyuan)) {
+					$tax = 'EXEMPTOUTPUT';
+				}
+				$stot = ($tax == 'OUTPUT') ? round($stot * 110) / 100 : $stot;
+				$il = new InvLine;
+				$il->inv_id = $inv->id;
+				$il->amount = $stot;
+				$il->model = 'WmsInvoiceLine';
+				$il->mdata['items'] = array_values($items);
+				$il->ccode = $quote_type;
+				$il->det = $task->getType();
+				$il->qty = 1;
+				$il->fid = $task->id;
+				$il->tax = $tax;
+				$il->gst = ($tax == 'OUTPUT') ? round($stot * 100 / 11) / 100 : 0;
+				$il->save();
+
+				$inv->dpt_id = $dpt_id;
+				$inv->lines = [$il];
+				$inv->total += $il->amount;
+				$inv->gst = ($tax == 'OUTPUT') ? round($inv->total * 100 / 11) / 100 : 0;
+				$inv->sync_xero = 0;
+			}
+
+			//Manifest Fee $10/day , if there were tasks;
+			$numManifestFee = $quote->mdata[WmsOrgQuote::QUOTE_manifest_fee];
+			if ($numManifestFee > 0) {
+				$dicDate2ListTaskNumber = [];
+				foreach ($tasks as $objTask) {
+					$strScheduledDate = date('Y-m-d', strtotime($objTask->mainTask->schd_time));
+					if (!array_key_exists($strScheduledDate, $dicDate2ListTaskNumber)) {
+						$dicDate2ListTaskNumber[$strScheduledDate] = [];
+					}
+
+					$strTaskNumber =  $objTask->getNo();
+					if (!in_array($strTaskNumber,  $dicDate2ListTaskNumber[$strScheduledDate])) {
+						$dicDate2ListTaskNumber[$strScheduledDate][] = $strTaskNumber;
+					}
+				}
+
+				$strQuoteType = WmsOrgQuote::QUOTE_manifest_fee;
+				$listItems = [];
+				$numSubTotal = 0;
+				foreach ($dicDate2ListTaskNumber as $strScheduledDate => $listTaskNumber) {
+					$strTaskNumbers = null;
+					foreach ($listTaskNumber as $strTaskNumber) {
+						$strTaskNumbers .= $strTaskNumber . ' ';
+					}
+					$listItems[] = ['Manifest Fee', 'by scheduled time', $strScheduledDate, $strTaskNumbers, $numManifestFee, 1, $numManifestFee];
+					$numSubTotal += $numManifestFee;
+				}
+
+				if (!empty($listItems) && $numSubTotal > 0) {
+					$il = new InvLine;
+					$il->inv_id = $inv->id;
+					$il->amount = round($numSubTotal * 110) / 100;
+					$il->model = 'WmsInvoiceLine';
+					$il->mdata['items'] = array_values($listItems);
+					$il->ccode = $strQuoteType;
+					$il->det = 'Manifest Fee';
+					$il->qty = 1;
+					$il->fid = '';
+					$il->tax = 'OUTPUT';
+					$il->gst = round($numSubTotal * 10) / 100;
+					$il->save();
+
+					$inv->dpt_id = $dpt_id;
+					$inv->lines = [$il];
+					$inv->total += $il->amount;
+					$inv->gst = round($inv->total * 100 / 11) / 100;
+				}
+			}
+
+
+
+			$inv->refresh();
+			$inv->getTotal();
+
+			if ($inv->total == 0) {
+				$inv->status = Invoice::INVOICE_STATUS_CACELLED;
+				$inv->save();
+			} else {
+				$inv->status = Invoice::INVOICE_STATUS_PENDING;
+				$inv->save();
+			}
+
+			$fd = date('Y-m-d', strtotime($fd . ' +7 day'));
+		}
+		return $errors;
+	}
+
+	public static function getShipmentWmsChargecode($shipment)
+	{
+		$aid = $shipment->agent_id;
+		$org = Org::model()->findByPk($aid);
+		$quote = WmsOrgQuote::model()->find(['condition' => 'org_id = :org_id AND status = 1 AND (JSON_VALUE(meta, "$.whole_sale") IS NULL OR JSON_VALUE(meta, "$.whole_sale") = 0)', 'params' => [':org_id' => $aid], 'order' => 'id DESC']);
+		if (empty($quote) && $org->by != 1) {
+				$quote = WmsOrgQuote::model()->find(['condition' => 'org_id = :org_id AND status = 1', 'params' => [':org_id' => $org->by], 'order' => 'id DESC']);
+		}
+		$min_id = 0;
+
+		if (!empty($org->extra['3pl_invoice_task_min_id'])) {
+			$min_id = $org->extra['3pl_invoice_task_min_id'];
+		}
+		// bwf & 4 - task auto completed before 2019-07-01, bwf & 16 - task invisible to customer which is stock change
+		// $tasks = WmsTask::model()->with('job', 'mainTask')->findAll(['condition' => 'job.org_id = :org_id and mainTask.status = :status and mainTask.compl_time < :to and mainTask.id > :min_id and mainTask.bwf & 4 = 0 and mainTask.bwf & 16 = 0', 'order' => 'mainTask.compl_time ASC', 'params' => [':org_id' => $aid, ':status' => array_search("Completed", WmsTask::$states), ':to' => date('Y-m-d', strtotime($td . ' + 1 day')), ':min_id' => $min_id]]);
+		$tasks = WmsTask::model()->with('job', 'mainTask')->findAll(['condition' => 't.type = :type and mainTask.id = :mid and job.org_id = :org_id', 'order' => 'mainTask.compl_time ASC', 'params' => [':mid' => str_replace('T', '', $shipment->cref),':org_id' => $aid,':type'=>WmsTask::TYPE_DELIVERY]]);
+		if(empty($tasks))
+		{
+			return "";
+		}
+
+		foreach ($tasks as $key => $task) {
+			$objCTask2Invoice = FactoryTask2Invoice::Create($task, $quote, $org);
+			if(!empty($objCTask2Invoice))
+			{
+				$charge = $objCTask2Invoice->funcCourierChargeCode();
+				if(!empty($charge))
+				{
+					return $charge;
+				}
+			}
+		}
+
+		return "";
+	}
+
+	public static function genWmsStorage($org, $fd, $ttl, $dpt_id)
+	{
+		$errors = [];
+		$aid = $org->id;
+
+
+		$owner = Org::model()->findByPk($aid);
+		$quotes = WmsOrgQuote::model()->find(['condition' => 'org_id = :org_id AND status = 1 AND (JSON_VALUE(meta, "$.whole_sale") IS NULL OR JSON_VALUE(meta, "$.whole_sale") = 0)', 'params' => [':org_id' => $aid], 'order' => 'id DESC']);
+		if (empty($quotes) && $owner->by != 1) {
+			$quotes = WmsOrgQuote::model()->find(['condition' => 'org_id = :org_id and status = 1', 'params' => [':org_id' => $owner->by], 'order' => 'id DESC']);
+		}
+		$charge_rate = 0;
+		if (!empty($quotes->mdata)) {
+			if (!empty($org->extra['storage_charge_type']) || !empty($org->owner->extra['storage_charge_type'])) {
+				if (empty($org->extra['storage_charge_type'])) {
+					$org->extra['storage_charge_type'] = $org->owner->extra['storage_charge_type'];
+				}
+				if (array_key_exists($org->extra['storage_charge_type'], $quotes->mdata)) {
+					$charge_rate = $quotes->mdata[$org->extra['storage_charge_type']];
+					$cbm = $org->extra['storage_charge_type'] == WmsOrgQuote::QUOTE_CBM_STORAGE_WEEK ? true : false;
+					if (empty($charge_rate) && $aid != Org::ORGID_3PL_LIFESTYLE) {
+						$errors[] = "10004-Charge rate not setup for " . WmsOrgQuote::$chgcodes[$org->extra['storage_charge_type']][0];
+						return $errors;
+					}
+				} else {
+					$errors[] = "10002-Please setup a valid Charge rate in the Rate Management ";
+				}
+			} else {
+				$errors[] = "10005-Please Select the Storage Charge Type";
+			}
+			$fdts = strtotime($fd);
+			if (!empty($errors)) {
+				return $errors;
+			}
+			$wd = date('N', $fdts);
+			if ($wd != 6) {
+				// $fdts = strtotime($fd . ' -' . ($wd + 1) . ' day');
+				// fix regenerate last week invoice
+				$fdts = strtotime($fd . ' -' . (($wd + 1) % 7) . ' day');
+				$fd = date('Y-m-d', $fdts);
+			}
+			$includingGST = false;
+			if (isset($org->extra['incl_gst']) && $org->extra['incl_gst'] == 1) {
+				$includingGST = true;
+			}
+
+			while (strtotime($fd) < strtotime($ttl)) {
+				$td = date('Y-m-d', strtotime($fd . ' +6 day'));
+				$bd = date('Y-m-d', strtotime($fd . ' +9 day'));
+				if ($owner->by == 1) {
+					$inv = Invoice::model()->find('type = 60 AND to_id = :aid AND date = :bd AND status NOT IN (8,10) AND dpt_id= :dpt_id', [':aid' => $aid, ':bd' => $bd, ':dpt_id' => $dpt_id]);
+				} else {
+					$inv = Invoice::model()->find('type = 60 AND to_id = :aid AND date = :bd AND dpt_id= :dpt_id AND JSON_VALUE(meta, "$.suborg") = :suborg AND status NOT IN (8,10)', [':aid' => $owner->by, ':suborg' => $aid, ':bd' => $bd, ':dpt_id' => $dpt_id]);
+				}
+				if (!empty($inv) && $inv->status > 3 && $inv->status != 10) {
+					$fd = date('Y-m-d', strtotime($fd . ' +7 day'));
+					continue;
+				}
+				if (empty($inv)) {
+					$inv = new Invoice;
+					$inv->type = 60;
+					$inv->dpmt = Invoice::DPMT_3PL;
+					if (in_array($aid, Org::$airsea_wh)) {
+						$inv->dpmt = Invoice::DPMT_AIRSEA;
+					}
+					$inv->currency = 1;
+					$inv->to_id = $aid;
+					$inv->status = Invoice::INVOICE_STATUS_PENDING;
+					$inv->date = $bd;
+				}
+				$inv->mdata['name'] = $owner->name;
+				$inv->mdata['address'] = $owner->getAddress();
+				$inv->mdata['payterm'] = empty($owner->extra['payterm']) ? 'COD' : $owner->extra['payterm'] . ' days';
+				$inv->mdata['paytype'] = empty($owner->extra['paytype']) ? '' : $owner->extra['paytype'];
+				$inv->mdata['billfrom'] = $fd;
+				$inv->mdata['billto'] = $td;
+				$inv->due = $inv->date;
+				if (!empty($owner->extra['payterm'])) {
+					$inv->due = date('Y-m-d', strtotime($inv->date . ' + ' . $owner->extra['payterm'] . ' days'));
+				}
+				$inv->total = 0;
+				$rs = WmsStock::model()->findAll('org_id = :oid and dpt_id = :dpt_id', [':oid' => $aid, ':dpt_id' => $dpt_id]);
+				$items = [];
+				$stot = 0;
+				$locs = [];
+
+				foreach ($rs as $r) {
+					// if (in_array($aid, [Org::ORGID_AIRSEA_SWISSEAU, Org::ORGID_AIRSEA_HHGROUP])) {
+					// 	$q = $r->chargeUnit($td, 5, $cbm, $locs);
+					// } else {
+					// 	$q = $r->chargeUnit($td, $freewk * 7, $cbm, $locs);
+					// }
+
+					// fetch free week / day from the quotes
+					if (!in_array($aid, Org::$airsea_wh)) {
+						$free_wk = empty($quotes->mdata[WmsOrgQuote::QUOTE_STORAGE_FREE_WEEK]) ? 0 : $quotes->mdata[WmsOrgQuote::QUOTE_STORAGE_FREE_WEEK];
+						$q = $r->chargeUnitByFreeWeek($td, $free_wk, $cbm, $locs);
+					} else {
+						if (isset($quotes->mdata[WmsOrgQuote::QUOTE_STORAGE_FREE_DAY])) {
+							$free_day = $quotes->mdata[WmsOrgQuote::QUOTE_STORAGE_FREE_DAY];
+						} else {
+							$sub_quotes = WmsOrgQuote::model()->find(['condition' => 'org_id = :org_id AND status = 1 AND JSON_VALUE(meta, "$.whole_sale") = 1', 'params' => [':org_id' => $aid], 'order' => 'id DESC']);
+							if (!empty($sub_quotes) && isset($sub_quotes->mdata[WmsOrgQuote::QUOTE_STORAGE_FREE_DAY])) {
+								$free_day = $sub_quotes->mdata[WmsOrgQuote::QUOTE_STORAGE_FREE_DAY];
+							} else {
+								$free_day = 0;
+							}
+						}
+						$q = $r->chargeUnitByFreeDay($td, $free_day, $cbm, $locs);
+					}
+
+					if ($q[0] == 0) {
+						continue;
+					}
+
+					// oversize pallet double charge
+					$double = false;
+					$packs = WmsProdPack::model()->findAll('type in (10, 20) AND prod_id = :prod_id AND qty != 0', [':prod_id' => $r->prod->id]);
+					foreach ($packs as $pack) {
+						if ((!empty($pack->dims['w']) && $pack->dims['w'] > 120) || (!empty($pack->dims['d']) && $pack->dims['d'] > 120) || (!empty($pack->dims['h']) && $pack->dims['h'] > 150)) {
+							$double = true;
+							break;
+						}
+					}
+
+					if ($double) {
+						if (!empty($quotes->mdata[WmsOrgQuote::QUOTE_PALLET_STORAGE_OVERSIZE_WEEK])) {
+							$rate = $quotes->mdata[WmsOrgQuote::QUOTE_PALLET_STORAGE_OVERSIZE_WEEK];
+						} else {
+							$rate = $charge_rate * 2;
+						}
+					} else {
+						$rate = $charge_rate;
+					}
+
+					if (!preg_match('/MISC PALLET/i', $r->prod->name)) {
+						$items[] = [$r->stockName(), $q[0], $q[1], $rate, $double];
+						$stot += $q[1] * $rate;
+					} else {
+						if (!in_array($aid, [Org::ORGID_3PL_BIOPHYSICS])) {
+							$items[] = ['MISC PALLET', $q[0], $q[1], $rate, $double];
+							$stot += $q[1] * $rate;
+						} else {
+							$sls = WmsStockLocation::model()->with('loc')->findAll('stock_id = :stock_id AND qty > 0 AND loc.pid != 2', [':stock_id' => $r->id]);
+							foreach ($sls as $sl) {
+								$ledger = WmsStockLedger::model()->find(['condition' => 'location_id = :loc_id', 'params' => [':loc_id' => $sl->loc->id], 'order' => 'id ASC']);
+								if ($ledger->ts > date('Y-m-d', strtotime($td . ' + 1 day'))) {
+									continue;
+								}
+								if (empty($sl->loc->extra['note'])) {
+									$desc = $sl->loc->notes;
+								} else {
+									$desc = $sl->loc->extra['note'];
+								}
+								$items[] = [$desc, 0, 1, $rate, $double];
+								$stot += 1 * $rate;
+							}
+						}
+					}
+				}
+
+
+
+
+
+
+
+				if ($stot != 0) {
+					$inv->save();
+					if ($includingGST) {
+						$stot = round($stot * 110) / 100;
+					}
+					$il = InvLine::model()->find('inv_id = :id', [':id' => $inv->id]);
+					if (empty($il)) {
+						$il = new InvLine;
+						$il->inv_id = $inv->id;
+					}
+					$il->amount = $stot;
+					if ($includingGST) {
+						$il->gst = round($stot * 100 / 11) / 100;
+						$il->tax = 'OUTPUT';
+					} else {
+						$il->gst = 0;
+					}
+					$il->mdata['items'] = $items;
+					$il->ccode = WmsOrgQuote::QUOTE_PALLET_STORAGE_WEEK;
+					$il->det = 'Warehouse Storage';
+					$il->qty = 1;
+
+					if ($aid != Org::ORGID_3PL_LIFESTYLE) {
+						$regular = 0;
+						$racking = 0;
+						$oversize = 0;
+						foreach ($items as $itm) {
+							if (!empty($itm[4])) {
+								$oversize += intval($itm[2]);
+							} else {
+								if (intval($itm[2]) == $itm[2]) {
+									$regular += intval($itm[2]);
+								} else {
+									$racking += floatval($itm[2] * 10);
+								}
+							}
+						}
+
+						if ($regular > 0) {
+							$il->mdata['regular'] = [$regular, $charge_rate];
+						}
+						if ($oversize > 0) {
+							$il->mdata['oversize'] = [$oversize, !empty($quotes->mdata[WmsOrgQuote::QUOTE_PALLET_STORAGE_OVERSIZE_WEEK]) ? $quotes->mdata[WmsOrgQuote::QUOTE_PALLET_STORAGE_OVERSIZE_WEEK] : $charge_rate * 2];
+						}
+						if ($racking > 0) {
+							$il->mdata['racking'] = [$racking, $charge_rate * 0.1];
+						}
+						$inv->mdata['new_format'] = true;
+					}
+
+					$il->fid = $r->id;
+					$il->save();
+
+					$inv->dpt_id = $dpt_id;
+					$inv->lines = [$il];
+					$inv->total = $stot;
+					if ($includingGST) {
+						$inv->gst = round($stot * 100 / 11) / 100;
+					} else {
+						$inv->gst = 0;
+					}
+					$inv->sync_xero = 0;
+					if (in_array($aid, Org::$airsea_abm)) {
+						$inv->mdata['loc'] = $locs;
+					}
+					$inv->checkPaid();
+					$inv->save();
+
+					if ($inv->total == 0) {
+						$inv->status = Invoice::INVOICE_STATUS_CACELLED;
+						$inv->save();
+					}
+				}
+				$fd = date('Y-m-d', strtotime($fd . ' +7 day'));
+			}
+		} else {
+			$errors[] = "10003-Please set up a valid charge rate for storage in in the Rate Management";
+		}
+		return $errors;
+	}
+
+	public static function getDeliveryRevenue($task, $quote, $org, $deport = "")
+	{
+		$objCTask2Invoice = FactoryTask2Invoice::Create($task, $quote, $org);
+		if ($objCTask2Invoice != null) {
+			$objCTask2Invoice->funcToInvoice($deport);
+			if ($objCTask2Invoice->funcIsEmptyErrors()) {
+				$stot = $objCTask2Invoice->getNumSubtotal();
+			}
+		}
+		return $stot;
+	}
+}
+
+
+
+
+class CTask2Invoice
+{
+	protected $objTask = null;
+	protected $objQuote = null;
+	protected $objOrg = null;
+
+
+	protected $listErrors = [];
+	protected $listItems = [];
+	protected $numSubtotal = 0;
+	protected $numQuoteType = 0;
+
+	function __construct($objTask, $objQuote, $objOrg)
+	{
+		$this->objTask = $objTask;
+		$this->objQuote = $objQuote;
+		$this->objOrg = $objOrg;
+	}
+
+	public function funcIsEmptyErrors()
+	{
+		return empty($this->listErrors);
+	}
+
+	public function getListErrors()
+	{
+		return $this->listErrors;
+	}
+
+	public function getListItems()
+	{
+		return $this->listItems;
+	}
+
+	public function getNumSubtotal()
+	{
+		return $this->numSubtotal;
+	}
+
+	public function getNumQuoteType()
+	{
+		return $this->numQuoteType;
+	}
+
+	function funcToInvoice()
+	{
+		// throw new except('please override');
+	}
+}
+
+class CTask2InvoicePalletsIn extends CTask2Invoice
+{
+	function funcToInvoice()
+	{
+		$task = $this->objTask;
+		$quote = $this->objQuote;
+		$org = $this->objOrg;
+		$owner = $org;
+
+		if ($owner->extra['wms_invoice'] != 'fix_rate') {
+			if (isset($quote->mdata[WmsOrgQuote::QUOTE_SORTING_COUNTING_CARTON]) && isset($quote->mdata[WmsOrgQuote::QUOTE_SORTING_COUNTING_UNIT]) && isset($quote->mdata[WmsOrgQuote::QUOTE_PALLET_IN])) {
+				$this->numQuoteType = WmsOrgQuote::QUOTE_PALLET_IN;
+
+				$pallets = [];
+				foreach ($task->items as $item) {
+					$pallets[$item->mdata['pl']][$item->mdata['gi']][] = $item;
+				}
+
+				foreach ($pallets as $pallet) {
+					// pallet package rule, use "pallet in" as the maximum charge
+					if (count($pallet) > 1 || $quote->mdata[WmsOrgQuote::QUOTE_PALLET_IN] == 0) {
+						foreach ($pallet as $prods) {
+							foreach ($prods as $item) {
+								$prod_packs = WmsProdPack::model()->findAll('prod_id = :prod_id AND type = :type AND qty > 1', [':prod_id' => $item->mdata['gi'], ':type' => WmsProdPack::TYPE_CARTON]);
+								$cq = 0;
+								$uq = intval($item->mdata['uq']);
+								foreach ($prod_packs as $prod_pack) {
+									$cq += floor($uq / intval($prod_pack->qty));
+									$uq = $uq % intval($prod_pack->qty);
+								}
+								// $this->numSubtotal += $cq * floatval($quote->mdata[WmsOrgQuote::QUOTE_SORTING_COUNTING_CARTON]) + $uq * floatval($quote->mdata[WmsOrgQuote::QUOTE_SORTING_COUNTING_UNIT]);
+								$numCurrentSubtotal = $cq * floatval($quote->mdata[WmsOrgQuote::QUOTE_SORTING_COUNTING_CARTON]) + $uq * floatval($quote->mdata[WmsOrgQuote::QUOTE_SORTING_COUNTING_UNIT]);
+								// less than "pallet in"
+								// if ($this->numSubtotal <= $quote->mdata[WmsOrgQuote::QUOTE_PALLET_IN]) {
+								if ($numCurrentSubtotal <= $quote->mdata[WmsOrgQuote::QUOTE_PALLET_IN]) {
+									if ($cq) {
+										$price = floatval($quote->mdata[WmsOrgQuote::QUOTE_SORTING_COUNTING_CARTON]);
+										$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Carton In Counting - ' . $item->mdata['gn'] . ' * ' . (intval($item->mdata['uq']) - $uq), $price, $cq, $cq * $price];
+										$this->numSubtotal += $cq * $price;
+									}
+									if ($uq) {
+										$price = floatval($quote->mdata[WmsOrgQuote::QUOTE_SORTING_COUNTING_UNIT]);
+										$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Unit In Counting - ' . $item->mdata['gn'] . ' * ' . $uq, $price, $uq, $uq * $price];
+										$this->numSubtotal += $uq * $price;
+									}
+								} else {
+									$price = floatval($quote->mdata[WmsOrgQuote::QUOTE_PALLET_IN]);
+									$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Counting - ' . $item->mdata['gn'] . ' * ' . intval($item->mdata['uq']), $price, 1, 1 * $price];
+									$this->numSubtotal += $price;
+								}
+							}
+						}
+					} else {
+						foreach ($pallet as $item) {
+							$this->numSubtotal += 1 * floatval($quote->mdata[WmsOrgQuote::QUOTE_PALLET_IN]);
+							$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Pallets In - ' . $item[0]->mdata['gn'], $quote->mdata[WmsOrgQuote::QUOTE_PALLET_IN], 1, 1 * floatval($quote->mdata[WmsOrgQuote::QUOTE_PALLET_IN])];
+						}
+					}
+				}
+			} else {
+				$this->listErrors[] = "10003 - Please set up a valid charge rate for Sorting & Counting in the Rate Management";
+				return;
+			}
+		} else {
+			// TODO
+			return;
+		}
+	}
+}
+
+class CTask2InvoicePickUpDelivery extends CTask2Invoice
+{
+	function funcToInvoice()
+	{
+		$task = $this->objTask;
+		$quote = $this->objQuote;
+		$org = $this->objOrg;
+		$owner = $org;
+
+		if ($owner->extra['wms_invoice'] != 'fix_rate') {
+			if (!empty($quote->mdata[WmsOrgQuote::QUOTE_MISC_PICKUP_DELIVERY_MIN_CHARGE])) {
+				$price = $quote->mdata[WmsOrgQuote::QUOTE_MISC_PICKUP_DELIVERY_MIN_CHARGE];
+				$this->numSubtotal +=  floatval($price);
+				$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Pick Up / Delivery Min Charge', $price, 1,  $price];
+			}
+		}
+	}
+}
+
+
+class CTask2InvoicePick extends CTask2Invoice
+{
+	function funcToInvoice()
+	{
+		$task = $this->objTask;
+		$quote = $this->objQuote;
+		$org = $this->objOrg;
+		$owner = $org;
+
+		if ($task->getType() == 'Pick Unit') {
+			$this->numQuoteType = WmsOrgQuote::QUOTE_PICKING_UNIT;
+		} else if ($task->getType() == 'Pick Carton') {
+			$this->numQuoteType = WmsOrgQuote::QUOTE_PICKING_CARTON;
+		}
+		if (!empty($task->mainTask->mdata['ItemsActionName']) && !empty($task->mainTask->mdata['totalItemsActionFee']) && !empty($task->mainTask->mdata['numItemsAction'])) {
+			$nameOfItemAction = $task->mainTask->mdata['ItemsActionName'];
+			$feeOfItemAction = $task->mainTask->mdata['totalItemsActionFee'];
+			$countOfItemAction = $task->mainTask->mdata['numItemsAction'];
+			$this->numSubtotal +=  floatval($feeOfItemAction);
+			$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, $nameOfItemAction, $feeOfItemAction / $countOfItemAction, intval($countOfItemAction),  $feeOfItemAction];
+		}
+		if (!empty($task->mainTask->mdata['PalletsActionName']) && !empty($task->mainTask->mdata['totalPalletsActionFee']) && !empty($task->mainTask->mdata['numPalletsAction'])) {
+			$nameOfPalletAction = $task->mainTask->mdata['PalletsActionName'];
+			$feeOfPalletAction = $task->mainTask->mdata['totalPalletsActionFee'];
+			$countOfPalletAction = $task->mainTask->mdata['numPalletsAction'];
+			$this->numSubtotal +=  floatval($feeOfPalletAction);
+			$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, $nameOfPalletAction, $feeOfPalletAction / $countOfPalletAction, intval($countOfPalletAction),  $feeOfPalletAction];
+		}
+		if ($owner->extra['wms_invoice'] != 'fix_rate') {
+			if (!empty($quote->mdata[WmsOrgQuote::QUOTE_PICKING_CHARGECODE])) {
+				$chargecode = WmsChargeCode::model()->find('chargecode = :c', [':c' => $quote->mdata[WmsOrgQuote::QUOTE_PICKING_CHARGECODE]]);
+				if (empty($chargecode)) {
+					$this->listErrors[] = "10003 - Picking chargecode is invalid";
+					return;
+				}
+
+				foreach ($task->items as $item) {
+					$stock = WmsStock::model()->findByPk($item->mdata['si']);
+					$weight = 0;
+					$pack = WmsProdPack::model()->find('prod_id = :prod_id AND type = :type AND qty = 1', [':prod_id' => $stock->prod_id, ':type' => WmsProdPack::TYPE_CARTON]);
+					if (!empty($pack)) {
+						$weight = $pack->weight;
+					} else {
+						// $weight = $stock->prod->weight;
+						$weight = $stock->prod->weight / 1000;
+					}
+					$amt = $chargecode->getChargeValue($weight);
+					$this->numSubtotal += floatval($amt) * intval($item->mdata['uq']);
+					$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Pick ' . $stock->prod->name . ' - ' . $weight . 'kg', $amt, intval($item->mdata['uq']), floatval($amt) * intval($item->mdata['uq'])];
+				}
+			} else if (!empty($quote->mdata[WmsOrgQuote::QUOTE_PICKING_SKU_BASE]) && isset($quote->mdata[WmsOrgQuote::QUOTE_PICKING_SKU_PER])) {
+				// base + extra (>= 2)
+
+				$prods = [];
+				foreach ($task->items as $item) {
+					$stock = WmsStock::model()->findByPk($item->mdata['si']);
+					if (empty($prods[$stock->prod_id])) {
+						$prods[$stock->prod_id] = $stock->prod->name;
+					}
+				}
+
+				$amt = floatval($quote->mdata[WmsOrgQuote::QUOTE_PICKING_SKU_BASE]) + (sizeof($prods) - 1) * floatval($quote->mdata[WmsOrgQuote::QUOTE_PICKING_SKU_PER]);
+				$this->numSubtotal += $amt;
+				$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Pick ' . sizeof($prods) . ' SKU', $amt, 1, $amt];
+			} else if (!empty($quote->mdata[WmsOrgQuote::QUOTE_PICKING_UNIT]) || !empty($quote->mdata[WmsOrgQuote::QUOTE_PICKING_CARTON])) {
+
+				// one stock pick from two location
+				$prods = [];
+				foreach ($task->items as $item) {
+					if (empty($prods[$item->mdata['si']])) {
+						$prods[$item->mdata['si']] = ['uq' => 0, 'sn' => $item->mdata['sn']];
+					}
+					$prods[$item->mdata['si']]['uq'] += intval($item->mdata['uq']);
+				}
+
+				foreach ($prods as $si => $item) {
+					$sn = $item['sn'];
+					$stock = WmsStock::model()->findByPk($si);
+
+					$plt_pack = WmsProdPack::model()->find(['condition' => 'prod_id = :prod_id AND type = :type AND qty > 1', 'params' => [':prod_id' => $stock->prod_id, ':type' => array_search('Pallet', WmsProdPack::$types)]]);
+					$pq = 0;
+					$uq = intval($item['uq']);
+					if (!empty($plt_pack)) {
+						$pq += floor($uq / intval($plt_pack->qty));
+						$uq = $uq % intval($plt_pack->qty);
+					}
+					if ($pq) {
+						$price = floatval($quote->mdata[WmsOrgQuote::QUOTE_PICKING_PALLET]);
+						$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Pick Pallet - ' . $sn . ' * ' . (intval($item['uq']) - $uq), $price, $pq, $pq * $price];
+					}
+
+					$cq = 0;
+					if (!empty($quote->mdata[WmsOrgQuote::QUOTE_PICKING_CARTON]) && preg_match('/^[S|R]/', $task->mainTask->ref)) {
+						$prod_packs = WmsProdPack::model()->findAll(['condition' => 'prod_id = :prod_id AND type = :type AND qty > 1', 'params' => [':prod_id' => $stock->prod_id, ':type' => WmsProdPack::TYPE_CARTON], 'order' => 'qty DESC']);
+						foreach ($prod_packs as $prod_pack) {
+							$cq += floor($uq / intval($prod_pack->qty));
+							$uq = $uq % intval($prod_pack->qty);
+						}
+					}
+					if ($cq) {
+						$price = floatval($quote->mdata[WmsOrgQuote::QUOTE_PICKING_CARTON]);
+						$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Pick Carton - ' . $sn . ' * ' . (intval($item['uq']) - $uq), $price, $cq, $cq * $price];
+					}
+
+					$bq = 0;
+					if (!empty($quote->mdata[WmsOrgQuote::QUOTE_PICKING_BAG])) {
+						$prod_packs = WmsProdPack::model()->findAll(['condition' => 'prod_id = :prod_id AND type = :type AND qty > 1', 'params' => [':prod_id' => $stock->prod_id, ':type' => WmsProdPack::TYPE_BAG], 'order' => 'qty DESC']);
+						foreach ($prod_packs as $prod_pack) {
+							$bq += floor($uq / intval($prod_pack->qty));
+							$uq = $uq % intval($prod_pack->qty);
+						}
+					}
+					if ($bq) {
+						$price = floatval($quote->mdata[WmsOrgQuote::QUOTE_PICKING_BAG]);
+						$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Pick Bag - ' . $sn . ' * ' . (intval($item['uq']) - $uq), $price, $bq, $bq * $price];
+					}
+
+					if ($uq && floatval($quote->mdata[WmsOrgQuote::QUOTE_PICKING_UNIT])) {
+						$price = floatval($quote->mdata[WmsOrgQuote::QUOTE_PICKING_UNIT]);
+						$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Pick Unit - ' . $stock->prod->name . ' * ' . $uq, $price, $uq, $uq * $price];
+					}
+					$this->numSubtotal += $pq * floatval($quote->mdata[WmsOrgQuote::QUOTE_PICKING_PALLET]) + $cq * floatval($quote->mdata[WmsOrgQuote::QUOTE_PICKING_CARTON]) + $uq * floatval($quote->mdata[WmsOrgQuote::QUOTE_PICKING_UNIT]);
+				}
+			} else {
+				$this->listErrors[] = "10003 - Please set up a valid charge rate for Picking / Unit and Picking / Carton in the Rate Management";
+				return;
+			}
+
+			$creator = User::model()->findByPk(Log::model()->getWmsTaskCreateUserID($task->mainTask->id));
+			if (!empty($creator) && $creator->org_id != $task->job->org_id && !empty($quote->mdata[WmsOrgQuote::QUOTE_PICKING_MANUAL_ORDER])) {
+				$this->numSubtotal += 1 * floatval($quote->mdata[WmsOrgQuote::QUOTE_PICKING_MANUAL_ORDER]);
+				$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Pick Manual Entry Fee * 1', $quote->mdata[WmsOrgQuote::QUOTE_PICKING_MANUAL_ORDER], 1, 1 * floatval($quote->mdata[WmsOrgQuote::QUOTE_PICKING_MANUAL_ORDER])];
+			}
+
+			if (!empty($quote->mdata[WmsOrgQuote::QUOTE_PICKING_ORDER])) {
+				$this->numSubtotal += 1 * floatval($quote->mdata[WmsOrgQuote::QUOTE_PICKING_ORDER]);
+				$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Pick Standard Fee * 1', $quote->mdata[WmsOrgQuote::QUOTE_PICKING_ORDER], 1, 1 * floatval($quote->mdata[WmsOrgQuote::QUOTE_PICKING_ORDER])];
+			}
+		} else {
+			// TODO
+			return;
+		}
+	}
+}
+
+
+
+class CTask2InvoicePack extends CTask2Invoice
+{
+	function funcToInvoice()
+	{
+		$task = $this->objTask;
+		$quote = $this->objQuote;
+		$org = $this->objOrg;
+		$owner = $org;
+
+
+		if ($owner->extra['wms_invoice'] != 'fix_rate') {
+			// Charge by parcel
+			if (!empty($quote->mdata[WmsOrgQuote::QUOTE_PACKING_ORDER_STATUS])) {
+				if (isset($quote->mdata[WmsOrgQuote::QUOTE_PACKING_ORDER])) {
+					$this->numQuoteType = WmsOrgQuote::QUOTE_PACKING_ORDER;
+					if (!empty($task->mdata['pkg'])) {
+						if (!empty(json_decode($task->mdata['pkg'], true))) {
+							$quantity = count(json_decode($task->mdata['pkg'], true));
+						} else {
+							$quantity = 0;
+						}
+						$this->numSubtotal += $quantity * floatval($quote->mdata[WmsOrgQuote::QUOTE_PACKING_ORDER]);
+						$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Fulfill Order - Standard fee', $quote->mdata[WmsOrgQuote::QUOTE_PACKING_ORDER], $quantity, $quantity * floatval($quote->mdata[WmsOrgQuote::QUOTE_PACKING_ORDER])];
+					}
+				} else {
+					$this->listErrors[] = "10003 - Please set up a valid charge rate for Standard Packing / Parcel in the Rate Management";
+					return;
+				}
+			}
+
+			//pack chargecode
+			if (isset($quote->mdata[WmsOrgQuote::QUOTE_PACKING_CHARGECODE]) && !empty($quote->mdata[WmsOrgQuote::QUOTE_PACKING_CHARGECODE])) {
+				$chargecode = WmsChargeCode::model()->find('chargecode = :c', [':c' => $quote->mdata[WmsOrgQuote::QUOTE_PACKING_CHARGECODE]]);
+				if (empty($chargecode)) {
+					$this->listErrors[] = "10003 - Picking chargecode is invalid";
+					return;
+				}
+
+				$this->numQuoteType = WmsOrgQuote::QUOTE_PACKING_ORDER;
+				$pick_task = WmsTask::model()->find('link_id = :link_id AND type in (3020, 3030)', [
+					':link_id' => $task->mainTask->id,
+				]);
+				if (empty($pick_task)) {
+					return;
+				}
+
+				//@@chargepackfee
+				if ($task->isNeedChargePackFee()) {
+					foreach ($pick_task->items as $item) {
+						$stock = WmsStock::model()->findByPk($item->mdata['si']);
+						$weight = 0;
+						$pack = WmsProdPack::model()->find('prod_id = :prod_id AND type = :type AND qty = 1', [':prod_id' => $stock->prod_id, ':type' => WmsProdPack::TYPE_CARTON]);
+						if (!empty($pack)) {
+							$weight = $pack->weight;
+						} else {
+							$weight = $stock->prod->weight / 1000;
+						}
+						$amt = $chargecode->getChargeValue($weight);
+						$this->numSubtotal += floatval($amt) * intval($item->mdata['uq']);
+						$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Pack ' . $stock->prod->name . ' - ' . $weight . 'kg', $amt, intval($item->mdata['uq']), floatval($amt) * intval($item->mdata['uq'])];
+					}
+				}
+			}
+			// Charge by unit
+			else if (isset($quote->mdata[WmsOrgQuote::QUOTE_PACKING_UNIT])) {
+				$this->numQuoteType = WmsOrgQuote::QUOTE_PACKING_ORDER;
+				$pick_task = WmsTask::model()->find('link_id = :link_id AND type in (3020, 3030)', [
+					':link_id' => $task->mainTask->id,
+				]);
+				if (empty($pick_task)) {
+					return;
+				}
+
+				// one stock pick from two location
+				$prods = [];
+				foreach ($pick_task->items as $item) {
+					if (empty($prods[$item->mdata['si']])) {
+						$prods[$item->mdata['si']] = ['uq' => 0, 'sn' => $item->mdata['sn']];
+					}
+					$prods[$item->mdata['si']]['uq'] += intval($item->mdata['uq']);
+				}
+
+				//@@chargepackfee
+				if ($task->isNeedChargePackFee()) {
+					foreach ($prods as $si => $item) {
+						$sn = $item['sn'];
+						$stock = WmsStock::model()->findByPk($si);
+						$prod_packs = WmsProdPack::model()->findAll(['condition' => 'prod_id = :prod_id AND type = :type AND qty > 1', 'params' => [':prod_id' => $stock->prod_id, ':type' => WmsProdPack::TYPE_CARTON], 'order' => 'qty DESC']);
+						$cq = 0;
+						$uq = intval($item['uq']);
+						foreach ($prod_packs as $prod_pack) {
+							$cq += floor($uq / intval($prod_pack->qty));
+							$uq = $uq % intval($prod_pack->qty);
+						}
+						$this->numSubtotal += $uq * floatval($quote->mdata[WmsOrgQuote::QUOTE_PACKING_UNIT]);
+						if ($uq && floatval($quote->mdata[WmsOrgQuote::QUOTE_PACKING_UNIT])) {
+							$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Fulfill Order - ' . $sn, floatval($quote->mdata[WmsOrgQuote::QUOTE_PACKING_UNIT]), $uq, $uq * floatval($quote->mdata[WmsOrgQuote::QUOTE_PACKING_UNIT])];
+						}
+					}
+				}
+			} else {
+				// $errors[] = "10003 - Please set up a valid charge rate for Packing / Unit in the Rate Management";
+				// continue;
+			}
+
+			if (!empty($quote->mdata[WmsOrgQuote::QUOTE_PACKING_ORDER_EXTRA])) {
+				$this->numQuoteType = WmsOrgQuote::QUOTE_PACKING_ORDER;
+				if (!empty($task->mdata['pkg'])) {
+					$pkgs = json_decode($task->mdata['pkg']);
+
+					$quantity = 0;
+					foreach ($pkgs as $pkg) {
+						if (explode(' ', $pkg->nt)[0] == '是') {
+							$quantity++;
+						}
+					}
+					$this->numSubtotal += $quantity * floatval($quote->mdata[WmsOrgQuote::QUOTE_PACKING_ORDER_EXTRA]);
+					if ($quantity) {
+						$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Fulfill Order - Comsumable Materials', floatval($quote->mdata[WmsOrgQuote::QUOTE_PACKING_ORDER_EXTRA]), $quantity, $quantity * floatval($quote->mdata[WmsOrgQuote::QUOTE_PACKING_ORDER_EXTRA])];
+					}
+				}
+			}
+
+			// insert fleets
+			if (!empty($quote->mdata[WmsOrgQuote::QUOTE_PACKING_INSERT])) {
+				$this->numSubtotal += floatval($quote->mdata[WmsOrgQuote::QUOTE_PACKING_INSERT]);
+				$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Fulfill Order - Insert Packing List, Inovice, etc.', floatval($quote->mdata[WmsOrgQuote::QUOTE_PACKING_INSERT]), 1, floatval($quote->mdata[WmsOrgQuote::QUOTE_PACKING_INSERT])];
+			}
+
+			// delivery label
+			if (!empty($quote->mdata[WmsOrgQuote::QUOTE_PACKING_DELIVERY_LABEL]) && !empty($task->mainTask->deliveryTask)) {
+				$qty = 0;
+				foreach ($task->mainTask->actionTask->items as $item) {
+					$qty += intval($item->mdata['uq']);
+				}
+				$this->numSubtotal += floatval($quote->mdata[WmsOrgQuote::QUOTE_PACKING_DELIVERY_LABEL]) * $qty;
+				$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Fulfill Order - Labels', floatval($quote->mdata[WmsOrgQuote::QUOTE_PACKING_DELIVERY_LABEL]), $qty, floatval($quote->mdata[WmsOrgQuote::QUOTE_PACKING_DELIVERY_LABEL])];
+			}
+		} else {
+			// TODO
+			$this->numSubtotal = 0;
+			$this->listItems = [];
+			if (!empty($task->mdata['pkg'])) {
+				$pkgs = json_decode($task->mdata['pkg'], true);
+
+				$pk_fee = 0;
+				foreach ($pkgs as $pkg) {
+					if ($pkg['wt'] < 1) {
+						$pk_fee += 0.6;
+					} else if ($pkg['wt'] >= 1 && $pkg['wt'] < 3) {
+						$pk_fee += 0.75;
+					} else if ($pkg['wt'] >= 3 && $pkg['wt'] < 5) {
+						$pk_fee += 0.95;
+					} else if ($pkg['wt'] >= 5) {
+						$pk_fee += 0.9;
+					}
+				}
+				$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Fulfill Order - Standard fee', $pk_fee, 1, $pk_fee];
+				$this->numSubtotal += $pk_fee;
+
+				$wrapper_fee = 0;
+				foreach ($pkgs as $pkg) {
+					if ($pkg['wt'] < 1) {
+						$wrapper_fee += 0.3;
+					} else if ($pkg['wt'] >= 1 && $pkg['wt'] < 3) {
+						$wrapper_fee += 0.5;
+					} else if ($pkg['wt'] >= 3 && $pkg['wt'] < 5) {
+						$wrapper_fee += 0.5;
+					} else if ($pkg['wt'] >= 5) {
+						$wrapper_fee += 0.8;
+					}
+				}
+				$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Fulfill Order - Comsumable fee', $wrapper_fee, 1, $wrapper_fee];
+				$this->numSubtotal += $pk_fee;
+			}
+		}
+	}
+}
+
+class CTask2InvoiceDelivery extends CTask2Invoice
+{
+	function funcToInvoice($deport = "")
+	{
+		$task = $this->objTask;
+		$quote = $this->objQuote;
+		$org = $this->objOrg;
+
+		$criteria = new CDbCriteria();
+		$criteria->compare('id', $task->mdata['shipment_id']);
+		$criteria->addCondition('status != 100');
+		$shipments = Shipment::model()->findAll($criteria);
+		foreach ($shipments as $k => $shipment) {
+			if ($shipment->status == ImParcel::STATE_CANCELLED) unset($shipments[$k]);
+		}
+		// $quote_type = 0;
+		$this->numQuoteType = 0;
+
+		$weight = [];
+
+		// if (!empty($quote->mdata[WmsOrgQuote::QUOTE_COURIER_CHARGECODE])) {
+		if ($deport != "") {
+			$numCourierChargeCode = $this->funcCourierChargeCode($deport);
+		} else {
+			$numCourierChargeCode = $this->funcCourierChargeCode();
+		}
+
+		$cc = ImportChargeCode::model()->find('chargecode = :chargecode AND status = 1', [':chargecode' => $numCourierChargeCode]);
+
+		if (empty($cc)) {
+			$this->listErrors[] = "10003 - Neither a valid import chargecode for this org or a standard import chargecode is available";
+			return;
+		}
+
+
+		//Author:Nero Date:2021/7/13 Description: if numCbm>numWeight then numCbm;
+		if (!empty($org->extra['weight_adjust']) && sizeof($shipments) == 1) {
+			$eWeight = 0.2;
+			$numWeight = 0;
+
+			if ($task->mdata['courier'] == Org::ORGID_COURIER_FASTWAY || $task->mdata['courier'] == Org::ORGID_COURIER_AUPOST || $task->mdata['courier'] == Org::ORGID_COURIER_UBI_AP ||  $task->mdata['courier'] == Org::ORGID_COURIER_AUPOST_EXPRESS) {
+				foreach ($task->mainTask->items as $item) {
+					if (empty($item->mdata['si'])) continue;
+					$stock = WmsStock::model()->findByPk($item->mdata['si']);
+					$numWeight = floatval(@$stock->prod->weight) / 1000 * intval($item->mdata['uq']);
+					$eWeight += $numWeight;
+				}
+			} else {
+				$numCbm = 0;
+				foreach ($task->mainTask->items as $item) {
+					if (empty($item->mdata['si'])) continue;
+					$stock = WmsStock::model()->findByPk($item->mdata['si']);
+					$numCbm = (floatval(@$stock->prod->cbm) / 1000000) * 250 * intval($item->mdata['uq']);
+					$numWeight = floatval(@$stock->prod->weight) / 1000 * intval($item->mdata['uq']);
+					if ($numWeight >= $numCbm) {
+						$eWeight += $numWeight;
+					} else {
+						$eWeight += $numCbm;
+					}
+				}
+			}
+
+			if ($eWeight > $shipments[0]->weight) {
+				$shipments[0]->weight = $eWeight;
+				$shipments[0]->update('weight');
+
+				if (!empty($task->mainTask->packTask->mdata['pkg']) && sizeof(json_decode($task->mainTask->packTask->mdata['pkg'], true)) == 1) {
+					$pkg = json_decode($task->mainTask->packTask->mdata['pkg'], true)[0];
+					$pkg['wt'] = $eWeight;
+					$task->mainTask->packTask->mdata['pkg'] = json_encode([$pkg]);
+					$task->mainTask->packTask->update('meta');
+				}
+			}
+		}
+
+
+		foreach ($shipments as $shipment) {
+			$chargecode = $cc->chargecode;
+
+
+			if ($task->mdata['cnee']['country'] != 'AU') {
+				// international, first read chargecode, then read sendle cost
+				if (!empty($quote->mdata[WmsOrgQuote::QUOTE_INTERNATIONAL_CHARGECODE]) && $task->mdata['courier'] != Org::ORGID_COURIER_SENDLE) {
+					$chargecode = $quote->mdata[WmsOrgQuote::QUOTE_INTERNATIONAL_CHARGECODE];
+					$cost = $task->getChargeByChargecodeInternational($shipment->weight, $shipment->cnee->country, $chargecode);
+				} else if (!empty($shipment->trans[sizeof($shipment->trans) - 1]->cost) && !empty($quote->mdata[WmsOrgQuote::QUOTE_SENDLE_CHARGE])) {
+					$cost = $shipment->trans[sizeof($shipment->trans) - 1]->cost + $quote->mdata[WmsOrgQuote::QUOTE_SENDLE_CHARGE];
+				} else {
+					$this->listErrors[] = "10003 - Please set up a valid International Charge Rate for Delivery in the Rate Management " . $task->mainTask->id;
+					continue;
+				}
+			} else if (preg_match('/' . $task->getNo() . '/i', $shipment->ref)) {
+				// letter
+				if (!empty($quote->mdata[WmsOrgQuote::QUOTE_LETTER_CHARGECODE])) {
+					$chargecode = $quote->mdata[WmsOrgQuote::QUOTE_LETTER_CHARGECODE];
+					$cost = $task->getChargeByChargecode($shipment->weight, $shipment->postcode, $chargecode);
+				} else {
+					$this->listErrors[] = "10003 - Please set up a valid Letter Charge Rate for Delivery in the Rate Management " . $task->mainTask->id;
+					continue;
+				}
+			} else {
+				// aupost charge by weight of each pkg, other charge by total weight
+				if ($task->mdata['shipment_courier_id'] == 101 or $task->mdata['shipment_courier_id'] == 3958) {
+					$cost = $task->getChargeByChargecode($shipment->weight, $shipment->postcode, $chargecode, true);
+				} else {
+					$cost = $task->getChargeByChargecode($shipment->weight, $shipment->postcode, $chargecode);
+				}
+			}
+			if ($cost) {
+				$this->numSubtotal += $cost;
+				$weight[] = $shipment->weight;
+			} else {
+				$this->listErrors[] = "10003 - Courier Chargecode do not cover postcode for " . $task->mainTask->id;
+				continue;
+			}
+		}
+
+		$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, $task->getType() . ' ' . $task->getCourierShortName() . ' ' . $this->objTask->mdata['cnee']['postcode'] . ' - ' . implode('kg, ', $weight) . 'kg', $this->numSubtotal, 1, 1 *  $this->numSubtotal];
+		if(($task->mdata['courier'] == Org::ORGID_COURIER_AUPOST || $task->mdata['courier'] == Org::ORGID_COURIER_UBI_AP)){
+			$numFuelRate = ImportsSystemFuel::getThisMonthFuel($task->mainTask->compl_time,4);
+			$disasterCost = $cost*$numFuelRate;
+			$this->listItems[] = [$task->getNo(), ucwords($task->mainTask->ref), empty($task->mainTask->compl_time) ? $task->compl_time : $task->mainTask->compl_time, 'Exrt Fuel Charge', $disasterCost, 1, $disasterCost];
+			$this->numSubtotal += $disasterCost;
+		}
+
+		// overwrite , if there are surcharges
+		$this->funcSurcharge();
+	}
+
+	// overwrite , if there are surcharges
+	function funcSurcharge()
+	{
+	}
+
+	function funcCourierChargeCode($deport = "")
+	{
+		$numCourierChargeCode = null;
+		if ($deport != "") {
+			$dpt_id = $deport;
+		} else {
+			$dpt_id = $this->objTask->dpt_id;
+		}
+
+		switch ($this->objTask->mdata['courier']) {
+			case Org::ORGID_COURIER_AUPOST:
+				if ($dpt_id == Org::TLA_DEPARTMENT_SYDNEY) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_CHARGECODE_AUPOSR];
+				} else if ($dpt_id == Org::TLA_DEPARTMENT_MELBOURNE) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_MEL_CHARGECODE_AUPOSR];
+				} else if ($dpt_id == Org::TLA_DEPARTMENT_BRISBANE) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_BNE_CHARGECODE_AUPOSR];
+				}
+				break;
+			case Org::ORGID_COURIER_TNT:
+				if ($dpt_id == Org::TLA_DEPARTMENT_SYDNEY) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_CHARGECODE_TNT];
+				} else if ($dpt_id == Org::TLA_DEPARTMENT_MELBOURNE) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_MEL_CHARGECODE_TNT];
+				} else if ($dpt_id == Org::TLA_DEPARTMENT_BRISBANE) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_BNE_CHARGECODE_TNT];
+				}
+
+				break;
+			case Org::ORGID_COURIER_SF:
+				if ($dpt_id == Org::TLA_DEPARTMENT_SYDNEY) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_CHARGECODE_SF];
+				} else if ($dpt_id == Org::TLA_DEPARTMENT_MELBOURNE) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_MEL_CHARGECODE_SF];
+				} else if ($dpt_id == Org::TLA_DEPARTMENT_BRISBANE) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_BNE_CHARGECODE_SF];
+				}
+
+				break;
+			case Org::ORGID_COURIER_EIZ_TOLL:
+				if ($dpt_id == Org::TLA_DEPARTMENT_SYDNEY) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_CHARGECODE_ETOLL];
+				} else if ($dpt_id == Org::TLA_DEPARTMENT_MELBOURNE) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_MEL_CHARGECODE_ETOLL];
+				} else if ($dpt_id == Org::TLA_DEPARTMENT_BRISBANE) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_BNE_CHARGECODE_ETOLL];
+				}
+
+				break;
+				//Only for 3PL courier use 
+			case Org::ORGID_COURIER_EIZ_ALLIED:
+				if ($dpt_id == Org::TLA_DEPARTMENT_SYDNEY) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_CHARGECODE_EALLIED];
+				} else if ($dpt_id == Org::TLA_DEPARTMENT_MELBOURNE) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_MEL_CHARGECODE_EALLIED];
+				} else if ($dpt_id == Org::TLA_DEPARTMENT_BRISBANE) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_BNE_CHARGECODE_EALLIED];
+				}
+
+				break;
+			case Org::ORGID_COURIER_UBI_TOLL:
+				if ($dpt_id == Org::TLA_DEPARTMENT_SYDNEY) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_CHARGECODE_UTOLL];
+				} else if ($dpt_id == Org::TLA_DEPARTMENT_MELBOURNE) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_MEL_CHARGECODE_UTOLL];
+				} else if ($dpt_id == Org::TLA_DEPARTMENT_BRISBANE) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_BNE_CHARGECODE_UTOLL];
+				}
+
+				break;
+			case Org::ORGID_COURIER_UBI_AP:
+				if ($dpt_id == Org::TLA_DEPARTMENT_SYDNEY) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_CHARGECODE_UAP];
+				} else if ($dpt_id == Org::TLA_DEPARTMENT_MELBOURNE) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_MEL_CHARGECODE_UAP];
+				} else if ($dpt_id == Org::TLA_DEPARTMENT_BRISBANE) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_BNE_CHARGECODE_UAP];
+				}
+
+				break;
+			case Org::ORGID_COURIER_TLA:
+				if ($dpt_id == Org::TLA_DEPARTMENT_SYDNEY) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_CHARGECODE_TLACARGO];
+				} else if ($dpt_id == Org::TLA_DEPARTMENT_MELBOURNE) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_MEL_CHARGECODE_TLACARGO];
+				} else if ($dpt_id == Org::TLA_DEPARTMENT_BRISBANE) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_BNE_CHARGECODE_TLACARGO];
+				}
+
+				break;
+			case Org::ORGID_COURIER_FASTWAY:
+				if ($dpt_id == Org::TLA_DEPARTMENT_SYDNEY) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_CHARGECODE_FASTWAY];
+				} else if ($dpt_id == Org::TLA_DEPARTMENT_MELBOURNE) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_MEL_CHARGECODE_FASTWAY];
+				} else if ($dpt_id == Org::TLA_DEPARTMENT_BRISBANE) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_BNE_CHARGECODE_FASTWAY];
+				}
+
+				break;
+			case Org::ORGID_COURIER_BORDER:
+				if ($dpt_id == Org::TLA_DEPARTMENT_SYDNEY) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_CHARGECODE_BORDER];
+				} else if ($dpt_id == Org::TLA_DEPARTMENT_MELBOURNE) {
+					//$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_MEL_CHARGECODE_FASTWAY];
+				} else if ($dpt_id == Org::TLA_DEPARTMENT_BRISBANE) {
+					//$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_BNE_CHARGECODE_FASTWAY];
+				}
+			case Org::ORGID_COURIER_TOLL_IPEC:
+				if ($dpt_id == Org::TLA_DEPARTMENT_SYDNEY) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_CHARGECODE_MYTOLL];
+				} else if ($dpt_id == Org::TLA_DEPARTMENT_MELBOURNE) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_MEL_CHARGECODE_MYTOLL];
+				} else if ($dpt_id == Org::TLA_DEPARTMENT_BRISBANE) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_BNE_CHARGECODE_MYTOLL];
+				}
+				break;
+			case Org::ORGID_COURIER_AUPOST_EXPRESS:
+				if ($dpt_id == Org::TLA_DEPARTMENT_SYDNEY) {
+					$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_CHARGECODE_AUPOST_EXPRESS];
+				}
+				break;
+		}
+		if (empty($numCourierChargeCode)) {
+			if ($dpt_id == Org::TLA_DEPARTMENT_SYDNEY) {
+				$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_CHARGECODE];
+			} else if ($dpt_id == Org::TLA_DEPARTMENT_MELBOURNE) {
+				$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_MEL_CHARGECODE];
+			} else if ($dpt_id == Org::TLA_DEPARTMENT_BRISBANE) {
+				$numCourierChargeCode = $this->objQuote->mdata[WmsOrgQuote::QUOTE_COURIER_BNE_CHARGECODE];
+			}
+		}
+		return $numCourierChargeCode;
+	}
+}
+
+
+class CTask2InvoiceDeliveryTNT extends CTask2InvoiceDelivery
+{
+	// overwrite , TNT surcharge 
+	function funcSurcharge()
+	{
+		// remote
+		$remote = 0;
+		if (empty($tnt_remote)) $tnt_remote = json_decode(file_get_contents(Yii::app()->basePath . DIRECTORY_SEPARATOR . 'data' . DIRECTORY_SEPARATOR . 'tnt_remote.json'), true);
+		if (!empty($tnt_remote[$this->objTask->mdata['cnee']['state']][$this->objTask->mdata['cnee']['postcode']]) && in_array($this->objTask->mdata['cnee']['suburb'], $tnt_remote[$this->objTask->mdata['cnee']['state']][$this->objTask->mdata['cnee']['postcode']])) {
+			$remote += 1;
+		}
+
+		// WA
+		$wa = false;
+		if (!empty($this->objTask->mdata['cnee']['state']) && $this->objTask->mdata['cnee']['state'] == 'WA') {
+			$wa = true;
+		}
+
+		if (!empty($wa)) {
+			$this->listItems[] = [$this->objTask->getNo(), ucwords($this->objTask->mainTask->ref), empty($this->objTask->mainTask->compl_time) ? $this->objTask->compl_time : $this->objTask->mainTask->compl_time, 'West Australia 10% surcharge', number_format($this->numSubtotal * 0.1, 2, '.', ''), 1, number_format($this->numSubtotal * 0.1, 2, '.', '')];
+			$this->numSubtotal += number_format($this->numSubtotal * 0.1, 2, '.', '');
+		}
+
+		if (!empty($remote)) {
+			$this->listItems[] = [$this->objTask->getNo(), ucwords($this->objTask->mainTask->ref), empty($this->objTask->mainTask->compl_time) ? $this->objTask->compl_time : $this->objTask->mainTask->compl_time, 'Remote Fee', 30, $remote, $remote * 30];
+			$this->numSubtotal += $remote * 30;
+		}
+
+
+		$listOversize = [ //cm , From<=x<To
+			20 => [150, 200],
+			40 => [200, 300],
+			50 => [300, 400],
+			250 => [400, 500],
+			450 => [500, 600],
+			600 => [600, 99999999],
+		];
+
+		$strPackage = $this->objTask->mainTask->packTask->mdata['pkg'];
+		if (!empty($strPackage)) {
+			//check 
+			foreach (json_decode($strPackage, true) as $pkg) {
+				if (in_array(null, [$pkg['wt'], $pkg['w'], $pkg['h'], $pkg['d']])) {
+					$this->listErrors[] = "pack task have no DIM(cm) " . $this->objTask->mainTask->id;
+					return;
+				}
+			}
+
+			foreach (json_decode($strPackage, true) as $pkg) {
+				// oversize fee
+				$numOversizeSurcharge = 0;
+				$numlengthMax =  max($pkg['w'], $pkg['h'], $pkg['d']);
+				foreach ($listOversize as $numPrice => $listRange) {
+					$numFrom = $listRange[0];
+					$numTo = $listRange[1];
+					if ($numlengthMax >= $numFrom && $numlengthMax < $numTo) {
+						$numOversizeSurcharge = $numPrice;
+					}
+				}
+
+				if ($numOversizeSurcharge > 0) {
+					$this->listItems[] = [
+						$this->objTask->getNo(),
+						ucwords($this->objTask->mainTask->ref),
+						empty($this->objTask->mainTask->compl_time) ? $this->objTask->compl_time : $this->objTask->mainTask->compl_time,
+						'Oversize Fee - ' . $pkg['wt'] . 'KG ' . $pkg['w'] . 'x' . $pkg['h'] . 'x' . $pkg['d'] . 'cm',
+						$numOversizeSurcharge,
+						1,
+						$numOversizeSurcharge
+					];
+					$this->numSubtotal += $numOversizeSurcharge;
+				}
+
+				// manual handling fee
+				$numManualHandlingSurcharge = 0;
+				if ($pkg['d'] < 20 || $pkg['d'] > 120) {
+					$numManualHandlingSurcharge = 15;
+				} else if ($pkg['w'] < 10 || $pkg['w'] > 60) {
+					$numManualHandlingSurcharge = 15;
+				} else if ($pkg['h'] < 1.5 || $pkg['h'] > 120) {
+					$numManualHandlingSurcharge = 15;
+				} else if ($pkg['wt'] < 0.25 || $pkg['wt'] > 30) {
+					$numManualHandlingSurcharge = 15;
+				}
+				if ($numManualHandlingSurcharge > 0) {
+					$this->listItems[] = [
+						$this->objTask->getNo(),
+						ucwords($this->objTask->mainTask->ref),
+						empty($this->objTask->mainTask->compl_time) ? $this->objTask->compl_time : $this->objTask->mainTask->compl_time,
+						'Manual Handling Fee - ' . $pkg['wt'] . 'KG ' . $pkg['w'] . 'x' . $pkg['h'] . 'x' . $pkg['d'] . 'cm',
+						$numManualHandlingSurcharge,
+						1,
+						$numManualHandlingSurcharge
+					];
+					$this->numSubtotal += $numManualHandlingSurcharge;
+				}
+			}
+		}
+	}
+}
+
+class CTask2InvoiceDeliveryEizAllied extends CTask2InvoiceDelivery
+{
+	// overwrite , Eiz Toll surcharge 
+	function funcSurcharge()
+	{
+
+		$listlengthLimit = [ //m
+			5.4 => [1.2, 2.39],
+			11.93 => [2.4, 3.59],
+			25.40 => [3.6, 4.19],
+			//450=>[4,9999],
+		];
+		$listDeadWeightLimit = [ //KG
+			6.95 => [0, 23],
+			13.50 => [23, 56],
+			47 => [56, 90],
+			92 => [90, 9999]
+		];
+		$listCubicWeightLimit = [
+			6.95 => [0, 23],
+			13.50 => [23, 56],
+			47 => [56, 135],
+			92 => [135, 9999]
+		];
+
+		$strPackage = $this->objTask->mainTask->packTask->mdata['pkg'];
+		if (!empty($strPackage)) {
+			//check 
+			foreach (json_decode($strPackage, true) as $pkg) {
+				if (in_array(null, [$pkg['wt'], $pkg['w'], $pkg['h'], $pkg['d']])) {
+					$this->listErrors[] = "pack task have no DIM(cm) " . $this->objTask->mainTask->id;
+					return;
+				}
+			}
+
+			foreach (json_decode($strPackage, true) as $pkg) {
+				$numlengthSurcharge = 0;
+				$numlengthMax =  max($pkg['w'], $pkg['h'], $pkg['d']) / 100; //cm to m
+				foreach ($listlengthLimit as $numPrice => $listRange) {
+					$numFrom = $listRange[0];
+					$numTo = $listRange[1];
+					if ($numlengthMax >= $numFrom && $numlengthMax < $numTo) {
+						$numlengthSurcharge = $numPrice;
+					}
+				}
+
+				$numDeadWeightSurcharge = 0;
+				$numDeadWeight =  $pkg['wt'];
+				foreach ($listDeadWeightLimit as $numPrice => $listRange) {
+					$numFrom = $listRange[0];
+					$numTo = $listRange[1];
+					if ($numDeadWeight >= $numFrom && $numDeadWeight < $numTo) {
+						$numDeadWeightSurcharge = $numPrice;
+					}
+				}
+
+				$numCubicWeightSurcharge = 0;
+				$numCubicWeight =  $pkg['w'] * $pkg['h'] * $pkg['d'] * 0.00025; // cm m
+				foreach ($listCubicWeightLimit as $numPrice => $listRange) {
+					$numFrom = $listRange[0];
+					$numTo = $listRange[1];
+					if ($numCubicWeight >= $numFrom && $numCubicWeight < $numTo) {
+						$numCubicWeightSurcharge = $numPrice;
+					}
+				}
+
+				$numMaxSurcharge =  max($numlengthSurcharge, $numDeadWeightSurcharge, $numCubicWeightSurcharge);
+				if ($numMaxSurcharge > 0) {
+					$this->listItems[] = [
+						$this->objTask->getNo(),
+						ucwords($this->objTask->mainTask->ref),
+						empty($this->objTask->mainTask->compl_time) ? $this->objTask->compl_time : $this->objTask->mainTask->compl_time,
+						'Oversize Fee - ' . $pkg['wt'] . 'KG ' . $pkg['w'] . 'x' . $pkg['h'] . 'x' . $pkg['d'] . 'cm',
+						$numMaxSurcharge,
+						1,
+						$numMaxSurcharge
+					];
+					$this->numSubtotal += $numMaxSurcharge;
+				}
+			}
+		}
+	}
+}
+
+class CTask2InvoiceDeliveryEizToll extends CTask2InvoiceDelivery
+{
+	// overwrite , Eiz Toll surcharge 
+	function funcSurcharge()
+	{
+
+		$listlengthLimit = [ //m
+			14 => [1.2, 1.8],
+			75 => [1.8, 3],
+			105 => [3, 4],
+			450 => [4, 9999],
+		];
+		$listDeadWeightLimit = [ //KG
+			14 => [30, 35],
+			75 => [35, 85],
+			105 => [85, 9999],
+		];
+		$listCubicWeightLimit = [
+			14 => [30, 35],
+			75 => [35, 85],
+			105 => [85, 9999],
+		];
+
+		$strPackage = $this->objTask->mainTask->packTask->mdata['pkg'];
+		if (!empty($strPackage)) {
+			//check 
+			foreach (json_decode($strPackage, true) as $pkg) {
+				if (in_array(null, [$pkg['wt'], $pkg['w'], $pkg['h'], $pkg['d']])) {
+					$this->listErrors[] = "pack task have no DIM(cm) " . $this->objTask->mainTask->id;
+					return;
+				}
+			}
+
+			foreach (json_decode($strPackage, true) as $pkg) {
+				$numlengthSurcharge = 0;
+				$numlengthMax =  max($pkg['w'], $pkg['h'], $pkg['d']) / 100; //cm to m
+				foreach ($listlengthLimit as $numPrice => $listRange) {
+					$numFrom = $listRange[0];
+					$numTo = $listRange[1];
+					if ($numlengthMax >= $numFrom && $numlengthMax < $numTo) {
+						$numlengthSurcharge = $numPrice;
+					}
+				}
+
+				$numDeadWeightSurcharge = 0;
+				$numDeadWeight =  $pkg['wt'];
+				foreach ($listDeadWeightLimit as $numPrice => $listRange) {
+					$numFrom = $listRange[0];
+					$numTo = $listRange[1];
+					if ($numDeadWeight >= $numFrom && $numDeadWeight < $numTo) {
+						$numDeadWeightSurcharge = $numPrice;
+					}
+				}
+
+				$numCubicWeightSurcharge = 0;
+				$numCubicWeight =  $pkg['w'] * $pkg['h'] * $pkg['d'] * 0.00025; // cm m
+				foreach ($listCubicWeightLimit as $numPrice => $listRange) {
+					$numFrom = $listRange[0];
+					$numTo = $listRange[1];
+					if ($numCubicWeight >= $numFrom && $numCubicWeight < $numTo) {
+						$numCubicWeightSurcharge = $numPrice;
+					}
+				}
+
+				$numMaxSurcharge =  max($numlengthSurcharge, $numDeadWeightSurcharge, $numCubicWeightSurcharge);
+				if ($numMaxSurcharge > 0) {
+					$this->listItems[] = [
+						$this->objTask->getNo(),
+						ucwords($this->objTask->mainTask->ref),
+						empty($this->objTask->mainTask->compl_time) ? $this->objTask->compl_time : $this->objTask->mainTask->compl_time,
+						'Oversize Fee - ' . $pkg['wt'] . 'KG ' . $pkg['w'] . 'x' . $pkg['h'] . 'x' . $pkg['d'] . 'cm',
+						$numMaxSurcharge,
+						1,
+						$numMaxSurcharge
+					];
+					$this->numSubtotal += $numMaxSurcharge;
+				}
+			}
+		}
+	}
+}
+
+class CTask2InvoiceDeliveryUbiToll extends CTask2InvoiceDelivery
+{
+	// overwrite , Ubi TOLL surcharge 
+	function funcSurcharge()
+	{
+
+		$listlengthLimit = [ //m /per piece
+			12 => [1.2, 1.8],
+			50 => [1.8, 9999],
+			//11.5=>[2,3],
+			//24.5=>[3,9999],
+			//450=>[4,9999],
+		];
+		$listDeadWeightLimit = [ //KG per shipment
+			12 => [30, 35],
+			50 => [35, 9999],
+			//43.5=>[56,90],
+			//85=>[90,9999],
+		];
+		$listCubicWeightLimit = [ // per shipment
+			50 => [175, 9999],
+			//43.5=>[56,135],
+			//85=>[135,9999],
+		];
+
+		$strPackage = $this->objTask->mainTask->packTask->mdata['pkg'];
+		if (!empty($strPackage)) {
+			//check 
+			foreach (json_decode($strPackage, true) as $pkg) {
+				if (in_array(null, [$pkg['wt'], $pkg['w'], $pkg['h'], $pkg['d']])) {
+					$this->listErrors[] = "pack task have no DIM(cm) " . $this->objTask->mainTask->id;
+					return;
+				}
+			}
+
+			foreach (json_decode($strPackage, true) as $pkg) {
+				$numlengthSurcharge = 0;
+				$numlengthMax =  max($pkg['w'], $pkg['h'], $pkg['d']) / 100; //cm to m
+				foreach ($listlengthLimit as $numPrice => $listRange) {
+					$numFrom = $listRange[0];
+					$numTo = $listRange[1];
+					if ($numlengthMax >= $numFrom && $numlengthMax < $numTo) {
+						$numlengthSurcharge = $numPrice;
+					}
+				}
+
+				$numDeadWeightSurcharge = 0;
+				$numDeadWeight =  $pkg['wt'];
+				foreach ($listDeadWeightLimit as $numPrice => $listRange) {
+					$numFrom = $listRange[0];
+					$numTo = $listRange[1];
+					if ($numDeadWeight >= $numFrom && $numDeadWeight < $numTo) {
+						$numDeadWeightSurcharge = $numPrice;
+					}
+				}
+
+				$numCubicWeightSurcharge = 0;
+				$numCubicWeight =  $pkg['w'] * $pkg['h'] * $pkg['d'] * 0.00025; // cm m
+				foreach ($listCubicWeightLimit as $numPrice => $listRange) {
+					$numFrom = $listRange[0];
+					$numTo = $listRange[1];
+					if ($numCubicWeight >= $numFrom && $numCubicWeight < $numTo) {
+						$numCubicWeightSurcharge = $numPrice;
+					}
+				}
+
+				$numMaxSurcharge =  max($numlengthSurcharge, $numDeadWeightSurcharge, $numCubicWeightSurcharge);
+				if ($numMaxSurcharge > 0) {
+					$this->listItems[] = [
+						$this->objTask->getNo(),
+						ucwords($this->objTask->mainTask->ref),
+						empty($this->objTask->mainTask->compl_time) ? $this->objTask->compl_time : $this->objTask->mainTask->compl_time,
+						'Oversize Fee - ' . $pkg['wt'] . 'KG ' . $pkg['w'] . 'x' . $pkg['h'] . 'x' . $pkg['d'] . 'cm',
+						$numMaxSurcharge,
+						1,
+						$numMaxSurcharge
+					];
+					$this->numSubtotal += $numMaxSurcharge;
+				}
+			}
+		}
+	}
+}
+
+class CTask2InvoiceDeliveryTlaCARGO extends CTask2InvoiceDelivery
+{
+	function funcSurcharge()
+	{
+
+		$listlengthLimit = [ //m /per piece
+			20 => [1.2, 2.4],
+			50 => [2.4, 3.6],
+			100 => [3.6, 9999],
+			//450=>[4,9999],
+		];
+		$listDeadWeightLimit = [ //KG per shipment
+			50 => [35, 9999],
+			//43.5=>[56,90],
+			//85=>[90,9999],
+		];
+		$listCubicWeightLimit = [ // per shipment
+			50 => [175, 9999],
+			//43.5=>[56,135],
+			//85=>[135,9999],
+		];
+
+		$strPackage = $this->objTask->mainTask->packTask->mdata['pkg'];
+		if (!empty($strPackage)) {
+			//check 
+			foreach (json_decode($strPackage, true) as $pkg) {
+				if (in_array(null, [$pkg['wt'], $pkg['w'], $pkg['h'], $pkg['d']])) {
+					$this->listErrors[] = "pack task have no DIM(cm) " . $this->objTask->mainTask->id;
+					return;
+				}
+			}
+
+			foreach (json_decode($strPackage, true) as $pkg) {
+				$numlengthSurcharge = 0;
+				$numlengthMax =  max($pkg['w'], $pkg['h'], $pkg['d']) / 100; //cm to m
+				foreach ($listlengthLimit as $numPrice => $listRange) {
+					$numFrom = $listRange[0];
+					$numTo = $listRange[1];
+					if ($numlengthMax >= $numFrom && $numlengthMax < $numTo) {
+						$numlengthSurcharge = $numPrice;
+					}
+				}
+
+				$numDeadWeightSurcharge = 0;
+				//$numDeadWeight=  $pkg['wt'];
+				//foreach($listDeadWeightLimit as $numPrice => $listRange){
+				//$numFrom = $listRange[0];
+				//$numTo = $listRange[1];
+				//if($numDeadWeight >= $numFrom && $numDeadWeight < $numTo){
+				//$numDeadWeightSurcharge = $numPrice;
+				//}
+				//}
+
+				$numCubicWeightSurcharge = 0;
+				//$numCubicWeight=  $pkg['w']*$pkg['h']* $pkg['d']*0.00025; // cm m
+				//foreach($listCubicWeightLimit as $numPrice => $listRange){
+				//$numFrom = $listRange[0];
+				//$numTo = $listRange[1];
+				//if($numCubicWeight >= $numFrom && $numCubicWeight < $numTo){
+				//$numCubicWeightSurcharge = $numPrice;
+				//}
+				//}
+
+				$numMaxSurcharge =  max($numlengthSurcharge, $numDeadWeightSurcharge, $numCubicWeightSurcharge);
+				if ($numMaxSurcharge > 0) {
+					$this->listItems[] = [
+						$this->objTask->getNo(),
+						ucwords($this->objTask->mainTask->ref),
+						empty($this->objTask->mainTask->compl_time) ? $this->objTask->compl_time : $this->objTask->mainTask->compl_time,
+						'Oversize Fee - ' . $pkg['wt'] . 'KG ' . $pkg['w'] . 'x' . $pkg['h'] . 'x' . $pkg['d'] . 'cm',
+						$numMaxSurcharge,
+						1,
+						$numMaxSurcharge
+					];
+					$this->numSubtotal += $numMaxSurcharge;
+				}
+			}
+		}
+	}
+}
+
+//IOC
+class FactoryTask2Invoice
+{
+	static function Create($objTask, $objQuote, $objOrg)
+	{
+		if (($objTask->getType() == 'Pallets In' || $objTask->getType() == 'Bulk In') && !empty($objTask->mainTask) && in_array($objOrg->extra['wms_invoice'], ['stock_in_only', 'all', 'fix_rate']) && empty($objTask->mainTask->mdata['return'])) {
+			// Pallets In
+			return new CTask2InvoicePalletsIn($objTask, $objQuote, $objOrg);
+		} else if (in_array($objTask->getType(), ['Pick Unit', 'Pick Carton']) && !empty($objTask->mainTask) && in_array($objOrg->extra['wms_invoice'], ['all', 'fix_rate'])) {
+			// Pick Unit or Pick Carton
+			return new CTask2InvoicePick($objTask, $objQuote, $objOrg);
+		} else if ($objTask->getType() == 'Pack Order' && !empty($objTask->mainTask) && in_array($objOrg->extra['wms_invoice'], ['all', 'fix_rate'])) {
+			// Pack Order
+			return new CTask2InvoicePack($objTask, $objQuote, $objOrg);
+		} else if (in_array($objTask->getType(), ['Delivery', 'Re-delivery']) && !empty($objTask->mainTask) && !empty($objTask->mdata['shipment_id']) && in_array($objOrg->extra['wms_invoice'], ['all', 'fix_rate'])) {
+			// Delivery or re-delivery
+			if ($objTask->mdata['courier'] == Org::ORGID_COURIER_TNT) {
+				return new CTask2InvoiceDeliveryTNT($objTask, $objQuote, $objOrg);
+			} else if ($objTask->mdata['courier'] == Org::ORGID_COURIER_EIZ_TOLL) {
+				return new CTask2InvoiceDeliveryEizToll($objTask, $objQuote, $objOrg);
+			} else if ($objTask->mdata['courier'] == Org::ORGID_COURIER_UBI_TOLL || $objTask->mdata['courier'] == Org::ORGID_COURIER_TOLL_IPEC) {
+				return new CTask2InvoiceDeliveryUbiToll($objTask, $objQuote, $objOrg);
+			} else if ($objTask->mdata['courier'] == Org::ORGID_COURIER_TLA) {
+				return new CTask2InvoiceDeliveryTlaCARGO($objTask, $objQuote, $objOrg);
+			} else if ($objTask->mdata['courier'] == Org::ORGID_COURIER_EIZ_ALLIED && empty($objTask->mdata['trackingno'])) {
+				return new CTask2InvoiceDeliveryEizAllied($objTask, $objQuote, $objOrg);
+			}
+			return new CTask2InvoiceDelivery($objTask, $objQuote, $objOrg);
+		} else if (in_array($objTask->getType(), ['Pickup']) && !empty($objTask->mainTask) && in_array($objOrg->extra['wms_invoice'], ['all', 'fix_rate'])) {
+			return new CTask2InvoicePickUpDelivery($objTask, $objQuote, $objOrg);
+		}
+
+
+		return null;
+	}
+}

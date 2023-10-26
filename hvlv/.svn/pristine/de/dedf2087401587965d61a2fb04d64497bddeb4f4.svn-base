@@ -1,0 +1,172 @@
+<?php
+
+if (!empty($model)) {
+    $questionId = $model['id'];
+    $questionNum = $model['question_num'];
+    $question = $model['question'];
+    $questionType = $model['question_type'];
+}
+
+if(!empty($_GET['submit_id']))
+{
+    $submit_id = $_GET['submit_id'];
+}
+
+$salesService = new SalesfunnelRequirementsService();
+
+?>
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-MrcW6ZMFYlzcLA8Nl+NtUVF0sA7MsXsP1UyJoMp4YLEuNSfAP+JcXn/tWtIaxVXM" crossorigin="anonymous"></script>
+    <!-- jQuery -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <!-- reCaptcha  -->
+    <!-- <script src="https://www.google.com/recaptcha/api.js"></script> -->
+    <!-- Custom CSS -->
+    <style>
+        .pe-label {
+            font-weight: 600;
+        }
+
+        .text-input-row {
+            margin-top: 8px;
+        }
+
+        #displayPrice {
+            display: none;
+        }
+
+        .item {
+            margin-bottom: 1em;
+        }
+
+        .btn {
+            width:  80px;
+            height: 50px;
+        }
+        
+    </style>
+    <title>Customer Requirements Form</title>
+</head>
+
+<body>
+    <div class="container-lg">
+        <br />
+        <main id="site-content" role="main">
+            <form class="row g-3 needs-validation" id="price-enquiry-form" method="POST" >
+                <div class="container" id="items">
+                    <header class="entry-header has-text-align-center header-footer-group">
+                        <div class="entry-header-inner section-inner medium">
+                            <h1 class="entry-title">Please confirm all the information</h1>
+                        </div><!-- .entry-header-inner -->
+                    </header>
+					<div class="row">
+                        <div class="col-md-6">
+                            <label for="email" class="form-label pe-label text-input-row">Email</label>
+                            <input type="text" class="form-control" id="email" name="email" disabled
+                            <?php
+                                if (!empty($submissionModel->email)){
+                                    echo 'value="'.$submissionModel->email.'"';
+                                }
+                            ?>
+                            >
+                        </div>
+                        <div class="col-md-6">
+                            <label for="company_name" class="form-label pe-label text-input-row">Company name</label>
+                            <input type="text" class="form-control" id="company_name" name="company_name" disabled
+                            <?php
+                                if (!empty($submissionModel->company_name)){
+                                    echo 'value="'.$submissionModel->company_name.'"';
+                                }
+                            ?>
+                            >
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label for="Name" class="form-label pe-label text-input-row">Name</label>
+                            <input type="text" class="form-control" id="Name" name="Name" disabled
+                            <?php
+                                if (!empty($submissionModel->first_name) || !empty($submissionModel->last_name)){
+                                    echo 'value="'.$submissionModel->first_name."  ".$submissionModel->last_name.'"';
+                                }
+                            ?>
+                            >
+                        </div>
+                        <div class="col-md-6">
+                            <label for="contact_number" class="form-label pe-label text-input-row">Contact number</label>
+                            <input type="text" class="form-control" id="contact_number" name="contact_number" disabled
+                            <?php
+                                if (!empty($submissionModel->contact_number)){
+                                    echo 'value="'.$submissionModel->contact_number.'"';
+                                }
+                            ?>
+                            >
+                        </div>
+                    </div>
+					<br>
+	<?php
+		foreach ($requirementRecordModels as $key => $recordModel)
+		{
+			if (!empty($recordModel->question) && !empty($submissionModel))
+		    {
+                print('
+                <div class="item" id="item">                    
+                    <h5 id="qid" qid="'.$recordModel->question->id.'">Question '.($key+1).'</h5>
+                ');
+		    	// if($recordModel->question_id==53){
+		    	// 	print_r($recordModel->question->question);
+		    	// }
+		    	$salesService->printFinalQuestion($recordModel->question, $submissionModel->id);
+                print('</div>');
+		    }
+		}
+
+	?>
+				</div>
+				<div class="col-12">                
+				    <button type="button" class="btn btn-primary" onclick="edit()">Edit</button>
+				    <button type="button" class="btn btn-success" onclick="save()">Submit</button>
+				</div>
+
+			</form>
+	    <main id="site-content" role="main">
+	</div>
+
+
+
+  <script type="text/javascript">
+  	function edit() {
+            let id = <?php echo $submissionModel->id ?>;	             
+            // alert(id);
+			window.location.replace("<?=$this->createUrl('salesfunnelRequirements/customerDetail')?>"+"?id="+id);
+			return false;
+        }
+
+    function save(){
+			// let id = <?php echo $submissionModel->id ?>;
+	  //   	window.location.replace("<?=$this->createUrl('salesfunnelRequirements/customerSubmit')?>"+"?id="+id);
+			// return false;
+    	
+	    	if ($('#lid').html()=="The questionnaire has ended."){
+                    let id = <?php echo $submissionModel->id ?>;
+			    	window.location.replace("<?=$this->createUrl('salesfunnelRequirements/customerSubmit')?>"+"?id="+id);
+					return false;
+            }else{
+            	alert('Your questionnaire has been saved.</br>Please finish the rest of questions with the same email when you feel free.</br>Thank you!');
+            	return false;
+            }
+    		
+    }
+  </script>
+
+ </body>
+
+</html>

@@ -1,0 +1,84 @@
+
+<h1>Sales Funnel Requirement Questions</h1>
+
+<div style="right: 20px;position: absolute;">
+    <a class="jqm_link" data-win-class="L" href="<?=$this->createUrl('salesFunnel/createQuestionAnswersForm');?>" title="New question and Answers"><div class="icon" style="background-position:-16px 0"></div>New question and Answers</a>  
+</div>
+</br></br></br>
+
+<?php $this->widget('zii.widgets.grid.CGridView', [
+	'id'=>'question-grid-list1',
+	'cssFile' => false,
+	'dataProvider'=>$questionModel->search(false, 5, false, false),
+	'filter'=>$questionModel,
+	'columns'=>[
+		'id',
+		['name'=>'question_num', 'value'=>'$data->getQuestionNumber()'],//,'filter'=>CHtml::dropDownList('SalesfunnelRequirementsQuestions[question_num]', $questionModel->question_num, SalesfunnelRequirementsQuestions::$questionNum, ['prompt'=>'All'])],
+		'question',
+		['name'=>'question_type', 'value'=>'$data->showQuestionType()','filter'=>CHtml::dropDownList('SalesfunnelRequirementsQuestions[question_type]', $questionModel->question_type, SalesfunnelRequirementsQuestions::$questionType, ['prompt'=>'All'])
+		],
+		["header"=>'Answer| Next Question',"value"=>function($data){
+			foreach ($data->salesfunnelRequirementsAnswers as $key => $value) {
+				echo $value->answer.CHtml::dropDownList("nextQuestion".$value->id, $value->next_question_id, $data->getALlQuestionList(), array("prompt"=>"SELECT","onchange"=>"return quickQueAnswerChange($value->id);","value"=>$value->id)).'</br>';
+			}
+		}],
+
+			[
+        'class'=>'oButtonColumn',
+        'template'=>'{Operation}',
+        'buttons'=>[
+            
+            'Operation' => [
+                'url'=>'Yii::app()->createURL("salesFunnel/updateQuestionAnswersForm",array("id"=>$data->id))',
+                'imageUrl'=>false,
+                'visible'=>'true',
+                'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Update'), 'title' => '$data->question.$data->id', 'data-win-class' => 'L'],
+            ],
+            ],
+        ]
+
+		]
+	]);
+?>
+
+
+<script type="text/javascript">
+
+    var MyFAQTab = $('#<?=$_GET["tabid"];?>');
+    var MyFAQPanel = MyFAQTab.data('panel');
+    $(function(){
+        MyFAQTab.unbind('reload_question_list').bind('reload_question_list', function(){
+                    $('#question-grid-list1', MyFAQTab.data('panel')).yiiGridView('update');
+                    return false;
+                });
+
+    });
+
+    function quickQueAnswerChange(id)
+    {
+            if(confirm("Are you sure to faq answer?"))
+            { 
+               var nextQuestion= $("#nextQuestion"+id).children('option:selected').val();
+               $.ajax({
+                       url: '<?=$this->createUrl("salesFunnel/queAnswer")?>',
+                       type: "post",
+                       data: {"nextQuestion":nextQuestion,"id":$("#nextQuestion"+id).attr("value")},
+                       success: function(r) {
+                           if(r=='done')
+                            {
+                               //alert(nextQuestion+"   "+id);
+                               myApp.notice('Done', 5000);
+                            }else
+                            {
+                               myApp.alert(r, false);   
+                            }
+                            MyFAQTab.trigger('reload_question_list');
+                        },
+                       error: function(e) {
+                           console.log(e);
+                       }
+                   });     
+            }
+    }
+
+</script>

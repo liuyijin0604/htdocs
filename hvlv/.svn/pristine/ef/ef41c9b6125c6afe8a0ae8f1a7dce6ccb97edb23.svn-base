@@ -1,0 +1,361 @@
+<?php 
+class LiveChatService extends Service
+{
+	
+    public function saveChat($data){//Json_decode data
+        $chatDetail = new LiveChatDetail(); 
+        $chatRecords = [];       
+
+        $chatDetail->agent_email = $data->chat->agents[0]->login;        
+        $chatDetail->started_timestamp = date('Y-m-d H:i:s',$data->chat->started_timestamp);
+        $chatDetail->ended_timestamp = date('Y-m-d H:i:s',$data->chat->ended_timestamp);
+        $chatDetail->visitor_name = $data->visitor->name;        
+        $chatDetail->visitor_email = $data->visitor->email;
+        $chatDetail->visitor_contact_number = @$data->pre_chat_survey[2]->answer;
+        $chatDetail->visitor_city = $data->visitor->city;
+        $chatDetail->visitor_country = $data->visitor->country;
+        $chatDetail->save();
+
+        foreach ($data->chat->messages as $key => $value) {
+        	$chatRecord = new LiveChatRecord();
+        	$chatRecord->detail_id = $chatDetail->id;
+        	$chatRecord->text = $value->text;
+        	$chatRecord->time = date('Y-m-d H:i:s',$value->timestamp);
+
+	        switch ($value->user_type) {
+	        	case 'agent':
+	        		$chatRecord->user_type = LiveChatRecord::USERTYPEAGENT;
+	        		break;
+
+	        	case 'visitor':
+	        		$chatRecord->user_type = LiveChatRecord::USERTYPEVISITOR;
+	        		break;
+	        	
+	        	default:
+	        		// code...
+	        		break;
+	        }
+	        $chatRecord->save();
+	        $chatRecords[] = $chatRecord;
+
+        }
+
+        $emailContent = $this->printEmailContent($chatDetail, $chatRecords);
+        $this->createEmail($chatDetail, $emailContent);
+
+    }
+
+    public static function createEmail($chatDetail, $message,$is3PL= 0)
+	{
+		$tmp = Yii::app()->basePath . DIRECTORY_SEPARATOR . 'runtime' . DIRECTORY_SEPARATOR . 'importsmail' . DIRECTORY_SEPARATOR;
+
+		$model = new ImportsMail();
+		$fromEmail = $chatDetail->visitor_email; //arrray('display'=>'Name','address'=>'jerry@toplogistics.com.au','is_group'=>false）;
+		$addressesTo[] = "sales@toplogistics.com.au";
+		$model->from_email = $fromEmail;
+		$model->from_name = $chatDetail->visitor_name;
+		if(empty($model->from_name))
+		{
+			$model->from_name = "unknow";
+		}
+		$a = trim("Online Chat Transcript");
+		if (preg_match_all('/\{EM\d+\}/', $a, $ms)) {
+			$a = str_replace($ms[0], '', $a) . ' ' . implode(' ', $ms[0]);
+		}
+		$a = preg_replace('/(Reply|回复|答复):/', 'Re:', $a);
+		$a = preg_replace('/^{(Spam|Definitely Spam|Virus|Disarmed)\??} /', '', $a);
+		$a = preg_replace('/Re:\s*Re:(\s*Re:)?(\s*Re:)?(\s*Re:)?/i', 'Re:', $a);
+		$model->subject = $a;
+		$tempToEmail = ''; //the list to to mail;
+		$toEmail = ''; //reply mail. imports or importscs
+		$toEmailName = "TLA Customer Service";
+		$model->mdata['search']['from'] = trim($model->from_email);
+		$model->mdata['search']['subject'] = trim($model->subject);
+		$model->mdata['search']['message_id'] = trim($chatDetail->id);
+		foreach ($addressesTo as $theToEmail) {
+			$tempToEmail .= $theToEmail . ';';
+			if (in_array($theToEmail, ['imports@toplogistics.com.au', 'importscs@toplogistics.com.au', 'finance@toplogistics.com.au'])) {
+				$toEmail = $theToEmail;
+				$toEmailName = $chatDetail->visitor_name;
+			}
+		}
+		// if (empty($toEmail)) {
+		// 	foreach ($addressesCc as $theToEmail) {
+		// 		if (in_array($theToEmail['address'], ['imports@toplogistics.com.au', 'importscs@toplogistics.com.au', 'finance@toplogistics.com.au'])) {
+		// 			$toEmail = $theToEmail['address'];
+		// 			$toEmailName = $theToEmail['display'];
+		// 			break;
+		// 		}
+		// 	}
+		// }
+		$model->mdata['to_email'] = $toEmail;
+		if ($toEmail == 'imports@toplogistics.com.au') {
+			$model->from_flag = 1;
+		} else {
+			$model->from_flag = 2;
+		}
+		if (empty($tempToEmail)) {
+			$tempToEmail = "notfoundAdress@notfoundAdress";
+		}
+		$model->to_email = substr($tempToEmail, 0, 500);
+		$model->to_name = substr($toEmailName, 0, 100);
+		$model->link_id = $model->getLinkId($model->subject);
+		$model->mdata['cc'][]['address'] = trim("imports@toplogistics.com.au");
+		$model->is3pl = $is3PL;
+		$model->status = ImportsMail::STATE_NEW;
+		$tk = [];
+		if(preg_match('/ticket CS\d{1,}/i', $a,$tk))
+		{
+			$model->ticket = preg_replace('/ticket /i', '', $tk[0]);
+			$tkid = explode('CS', $model->ticket)[1]*1;
+			if($tkid<17130)
+			{
+				$model->status = ImportsMail::STATE_CLOSED;
+			}
+
+			if(!empty($model->ticket)&&!preg_match('/toplogistics.com.au/i', $model->from_email))
+			{
+				$ticket = ShipmentQuestionSubmit::model()->find('ticket=:ticket',[":ticket"=>$model->ticket]);
+				if(!empty($ticket)&&!empty($ticket->shipmentQuestion))
+				{
+					$sq = $ticket->shipmentQuestion[0];
+					$sq->process_type = ShipmentQuestion::TYPE_RECEIVED;
+					$sq->save();
+				}
+			}
+		}
+		$ccEmailAddress = '';
+		if (!empty($addressesCc)) {
+			foreach ($addressesCc as $tempCC) {
+				$ccEmailAddress .= $tempCC . ';';
+			}
+		}
+		$model->cc_email = substr($ccEmailAddress, 0, 500);
+
+		$model->plain_body = $message;
+		$model->create_time = date('Y-m-d H:i:s');
+		// $model->type= $model->checkTheType($model->subject);
+		
+		$model->checkTheType($is3PL);
+		if (!$model->save()) {
+			Emailog::sendEmailTo(Emailog::NOTIFY_OP_EMAIL, json_encode($model->getErrors()), "Imports Mail Save Error");
+			// Log::log2file(json_encode($model->getErrors()), 'imports_mail_error', "importsMailError");
+			return false;
+		}
+		$model->refresh();
+		$model->newMailUser($is3PL);
+		if (!empty($model->mdata['tel_op'])) {
+			foreach (preg_split("/[;,]+/", $model->mdata['tel_op']) as $tel) {
+				if (empty($tel)) {
+					continue;
+				}
+				$model->sendMsg($tel);
+			}
+		}
+		//file_put_contents($tmp . $model->no . ".emz", gzencode($message));
+		$tlaTaskService = new TlaTaskService();
+		$tlaTaskService->saveEmailToBeEmailTask($model);
+
+		$consolProcessService = new ConsolProcessService();
+		$consolProcessService->checkNOAEmail($model);
+
+		return $model;
+	}
+
+    public function printEmailContent($chatDetail, $chatRecords){
+    	$contentHtml = '';
+    	$contentHtml.= '
+<div style="font-family:Tahoma,Arial,Helvetica,sans-serif;font-size:12px;">
+<table>
+<tr>
+	<td>
+		<table cellpadding="0" cellspacing="0" width="100%">
+			<tbody>
+				<tr>
+					<td height="18" colspan="2" style="font-size:18px;line-height:18px">&nbsp;</td>
+				</tr>
+				<tr>
+					<td align="center">
+						<p style="font-family:Arial,Helvetica,sans-serif;font-size:28px;color:#544d44;margin:0;padding:0;font-weight:bold">Chat transcript</p>
+					</td>
+				</tr>
+				<tr>
+					<td height="28" colspan="2" style="font-size:28px;line-height:28px">&nbsp;</td>
+				</tr>
+				<tr>
+					<td>
+						<table cellpadding="0" cellspacing="0" width="100%">
+							<tbody>
+								<tr>
+									<td width="22" style="font-size:23px;line-height:23px">&nbsp;</td>
+									<td>
+										<table cellpadding="0" cellspacing="0" width="100%">
+											<tbody>
+												<tr>
+													<td>
+														<p style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#6d6862;margin:0px;padding:0px">
+															<b>Customer Name:</b> '.$chatDetail->visitor_name.'
+														</p>
+													</td>
+												</tr>
+												<tr>
+													<td height="7" colspan="2"></td>
+												</tr>
+												<tr>
+													<td>
+														<p style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#6d6862;margin:0px;padding:0px">
+															<b>E-mail:</b> <a href="mailto:weijt133@yahoo.com" target="_blank">'.$chatDetail->visitor_email.'</a>
+														</p>
+													</td>
+												</tr>
+												<tr>
+													<td height="7" colspan="2"></td>
+												</tr>
+												<tr>
+													<td>
+														<p style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#6d6862;margin:0px;padding:0px">
+															<b>Contact Number:</b>'.@$chatDetail->visitor_contact_number.' 
+														</p>
+													</td>
+												</tr>
+												<tr>
+													<td height="7" colspan="2"></td>
+												</tr>
+											</tbody>
+										</table>
+									</td>
+								</tr>
+							</tbody>
+						</table>
+					</td>
+				</tr>
+
+
+
+				<tr>
+					<td height="20">
+					</td>
+				</tr>
+
+
+				<tr>
+					<td align="center">
+
+						<table cellpadding="0" cellspacing="0" width="580">
+							<tbody><tr>
+								<td rowspan="3" bgcolor="#fff" width="1"></td><td bgcolor="#fff" height="1"></td><td rowspan="3" bgcolor="#fff" width="1"></td>
+							</tr>
+							<tr><td align="center">
+								<table cellpadding="0" cellspacing="0" width="600" style="font-family:Arial,Helvetica,sans-serif">
+		<tbody>
+
+		<tr>
+			<td height="1" bgcolor="#dddddd" style="font-size:1px;line-height:1px;background-color:#dddddd">&nbsp;</td>
+		</tr>
+		<tr>
+			<td height="1" bgcolor="#ffffff" style="font-size:1px;line-height:1px;background-color:#ffffff">&nbsp;</td>
+		</tr>';
+		foreach ($chatRecords as $key => $value) {
+					
+		$contentHtml.= 
+		'<tr style="background-color:#fafafa" bgcolor="#fafafa">
+			<td>
+				<table cellpadding="0" cellspacing="0" width="100%">
+					<tbody>
+						<tr><td colspan="4" height="12" style="font-size:12px;line-height:12px">&nbsp;</td></tr>
+
+						<tr>
+							<td width="22">&nbsp;</td>
+							<td height="12" align="left" style="color:#bcbab8;font-size:12px">'
+								.$value->showUserType().
+							'</td>
+							<td align="right" style="color:#bcbab8;font-size:10px">'
+								.$value->time.
+							'</td>
+							<td width="20"></td>
+						</tr>
+						<tr><td colspan="4" height="2" style="font-size:2px;line-height:2px">&nbsp;</td></tr>
+						<tr>
+							<td width="22"></td>
+							<td height="14" align="left" colspan="2" style="color:#544d44;font-size:14px;line-height:22px">
+								<table cellpadding="0" cellspacing="0" width="100%" style="font-family:Arial,Helvetica,sans-serif">
+									<tbody>
+										<tr>
+											<td align="left">'
+											.$value->text.
+											'</td>
+										</tr>
+									</tbody>
+								</table>
+							</td>
+
+							<td width="20"></td>
+							</tr>
+							<tr><td colspan="4" height="10" style="font-size:10px;line-height:10px">&nbsp;</td></tr>
+					</tbody>
+				</table>
+			</td>
+		</tr>';
+		}
+
+		$contentHtml.= '
+		<tr>
+			<td height="1" bgcolor="#dddddd" style="font-size:1px;line-height:1px;background-color:#dddddd">&nbsp;</td>
+		</tr>
+		<tr>
+			<td height="1" bgcolor="#ffffff" style="font-size:1px;line-height:1px;background-color:#ffffff">&nbsp;</td>
+		</tr>
+
+		<tr>
+			<td>
+				<table cellpadding="0" cellspacing="0" width="100%">
+					<tbody>
+						<tr>
+							<td height="28" colspan="2">
+
+							</td>
+						</tr>
+							<tr>
+								<td width="20"></td>
+								<td height="20" align="left" style="color:#cac9c7;font-size:14px">
+									Our Website: <a href="http://localhost/hvlv_branch/liveChat/addLiveChat" style="text-decoration:none;color:#4d7cb3" target="_blank" data-saferedirecturl="https://toplogistics.com.au/">https://toplogistics.com.au/</a>
+								</td>
+							</tr>
+								<tr>
+									<td width="20"></td>
+									<td height="20" align="left" style="color:#cac9c7;font-size:14px">
+										Visitor geolocation: '.$chatDetail->visitor_city.'  '.$chatDetail->visitor_country.'
+									</td>
+								</tr>
+					</tbody>
+				</table>
+			</td>
+		</tr>
+
+
+	</tbody>
+</table>
+
+
+										</td></tr>
+										<tr><td bgcolor="#fff" height="1" style="font-size:1px;line-height:1px"></td></tr>
+									</tbody></table>
+								</td>
+							</tr>
+							<tr>
+								<td height="50">
+
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</td>
+			</tr>
+</table>
+</div>';
+	return $contentHtml;
+    }
+
+
+}
+?>

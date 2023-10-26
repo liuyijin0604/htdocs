@@ -1,0 +1,732 @@
+<?php
+if(!empty($_GET['man_id'])){
+    $link_url=array('manifest/manage','id'=>$_GET['man_id']);
+    $title='Manifest-'.$_GET['man_id'];
+}else{
+    $title='RtsProcess';
+    $link_url=array('rtsProcess/index');
+}
+$this->widget('zii.widgets.CBreadcrumbs', array(
+	'links' => array(
+		$title =>$link_url,
+		'RTS Operate  - '.$model->hbn,
+	),
+));
+?>
+
+<h1>RTS Shipment - Original HBN <?=$model->hbn;?></h1>
+<style>    
+#warning{
+        display:none;
+        margin: 10px 0;
+        border: 1px solid;
+        padding:15px 20px;
+        font-size: 14px;
+        background: #fe0;
+    }
+.form-control-border
+{
+	-webkit-box-shadow:inset 0 0px 0px rgb(0 0 0 / 8%);
+	border:0px solid #FFF;
+}
+ </style>
+<div class="form">
+<?php $form=$this->beginWidget('CActiveForm', array(
+	'id'=>'shipment-form',
+	'enableAjaxValidation'=>false,
+	'htmlOptions' =>[
+		'data-bit' => '1',
+	]
+));
+
+$u = User::model()->findByPk(Yii::app()->user->id);
+if(empty($model->cnor)){
+	$model->cnor = new Addr;
+	$model->cnor->country = 'PR China';
+	if(!empty($u->org->contacts)){
+        $orgContact = $u->org->contacts[0]; // always use first one which should be shipper address currently
+		if ( $orgContact && $orgContact->status == 1 ) {
+			$model->cnor->setAttributes(
+                array(
+                    'name' => $orgContact->name,
+                    'tel' => $orgContact->phone,
+                    'address' => $orgContact->address,
+                    'suburb' => $orgContact->suburb,
+                    'city' => $orgContact->city,
+                    'state' => $orgContact->state,
+                    'postcode' => $orgContact->postcode,
+                    'country' => $orgContact->country,
+                    'email' => $orgContact->email
+                )
+            );
+		}
+	}
+}
+if(empty($model->cnee)){
+	$model->cnee = new Addr;
+	$model->cnee->country = 'Australia';
+}
+$rs= ImportChargeCode::model()->findAll('status=1 AND org_id=:oid',array(':oid'=>$org->id));
+$chargecodeInfo=[];
+foreach ($rs as $r) {
+    if(!empty($r->description))
+    {
+        $chargecodeInfo[$r->chargecode]=$r->chargecode."(".$r->description.")";
+    }else
+    {
+        $chargecodeInfo[$r->chargecode]=$r->chargecode;
+    }
+}
+
+?>    <?php if($model->isNewRecord):?>
+        <div class="form-group" style="max-width: 10em;">
+         <?php echo CHtml::label('Chargecode','chargecode')?>
+         <?php echo CHtml::dropDownList('chargecode','',$chargecodeInfo,array('class'=>'form-control form-control-border','prompt'=>"Choose One"))?>  
+        </div>
+        <?php endif;?>
+    <div id="warning">
+    </div>
+ 	<div class="row">
+	<div class="col col-md-6 col-sm-12">
+	<h3><?=$this->t('Original Consignee Information');?></h3>
+	<div class="row">
+	<div class="col col-sm-6 col-xs-12">
+	<div class="form-group">
+		<?php echo $form->labelEx($model->cnee, 'name');
+		echo CHtml::label($model->cnee->name,'cname',['class'=>'form-control form-control-border']);
+		?>
+	</div>
+	</div>
+	<div class="col col-sm-6 col-xs-12">
+	<div class="form-group">
+		<?php echo $form->labelEx($model->cnee, 'tel');
+		echo CHtml::label($model->cnee->tel,'ctel',['class'=>'form-control form-control-border']);
+		?>
+	</div>
+	</div>
+	</div>
+	<div class="form-group">
+		<?php echo $form->labelEx($model->cnee, 'address');
+		echo CHtml::label($model->cnee->address,'caddress',['class'=>'form-control form-control-border']);
+		?>
+	</div>
+
+	<div class="row">
+	<div class="col col-sm-6 col-xs-12">
+	<div class="form-group">
+		<?php echo $form->labelEx($model->cnee, 'suburb');
+		echo CHtml::label($model->cnee->suburb,'csuburb',['class'=>'form-control form-control-border']);
+		?>
+	</div>
+	</div>
+	<div class="col col-sm-6 col-xs-12">
+	<div class="form-group">
+		<?php echo $form->labelEx($model->cnee, 'state');
+		echo CHtml::label($model->cnee->state,'cstate',['class'=>'form-control form-control-border']);
+		?>
+	</div>
+	</div>
+	</div>
+
+	<div class="row">
+	<div class="col col-sm-6 col-xs-12">
+	<div class="form-group">
+		<?php echo $form->labelEx($model->cnee, 'postcode');
+		echo CHtml::label($model->cnee->postcode,'cpostcode',['class'=>'form-control form-control-border']);
+		?>
+	</div>
+	</div>
+	<div class="col col-sm-6 col-xs-12">
+	<div class="form-group">
+		<?php 
+                echo $form->labelEx($model->cnee, 'country');
+		echo CHtml::label($model->cnee->country,'ccountry',['class'=>'form-control form-control-border']);
+
+		?>
+	</div>
+	</div>
+	</div>
+	<div class="form-group">
+		<?php echo $form->labelEx($model->cnee, 'email');
+		echo CHtml::label($model->cnee->email,'cemail',['class'=>'form-control form-control-border']); 
+		?>
+	</div>
+	</div>
+
+	<div class="col col-md-6 col-sm-12">
+	<h3><?=$this->t('New Consignee Information');?></h3>
+	<div class="row">
+	<div class="col col-sm-6 col-xs-12">
+	<div class="form-group">
+		<?php echo $form->labelEx($model->cnee, 'name');
+		$this->widget('zii.widgets.jui.CJuiAutoComplete', array(
+				'name' => 'cnee_name_ac',
+				'sourceUrl' => array('shipment/cneeSuggest'),
+				'value' => ($model->cnee->name) ? $model->cnee->name : '',
+				'options' => array(
+						'showAnim' => 'fold',
+						'minLength' => 2,
+						'delay' => 200,
+						'autoFocus' => true,
+						'select' => 'js:function(evt, ui){ $(this).trigger("ac_after_select", ui); return false; }',
+				),
+				'htmlOptions' => array(
+					'size' => '20',
+					'name' => 'Cnee[name]',
+					'class' => 'form-control',
+				),
+		));
+		?>
+	</div>
+	</div>
+	<div class="col col-sm-6 col-xs-12">
+	<div class="form-group">
+		<?php echo $form->labelEx($model->cnee, 'tel');
+		$this->widget('zii.widgets.jui.CJuiAutoComplete', array(
+				'name' => 'cnee_tel_ac',
+				'sourceUrl' => array('shipment/cneeSuggest'),
+				'value' => ($model->cnee->tel) ? $model->cnee->tel : '',
+				'options' => array(
+						'showAnim' => 'fold',
+						'minLength' => 4,
+						'delay' => 200,
+						'autoFocus' => true,
+						'select' => 'js:function(evt, ui){ $(this).val(ui.item["value"]); $(this).trigger("ac_after_select", ui); return false; }',
+				),
+				'htmlOptions' => array(
+					'size' => '20',
+					'name' => 'Cnee[tel]',
+					'class' => 'form-control',
+				),
+		));
+		?>
+	</div>
+	</div>
+	</div>
+	<div class="form-group">
+		<?php echo $form->labelEx($model->cnee, 'address'),
+		CHtml::textField('Cnee[address]', $model->cnee->address, array('size'=>40, 'class' => 'form-control'));?>
+	</div>
+
+	<div class="row">
+	<div class="col col-sm-6 col-xs-12">
+	<div class="form-group">
+		<?php echo $form->labelEx($model->cnee, 'suburb');
+		$this->widget('zii.widgets.jui.CJuiAutoComplete', array(
+				'name' => 'cnee_sub_ac',
+				'sourceUrl' => array('shipment/auPcSuggest'),
+				'value' => ($model->cnee->suburb) ? $model->cnee->suburb : '',
+				'options' => array(
+						'showAnim' => 'fold',
+						'minLength' => 2,
+						'delay' => 200,
+						'autoFocus' => true,
+						'select' => 'js:function(evt, ui){ $(this).val(ui.item["value"]); $(this).trigger("ac_after_select", ui); return false; }',
+				),
+				'htmlOptions' => array(
+					'size' => '20',
+					'name' => 'Cnee[suburb]',
+					'class' => 'form-control',
+				),
+		));
+		?>
+	</div>
+	</div>
+	<div class="col col-sm-6 col-xs-12">
+	<div class="form-group">
+		<?php echo $form->labelEx($model->cnee, 'state'),
+		CHtml::dropDownList('Cnee[state]', $model->cnee->state, array('ACT' => 'ACT - Australia Capital Territory', 'NSW' => 'NSW - New South Wales', 'NT' => 'NT - Northern Territory', 'QLD' => 'QLD - Queensland', 'SA' => 'SA - South Australia', 'TAS' => 'TAS - Tasmania', 'VIC' => 'VIC - Victoria', 'WA' => 'WA - Western Australia'), array('empty' => $this->t('Select One'), 'class' => 'form-control')); ?>
+	</div>
+	</div>
+	</div>
+
+	<div class="row">
+	<div class="col col-sm-6 col-xs-12">
+	<div class="form-group">
+		<?php echo $form->labelEx($model->cnee, 'postcode'),
+		CHtml::textField('Cnee[postcode]', $model->cnee->postcode, array('size'=>15, 'class' => 'form-control')); ?>
+	</div>
+	</div>
+	<div class="col col-sm-6 col-xs-12">
+	<div class="form-group">
+		<?php 
+                      $model->cnee->country='Australia';
+                echo $form->labelEx($model->cnee, 'country'),
+		CHtml::dropDownList('Cnee[country]', $model->cnee->country,array('Australia'=>'Australia'),array('class' => 'form-control')); ?>
+	</div>
+	</div>
+	</div>
+	<div class="form-group">
+		<?php echo $form->labelEx($model->cnee, 'email'),
+		CHtml::textField('Cnee[email]', $model->cnee->email, array('size'=>30, 'class' => 'form-control')); ?>
+	</div>
+	</div>
+
+	</div>
+	<div class="form-group">
+        <h3><?=$this->t('RTS Packages');?></h3>
+        <?php
+                echo '<div class="row">';
+	        		echo '<div class="col col-sm-4 col-xs-6">';
+	                echo CHtml::label('RTS Barcode','RTS Barcode');
+	                echo '</div>';
+
+	                echo '<div class="col col-sm-4 col-xs-6">';
+	                echo CHtml::label('RTS Reason','RTS Reason');
+	                echo '</div>';
+
+
+	                echo '<div class="col col-sm-4 col-xs-6">';
+	                echo CHtml::label('RTS Image','RTS Image');
+	                echo '</div>';
+                echo '</div>';
+
+        	foreach($rtsPackages as $key => $package)
+        	{
+        		echo '<div class="row">';
+	        		echo '<div class="col col-sm-4 col-xs-6">';
+	                echo CHtml::label($package->barcode,'cbarcode',['class'=>'form-control form-control-border']);
+	                echo '</div>';
+
+	                echo '<div class="col col-sm-4 col-xs-6">';
+	                echo CHtml::label($package->reason,'creason',['class'=>'form-control form-control-border']);
+	                echo '</div>';
+
+
+	                echo '<div class="col col-sm-4 col-xs-6">';
+	                echo CHtml::link($package->getUrl(),'curl');
+	                echo '</div>';
+                echo '</div>';
+        	}
+        ?>
+        </br>
+        <div class="row">
+            <div class="col col-md-2 col-sm-4 col-xs-6">
+                <div class="form-group">
+                    <?php echo $form->labelEx($model, 'pkg'); ?>
+                    <?php 
+                    	echo CHtml::label($rtsObj->pkg,'cpkg', array('class' => 'form-control','disabled'=>'disabled'));
+                    ?>
+                </div>
+            </div>
+            <div class="col col-md-2 col-sm-4 col-xs-6">
+                <div class="form-group">
+                    <?php echo $form->labelEx($model,'Weight');?>
+                    <div class="input-group">
+                        <?php echo CHtml::label($rtsObj->weight,'cweight',array('size'=>10,'maxlength'=>10, 'class' => 'form-control', 'id' => 'ImParcel_weight','disabled'=>'disabled')); ?>
+                        <div class="input-group-addon">kg</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col col-md-2 col-sm-4 col-xs-6">
+                <div class="form-group">
+                    <?php echo $form->labelEx($model,'Average Cubic Meter');?>
+                    <div class="input-group">
+                        <?php echo CHtml::label($rtsObj->cbm,'ccbm',array('size'=>10,'maxlength'=>10, 'class' => 'form-control', 'id' => 'ImParcel_cbm','disabled'=>'disabled')); ?>
+                        <div class="input-group-addon">M<sup>3</sup></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col col-md-2 col-sm-4 col-xs-6">
+                <div class="form-group">
+                    <?php echo $form->labelEx($model,'Total Cubic Meter');?>
+                    <div class="input-group">
+                        <?php echo CHtml::label(number_format($rtsObj->cbm*$rtsObj->pkg,3,'.',''),'totalcbm',array('size'=>10,'maxlength'=>10, 'class' => 'form-control', 'id' => 'ImParcel_total_cbm','disabled'=>'disabled')); ?>
+                        <div class="input-group-addon">M<sup>3</sup></div>
+                    </div>
+                    
+                </div>
+            </div>
+
+            <div class="col col-md-2 col-sm-4 col-xs-6">
+                <div class="form-group">
+                    <?php echo $form->labelEx($model,'Insurance'); ?>
+                    <div class="input-group">
+                        <div class="input-group-addon">$</div>
+                        <?php echo CHtml::label($model->insurance,'cinsurance',array('size'=>6,'maxlength'=>10, 'class' => 'form-control','disabled'=>'disabled')); ?>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col col-md-2 col-sm-4 col-xs-6">
+                <div class="form-group">
+                    <?php echo  CHtml::label('Cust.Ref','Cust.Ref'); ?>
+                    <?php echo CHtml::label($model->cref, 'ccref', array('size'=>10,'maxlength'=>20, 'class' => 'form-control','disabled'=>'disabled')); ?>
+                </div>
+            </div>
+
+        </div>
+
+        <table id="items" class="table table-striped table-bordered">
+	<thead>
+	<tr><th width="60">#</th>
+	<th><?=$this->t('Item Chinese Name');?> <span class="required">*</span></th>
+	<th><?=$this->t('Item English Name');?> <span class="required">*</span></th>
+        <th><?=$this->t('HS Code');?></th>
+        <th><?=$this->t('Quantity');?><span class="required">*</span></th>
+        <th><?=$this->t('Unit value');?><span class="required">*</span></th>
+        <th><?=$this->t('Sub Total');?></th></tr>
+	</thead>
+	<tbody>
+	</tbody>
+	<tfoot>
+	<tr>
+        <td></td>
+        <th class="tright"><?=$this->t('Total');?>:</th><th id="tot_qty"></th><th id="tot_value"></th></tr>
+	</tfoot>
+	</table>
+	</div>
+	<div id="cost" style="text-align: right;"></div>
+
+	<div class="row">
+	<div class="col col-sm-6 col-xs-12">
+	<div class="form-group"> 
+
+	    <?php echo CHtml::label('Select Reshipping Chargecode', 'Select Reshipping Chargecode')?>
+	    <?php echo CHtml::dropDownList('chargecode', @$model->mdata['chargecode'], $chargecodeInfo, ['class'=>'form-control','prompt'=>"Choose One"])?>  
+	</div>
+		<?php
+          echo CHtml::checkbox('mdata[wooden_box]', (isset($model->mdata['wooden_box']) ? ($model->mdata['wooden_box'] == 1 ? 0 : 1) : 0), array('id' => 'wooden-box-checkbox'));
+          echo CHtml::label('Wooden Box', 'wooden-box-checkbox');
+        ?>
+	</div>
+	</div>
+
+
+	<div class="form-group buttons">
+		<button type="submit" class="btn btn-primary btn-lg"><?=$this->t('Submit Reshipping Info');?></button>
+	</div>
+
+<?php $this->endWidget(); ?>
+
+	<div class="form-group buttons">
+		<button id = "discardRTS" class="btn btn-primary btn-lg" style="background: linear-gradient(to bottom, #992a1f 0%, #be3426 100%) repeat scroll 0 0 rgba(0, 0, 0, 0);"><?=$this->t('Discard');?></button>
+	</div>
+</div><!-- form -->
+<div class="modal fade" id="modal-message" tabindex="-1" role="dialog" aria-labelledby="modal-message-label" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-body">
+      </div>
+      <div class="modal-footer">
+      	<button type="button" id='modal_yes' class="btn btn-default" data-dismiss="modal"><?=$this->t('Yes');?></button>
+        <button type="button" id='modal_close' class="btn btn-default" data-dismiss="modal"><?=$this->t('No');?></button>
+      </div>
+    </div>
+  </div>
+</div>
+<?php ob_start(); ?>
+<script type="text/javascript">
+$(function(){
+	var pitems = <?=json_encode(empty($model->eitems)? '' : $model->eitems);?> || {};
+	var addItem = function(add){
+		var tb = $('#items tbody');
+		var id = $('tr', tb).length;
+		var add = add || 1;
+		while(add-- > 0){
+            var items = '';
+            items = '<tr class="'+(id%2==0? 'even' : 'odd');
+            items = items + '"><td class="rid"></td>';
+            items = items + '<td><label type="text" class="item_name'+(pitems.g_zh && pitems.g_zh[id] === false? ' error' : '')+' form-control form-control-border" name="items[g_zh]['+id+']" size="25"  >'+(pitems.g_zh && pitems.g_zh[id] ? pitems.g_zh[id] : '') + '</label> </td>';
+            items = items + '<td>';
+            items = items + '<label type="text" class="item_name'+(pitems.g && pitems.g[id] === false? ' error' : '')+' form-control form-control-border" name="items[g]['+id+']" size="25" >'+(pitems.g && pitems.g[id]? pitems.g[id] : '') +  '</label></td>';
+            items = items + '<td><label type="text" class="item_hscode'+(pitems.hs && pitems.hs[id] === false? ' error' : '')+' form-control form-control-border" name="items[hs]['+id+']" size="20" >'+(pitems.hs && pitems.hs[id]? pitems.hs[id]: '') + '</label></td>';
+            items = items + '<td><label type="text" class="item_qty'+(pitems.q && pitems.q[id] === false? ' error' : '')+' form-control form-control-border" name="items[q]['+id+']" size="3" >'+(pitems.q && pitems.q[id]? pitems.q[id]: '') + '</label></td>';
+            items = items + '<td><label type="text" class="item_value'+(pitems.v && pitems.v[id] === false? ' error' : '')+' form-control form-control-border" name="items[v]['+id+']" size="10" >'+(pitems.v && pitems.v[id]? pitems.v[id]: '') + '</label></td>';
+            var subTotal = 0;
+            if ( pitems.q && pitems.q[id] && pitems.v && pitems.v[id]) subTotal =  pitems.q[id] * pitems.v[id];
+            items = items + '<td class="item_tot">'+ subTotal.toFixed(2) +'</td>';
+            items = items + '</tr>';
+			tb.append(items);
+			id++;
+		}
+		calcTot();
+	};
+        
+	var calcTot = function(){
+		var tqty = 0;
+        var tvalue = 0.0;
+
+		$('#items tbody tr').each(function(){
+            var itemValue =  Number($('.item_value', this).html()) || 0;
+            var itemQty = Number($('.item_qty', this).html()) || 0;
+			tqty += itemQty;
+            var subTotal =  itemValue * itemQty;
+            $('.item_tot', this).html(  subTotal.toFixed(2) );
+            tvalue += subTotal;
+		});
+		
+		$('#tot_qty').text(tqty);
+        $('#tot_value').text(tvalue.toFixed(2));
+	};
+	
+	//required fields
+	$('#cnee_name_ac, #ExParcel_weight, #cnor_name_ac, #cnee_tel_ac, #cnor_name_ac, #Cnor_tel, #Cnor_address, #cnor_state_ac, #cnor_city_ac, #Cnor_postcode').off('change').on('change', function(){
+		if($(this).val() == '' || $(this).val() == 0){
+			$(this).parents('.form-group').addClass('has-warning').removeClass('has-success');
+		}else{
+			$(this).parents('.form-group').removeClass('has-warning').addClass('has-success');
+		}
+	}).trigger('change');
+
+	$('#items').off('change', '.item_qty,.item_value').on('change', '.item_qty,.item_value', calcTot);
+
+	$('#items').off('keydown', 'input[type=text]').on('keydown', 'input[type=text]', function(evt){
+			if(evt.keyCode == 13){
+				if(Number($(this).parents('tr').find('.rid').text()) == $('#items tbody tr').length) addItem(1);
+				return false;
+			}
+	});
+	$('.moreitem').off('click').on('click', function(e){
+               e.preventDefault();
+		addItem(1);
+	});
+        
+        $(document).off('click','.less').on('click','.less',function(e){
+                e.preventDefault();
+                $(this).parent().parent().remove();
+                calcTot();
+	});
+
+	addItem(pitems.g? pitems.g.length : 1);
+
+	//ac baseurl
+	$('#cnee_city_ac, #cnee_suburb_ac').on('autocompletecreate', function(){
+		//alert('ac');
+		$(this).data('src', $(this).autocomplete('option', 'source'));
+	});
+
+	var cnor_state = $('#cnor_state_ac');
+
+	//cnor name/mobile ac
+	$('#cnee_name_ac, #cnee_tel_ac').off('ac_after_select').on('ac_after_select', function(evt, ui){
+		var mfs = ['address', 'state', 'postcode', 'country', 'email'];
+		for(var i=0; i < mfs.length; i++) $('#Cnor_'+mfs[i]).val(ui.item[mfs[i]]);
+		$('#cnee_name_ac').val(ui.item.name);
+		$('#cnee_tel_ac').val(ui.item.tel);
+		$('#cnee_sub_ac').val(ui.item.suburb);
+	});
+
+	//cnor suburb ac
+	$('#cnee_sub_ac').off('ac_after_select').on('ac_after_select', function(evt, ui){
+		$("#Cnee_postcode").val(ui.item.pc);
+		$('#Cnee_state').val(ui.item.st);
+	});
+
+	//cnee name ac
+	$('#cnor_name_ac').off('ac_after_select').on('ac_after_select', function(evt, ui){
+		var mfs = ['tel', 'address', 'postcode', 'country', 'email'];
+		for(var i=0; i < mfs.length; i++) $('#Cnor_'+mfs[i]).val(ui.item[mfs[i]]);
+		cnor_state.val(ui.item.state);
+		$('#cnor_city_ac').val(ui.item.city);
+		$("#cnor_suburb_ac").val(ui.item.suburb);
+		$("#Cnor_address").focus();
+		$('#notifc').notify({message: {text: "Consignor atuofill"}}).show();
+	});
+
+	//cnee state
+	cnor_state.off('ac_after_select').on('ac_after_select', function(evt, ui){
+		$(this).val(ui.item.value).data('sid', ui.item.id);
+		if(ui.item.ocid){
+			$('#cnor_city_ac').val(ui.item.value).data('cid', ui.item.ocid).focus();
+			$('#Cnor_postcode').val(ui.item.oczip);
+		}
+	}).on('focus',function(){
+		$(this).autocomplete('search', $(this).val());
+	});
+
+	var cnorSid = function(){
+		var v = cnor_state.val();
+		if(v != ''){
+			var s = cnor_state.autocomplete('option', 'source');
+			for(i in s){
+				if(s[i].value == v) cnor_state.data('sid', s[i].id);
+			}
+		}
+	};
+
+	//cnee city
+	$('#cnor_city_ac').off('ac_after_select').on('ac_after_select', function(evt, ui){
+		$(this).val(ui.item.value).data('cid', ui.item.id);
+		if(ui.item.aname){
+			$('#cnor_suburb_ac').val(ui.item.aname);
+		}
+		if(ui.item.zip){
+			$('#Cnor_postcode').val(ui.item.zip);
+		}
+	}).on('focus', function(){
+		cnorSid();
+		if(!$(this).data('src')) $(this).data('src', $(this).autocomplete('option', 'source'));
+		$(this).autocomplete({source : $(this).data('src')+'?sid='+cnor_state.data('sid')}).autocomplete('search', $(this).val());
+	}).on( "autocompletesearch", function(e, u){
+		if(cnor_state.val() == '') return false;
+	});
+
+	//cnee suburb
+	$('#cnor_suburb_ac').off('ac_after_select').on('ac_after_select', function(evt, ui){
+		$(this).val(ui.item.value);
+		$('#Cnor_postcode').val(ui.item.zip);
+	}).on('focus', function(){
+		if(!$(this).data('src')) $(this).data('src', $(this).autocomplete('option', 'source'));
+		$(this).autocomplete({source : $(this).data('src')+'?cid='+$('#cnor_city_ac').data('cid')}).autocomplete('search', $(this).val());
+	}).on( "autocompletesearch", function(e, u){
+		if($('#cnor_city_ac').val() == '') return false;
+	});
+
+	//product ac
+	$('#items').off('focus', '.item_name').on('focus', '.item_name', function(){
+		var t = $(this);
+		var tp = $('select.typsel', t.parents('tr'));
+		if(!t.data('ac_inited')){
+			t.autocomplete({
+				showAnim:'fold',
+				minLength:1,
+				delay:500,
+				autoFocus:true,
+				source : posApp.baseUrl+'shipment/prodSuggest',
+				response: function(e, u){
+					if(u.content.length == 1){
+						var itm = u.content[0];
+						$(this).parent().find('input.item_pid').val(itm.pid).data({'p': itm.price, 'r1': itm.r1, 'r2': itm.r2});
+						$(this).val(itm.label);
+						$(this).parents('td').next().find('.item_qty').focus();
+					}
+				},
+				select:function(e, u){
+					$(this).parent().find('input.item_pid').val(u.item.pid).data({'p': u.item.price, 'r1': u.item.r1, 'r2': u.item.r2});
+					$('#cost').trigger('upCost');
+				}
+			}).on( "autocompletesearch", function(e, u){
+				if(tp.val() == '') return false;
+			});
+			t.data({'ac_inited': true, 'src': posApp.baseUrl+'shipment/prodSuggest'});
+		}
+		$(this).autocomplete({source : $(this).data('src')+'?t='+tp.val()});
+	});
+
+	$('body').on('change', '#ImParcel_weight, .item_qty', function(){
+		$('#cost').trigger('upCost');
+	});
+
+	//tabindex control
+	$('#ImParcel_weight').focus();
+
+	$('#items input').off('keydown').on('keydown', function(evt){
+		if(evt.keyCode == 9 && !evt.shiftKey){
+			var j = false;
+			switch($(this).attr('id')){
+				case 'ExParcel_hbn':
+					j = '#ExParcel_weight';
+				break;
+				case 'ExParcel_weight':
+					j = '#cnor_name_ac';
+				break;
+				case 'cnee_tel_ac':
+					j = '#cnor_name_ac';
+				break;
+				case 'Cnor_address':
+					j = '#items .typsel:first-of-type';
+				break;
+			}
+			if(j){
+				$(j).focus();
+				return false;
+			}
+		}
+	});
+});
+</script>
+<?php $this->registerJS(ob_get_clean()); ?>
+<?php ob_start(); ?>
+<script type="text/javascript">
+$(function(){
+	$('#modal_close').on('click',function(){
+		$('#loading-container').hide();
+		return true;
+	});
+
+	$('#modal_yes').on('click',function(){
+		var form = new FormData(document.getElementById("shipment-form"));
+		var woodenBoxChecked = $('#wooden-box-checkbox').is(':checked') ? 1 : 0;
+		form.append('mdata[wooden_box]', woodenBoxChecked);
+		$.ajax({
+				url: '<?=$this->createUrl("rtsProcess/submitRTS")."?id=".$model->id?>',
+				type: "post",
+				data: form,
+				processData: false,
+				contentType: false,
+				success: function(r) {
+					var re = JSON.parse(r);
+				    if(re.success)
+				    {
+				    	$('#loading-container').hide();
+				    	posApp.toPage('<?=$this->createUrl('rtsProcess/index')?>', false);
+				    }else
+			        {
+			        	alert(re.msg);
+			        	$('#loading-container').hide();
+			        }
+				}
+		});
+		return true;
+	});
+	$('#shipment-form').on('submit', function(e,r){
+			$('#loading-container').show();
+			var form = new FormData(document.getElementById("shipment-form"));
+			var woodenBoxChecked = $('#wooden-box-checkbox').is(':checked') ? 1 : 0;
+			form.append('mdata[wooden_box]', woodenBoxChecked);
+			$.ajax({
+			        url: '<?=$this->createUrl("rtsProcess/checkChargecodeCanRTS")."?id=".$model->id?>',
+			        type: "post",
+			        data: form,
+			        processData: false,
+			        contentType: false,
+			        success: function(r) {
+			        	var re = JSON.parse(r);
+			            if(re.success)
+			            {
+			            	$('#modal-message').modal();
+			            	let html = "<h2>此包裹的退件重派费用为：<font style='font-weight:bold;font-size:2em;'>$<span style='color:red'>"+re.charge+"</span></font>, 请问是否要退件重派？</h2> "
+        					$('#modal-message .modal-body').html(html);
+			            }else
+			            {
+			            	alert(re.msg);
+			            	$('#loading-container').hide();
+			            }
+				      },
+			        error: function(e) {
+			            console.log(e);
+			        }
+			});
+			return false;
+	});
+
+
+	$('#discardRTS').on('click',function(){
+		if(confirm("确定要弃件吗？"))
+		{
+			var form = new FormData(document.getElementById("shipment-form"));
+			$('#loading-container').show();
+			$.ajax({
+			    url: '<?=$this->createUrl("rtsProcess/discardRTS")."?id=".$model->id?>',
+			    type: "post",
+			    data: form,
+			    processData: false,
+			    contentType: false,
+			    success: function(r) {
+			        if(r=="done")
+			        {
+			        	$('#loading-container').hide();
+			        	posApp.toPage('<?=$this->createUrl('rtsProcess/index')?>', false);
+			        }else
+			        {
+			        	alert("Discard Failure");
+			        }
+			    }
+			});
+		}
+		return false;
+	});
+});
+</script>
+<?php $this->registerJS(ob_get_clean(),2); ?>

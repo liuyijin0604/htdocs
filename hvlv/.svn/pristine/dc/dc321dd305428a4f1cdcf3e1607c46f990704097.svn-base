@@ -1,0 +1,26 @@
+<center>
+<h2> Courier Fuel Surcharge:</h2>
+<table width="100%">
+	<?php
+		echo "<tr><td><center>From Day</center></td><td><center>To Day</center></td><td><center>Fuel Surcharge</center></td></tr>";
+		foreach ($data as $key => $fuel)
+		{
+			echo "<tr><td><center>{$fuel['from_day']}</center></td><td><center>{$fuel['to_day']}</center></td><td><center>".($fuel['rate']*100)."%</center></td></tr>";
+		}
+
+	?>
+</table>
+</br>
+</br>
+<h2> Container Cartage Fuel Surcharge:</h2>
+<table width="100%">
+	<?php
+		echo "<tr><td><center>From Day</center></td><td><center>To Day</center></td><td><center>Fuel Surcharge</center></td></tr>";
+		foreach ($data2 as $key => $fuel)
+		{
+			echo "<tr><td><center>{$fuel['from_day']}</center></td><td><center>{$fuel['to_day']}</center></td><td><center>".($fuel['rate']*100)."%</center></td></tr>";
+		}
+
+	?>
+</table>
+</center>

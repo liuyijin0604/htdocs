@@ -1,0 +1,443 @@
+<?php
+
+/**
+ * This is the model class for table "storage".
+ *
+ * The followings are the available columns in table 'storage':
+ * @property string $id
+ * @property string $wid
+ * @property string $pid
+ * @property integer $type
+ * @property integer $status
+ * @property string $name
+ * @property string $code
+ * @property integer $cx
+ * @property integer $cy
+ * @property integer $cz
+ * @property string $cap
+ * @property string $cap_kg
+ * @property string $cap_cbm
+ * @property string $cap_item
+ * @property string $width
+ * @property string $depth
+ * @property string $height
+ * @property string $bwf
+ * @property string $notes
+ * @property string $meta
+ */
+class WmsLocation extends CActiveRecord
+{
+	
+	public static $types = array(
+		10 => 'Area',
+		20 => 'Rack Bay',
+		30 => 'Sorting Rack',
+		self::TYPE_PALLET => 'Pallet',
+		60 => 'Carton',
+		90 => 'Virtual',
+		99 => 'System',
+		self::CREATED_PALLET =>'C PAllet'
+	);
+	const TYPE_PALLET = 50;
+	const TYPE_AREA = 10;
+	const TYPE_RACK_BAY = 20;
+	
+	public static $states = array(
+		1 => 'Active',
+		0 => 'Inactive',
+	);
+
+	public static $bwfs = [
+		self::BWF_AIR => 'Air',
+		self::BWF_SEA => 'Sea',
+		self::BWF_DG_YES => 'DG',
+		self::BWF_DG_NO => 'not DG',
+	];
+	const BWF_AIR = 8;
+	const BWF_SEA = 16;
+	const BWF_DG_YES = 32;
+	const BWF_DG_NO = 64;
+
+	const META_CHANGED = 'changed';
+	const META_CHANGE_TIME  = 'change_time';
+	const CREATED_PALLET = 98;
+
+	public static $warehouse_prefix = [
+		106 => 'S1',
+		286 => 'K3',
+		218 => 'M1',
+		530 => 'B1',
+	];
+
+	const PENDING_OUT = 2;
+	const WMS_LOCATION_PACKING = 3;
+	const WMS_LOCATION_RESERVED = 4;
+	const LEFT_WAREHOUSE = 5;
+	const WMS_LOCATION_SHORT_RELEASE = 8;
+	const WMS_LOCATION_MAX_MAGIC_ID = 100;
+
+	public $pname, $nolog, $extra = [];
+
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName(){
+		return 'wms_location';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules(){
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('wid, type, name', 'required'),
+			array('pid, status, code, cx, cy, cz, cap, cap_kg, cap_cbm, cap_item, width, height, depth, bwf, notes, meta', 'safe'),
+			array('type, status, cx, cy, cz', 'numerical', 'integerOnly'=>true),
+			array('wid, pid, cap_item, bwf', 'length', 'max'=>11),
+			array('name, code', 'length', 'max'=>50),
+			array('cap_kg, cap_cbm, height, width', 'length', 'max'=>10),
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, wid, pid, pname, type, status, name, code, cx, cy, cz, cap, cap_kg, cap_cbm, cap_item, width, height, depth, bwf, notes, meta,ground_label,ground_label_in_time', 'safe', 'on'=>'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations(){
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+			'warehouse' => array(self::BELONGS_TO, 'Org', 'wid'),
+			'parent' => array(self::BELONGS_TO, 'WmsLocation', 'pid'),
+			'stocks' => array(self::HAS_MANY, 'WmsStockLocation', 'location_id'),
+			'rackShipments' => array(self::HAS_MANY, 'WmsRackShipment', 'rack_id'),
+		);
+	}
+
+	public function notEmpty()
+	{
+		if ($this->pid == 5) {
+			return false;
+		}
+
+		return WmsStockLocation::model()->count('qty > 0 AND location_id = :id', [':id' => $this->id]) > 0;
+	}
+
+	public static function genCodes($q, $t = 50, $wid = 106){
+		switch($t){
+			case 50:
+				if(isset(self::$warehouse_prefix[$wid])){
+					$pfix = 'P'.self::$warehouse_prefix[$wid];
+				}else{
+					$pfix = 'PLT';
+				}
+				$pfix_q = 'P__'.date('ymd');
+				$pfix = $pfix.date('ymd');
+				$sub_len = 10;
+			break;
+			case 60:
+				if(isset(self::$warehouse_prefix[$wid])){
+					$pfix = 'C'.self::$warehouse_prefix[$wid];
+				}else{
+					$pfix = 'CTN';
+				}
+				$pfix_q = 'C__'.date('ymd');
+				$pfix = $pfix.date('ymd');
+				$sub_len = 10;
+			break;
+			case 70:
+				$pfix_q = $pfix = 'LF';
+				$t = 60;
+				$sub_len = 4;
+			break;
+		}
+
+		$sql = 'SELECT MAX(substring(code,:l)) FROM wms_location WHERE type = :t AND code LIKE :pfix AND status = 1';
+
+		$max = Yii::app()->db->createCommand($sql)->bindValues([':l' => $sub_len, ':t' => $t, ':pfix' => $pfix_q.'%'])->queryScalar();
+
+		if(empty($max)){
+			$max = 0;
+		}else{
+			$max = ltrim($max, '0');
+		}
+		$cs = [];
+		for($i = 1; $i <= $q; $i++){
+			if ($pfix == 'LF') {
+				$fmt = '%06d';
+			} else {
+				$fmt = '%04d';
+			}
+			$c = $pfix.sprintf($fmt, intval($max)+intval($i));
+			$l = new WmsLocation;
+			$l->wid = $wid;
+			$l->type = $t;
+			$l->status = 1;
+			$l->name = $c;
+			$l->code = $c;
+			$l->save();
+			$cs[] = $c;
+		}
+		return $cs;
+	}
+	
+	public function getType(){
+		return Yii::t(strtolower(__CLASS__), empty(self::$types[$this->type])? '' : self::$types[$this->type]);
+	}
+	
+	public function getStatus(){
+		return Yii::t(strtolower(__CLASS__), empty(self::$states[$this->status])? '' : self::$states[$this->status]);
+	}
+	
+	public function beforeSave(){
+		$this->name = trim($this->name);
+		$this->code = trim($this->code);
+		if($this->id > 0){
+			$o = self::model()->findByPk($this->id);
+			$this->nolog = $o->pid == $this->pid;
+		}
+		$this->meta = json_encode($this->extra);
+		return true;
+	}
+	
+	public function afterSave(){
+		if(!$this->nolog && !empty($this->pid)){
+			Log::add($this, 4, ['parent' => $this->parent->name]);
+			Log::add($this->parent, 4, ['store' => $this->name]);
+		}
+	}
+	
+	public function afterFind(){
+		$this->extra = json_decode($this->meta, true);
+		return true;
+	}
+
+	/**
+	 * store the paracel at the specified area
+	 * @param $wid
+	 * @param $type
+	 * @param $code
+	 * @param $parcel
+	 */
+	public static function allocateInDestArea($wid,$type,$code,$parcel){
+		$rs = self::model()->findAll(array(
+			'condition' => 'status = 1 AND cap < 100 AND wid = :wid AND type = :type AND code = :code',
+			'params' => array(':wid' => $wid, ':type' => $type, ':code' => $code),
+			'order' => 'wt, id',
+		));
+		foreach($rs as $r){
+			if($r->canFit($parcel)){
+				$r->addItem($parcel);
+				return $r;
+			}
+		}
+		return false;
+	}
+
+	public static function allocate($wid, $type, $p, $n=false){
+		if(!$n){
+			$rs = self::model()->findAll(array(
+				'condition' => 'status = 1 AND cap < 100 AND wid = :wid AND type = :type',
+				'params' => array(':wid' => $wid, ':type' => $type),
+				'order' => 'wt, id',
+			));
+		}else{
+			$s = self::model()->find('name = :n OR code = :n', [':n' => $n]);
+			if(empty($s)) return false;
+			$rs = self::model()->findAll(array(
+				'condition' => 'status = 1 AND cap < 100 AND wid = :wid AND type = :type AND wt >= :w',
+				'params' => array(':wid' => $wid, ':type' => $type, ':w' => $s->wt),
+				'order' => 'wt, id',
+			));
+		}
+		
+		foreach($rs as $r){
+			if($r->canFit($p)){
+				$r->addItem($p);
+				return $r;
+			}
+		}
+
+		return false;
+	}
+
+	public function canFit($p){
+		$f = true;
+		if($this->cap_item > 0){
+			$f = ($this->totItems() + $p->pkg) <=  $this->cap_item;
+		}
+		if($f && $this->cap_cbm > 0){
+			$f = ($this->totCBM() + $p->cbm) <= $this->cap_cbm;
+		}
+		if($f && $this->cap_kg > 0){
+			$f = ($this->totWeight() + $p->weight) <= $this->cap_kg;
+		}
+
+		return $f;
+	}
+
+	public function totCBM(){
+		$t = 0;
+		foreach($this->items as $r){
+			if ( isset($r->cbm) ) {
+				$t += $r->cbm;
+			}
+		}
+		return $t;
+	}
+
+	public function totWeight(){
+		$t = 0;
+		foreach($this->items as $r){
+			if ( isset($r->weight) ) {
+				$t += $r->weight;
+			}
+		}
+		return $t;
+	}
+
+	public function updateCap(){
+		$ocap = $this->cap;
+		if($this->cap_item + $this->cap_cbm + $this->cap_kg == 0){
+			$this->cap = 0;
+		}else{
+			$items = $this->totItems();
+			if(empty($items)){
+				$this->cap = 0;
+			}else{
+				$pct = [0];
+				if($this->cap_item > 0){
+					$pct[] = round($this->totItems() / $this->cap_item * 100);
+				}
+				if($this->cap_cbm > 0){
+					$pct[] = round($this->totCBM() / $this->cap_cbm * 100);
+				}
+				if($this->cap_kg > 0){
+					$pct[] = round($this->totWeight() / $this->cap_kg * 100);
+				}
+				$this->cap = max($pct);
+			}
+		}
+
+		if($ocap != $this->cap) $this->save();
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels(){
+		return array(
+			'id' => 'ID',
+			'wid' => 'Warehouse',
+			'pid' => 'Parent',
+			'pname' => 'Parent',
+			'type' => 'Type',
+			'status' => 'Status',
+			'name' => 'Name',
+			'code' => 'Code',
+			'cx' => 'X',
+			'cy' => 'Y',
+			'cz' => 'Z',
+			'cap' => 'Cap. %',
+			'cap_kg' => 'Cap KG',
+			'cap_cbm' => 'Cap CBM',
+			'cap_item' => 'Cap Item',
+			'width' => 'Width',
+			'height' => 'Height',
+			'depth' => 'Depth',
+			'bwf' => 'Bwf',
+			'notes' => 'Notes',
+			'meta' => 'Meta',
+		);
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search($pgn=true, $ps = 30, $ec = false){
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('t.id',$this->id);
+		$criteria->compare('wid',$this->wid);
+		$criteria->compare('pid',$this->pid);
+		$criteria->compare('t.type',$this->type);
+		$criteria->compare('t.status',$this->status);
+		$criteria->compare('t.code',$this->code,true);
+		$criteria->compare('cx',$this->cx);
+		$criteria->compare('cy',$this->cy);
+		$criteria->compare('cz',$this->cz);
+		$criteria->compare('cap',$this->cap,true);
+		$criteria->compare('cap_kg',$this->cap_kg,true);
+		$criteria->compare('cap_cbm',$this->cap_cbm,true);
+		$criteria->compare('cap_item',$this->cap_item,true);
+		$criteria->compare('width',$this->width,true);
+		$criteria->compare('height',$this->height,true);
+		$criteria->compare('depth',$this->depth,true);
+		$criteria->compare('bwf',$this->bwf,true);
+		$criteria->compare('notes',$this->notes,true);
+
+		if (!empty($this->name)&&preg_match('/[\s,;]+/', trim($this->name))) {
+			$ns = preg_split('/[\s,;]+/', trim($this->name));
+			if (sizeof($ns) > 200) {
+				$ns = array_slice($ns, 0, 200);
+			}
+			$sc1 = new CDbCriteria;
+			$sc1->addInCondition("t.name", $ns);
+			$criteria->mergeWith($sc1);
+			$this->name = "";
+		}else
+		{
+			$criteria->compare('t.name',$this->name,true);
+		}
+
+		$with = array();
+		if(!empty($this->pname)){
+			$with[] = 'parent';
+			$criteria->addCondition('(parent.code LIKE :pn OR parent.name LIKE :pn)');
+			$criteria->params[':pn'] = '%'.$this->pname.'%';
+		}
+
+		if(!empty($with)){
+			$criteria->with = array_unique($with);
+			$criteria->together = true;
+		}
+
+		if($ec) $criteria->mergeWith($ec);
+
+
+		return new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+			'sort'=>array(
+				'defaultOrder'=>'t.type ASC, t.name ASC',
+			),
+			'pagination'=> $pgn? array(
+				'pageSize' => $ps,
+			) : false,
+		));
+	}
+
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return Storage the static model class
+	 */
+	public static function model($className=__CLASS__){
+		return parent::model($className);
+	}
+}

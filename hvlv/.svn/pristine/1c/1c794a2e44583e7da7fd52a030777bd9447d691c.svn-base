@@ -1,0 +1,308 @@
+<?php
+
+class RtsProcessController extends Controller
+{
+	//put your code here
+	protected $nonAjax = ['printAdjustShipmentLabel','rtsInvoice'];
+	/**
+	 * Declares class-based actions.
+	*/
+	protected $skipAcl = [];
+
+	protected $org;
+	protected $type;
+	protected $warehouseProcessService;
+
+	public function beforeAction($action)
+	{
+		if(!Yii::app()->request->isAjaxRequest) $this->layout = 'whscan';
+		if (!Yii::app()->user->isGuest) {
+			$this->org = Org::model()->findByPk(Yii::app()->user->org);
+			$this->type = 'sc';
+		}
+		$this->warehouseProcessService = new WarehouseProcessService();
+		return parent::beforeAction($action);
+	}
+	
+	public function actionIndex()
+	{
+		$filtersForm=new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+		$rtsProcessService = new RtsProcessService();
+		$provide=$rtsProcessService->getRtsProcessReportProvide();
+		$filteredData=$filtersForm->filter($provide);
+		$dataProvider=new CArrayDataProvider($filteredData);
+		$dataProvider->pagination=['pageSize' =>999,];
+		$sort=new CSort();
+		$sort->attributes=[
+			'today_left'=>[
+				'asc'=>'today_left ASC',
+				'desc'=>'today_left DESC',
+			],
+			'status'=>[
+				'asc'=>'status ASC',
+				'desc'=>'status DESC',
+			],
+		];
+		$sort->defaultOrder = "status ASC";
+		$dataProvider->sort=$sort;
+		$this->render('index', ['dataProvider'=>[$dataProvider,$filtersForm],'provide'=>$provide]);
+	} 
+
+	public function actionProcessPage()
+	{
+		switch ($_GET['tab']) {
+			case 'rts_scan':
+				$op ='rtsscan';
+				$this->render('rts_scan', ['op'=>$op]);
+				break;
+			case 'rts_unknown':
+				$provide = [];
+				$model = new ShipmentRtsRecord('search');
+				$model->unsetAttributes();
+				if(!empty($_GET['ShipmentRtsRecord']))
+				{
+					$model->setAttributes($_GET['ShipmentRtsRecord']);
+				}
+
+				$model->type = ShipmentRtsRecord::UNKNOWN;
+				$model->status = "<".ShipmentRtsRecord::WAITING_UNKNOWN_DISCARD;
+
+				if(empty($_GET['ShipmentRtsRecord']))
+				{
+					$rtsProcessService = new RtsProcessService();
+					$provide = $rtsProcessService->getWhscanRTSUnknownProvide(true);
+				}
+
+
+				$this->render('rts_unknown',['model'=>$model,'provide'=>$provide]);
+				break;
+
+
+
+			case 'rts_resend':
+				$op ='rtsresend';
+				$model = new ShipmentRtsRecordConfirm('search');
+				$model->unsetAttributes();
+				$model->status = ShipmentRtsRecordConfirm::RTS_WAITING_RESEND;
+				if(!empty($_GET['ShipmentRtsRecordConfirm']))
+				{
+					$model->setAttributes($_GET['ShipmentRtsRecordConfirm']);
+				}
+				$this->render('rts_resend', ['model' => $model,'op'=>$op]);
+				break;
+
+			case 'rts_done':
+				$op ='rtsdone';
+				$model = new ShipmentRtsRecordConfirm('search');
+				$model->unsetAttributes();
+				$model->status = ShipmentRtsRecordConfirm::RTS_DONE;
+				if(!empty($_GET['ShipmentRtsRecordConfirm']))
+				{
+					$model->setAttributes($_GET['ShipmentRtsRecordConfirm']);
+				}
+				$this->render('rts_resend', ['model' => $model,'op'=>$op]);
+				break;
+
+
+
+			case 'rts_waiting_discard':
+				$model = new ShipmentRtsRecord('search');
+				$model->unsetAttributes();
+				$model->status = [ShipmentRtsRecord::WAITING_UNKNOWN_DISCARD,ShipmentRtsRecord::WAITING_KNOWN_DISCARD];
+				if(!empty($_GET['ShipmentRtsRecord']))
+				{
+					$model->setAttributes($_GET['ShipmentRtsRecord']);
+				}
+				$op ='rtswaitingdiscard';
+				$this->render('rts_discarded',['model'=>$model,'op'=>$op]);
+				break;
+
+			case 'rts_discarded':
+				$model = new ShipmentRtsRecord('search');
+				$model->unsetAttributes();
+				$model->status = [ShipmentRtsRecord::UNKNOWN_DISCARD_DONE,ShipmentRtsRecord::KNOWN_DISCARD_DONE];
+				if(!empty($_GET['ShipmentRtsRecord']))
+				{
+					$model->setAttributes($_GET['ShipmentRtsRecord']);
+				}
+				$op ='rtsdiscarded';
+				$this->render('rts_discarded',['model'=>$model,'op'=>$op]);
+				break;
+
+
+
+			case 'rtc_list':
+				$model = new Shipment('search');
+				$model->unsetAttributes();
+				$status = 0;
+				$status = ShipmentRtsRecord::NEW;
+				$barcodeStr="";
+				if(!empty($_GET['Shipment']['barcode']))
+				{
+					$barcodeStr = 'barcode = "'.$_GET['Shipment']['barcode'].'"';
+				}
+				
+				if(empty($_GET['Shipment']['warehouse_id']))
+				{
+					$records = ShipmentRtsRecord::model()->findAll("type=:type and status=:status ".$barcodeStr,[':status'=>$status,':type'=>ShipmentRtsRecord::KNOWN]);
+				}else
+				{
+					$records = ShipmentRtsRecord::model()->findAll("type=:type and status=:status and warehouse_id=:warehouse_id ".$barcodeStr,[':status'=>$status,':type'=>ShipmentRtsRecord::KNOWN,':warehouse_id'=>$_GET['Shipment']['warehouse_id']]);
+				}
+				$ids = array_column($records,'shipment_id');
+				$ids[] = -1;
+				$model->ot_id= null;
+				$model->mids = $ids;
+				if (!empty($_GET['Shipment'])) {
+					$model->setAttributes($_GET['Shipment']);
+					$model->type = ImParcel::RTS_RECEIVED;
+				}
+				if(empty($_GET['sort']))
+				{
+					$_GET['sort'] = 'rts_scan_date.desc';
+				}
+
+				$this->render('rtc_list', ['model' => $model,'rtsType'=>$status]);
+				break;
+
+
+
+			case 'rtc_record':
+				$op ='rtc_record';
+				$model = new ShipmentRtsRecordConfirm('search');
+				$model->unsetAttributes();
+				$model->status = ShipmentRtsRecordConfirm::RTC_WAITING;
+				if(!empty($_GET['ShipmentRtsRecordConfirm']))
+				{
+					$model->setAttributes($_GET['ShipmentRtsRecordConfirm']);
+				}
+				$this->render('rtc_record', ['model' => $model,'op'=>$op]);
+				break;
+
+			default:
+				# code...
+				break;
+		}
+	}
+
+
+		/**
+	 * process scan check in
+ 	*/
+	public function actionCheckRtsStatus()
+	{
+		$rtsProcessService = new RtsProcessService();
+		// $model = Consol::model()->findByPk();
+		$rtsProcessService->scanRts($_POST,"rtsstatus");
+
+	}
+
+	public function actionUnknownOperation($id)
+	{
+		$model = $this->loadModel($id);
+		$this->render('unknown_operation',['model'=>$model]);
+	}
+
+	public function actionPrintAdjustShipmentLabel($id)
+	{
+		$sn = $_GET['sno'];
+		$model=ShipmentRtsRecord::model()->findByPk($id);
+		$labelService = new LabelService();
+		$labelService->printLabel($model->adjust_shipment_id,false,$sn);
+	}
+
+	public function actionUpdateUnknown()
+	{
+		$id = $_GET['id'];
+		$model = $this->loadModel($id);
+		$ref = $_POST['ref'];
+		$sno = $_POST['sno'];
+		$rtsProcessService = new RtsProcessService();
+		$result = $rtsProcessService->updateShipmentRtsProcess($model,$ref,$sno);
+		if($result===true)
+		{
+			echo "done";
+		}elseif($result===false)
+		{
+			echo "failure";
+		}else
+		{
+			echo $result;
+		}
+	}
+
+	public function actionSubmitRTCList()
+	{
+		$selectedIds = $_POST['selectedIds'];
+		$shipmentIds = explode(',',$selectedIds);
+		$rtsProcessService = new RtsProcessService();
+		$result = $rtsProcessService->submitRTCList($shipmentIds);
+		if($result===true)
+		{
+			echo "done";
+		}elseif($result===false)
+		{
+			echo "failure";
+		}else
+		{
+			echo $result;
+		}
+	}
+
+	public function actionUploadGatePass($id)
+	{
+        $this->render('import_file_for_gp',["id"=>$id]);
+    }
+
+    public function actionAjaxImportFileForRtcGp($id)
+    {
+    	$rtsProcessService = new RtsProcessService();
+    	$result = $rtsProcessService->importFileForRtcGp($_FILES['file'],$id);
+        echo json_encode($result);
+        return;
+    }
+
+    public function actionDiscardUnknownRTS($id)
+	{
+		$rtsProcessService = new RtsProcessService();
+		if($rtsProcessService->discardUnknownRTS($id))
+		{
+			echo "done";
+		}else
+		{
+			echo "failure";
+		}
+	}
+
+	public function actionRtsInvoice($id)
+	{
+		$shipmentRtsRecordConfirm = ShipmentRtsRecordConfirm::model()->findByPk($id);
+		$invoice = $shipmentRtsRecordConfirm->getInvoice();
+		$invoiceService = new InvoiceService();
+		$invoiceService->printInvoice($invoice->id);
+
+
+	}
+
+
+	/**
+	 * Returns the data model based on the primary key given in the GET variable.
+	 * If the data model is not found, an HTTP exception will be raised.
+	 * @param integer the ID of the model to be loaded
+	 */
+	public function loadModel($id)
+	{
+		$model = null;
+		$model=ShipmentRtsRecord::model()->findByPk($id);
+		if ($model===null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		return $model;
+	}
+
+
+
+}

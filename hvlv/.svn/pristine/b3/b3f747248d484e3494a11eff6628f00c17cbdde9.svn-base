@@ -1,0 +1,603 @@
+<style type="text/css">
+	.display_none {
+		display: none;
+	}
+	.width_item_label{
+		size:15;
+	}
+</style>
+<div style="right: 20px;text-align:right;position:absolute;">
+</div>
+<div class="form">
+	<?php $form = $this->beginWidget('CActiveForm', array(
+		'id' => 'cargo-plan-form',
+		'enableAjaxValidation' => false,
+	)); ?>
+
+	<div class="row rowcol rowleft">
+		<br />
+		<h3>Pallet Request Info.</h3>
+		<br />
+		<hr align=center width=100% color=#AED0EA SIZE=1 style="margin-bottom: 10px;">
+
+		<div class="row rowcol rowleft">
+			<?php echo $form->labelEx($model, 'status', array('required' => 'required')); ?>
+			<?php echo $form->dropDownList($model, 'status',  $this->t(CargoProcessPlan::$cargoplan_states), ['empty' => 'Select One']); ?>
+		</div>
+
+		<div class="row rowcol ">
+			<?php echo $form->labelEx($model, 'type', array('required' => 'required')); ?>
+			<?php echo $form->dropDownList($model, 'type',  $this->t(CargoProcessPlan::$cargoplan_types), ['style' => 'width:238px', 'empty' => 'Select One', 'required' => 'required', 'onchange' => 'funcGetType(this.options[this.selectedIndex].value)']); ?>
+		</div>
+		<br />
+	</div>
+
+	<div class="row rowcol rowleft">
+		<br />
+		<h3>Shipment Info.</h3>
+		<br />
+		<hr align=center width=100% color=#AED0EA SIZE=1 style="margin-bottom: 10px;">
+
+		<div class="row rowcol rowleft">
+			<?php echo Chtml::label('Ref', '', array('required' => 'required')); ?>
+			<?php echo Chtml::textField('mdata[Ref]', @$model->mdata['Ref'], ['size' => 30, 'required' => 'required', 'maxlength' => '45','onchange'=>'fungetRef()']); ?>
+		</div>
+
+		<div class="row rowcol ">
+			<?php echo $form->labelEx($model, 'ref'); ?>
+			<?php echo $form->textField($model, 'ref', ['size' => 30, 'readonly' => 'readonly', 'id' => 'ref']); ?>
+		</div>
+
+		<div class="row rowcol ">
+			<?php echo $form->labelEx($model, 'schedule_time'); ?>
+			<?php echo $form->textField($model, 'schedule_time', ['size' => 30, 'class' => 'datetime_input', 'id' => $_GET['tabid'] . '_dt_schedule']); ?>
+		</div>
+
+		<div class="row rowcol ">
+			<?php echo $form->labelEx($model, 'due_time'); ?>
+			<?php echo $form->textField($model, 'due_time', ['size' => 30, 'class' => 'datetime_input', 'id' => $_GET['tabid'] . '_dt_due']); ?>
+		</div>
+
+		<div class="row rowcol rowleft">
+			<?php echo $form->labelEx($model, 'creater'); ?>
+			<?php echo CHtml::textField('CargoProcessPlan[creater]', @$model->assigned->fname, ['size' => 30, 'disabled' => 'disabled']) ?>
+		</div>
+
+		<div class="row rowcol">
+			<div>
+				<?php echo $form->labelEx($model, 'agent_id', array('required' => 'required')); ?>
+			</div>
+			<input class="width_item_input" type="hidden" id='CargoProcessPlan[agent_id]' value='<?php echo $model->agent_id ?>' name='CargoProcessPlan[agent_id]'>
+			<?php
+			$acname = empty($_GET["tabid"]) ? 'agent_ac' : $_GET["tabid"] . '_agent_ac';
+			$this->widget('zii.widgets.jui.CJuiAutoComplete', array(
+				'name' => $acname,
+				'sourceUrl' => array('org/ownerSuggest'),
+				'value' => empty($model->agent_id) ? '' : $model->agent->name,
+				'options' => array(
+					'showAnim' => 'fold',
+					'minLength' => 2,
+					'delay' => 200,
+					'select' => 'js:function(event, ui){ $(this).val(ui.item["label"]); $(this).prevAll("input[type=hidden]").val(ui.item["value"]).data("ov",ui.item["value"]); return false; }',
+					'change' => 'js:function(event, ui){ if(ui.item == null) $(this).prevAll("input[type=hidden]").val($(this).prevAll("input[type=hidden]").data("ov")); return false; }',
+				),
+				'htmlOptions' => array(
+					'class' => 'required',
+					'size' => '30',
+				),
+			));
+			?>
+		</div>
+
+		<div class="row rowcol ">
+			<?php echo $form->labelEx($model, 'need_invoice', array('required' => 'required')); ?>
+			<?php echo $form->dropDownList($model, 'need_invoice', [0 => "Null", 1 => "Creater", 2 => "Cartage"], ['style' => 'width:238px', 'required' => 'required', 'onchange' => 'funcGetNeedInvoice(this.options[this.selectedIndex].value)']); ?>
+		</div>
+
+		<div class="row rowcol">
+			<?php echo $form->labelEx($model, 'Input Revenue'); ?>
+			<?php echo CHtml::textField('CargoProcessPlan[input_revenue]', @$model->mdata['input_revenue'], ['size' => 30]); ?>
+		</div>
+		
+		<div class="row rowcol display_none" id="invoiceNo">
+			<?php echo $form->labelEx($model, 'invoice_by', array('required' => 'required')); ?>
+			<?php echo $form->textField($model, 'invoice_by', ['size' => 30, 'onblur' => 'funcCheckOT(this.value)']); ?>
+		</div>
+
+		<div class="row rowcol display_none" id="show_request">
+			<br />
+			<a id="error_message" style="color:red;"></a>
+		</div>
+
+		<div class="row rowcol rowleft">
+			<?php echo $form->labelEx($model, 'dpt_id'); ?>
+			<?php echo $form->dropDownList($model, 'dpt_id', Org::dptList3PL(), ['style' => 'width:238px', 'required' => 'required', 'empty' => 'Select One', 'onchange'=>'fungetRef()']); ?>
+		</div>
+
+		<div class="row rowcol ">
+			<?php echo $form->labelEx($model, 'ot_id'); ?>
+			<?php echo $form->dropDownList($model, 'ot_id', $this->t(CargoProcessPlan::$dpmts), ['style' => 'width:238px', 'required' => 'required', 'empty' => 'Select One', 'onchange'=>'fungetRef()']); ?>
+		</div>
+
+		<div class="row rowcol rowleft">
+			<label>Pallets or Truck Type</label>
+			<?php echo CHtml::textArea('CargoProcessPlan[pallets_note]', $model->pallets_note, array('style' => 'width:980px; height:100px;')); ?>
+		</div>
+
+		<div class="row rowcol rowleft">
+			<label>Note</label>
+			<?php echo CHtml::textArea('CargoProcessPlan[note]', $model->note, array('style' => 'width:980px; height:100px;')); ?>
+		</div>
+	</div>
+
+	<div class="row rowcol rowleft">
+		<br />
+		<br />
+		<h3>Dimension Info</h3>
+		<br />
+		<hr align=center width=100% color=#AED0EA SIZE=1 style="margin-bottom: 10px;">
+
+		<div class='row rowcol rowleft'>
+		<?php echo CHtml::dropDownList("mdata[dim_delivery]",@$model->mdata['dim_delivery']==1?1:2,[1=>'Pallets',2=>'Packages,Boxes or Cartons'],['style' => 'width:238px','id'=>'plt_delivery']),'';?>
+		</div>
+	
+		<!-- <div id="plt-delivery" class='row rowcol rowleft'>
+			<div class="row rowcol rowleft">
+				<?php echo CHtml::label('Pallet Type', 'Pallet Type'); ?>
+				<?php echo CHtml::dropDownList('pallet_type',0, [0=>'Standard 120cm x 120cm x 150cm'], ['style' => 'width:238px']); ?>
+			</div>
+			<div class="row rowcol ">
+				<?php echo $form->labelEx($model, 'pallets',array('required' => 'required')); ?>
+				<?php echo $form->textField($model, 'pallets', ['required' => 'required','size' => 30]); ?>
+			</div>
+			<div class="row rowcol">
+				<?php echo $form->labelEx($model, 'total weight (kg)',array('required' => 'required')); ?>
+				<?php echo $form->textField($model, 'weight', ['required' => 'required','size' => 30]); ?>
+			</div>
+			<div class="row rowcol">
+				<?php echo $form->labelEx($model, 'total cbm (m³)',array('required' => 'required')); ?>
+				<?php echo $form->textField($model, 'cbm', ['required' => 'required','size' => 30]); ?>
+			</div>
+		</div> -->
+
+		<div id="weight-delivery" class='row rowcol rowleft'>
+			<div class="row rowcol rowleft">
+				<?php echo CHtml::label('Pallet Type', 'Pallet Type'); ?>
+				<?php echo CHtml::dropDownList('pallet_type',0, [0=>'Standard 120cm x 120cm x 150cm'], ['style' => 'width:238px']); ?>
+			</div>
+			<div class="row rowcol ">
+				<?php echo $form->labelEx($model, 'pallets',array('required' => 'required')); ?>
+				<?php echo $form->textField($model, 'pallets', ['required' => 'required','size' => 30]); ?>
+			</div>
+			<div class="row rowcol ">
+				<?php echo $form->labelEx($model, 'total weight (kg)',array('required' => 'required')); ?>
+				<?php echo $form->textField($model, 'weight', ['required' => 'required','size' => 30]); ?>
+			</div>
+
+			<div class="row rowcol ">
+				<?php echo $form->labelEx($model, 'total cbm (m³)',array('required' => 'required')); ?>
+				<?php echo $form->textField($model, 'cbm', ['required' => 'required','size' => 30]); ?>
+			</div>
+
+			<div class="row rowcol display_none">
+				<?php echo $form->labelEx($model, 'pallets_rate', array('required' => 'required')); ?>
+				<?php echo $form->textField($model, 'pallets_rate', ['required' => 'required', 'size' => 20, 'value' => $model->getPalletRate()]); ?>
+			</div>
+
+			<br />
+			<br />
+			<h3>Packages Details</h3>
+			<br />
+			<hr align=center width=100% color=#AED0EA SIZE=1 style="margin-bottom: 10px;">
+
+			<div id="divItems" class="row rowcol rowleft">
+				<?php
+				$numCountItem = 0;
+				if (!empty(@$model->mdata['Items'])) {
+					echo  CHtml::label("Items", "Items");
+					echo "<br />";
+					foreach ($model->mdata['Items'] as $key => $item) {
+						$numCountItem = $key + 1;
+						echo "<div class='row rowcol rowleft'>" . CHtml::label("Package" . $numCountItem . " |", "Item" . $numCountItem) . "</div>";
+						echo "<div class='row rowcol'>" . CHtml::label("Weight: " . $item['weight'] . "kg;", "Weight: " . $item['weight']) . "</div>";
+						echo "<div class='row rowcol'>" . CHtml::label("Length: " . $item['length'] . "cm;", "Length: " . $item['length']) . "</div>";
+						echo "<div class='row rowcol'>" . CHtml::label("Width: " . $item['width'] . "cm;", "Width: " . $item['width']) . "</div>";
+						echo "<div class='row rowcol'>" . CHtml::label("Height: " . $item['height'] . "cm;", "Height: " . $item['height']) . "</div>";
+					}
+				}
+				?>
+			</div>
+			<br />
+			<input type="button" value="add new item 添加 " onclick="funcAddItem()" />
+			<input type="button" value="delete item 删除 " onclick="funDeleteItem()" />
+			<br />
+			<br />
+		</div>
+	</div>
+	<?php $cnee = new Addr; ?>
+	<br />
+	<div id="divAdd" class="row rowcol left display_none">
+		<br />
+		<h3>Address Info</h3>
+		<br />
+		<hr align=center width=100% color=#AED0EA SIZE=1 style="margin-bottom: 10px;">
+		<div id="divCnor" class="row rowcol left col-12 display_none">
+			<div class="row rowcol rowleft">
+				<h3>Pickup From Address <?php echo CHtml::dropDownList('address_default_set', 0, CargoProcessPlan::$address_default, ['onchange' => 'funcGetDefaultAddress(this.options[this.selectedIndex].value,1)']) ?></h3>
+			</div></br>
+			<div class="row rowcol rowleft">
+				<?php echo $form->labelEx($cnee, 'name', array('required' => 'required')); ?>
+				<?php echo CHtml::textField('mdata[cnor][name]', @$model->mdata['cnor']['name'], array('size' => 30, 'required' => 'required')); ?>
+			</div>
+			<div class="row rowcol">
+				<?php echo $form->labelEx($cnee, 'tel', array('required' => 'required')); ?>
+				<?php echo CHtml::textField('mdata[cnor][tel]', @$model->mdata['cnor']['tel'], array('size' => 30, 'required' => 'required')); ?>
+			</div>
+			<div class="row">
+				<?php echo $form->labelEx($cnee, 'address'); ?>
+				<?php echo CHtml::textField('mdata[cnor][address]', @$model->mdata['cnor']['address'], array('size' => 64, 'required' => 'required')); ?>
+			</div>
+			<div class="row rowcol rowleft">
+				<?php echo $form->labelEx($cnee, 'suburb'); ?>
+				<?php echo CHtml::textField('mdata[cnor][suburb]', @$model->mdata['cnor']['suburb'], array('size' => 30, 'required' => 'required')); ?>
+			</div>
+			<div class="row rowcol display_none">
+				<?php echo $form->labelEx($cnee, 'city'); ?>
+				<?php echo CHtml::textField('mdata[cnor][city]', @$model->mdata['cnor']['city'], array('size' => 20)); ?>
+			</div>
+			<div class="row rowcol">
+				<?php echo $form->labelEx($cnee, 'state'); ?>
+				<?php echo CHtml::textField('mdata[cnor][state]', @$model->mdata['cnor']['state'], array('size' => 30, 'required' => 'required')); ?>
+			</div>
+			<div class="row rowcol rowleft">
+				<?php echo $form->labelEx($cnee, 'postcode'); ?>
+				<?php echo CHtml::textField('mdata[cnor][postcode]', @$model->mdata['cnor']['postcode'], array('size' => 30, 'required' => 'required')); ?>
+			</div>
+			<div class="row rowcol">
+				<?php echo $form->labelEx($cnee, 'country', array('required' => 'required')); ?>
+				<?php echo CHtml::dropDownList('mdata[cnor][country]', @$model->mdata['cnor']['country'], CargoProcessPlan::$countries, array('style' => 'width:238px', 'required' => 'required', 'options' => array('AU' => array('selected' => true)))); ?>
+			</div>
+		</div>
+
+		<div id="divCnee" class="row rowcol col-12 display_none">
+			<div class="row rowcol rowleft">
+				<h3>Delivery To Address <?php echo CHtml::dropDownList('address_default_set', 0, CargoProcessPlan::$address_default, ['onchange' => 'funcGetDefaultAddress(this.options[this.selectedIndex].value,2)']) ?></h3>
+			</div></br>
+			<div class="row rowcol rowleft">
+				<?php echo $form->labelEx($cnee, 'name', array('required' => 'required')); ?>
+				<?php echo CHtml::textField('mdata[cnee][name]', @$model->mdata['cnee']['name'], array('size' => 30, 'required' => 'required')); ?>
+			</div>
+			<div class="row rowcol">
+				<?php echo $form->labelEx($cnee, 'tel', array('required' => 'required')); ?>
+				<?php echo CHtml::textField('mdata[cnee][tel]', @$model->mdata['cnee']['tel'], array('size' => 30, 'required' => 'required')); ?>
+			</div>
+			<div class="row">
+				<?php echo $form->labelEx($cnee, 'address', array('required' => 'required')); ?>
+				<?php echo CHtml::textField('mdata[cnee][address]', @$model->mdata['cnee']['address'], array('size' => 64, 'required' => 'required')); ?>
+			</div>
+			<div class="row rowcol rowleft">
+				<?php echo $form->labelEx($cnee, 'suburb', array('required' => 'required')); ?>
+				<?php echo CHtml::textField('mdata[cnee][suburb]', @$model->mdata['cnee']['suburb'], array('size' => 30, 'required' => 'required')); ?>
+			</div>
+			<div class="row rowcol display_none">
+				<?php echo $form->labelEx($cnee, 'city'); ?>
+				<?php echo CHtml::textField('mdata[cnee][city]', @$model->mdata['cnee']['city'], array('size' => 30)); ?>
+			</div>
+			<div class="row rowcol">
+				<?php echo $form->labelEx($cnee, 'state', array('required' => 'required')); ?>
+				<?php echo CHtml::textField('mdata[cnee][state]', @$model->mdata['cnee']['state'], array('size' => 30, 'required' => 'required')); ?>
+			</div>
+			<div class="row rowcol rowleft">
+				<?php echo $form->labelEx($cnee, 'postcode', array('required' => 'required')); ?>
+				<?php echo CHtml::textField('mdata[cnee][postcode]', @$model->mdata['cnee']['postcode'], array('size' => 30, 'required' => 'required')); ?>
+			</div>
+			<div class="row rowcol">
+				<?php echo $form->labelEx($cnee, 'country', array('required' => 'required')); ?>
+				<?php echo CHtml::dropDownList('mdata[cnee][country]', @$model->mdata['cnee']['country'], CargoProcessPlan::$countries, array('style' => 'width:238px', 'required' => 'required', 'options' => array('AU' => array('selected' => true)))); ?>
+			</div>
+		</div>
+	</div>
+	<br />
+
+	<div class="row buttons">
+		<?php echo CHtml::hiddenField('meta_items'); ?>
+		<?php echo CHtml::submitButton($this->t($model->isNewRecord ? 'Create' : 'Save'), ['name' => 'act_btn']); ?>
+	</div>
+	<?php $this->endWidget(); 
+	$str = @$model->mdata['dim_delivery'];
+	?>
+
+</div><!-- form -->
+
+<script type="text/javascript">
+	$(function() {
+		var tab = $("#<?= $_GET['tabid']; ?>");
+		var panel = tab.data('panel');
+		<?php if (!$model->isNewRecord) { ?>
+			<?php if ($model->type == 10) { ?>
+				$("#divCnee", panel).removeClass("display_none");
+				$("#divCnor", panel).addClass("display_none");
+			<?php } else if ($model->type == 20) { ?>
+				$("#divCnee", panel).addClass("display_none");
+				$("#divCnor", panel).removeClass("display_none");
+			<?php } else if ($model->type == 30) { ?>
+				$("#divAdd", panel).removeClass("display_none");
+				$("#divCnee", panel).removeClass("display_none");
+				$("#divCnor", panel).removeClass("display_none");
+			<?php } else { ?>
+				$("#divAdd", panel).addClass("display_none");
+				$("#divCnee", panel).addClass("display_none");
+				$("#divCnor", panel).addClass("display_none");
+			<?php } ?>
+			<?php if ($model->need_invoice == 1) { ?>
+				$("#invoiceNo", panel).removeClass("display_none");
+			<?php } ?>
+		<?php } ?>
+		//$("#plt-delivery",panel).show();
+		$("#weight-delivery",panel).show();
+		<?php if (@$model->mdata['dim_delivery'] == 1) { ?>
+			//$("#plt-delivery",panel).show();
+			$("#weight-delivery",panel).show();
+		<?php } else if (@$model->mdata['dim_delivery'] == 2) { ?>
+			//$("#plt-delivery",panel).hide();
+			$("#weight-delivery",panel).show();
+		<?php } ?>
+
+		var t = $('#mtsk_itms', panel);
+
+		for (var i = 0; i < 3; i++) t.trigger('addLine');
+		$('#cargo-plan-form', panel).on({
+			'success': function(e, r) {
+				<?php if ($model->isNewRecord) { ?>
+					myApp.tabs.CreateTab({
+						title: 'T-' + r.id,
+						url: tab.data('url').replace(/\/create.+/, '/update/' + r.id),
+					});
+					tab.trigger('close');
+				<?php } else { ?>
+					tab.trigger('reload_tab');
+				<?php } ?>
+				$('tbody input', t).prop('disabled', false);
+			},
+			'error': function(e, r) {
+				<?php if ($model->isNewRecord) { ?>
+					myApp.tabs.CreateTab({
+						title: 'T-' + r.id,
+						url: tab.data('url').replace(/\/create.+/, '/update/' + r.id),
+					});
+					tab.trigger('close');
+				<?php } else { ?>
+					tab.trigger('reload_tab');
+				<?php } ?>
+				$('tbody input', t).prop('disabled', false);
+			}
+		}).on('beforeSerialize', function() {
+			var ia = [];
+			$('tbody tr', t).each(function() {
+				var o = {};
+				$('input', this).each(function() {
+					o[$(this).attr('name')] = $(this).val();
+				});
+				ia.push(o);
+			});
+			$('#meta_items', this).val(JSON.stringify(ia));
+			$('tbody input', t).prop('disabled', true);
+			return true;
+		});
+
+		t.trigger('calcTot');
+
+		if ($('#mdata_pi_cargo', panel).prop('checked')) {
+			$('#div_cargo', panel).show();
+		} else {
+			$('#div_cargo', panel).hide();
+		}
+		$('#mdata_pi_cargo', panel).off('click').on('click', function() {
+			if ($('#mdata_pi_cargo', panel).prop('checked')) {
+				$('#div_cargo', panel).show();
+			} else {
+				$('#div_cargo', panel).hide();
+			}
+		});
+
+		if ($('#mdata_simple_in', panel).prop('checked')) {
+			$('#div_simple', panel).show();
+		} else {
+			$('#div_simple', panel).hide();
+		}
+		$('#mdata_simple_in', panel).off('click').on('click', function() {
+			if ($('#mdata_simple_in', panel).prop('checked')) {
+				$('#div_simple', panel).show();
+			} else {
+				$('#div_simple', panel).hide();
+			}
+		});
+
+		$(panel).on('click', '#cargo-plan-form .ajax_link', function() {
+			$(this).prev().remove();
+			$(this).remove();
+		});
+
+		$("#plt_delivery",panel).on('change',function(){
+			var strtype = $("#plt_delivery",panel).children("option").filter(":selected").val();
+			//alert(('#mdata_dim_delivery :selected').val());
+			 if(strtype==<?=CargoProcess::NORMAL_CARGO?>)
+			 {
+			 	//$("#plt-delivery",panel).show();
+			 	$("#weight-delivery",panel).show();
+			 }else
+			 {
+			 	//$("#plt-delivery",panel).hide();
+			 	$("#weight-delivery",panel).show();
+			 }
+		 });
+	});
+
+	function funcGetType(curTarget) {
+		var tab = $("#<?= $_GET['tabid']; ?>");
+		var panel = tab.data('panel');
+		switch (curTarget) {
+			case "10":
+				$("#divCnee", panel).removeClass("display_none");
+				$("#divCnor", panel).addClass("display_none");
+				break;
+			case "20":
+				$("#divCnee", panel).addClass("display_none");
+				$("#divCnor", panel).removeClass("display_none");
+				break;
+			case "30":
+				$("#divAdd", panel).removeClass("display_none");
+				$("#divCnee", panel).removeClass("display_none");
+				$("#divCnor", panel).removeClass("display_none");
+				break;
+			case "40":
+				$("#divAdd", panel).removeClass("display_none");
+				$("#divCnee", panel).removeClass("display_none");
+				$("#divCnor", panel).removeClass("display_none");
+				break;
+			default:
+				$("#divAdd", panel).addClass("display_none");
+				$("#divCnee", panel).addClass("display_none");
+				$("#divCnor", panel).addClass("display_none");
+				break;
+		}
+	}
+
+	function funcGetNeedInvoice(curTarget) {
+		var tab = $("#<?= $_GET['tabid']; ?>");
+		var panel = tab.data('panel');
+		switch (curTarget) {
+			case "0":
+				$("#show_request", panel).addClass("display_none");
+				$("#invoiceNo", panel).addClass("display_none");
+				break;
+			case "1":
+				$("#invoiceNo", panel).removeClass("display_none");
+				break;
+			case "2":
+				$("#invoiceNo", panel).addClass("display_none");
+				$("#show_request", panel).removeClass("display_none");
+				$("#error_message").text("Invoice will be created before synchronize.");
+				$("#error_message", panel).removeClass("display_none");
+				break;
+			default:
+				$("#invoiceNo", panel).addClass("display_none");
+				break;
+		}
+	}
+
+	function fungetRef(){
+		var tab = $("#<?= $_GET['tabid']; ?>");
+		var panel = tab.data('panel');
+		var strRef = $("#mdata_Ref",panel).val();
+		var valcp = $("#CargoProcessPlan_ot_id",panel).find("option:selected").val();
+		var depotcp = $("#CargoProcessPlan_dpt_id",panel).find("option:selected").val();
+		var strSp,str3pl = "";
+		switch(valcp){
+			case "40":
+				str3pl = "3PL";
+				break;
+		}
+		switch(depotcp){
+			case "106":
+				strSp = "SPR";
+				break;
+			case "218":
+				strSp = "MPR";
+				break;
+			case "530":
+				strSp = "BPR";
+				break;
+			default:
+				strSp = "SPR";
+				break;
+		}
+		$("#ref",panel).val(strSp+str3pl+strRef);
+	}
+
+	function funcCheckOT(curTarget) {
+		if (curTarget.length >= 8) {
+			var tab = $("#<?= $_GET['tabid']; ?>");
+			var panel = tab.data('panel');
+
+			$("#show_request", panel).addClass("display_none");
+
+			var listData = new FormData();
+			listData.append('invoiceNo', curTarget);
+			//listData.append('orgId', orgId);
+			htmlobj = $.ajax({
+				type: "POST",
+				url: "<?= $this->createUrl('cargoProcessPlan/ajaxCheckInvoiceNoExist'); ?>",
+				data: listData,
+				dataType: 'html',
+				async: false,
+				contentType: false,
+				processData: false,
+			});
+			obj = JSON.parse(htmlobj.responseText);
+			if (obj.isSuccess) {
+				$("#show_request", panel).addClass("display_none");
+			} else {
+				$("#show_request", panel).removeClass("display_none");
+				$("#error_message").text("No Invoice No. match! Please make sure exsit.");
+
+			}
+		} else {
+			$("#show_request", panel).removeClass("display_none");
+			$("#error_message").text("Invoice No should be at least 8 characters long.");
+			$("#CargoProcessPlan_invoice_by", panel).focus();
+		}
+	}
+
+	function funcGetDefaultAddress(orgId, type) {
+		var tab = $("#<?= $_GET['tabid']; ?>");
+		var panel = tab.data('panel');
+		var listData = new FormData();
+		listData.append('orgId', orgId);
+		htmlobj = $.ajax({
+			type: "POST",
+			url: "<?= $this->createUrl('cargoProcessPlan/ajaxGetDefaultAddress'); ?>",
+			data: listData,
+			dataType: 'html',
+			async: false,
+			contentType: false,
+			processData: false,
+		});
+		obj = JSON.parse(htmlobj.responseText);
+		if (obj.isSuccess) {
+			var strTemp = ""
+			if (type == 1) {
+				strTemp = "cnor";
+			} else {
+				strTemp = "cnee";
+			}
+			//$("#mdata_"+strTemp+"_name").val(obj.name);
+			//$("#mdata_"+strTemp+"_tel").val(obj.tel);
+			$("#mdata_" + strTemp + "_address").val(obj.address);
+			$("#mdata_" + strTemp + "_suburb").val(obj.suburb);
+			$("#mdata_" + strTemp + "_city").val(obj.city);
+			$("#mdata_" + strTemp + "_state").val(obj.state);
+			$("#mdata_" + strTemp + "_postcode").val(obj.postcode);
+		}
+
+	}
+
+	var numCountItem = <?= $numCountItem ?>;
+
+	function funcAddItem() {
+		var tab = $("#<?= $_GET['tabid']; ?>");
+		var panel = tab.data('panel');
+		numCountItem++;
+		var strHtmlItem = '<div id="divItem' + numCountItem + '"><br/><label>Package ' + numCountItem + '</label><span class="width_item_label"> Length(cm)</span><input onchange="funcCountItem()" class="width_item_input" type="text" name="Item[length_' + numCountItem + ']" id="Item[length_' + numCountItem + ']"></input><span class="width_item_label"> Width(cm)</span><input onchange="funcCountItem()" class="width_item_input" type="text" name="Item[width_' + numCountItem + ']" id="Item[width_' + numCountItem + ']"></input><span class="width_item_label"> Height(cm)</span><input onchange="funcCountItem()" class="width_item_input" type="text" name="Item[height_' + numCountItem + ']" id="Item[height_' + numCountItem + ']"></input><span class="width_item_label"> Weight(kg)</span><input onchange="funcCountItem()" class="width_item_input" type="text" name="Item[weight_' + numCountItem + ']" id="Item[weight_' + numCountItem + ']"></input> * <span class="width_item_label"> Quantity:</span><input onchange="funcCountItem()" class="width_item_label" type="text" name="Item[quantity_' + numCountItem + ']" id="Item[quantity_' + numCountItem + ']"></input><br/></div></div>';
+		$("#divItems", panel).append(strHtmlItem);
+	}
+
+	function funDeleteItem() {
+		var tab = $("#<?= $_GET['tabid']; ?>");
+		var panel = tab.data('panel');
+		$("#divItem" + numCountItem, panel).remove();
+		if (numCountItem > 0) {
+			numCountItem--;
+		}
+	}
+</script>

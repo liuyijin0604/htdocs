@@ -1,0 +1,30 @@
+@charset "UTF-8";
+body, .ui-widget {
+	font: 12px "新宋体", "宋体", sans-serif;
+}
+h1, h2, h3 {
+	font-family: "微软雅黑", "黑体", sans-serif;
+}
+div.form label{
+	font-size: 1em;
+}
+
+div.form .errorSummary{
+	font-size: 1em;
+}
+
+div.form .errorMessage{
+	font-size: 1em;
+}
+
+.grid-view table.items th, .grid-view table.items td{
+	font-size: 1em;
+}
+
+table.detail-view th, table.detail-view td {
+	font-size: 1em !important;
+}
+
+table.detail-view th {
+	width: 100px !important;
+}

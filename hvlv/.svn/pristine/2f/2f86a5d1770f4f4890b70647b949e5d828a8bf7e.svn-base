@@ -1,0 +1,173 @@
+<!doctype html>
+<html>
+<head>
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+	<meta name="language" content="<?=Yii::app()->language;?>" />
+	<link rel="shortcut icon" href="<?php echo Yii::app()->request->baseUrl; ?>/favicon.ico" >
+	<!--[if lt IE 8]>
+		<link rel="stylesheet" type="text/css" href="<?php echo Yii::app()->request->baseUrl; ?>/css/ie.css" media="screen, projection" />
+	<![endif]-->
+	<link rel="stylesheet" type="text/css" href="<?php echo Yii::app()->request->baseUrl; ?>/css/jquery-ui-1.9.0.custom.css" />
+	<link rel="stylesheet" type="text/css" href="<?php echo Yii::app()->request->baseUrl; ?>/css/app.css?v=1.0" />
+	<?php if(Yii::app()->language != 'en'): ?>
+	<link rel="stylesheet" type="text/css" href="<?php echo Yii::app()->request->baseUrl; ?>/css/app-<?=Yii::app()->language?>.css" />
+	<?php endif; ?>
+  <link rel="shortcut icon" href="favicon.ico" />
+  <link rel="icon apple-touch-icon" href="favicon.png" />
+	<title><?php echo CHtml::encode($this->pageTitle); ?></title>
+</head>
+
+<body>
+<input type="hidden" id ="menuforce" value="<?=@$_GET['menu']?>">
+<input type="hidden" id ="titleforce" value="<?=@$_GET['title']?>">
+<div id="sysloading"></div>
+<!-- Message Dialog -->
+<div id="appmsg" class="jqmDialog jqmMsg">
+  <div class="appmsgwin">
+    <div class="msgIcon"></div>
+    <div class="msgContent"></div>
+    <div>
+      <input type="submit" value="OK" class="msgOk" />
+      <input type="submit" value="NO" class="msgNo" />
+      <input type="submit" value="YES" class="msgYes" />
+    </div>
+  </div>
+</div>
+<!-- Login Form -->
+<div id="login" class="jqmDialog">
+  <form id="loginform" name="loginform" method="post" action="<?php echo Yii::app()->request->baseUrl; ?>/site/auth">
+  <h2><?=Yii::app()->name;?> <?=$this->t('Login');?></h2><br />
+    <div class="formWidget">
+      <label><?=$this->t('User Name');?>:</label>
+      <div class="formField">
+        <input type="text" name="LoginForm[user]" id="lf_un" class="required" minlength="3" />
+      </div>
+    </div>
+    <div class="formWidget">
+      <label><?=$this->t('Password');?>:</label>
+      <div class="formField">
+        <input type="password" name="LoginForm[pwd]" id="lf_pwd" class="required" minlength="6" />
+      </div>
+    </div>
+    <div class="formWidget">
+      <label><?=$this->t('Captcha');?>:</label>
+      <div class="formField">
+        <input name="LoginForm[vvc]" type="text" id="lf_vvc" autocomplete="off" style="width:80px;" maxlength="8" class="required" minlength="4" />
+		<img src="" id="lf_capcha" title="<?=$this->t('Click to Reload');?>" alt="CAPTCHA" style="position:absolute; right:10px; top:140px;cursor:pointer;" />
+         </div>
+    </div>
+    <div class="formWidget">
+      <div class="formField">
+        <input type="submit" name="submit" id="lf_submit" value="<?=$this->t('Login');?>" style="width:70px;margin-top:5px;" />
+      </div>
+    </div>
+  </form>
+</div>
+<div id="header"<?=defined('YII_TEST')? ' style="background: #f66"' : '';?>>
+    <h1 id="logo"<?=defined('YII_TEST')? ' style="background: none; text-indent: 20px; width: auto;"' : '';?>><?php echo CHtml::encode(Yii::app()->name),(defined('YII_TEST')? ' - TEST' : ''); ?></h1>
+
+    <div id="topright">
+        <div class="tritem" style="margin-top:-8px;">
+          <label for="season" style="color:azure">Time: &nbsp;&nbsp;&nbsp;&nbsp;</label>
+          <progress id="season"></progress>&nbsp;&nbsp;<input id="time_percent" style="width: 28px; background:#22bdb7; border:none; color:azure;" disabled />
+          <br/>
+          <label for="target" style="color:azure">Progress:</label>
+          <progress id="target"></progress>&nbsp;&nbsp;<input id="profit_percent" style="width: 28px; background:#22bdb7; border:none; color:azure;" disabled />
+        </div>
+        <div class="tritem">
+            <div class="icon" style="background-position:-240px -256px"></div>
+            <a id="close_tabs" 
+               style="float:left; color:white; cursor:pointer;"><?= $this->t('Close all tabs'); ?></a></div>
+        <div class="tritem">
+            <div class="icon" style="background-position:-224px -752px"></div>
+            <span id="username" style="float:left;">User</span></div>
+        <div class="tritem">
+            <div class="icon" style="background-position:-64px -784px"></div>
+            <span
+                style="float:left;"><?php echo CHtml::dropDownList('lang-switch', Yii::app()->language, array('en' => 'English', 'zh_cn' => '中文')); ?></span>
+        </div>
+        <div class="tritem">
+            <div><a id="zoom_out" href="#">Zoom Out</a></div>
+            <div style="padding-right:10px"><a id="zoom_in" href="#">Zoom In</a></div>
+            <div class="icon" style="background-position:-96px -192px"></div>
+            <a href="<?php echo Yii::app()->request->baseUrl; ?>/importsMail/myEmails.app" class="tab_link" id="emails" title="My Mail List"
+               style="float:left;"><label id = 'importsEmailNumber' style="color: red">0</label><?= $this->t('Imports Emails'); ?></a>
+                           <div class="icon" style="background-position:-96px -192px"></div>
+            <a href="<?php echo Yii::app()->request->baseUrl; ?>/importsMail/myWmsEmails.app" class="tab_link" id="wmsEmails" title="My Wms Mail List"
+               style="float:left;"><label id = 'wmsEmailNumber' style="color: red">0</label><?= $this->t('Wms Emails'); ?></a>
+            <div class="icon" style="background-position:-96px -192px"></div>
+            <a href="<?php echo Yii::app()->request->baseUrl; ?>/tlaTask/getTlaTaskList.app" class="tab_link" id="tasks" title="TLA Task List"
+               style="float:left;"><label id = 'taskNumber' style="color: red">0</label><?= $this->t('Tasks'); ?></a>
+            <div class="icon" style="background-position:-96px -192px"></div>
+            <a href="<?php echo Yii::app()->request->baseUrl; ?>/message.app" class="jqm2_link" id="messages"
+               style="float:left;"><label id = 'messageNumber' style="color: red">0</label><?= $this->t('Messages'); ?></a>
+        </div>
+        <div class="tritem">
+            <div class="icon" style="background-position:-96px -368px"></div>
+            <a href="<?php echo Yii::app()->request->baseUrl; ?>/app/help.app" class="jqm_link" id="help"
+               style="float:left;"><?= $this->t('Help'); ?></a></div>
+        <div class="tritem">
+            <div class="icon" style="background-position:-240px -256px"></div>
+            <a href="<?php echo Yii::app()->request->baseUrl; ?>/site/logout.app" id="logout"
+               style="float:left;"><?= $this->t('Logout'); ?></a></div>
+    </div>
+</div>
+<div id="main">
+  <div id="leftpanel">
+    <div id="menu" class="panel">
+		<h2>Loading...</h2>
+    </div>
+  </div>
+  <div id="splitter" class="splitLeft"></div>
+  <div id="rightpanel" class="panel">
+    <div id="tabs"></div>
+    <div id="tab-strip-spacer"></div>
+    <div id="content"></div>
+  </div>
+</div>
+<script type="text/javascript" src="<?php echo Yii::app()->request->baseUrl; ?>/js/jquery.min.js"></script>
+<script type="text/javascript" src="<?php echo Yii::app()->request->baseUrl; ?>/js/jquery-ui.min.js"></script>
+<!--[if lt IE 8]><script type='text/javascript' src='<?php echo Yii::app()->request->baseUrl; ?>/js/json2.js'></script><![endif]-->
+<script type='text/javascript' src='<?php echo Yii::app()->request->baseUrl; ?>/js/jquery.combo.js'></script>
+<script type='text/javascript' src='<?php echo Yii::app()->request->baseUrl; ?>/js/jquery.yiigridview.js'></script>
+<?php
+if(Yii::app()->language == 'zh_cn'):
+?>
+<script type='text/javascript' src='<?php echo Yii::app()->request->baseUrl; ?>/js/jquery.validate.zh.js'></script>
+<script type="text/javascript" src="<?php echo Yii::app()->request->baseUrl; ?>/js/jquery-ui-i18n.min.js"></script>
+<?php endif; ?>
+<script type='text/javascript' src='<?php echo Yii::app()->request->baseUrl; ?>/js/jqOriteApp.js'></script>
+<script type='text/javascript'>
+var myApp = $.oriteApp({hometab: {title: '<?=Yii::t('default', 'Dashboard');?>', url : 'dash.app'}});
+</script>
+<script>
+  $(document).ready(function(){
+    // Set season progress bar value
+    var startDate = new Date('2023-10-01');
+    var endDate = new Date('2024-01-31');
+    var currentDate = new Date();
+    var seasonLength = Math.floor((endDate - startDate)/(1000*60*60*24)+1);
+    var currentLength = Math.floor((currentDate - startDate)/(1000*60*60*24)+1);
+    $("#season").val(currentLength);
+    document.getElementById("season").max = seasonLength;
+
+    // Set target progress bar value
+    var targetProfit = 25000000.00;
+    document.getElementById('target').max = targetProfit;
+    var currentProfit = <?php
+      $profitData = ReportService::getSeasonProfit();
+      $profitData = json_decode($profitData);
+      echo $profitData->profit;
+    ?>
+    
+    $('#target').val(currentProfit);
+    var currentTimePercentage = (100*currentLength)/seasonLength;
+    var currentProfitPercentage = (100*currentProfit)/targetProfit;
+    $("#time_percent").val(Math.floor(currentTimePercentage)+'%');
+    $("#profit_percent").val(Math.floor(currentProfitPercentage)+'%');
+    //console.log(currentProfit);
+  })
+</script>
+</body>
+</html>
+

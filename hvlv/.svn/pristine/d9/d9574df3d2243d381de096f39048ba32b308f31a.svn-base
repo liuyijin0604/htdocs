@@ -1,0 +1,42 @@
+<?php
+class SMSService extends Service
+{
+    /**
+	 * Send SMS message to customer asking for their email address 
+	 */
+	public static function sendRequireEmailSMS($shipment)
+	{
+		if ((isset($shipment->cnee->tel)&&preg_match('/^04\d{8}$/', ($shipment->cnee->auTel())))) {
+			$phoneNo=$shipment->cnee->auTel();
+			$items = json_decode($shipment->items);
+			$items = $items->{"g"};
+			$user = User::getCurrentUser();		// send different email address based on user DDU1/DDU2
+			// Text message has to be split into 3 pieces because SMS size limit
+			$msg1="Hi {$shipment->cnee->name} / {$shipment->cnee->address} {$shipment->cnee->suburb},\nThis is Top Logistics we are doing the customs clearance for your shipment of {$items[0]} {$shipment->pkg} packages.";
+			$msg2="Please provide your email address to this email {$user->email} with the tracking number below so we can send you Letter of Authority to sign before proceed the shipment.";
+			$msg3="Tracking number: {$shipment->hbn} / {$shipment->ref}";
+			Sms::sendMessageLocal($phoneNo, $msg1);
+			Sms::sendMessageLocal($phoneNo, $msg2);
+			Sms::sendMessageLocal($phoneNo, $msg3);
+
+			// After send SMS message to consignee, update shipment process status to "Message send to consignee"
+			$shipment->process->changeStatus(ShipmentProcess::MSG_CONSIGNEE);
+		} else {
+			echo 'not valid phone number.';
+		}
+	}
+
+	/**
+	 * Send SMS to consignee asking them to confirm forklift information
+	 */
+	public function sendCargoPreForkliftConfirmationSMS($shipment)
+	{
+		if ((isset($shipment->cnee->tel)&&preg_match('/^04\d{8}$/', ($shipment->cnee->auTel())))) {
+			$phoneNo = $shipment->cnee->auTel();
+			$link = "https://ims.toplogistics.com.au/customerService/confirmForklift?ref=" . $shipment->ref;
+			$msg = "Hi " . $shipment->cnee->name . ",\nThis is Top Logistics Australia, a logistics and delivery company in Australia. You have a shipemnt that will be delivered to following address. Please click following link to confirm your forklift information.\n";
+			$msg .= "Link: " . $link;
+			Sms::sendMessageLocal($phoneNo, $msg);
+		}
+	}
+}

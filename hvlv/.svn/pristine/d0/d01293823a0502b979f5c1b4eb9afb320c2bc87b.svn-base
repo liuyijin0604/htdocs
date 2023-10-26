@@ -1,0 +1,134 @@
+<?php 
+class GatepassService extends Service
+{
+	public function handlingGatepassSubmit($postData,$submit)
+	{
+		$resp = array('status' => 1, 'msg' => 'done', 'id' => 0);
+		$model = new GatepassShipment('search');
+		if (!empty($postData)) {
+			$model->status = 0;
+			$warehouse = isset($postData['warehouse']) ? $postData['warehouse'] : 106;
+			$awb = isset($postData['awb']) ? $postData['awb'] : '';
+			$courier = isset($postData['courier']) ? $postData['courier'] : '';
+			$search_context = isset($postData['search_context']) ? $postData['search_context'] : '';
+			$type = isset($postData['type']) ? $postData['type'] : 0;
+			$model->warehouse = $warehouse;
+			$driver_name = isset($postData['driver_name']) ? $postData['driver_name'] : '';
+			$driver_rego = isset($postData['driver_rego']) ? $postData['driver_rego'] : '';
+			$ref = isset($postData['ref']) ? $postData['ref'] : '';
+			$selectedIds = isset($postData['selectedIds']) ? $postData['selectedIds'] : '';
+			$gatepassNo = empty($postData['gatepass_no'])?"":$postData['gatepass_no'];
+			$pickupDate = empty($postData['pickup_date'])?"":$postData['pickup_date'];
+			$isMQ = empty($postData['isMQ'])?false:true;
+			$model->awb = $awb;
+			if($selectedIds==""&&!$isMQ)
+			{
+				$resp['msg'] = "Select Parcel Firstly";
+				$resp['status'] = 0;
+				return $resp;
+			}
+
+			if (!empty($courier)) {
+				if ($courier == 101) {
+					$model->courier_ids = [101, 1426,Org::ORGID_COURIER_GV_AUPOST,Org::ORGID_COURIER_AUSLETTER];
+				}else if($courier == Org::ORGID_COURIER_TNT)
+				{
+					$model->courier_ids = [Org::ORGID_COURIER_TNT, Org::ORGID_COURIER_TNT_TOP];
+				}else if($courier == Org::ORGID_COURIER_DFE)
+				{
+					$model->courier_ids = [Org::ORGID_COURIER_DFE, Org::ORGID_COURIER_DFE_TOP];
+				}
+				else {
+					$model->courier_id = $courier;
+				}
+			}
+
+			if (!empty($search_context)) {
+				$ids = [];
+				foreach (preg_split("/[;,\n]/", $search_context) as $hbn) {
+					if (empty(trim($hbn))) {
+						continue;
+					}
+					$cStr= '';
+					if($model->courier_id!='moving')
+					{
+						$cStr= 'cargo_process.id is null and ';
+					}
+					$shipment = ImParcel::model()->with(["cargo_process"])->find($cStr.'(hbn=:hbn OR ref=:hbn) AND cbwf&:cbwf=0', array(':hbn' => trim($hbn), ':cbwf' => ImParcel::CBWF_D2Z_CONSOL_NOT_FOR_SCAN));
+					if (!empty($shipment)) {
+						$ids[] = $shipment->id;
+					}
+					$model->ids = $ids;
+				}
+			}
+
+			if ($model->courier_id == 'TP') 
+			{
+				$resp['msg'] = "TP not support";
+				$resp['status'] = 0;
+				return $resp;
+			}
+
+
+			if ($model->courier_id == 2797) {
+				$ids = [0];
+				$shipments = ImParcel::model()->with('gatepass_shipment')->findAll('(t.hbn like :hbn OR t.ref like :hbn) and t.ref LIKE "CPWPA%" and t.agent_id = 2797 and t.status >= 60 and t.status < 90 and t.created > "2020-01-01" and gatepass_shipment.status = 0',[":hbn"=>"%".trim($search_context)."%"]);
+				foreach ($shipments as $shipment) {
+					$ids[] = $shipment->id;
+				}
+				$model->ids = $ids;
+				$model->courier_id = null;
+			}
+
+			if ($model->courier_id == 2995) {
+				$ids = [0];
+				$shipments = ImParcel::model()->with('gatepass_shipment')->findAll('(t.hbn like :hbn OR t.ref like :hbn) and t.agent_id = 2995 and t.status >= 60 and t.status < 90 and t.created > "2020-01-01" and gatepass_shipment.status = 0',[":hbn"=>"%".trim($search_context)."%"]);
+				$thisShipments = array_column($shipments, 'id');
+				$ids = array_merge($thisShipments,$ids);
+				$model->ids = $ids;
+				$model->courier_id = null;
+			}
+
+			if ($model->courier_id == 140) {
+				$ids = [];
+				$shipments = ImParcel::model()->findAll('ref LIKE "PB%"');
+				foreach ($shipments as $shipment) {
+					$ids[] = $shipment->id;
+				}
+				$model->ids = $ids;
+			}
+
+			if (sizeof($model->search()->data) <= 0) {
+				$resp['msg'] = "Not Found Any number of shipments";
+				$resp['status'] = 0;
+				return $resp;
+			}
+			if(!empty($submit))
+			{
+				$model->scan_time = "<".$submit->create_time;
+			}
+			$id = $this->handleGatePassTicket($model->search(false,false,true)->data, $submit);
+			if(!empty($id))
+			{
+				$resp['id'] = $id;
+				return $resp;
+			}
+		}
+		$resp['msg'] = "Failed";
+		$resp['status'] = 0;
+		return $resp;
+	}
+
+	/**
+     *
+     * @param type $rs Array of gatePassShipment
+     * @param type $submit Object of gatepassCourier
+     */
+    public function handleGatePassTicket($rs, $submit)
+    {
+        GatepassCourier::handlingShipmentIntoGatepass($submit,$rs,$submit->mdata['ocourier_id'],$submit->courier_id);
+        return $submit->id;
+    }
+	
+}
+?>

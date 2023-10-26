@@ -1,0 +1,982 @@
+<?php
+class CargoProcessPlanService extends Service
+{
+    public static function upDateCargoPlan(&$model)
+    {
+        $arrItems = [];
+        $numCountItems = 0;
+        if (!empty($_POST['CargoProcessPlan'])) {
+            $model->setAttributes($_POST['CargoProcessPlan']);
+        }
+        if(!empty($_POST['CargoProcessPlan']['status']) && $_POST['CargoProcessPlan']['status']=="100"){
+            if(!empty($model->mdata['shipment_id_no'])){
+                $objShipment = ImParcel::model()->findByPk($model->mdata['shipment_id_no']);
+                if(!empty($objShipment)){
+                    $objShipment->status = 100;
+                    $objShipment->save();
+                }
+            }
+        }
+        if (!empty($_POST['mdata']['cnee']) && in_array($_POST['mdata']['cnee']['country'], ['AU'])) {
+            if (!Postcode::validateAddress($_POST['mdata']['cnee']['suburb'], $_POST['mdata']['cnee']['state'], $_POST['mdata']['cnee']['postcode'], $_POST['mdata']['cnee']['country'])) {
+                $model->addError('meta', 'Error Address');
+            }
+        }
+        if (!empty($_POST['mdata'])) {
+            foreach ($_POST['mdata'] as $k => $v) {
+                if (is_array($v)) {
+                    $v = array_map('trim', $v);
+                } elseif (is_string($v)) {
+                    $v = trim($v);
+                }
+                if (!empty($v) || strlen($v) >= 0) {
+                    $model->mdata[$k] = $v;
+                }
+            }
+        }
+        
+        if(!empty($model->mdata['Items'])){
+            $arrItems = $model->mdata['Items'];
+            $numCountItems = count($arrItems);
+        }
+
+        if(!empty($_POST['Item'])){
+            $numTotalWeight = !empty($model->mdata['weight'])?$model->mdata['weight']:0;
+            $numTotalCBM = !empty($model->mdata['cbm'])?$model->mdata['cbm']:0;
+            for($i=1+$numCountItems;$i==true;$i++){
+                if(!empty($_POST['Item']["quantity_".$i])){
+                    for($j=$_POST['Item']["quantity_".$i];$j>0;$j--){
+                        $arrItems[] = [
+                            'weight'=>$_POST['Item']["weight_".$i],
+                            'length'=>$_POST['Item']["length_".$i],
+                            'height'=>$_POST['Item']["height_".$i],
+                            'width'=>$_POST['Item']["width_".$i],
+                            'reference'=>0,
+                            'cbm'=>($_POST['Item']["length_".$i]*$_POST['Item']["height_".$i]*$_POST['Item']["width_".$i])/1000000
+                        ];
+                        $numTotalWeight += $_POST['Item']["weight_".$i];
+                        $numTotalCBM += ($_POST['Item']["length_".$i]*$_POST['Item']["height_".$i]*$_POST['Item']["width_".$i])/1000000;
+                    }
+                }else{
+                    break;
+                }
+            }
+            $model->mdata['Items']= $arrItems;
+            $model->mdata['weight'] = $numTotalWeight;
+            $model->mdata['cbm'] = $numTotalCBM;
+            $model->mdata['pkg'] = !empty(count($arrItems))?count($arrItems):0;
+        }
+
+        if (!empty($_POST['CargoProcessPlan'])) {
+            $model->save();
+        }
+    }
+
+    public static function createCargoPlan(&$model)
+    {
+        if (!empty($_POST['CargoProcessPlan'])) {
+            $model->setAttributes($_POST['CargoProcessPlan']);
+            $model->creater = Yii::app()->user->id;
+        }
+        if (!empty($_POST['mdata']['cnee']) && in_array($_POST['mdata']['cnee']['country'], ['AU'])) {
+            if (!Postcode::validateAddress($_POST['mdata']['cnee']['suburb'], $_POST['mdata']['cnee']['state'], $_POST['mdata']['cnee']['postcode'], $_POST['mdata']['cnee']['country'])) {
+                $model->addError('meta', 'Error Address');
+            }
+        }
+        if (!empty($_POST['mdata'])) {
+            foreach ($_POST['mdata'] as $k => $v) {
+                if (is_array($v)) {
+                    $v = array_map('trim', $v);
+                } elseif (is_string($v)) {
+                    $v = trim($v);
+                }
+                if (!empty($v) || strlen($v) >= 0) {
+                    $model->mdata[$k] = $v;
+                }
+            }
+        }
+        if(!empty($_POST['Item'])){
+            $arrItems = [];
+            $pkg = 0;
+            $numTotalWeight = $numTotalCBM = 0;
+            for($i=1;$i==true;$i++){
+                if(!empty($_POST['Item']["quantity_".$i])){
+                    for($j=$_POST['Item']["quantity_".$i];$j>0;$j--){
+                        $arrItems[] = [
+                            'weight'=>$_POST['Item']["weight_".$i],
+                            'length'=>$_POST['Item']["length_".$i],
+                            'height'=>$_POST['Item']["height_".$i],
+                            'width'=>$_POST['Item']["width_".$i],
+                            'reference'=>0,
+                            'cbm'=>($_POST['Item']["length_".$i]*$_POST['Item']["height_".$i]*$_POST['Item']["width_".$i])/1000000
+                        ];
+                        $numTotalWeight += $_POST['Item']["weight_".$i];
+                        $numTotalCBM += ($_POST['Item']["length_".$i]*$_POST['Item']["height_".$i]*$_POST['Item']["width_".$i])/1000000;
+                        $pkg += 1;
+                    }
+                }else{
+                    break;
+                }
+            }
+            $model->mdata['Items']= $arrItems;
+            $model->mdata['weight'] = $numTotalWeight;
+            $model->mdata['cbm'] = $numTotalCBM;
+            $model->mdata['pkg'] = !empty(count($arrItems))?count($arrItems):0;
+        }
+        if (!empty($_POST['CargoProcessPlan'])) {
+            $model->save();
+        }
+    }
+
+    public static function toShipment($id)
+    {
+        $model = CargoProcessPlan::model()->findByPk($id);
+        if (!empty($model)) {
+            if(!empty($model->mdata['shipment_id'])){
+                if (empty($model->mdata['generated_from_consol'])) {
+                    return "Already Synchronized.";
+                } else {
+                    if ($model->status == 30 || $model->status == 100) {
+                        return "Already Synchronized.";
+                    }
+                    if (!empty($model->mdata['shipment_id_no'])) {
+                        $shipment = ImParcel::model()->findByPk($model->mdata['shipment_id_no']);
+                    } else {
+                        $shipment = ImParcel::model()->findByAttributes(array('hbn' => $model->mdata['shipment_id']));
+                    }
+                    if (!empty($shipment)) {
+                        
+                        // Create pallet request invoice
+                        $invoiceService = new InvoiceService();
+                        $createInvoiceResult = $invoiceService->createPalletRequestInvoice($model, $shipment);
+                        if ($createInvoiceResult->success) {
+                            $model->status = 30; // Change pallet request status to Synchronized
+                            $model->save();
+
+                            $shipment->mdata['cargo_delivery'] = 1;
+                            $shipment->mdata['cargo_ignore_scan'] = 1;
+                            $shipment->mdata['isPalletRequest'] = 1;
+                            $shipment->save();
+                            return 'true';
+                        } else {
+                            return 'Create invoice error: ' . $createInvoiceResult->message;
+                        }
+                    }
+                }
+            }
+            if($model->need_invoice == 2 && empty($model->invoice_id)){
+                return "Open Invoice First.";
+            }
+            $transaction = Yii::app()->db->beginTransaction();
+            try {
+                $arrAddressModel = self::createAddr($model);
+
+                $modelShipment = new ImParcel;
+
+                $weight = $cbm = $pkg = 0;
+                if(!empty($model->weight)){
+                    $weight = $model->weight;
+                }
+                if(!empty($model->mdata['weight'])){
+                    $weight = $model->mdata['weight'];
+                }
+                if(!empty($model->cbm)){
+                    $cbm = $model->cbm;
+                }
+                if(!empty($model->mdata['cbm'])){
+                    $cbm = $model->mdata['cbm'];
+                }
+                if(!empty($model->pkg)){
+                    $pkg = $model->pkg;
+                }
+                if(!empty($model->mdata['pkg'])){
+                    $pkg = $model->mdata['pkg'];
+                }
+
+                $modelShipment->setAttributes([
+                    'agent_id' => $model->agent_id,
+                    // 'odpt_id' => 106,
+                    'odpt_id' => $model->dpt_id,
+                    'ddpt_id' => $model->dpt_id,
+                    'cnor_id' => $arrAddressModel[0]->id,
+                    'cnee_id' => $arrAddressModel[1]->id,
+                    'status' => empty($modelShipment->status) ? 10 : $modelShipment->status,
+                    'state' =>  $arrAddressModel[1]->state,
+                    'postcode' =>  $arrAddressModel[1]->postcode,
+                    'pkg' => !empty($pkg)?$pkg:1,
+                    'currency' => 1,
+                    'cref' => $model->ref,
+                    'weight' => !empty($weight)?$weight:1,
+                    'cbm' => !empty($cbm)?$cbm:0.001,
+                    'packages' => !empty($model->mdata['Items'])? json_encode($model->mdata['Items']):""
+                ]);
+
+                if($model->mdata['cnor']['state']!=$model->mdata['cnee']['state']){
+                    $modelShipment->mdata['interstate'] = 1;
+                }
+                $modelShipment->mdata['amzon_pallet']=$model->pallets;
+				$modelShipment->cbwf = $modelShipment->cbwf | Imparcel::CBWF_PALLET_CARO;
+                $modelShipment->hbn = $model->ref;
+                //$modelShipment->hbn = $modelShipment->genHbn();
+                $modelShipment->ref = $model->ref;
+                //$modelShipment->consol_id = 0;
+                // Create a fake consol each month
+                $consolId = self::createConsol($model);
+                $modelShipment->consol_id = $consolId;
+                //$modelShipment->ref = $modelShipment->genBPHbn();
+                $modelShipment->status =  ImParcel::STATE_LOCAL_ARRIVAL;
+                $modelShipment->mdata['cargo_delivery'] = 1;
+                $modelShipment->mdata['cargo_ignore_scan'] = 1;
+                $modelShipment->mdata['isPalletRequest'] = 1;
+
+                $oldShipment = ImParcel::model()->find('hbn = :hbn or ref = :hbn and status !=100',[':hbn'=> $model->ref]);
+                if(empty($oldShipment)){
+                    
+
+                    $modelShipment->save();
+
+                    $model->status = 30;
+                    $model->mdata['shipment_id'] = $modelShipment->ref;
+                    $model->mdata['shipment_id_no'] = $modelShipment->id;
+                    $model->save();
+
+                    $gatepass=new GatepassShipment();
+                    $gatepass->scan_time=date('Y-m-d H:i:s');
+                    $gatepass->fid= $modelShipment->id;
+                    $gatepass->connote_no=$modelShipment->ref;
+                    $gatepass->sno=0;
+                    $gatepass->courier_id=114;
+                    $gatepass->shipment_status=ImParcel::STATE_LOCAL_ARRIVAL;
+                    $gatepass->warehouse=$model->dpt_id;
+                    $gatepass->status = 0;
+                    $gatepass->save();
+
+                    $objfiles = FileRepo::model()->findAll('fid=:fid and type = 143',[':fid'=>$model->id]);
+                    if(!empty($objfiles)){
+                        foreach($objfiles as $objfile){
+                            $data = $objfile->attributes;
+                            $objNewFile = new FileRepo;
+                            $objNewFile->setAttributes($data);
+                            $objNewFile->fid = $modelShipment->id;
+                            $objNewFile->save();
+                        }
+                    }
+
+                    $transaction->commit();
+                    return "true";
+                }else{
+                    return "Already Exsit.";
+                }
+                
+            } catch (Exception $ex) {
+                $transaction->rollback();
+                return $ex;
+            }
+        }
+    }
+
+    public static function createAddr($model)
+    {
+        //$IsCnorCnee:  true->Cnor  false->Cnee
+        $modelCnor = new Addr;
+        $modelCnee = new Addr;
+        $modelAddr = new Addr;
+        $modelOrg = Org::model()->findByPk($model->dpt_id);
+
+        if (!empty($modelOrg)) {
+            $modelAddr->name = $modelOrg->name;
+            $modelAddr->company = "TOP LOGISTICS AUSTRALIA";
+            $modelAddr->address = $modelOrg->address;
+            $modelAddr->suburb = $modelOrg->suburb;
+            $modelAddr->city = $modelOrg->suburb;
+            $modelAddr->state = $modelOrg->state;
+            $modelAddr->postcode = $modelOrg->postcode;
+            $modelAddr->country = $modelOrg->country;
+            $modelAddr->tel = $modelOrg->phone;
+            $modelAddr->email = $modelOrg->email;
+
+            if ($model->type == 10) {
+                $modelCnor = $modelAddr;
+                $modelCnor->save();
+
+                $modelCnee->setAttributes($model->mdata['cnee']);
+                $modelCnee->save();
+            } else if ($model->type == 20) {
+                $modelCnor->setAttributes($model->mdata['cnor']);
+                $modelCnor->save();
+
+                $modelCnee = $modelAddr;
+                $modelCnee->save();
+            } else if ($model->type == 30) {
+                $modelCnor->setAttributes($model->mdata['cnor']);
+                $modelCnor->save();
+
+                $modelCnee->setAttributes($model->mdata['cnee']);
+                $modelCnee->save();
+            }
+        }
+        return [$modelCnor, $modelCnee];
+    }
+
+    /**
+     * Generate pallet request using shipments in consol,
+     * $entire is true: use all shipments,
+     * else use part of shipments.
+     */
+    public function batchToPalletRequest($consol, $ownerId, $entire = false)
+    {
+        $errors = [];
+        $shipments = [];
+        $partialConsolToPalletRequestClients = array(4321, 4117, 2740, 3321, 4063);
+        $sql = 'SELECT * FROM shipment WHERE consol_id = ' . $consol->id . ' AND `status` IN (' . ImParcel::STATE_CLEAR . ', ' . ImParcel::STATE_LOCAL_ARRIVAL . ')';
+        $allShipments = ImParcel::model()->findAllBySql($sql);
+        if ($entire) {
+            foreach ($allShipments as $shipment) {
+                array_push($shipments, $shipment); // For FCL, simply add all shipments to pallet request, no need to filter.
+            }
+        } else {
+            foreach ($allShipments as $shipment) {
+                if (!empty($shipment->mdata['scan_time']) && !empty($shipment->mdata['org_rate_id']) && $shipment->mdata['org_rate_id'] == 931 && $shipment->agent_id == $ownerId) { // remove shipments which doesn't have been scanned or doesn't have pickup non ref value been set
+                    array_push($shipments, $shipment);
+                }
+            }
+        }
+
+        // When no shipments to add to pallet request, do nothing.
+        if (count($shipments) < 1) {
+            array_push($errors, 'No cleared shipments found.');
+            return $errors;
+        }
+
+        $palletRequest = new CargoProcessPlan();
+        if ($consol->service == Consol::AIRCONSOL) {
+            switch ($consol->dpt_id) {
+                case 106:
+                    $palletRequest->ref = 'SPR' . $consol->awb;
+                    break;
+                case 218:
+                    $palletRequest->ref = 'MPR' . $consol->awb;
+                    break;
+                case 530:
+                    $palletRequest->ref = 'BPR' . $consol->awb;
+                    break;
+                default:
+                    $palletRequest->ref = 'SPR' . $consol->awb;
+            }
+            $palletRequest->mdata['Ref'] = $consol->awb;
+        } else if ($consol->service == Consol::SEACONSOL) {
+            switch ($consol->dpt_id) {
+                case 106:
+                    $palletRequest->ref = 'SPR' . $consol->container_no;
+                    break;
+                case 218:
+                    $palletRequest->ref = 'MPR' . $consol->container_no;
+                    break;
+                case 530:
+                    $palletRequest->ref = 'BPR' . $consol->container_no;
+                    break;
+                default:
+                    $palletRequest->ref = 'SPR' . $consol->container_no;
+            }
+            $palletRequest->mdata['Ref'] = $consol->container_no;
+        }
+        
+        $palletRequest->agent_id = $ownerId;
+        $palletRequest->dpt_id = $consol->dpt_id;
+        $palletRequest->ot_id = 50; // Department: Top Courier Service
+        $palletRequest->type = 30;
+        if (!empty($consol->mdata['ContainerUnloadDate'])) {
+            $palletRequest->schedule_time = date('Y-m-d H:i:s', strtotime($consol->mdata['ContainerUnloadDate'] . '+1 day'));
+            $palletRequest->due_time = date('Y-m-d H:i:s', strtotime($consol->mdata['ContainerUnloadDate'] . '+2 day'));
+        } else {
+            $palletRequest->schedule_time = date('Y-m-d 00:00:00', strtotime(date('Y-m-d') . '+1 day'));
+            $palletRequest->due_time = date('Y-m-d 00:00:00', strtotime(date('Y-m-d') . '+2 day'));
+        }
+
+        $weight = 0.0;
+        $cbm = 0.0;
+        $totalCbm = 0;
+        $pkg = 0;
+        $hbns = '';
+        $shipmentIds = [];
+        foreach ($shipments as $s) {
+            $weight += $s->weight;
+            $totalCbm += $s->cbm * $s->pkg;
+            $pkg += $s->pkg;
+            $hbns .= $s->hbn . ", ";
+            array_push($shipmentIds, $s->id);
+        }
+        $cbm = round($totalCbm / $pkg, 5);
+
+        $pallets = !empty($consol->mdata['cargo_receipt_pallets']) ? intval($consol->mdata['cargo_receipt_pallets']) : 0;
+        $cages = !empty($consol->mdata['cargo_receipt_cages']) ? intval($consol->mdata['cargo_receipt_cages']) : 0;
+        // if cages is odd, pallets = cages + 1; otherwise pallets = cages
+        if ($cages % 2 != 0) {
+            $palletRequest->pallets = $pallets + $cages + 1;
+        } else {
+            $palletRequest->pallets = $pallets + $cages;
+        }
+        //$palletRequest->pallets = $pallets + ($cages * 2);
+        $palletRequest->pallets_note = $pallets . " pallets, " . $cages . " cages.";
+        $palletRequest->mdata['dim_delivery'] = 1;  // Dimension info: pallets  
+        $palletRequest->note = $hbns;
+
+        // if number of pallets = 0: set pallet request status to New; else set it to Confirmed
+        if ($palletRequest->pallets == 0) {
+            $palletRequest->status = 10; // status New
+        } else {
+            $palletRequest->status = 20;    // status Confirmed
+        }
+        $palletRequest->creater = !empty(Yii::app()->user) ? Yii::app()->user->id : 0;
+        $palletRequest->create_time = date('Y-m-d H:i:s');
+        $palletRequest->need_invoice = 2;   // Need Create Invoice: Cartage
+        $palletRequest->weight = $weight;
+        $palletRequest->cbm = $cbm;
+        $palletRequest->pkg = $pkg;
+        $palletRequest->mdata['shipment_ids'] = $shipmentIds;
+        $palletRequest->mdata['consol_id'] = $consol->id;
+        $palletRequest->mdata['generated_from_consol'] = 1;
+        if ($palletRequest->save()){
+            $shipmentId = $this->generateShipment($consol, $palletRequest, $ownerId);
+            $imParcel = ImParcel::model()->findByPk($shipmentId);
+            if (!empty($imParcel)) {
+                $palletRequest->mdata['cnor']['name'] = $imParcel->cnor->name;
+                $palletRequest->mdata['cnor']['tel'] = $imParcel->cnor->tel;
+                $palletRequest->mdata['cnor']['address'] = $imParcel->cnor->address;
+                $palletRequest->mdata['cnor']['suburb'] = $imParcel->cnor->suburb;
+                $palletRequest->mdata['cnor']['city'] = $imParcel->cnor->city;
+                $palletRequest->mdata['cnor']['state'] = $imParcel->cnor->state;
+                $palletRequest->mdata['cnor']['postcode'] = $imParcel->cnor->postcode;
+                $palletRequest->mdata['cnor']['country'] = $imParcel->cnor->country;
+                $palletRequest->mdata['cnee']['name'] = $imParcel->cnee->name;
+                $palletRequest->mdata['cnee']['tel'] = $imParcel->cnee->tel;
+                $palletRequest->mdata['cnee']['address'] = $imParcel->cnee->address;
+                $palletRequest->mdata['cnee']['suburb'] = $imParcel->cnee->suburb;
+                $palletRequest->mdata['cnee']['city'] = $imParcel->cnee->city;
+                $palletRequest->mdata['cnee']['state'] = $imParcel->cnee->state;
+                $palletRequest->mdata['cnee']['postcode'] = $imParcel->cnee->postcode;
+                $palletRequest->mdata['cnee']['country'] = $imParcel->cnee->country;
+                $palletRequest->mdata['shipment_id'] = $imParcel->ref;
+                $palletRequest->mdata['shipment_id_no'] = $imParcel->id;
+                $palletRequest->save();
+            }
+
+            $maniMap = ManiMap::model()->findByAttributes(array('fid' => $shipmentId));
+            if (!empty($maniMap)) {
+                foreach ($shipments as $s) {
+                    $tempManiMap = new ManiMap();
+                    $tempManiMap->mani_id = $maniMap->mani_id;
+                    $tempManiMap->model = 'ImParcel';
+                    $tempManiMap->fid = $s->id;
+                    $tempManiMap->mdata['cargo_process_id'] = $maniMap->mdata['cargo_process_id'];
+                    $tempManiMap->status = 10;
+                    $tempManiMap->save();
+                }
+            }
+
+            $gatepass=new GatepassShipment();
+            $gatepass->scan_time=date('Y-m-d H:i:s');
+            $gatepass->fid= $shipmentId;
+            $gatepass->connote_no=$imParcel->ref;
+            $gatepass->sno=0;
+            $gatepass->courier_id=114;
+            $gatepass->shipment_status=$imParcel->status;
+            $gatepass->warehouse=$consol->dpt_id;
+            $gatepass->status = 0;
+            $gatepass->save();
+        } else {
+            array_push($errors, 'Pallet request save failed.');
+        }
+        return $errors;
+    }
+
+    /**
+     * Generate new Shipment
+     */
+    private function generateShipment($consol, $pallet_request, $ownerId, $courier='')
+    {
+        $imParcel = new ImParcel();
+        $imParcel->agent_id = $ownerId;
+        //$imParcel->consol_id = 0;   // Generated shipment doesn't need to show in origin consol
+        $consolId = self::createConsol($pallet_request);
+        $imParcel->consol_id = $consolId;
+        $imParcel->odpt_id = $consol->dpt_id;
+        $imParcel->ddpt_id = $consol->dpt_id;
+        $cnorId = $this->generateAddress($consol, $ownerId, true);
+        $cneeId = $this->generateAddress($consol, $ownerId, false, $courier);
+        $cnee = Addr::model()->findByPk($cneeId);
+        $imParcel->cnor_id = $cnorId;
+        $imParcel->cnee_id = $cneeId;
+        $imParcel->status = ImParcel::STATE_LOCAL_ARRIVAL;
+        $imParcel->type = 10;
+        $imParcel->ot_id = 10;
+        $imParcel->hbn = $pallet_request->ref;
+        $imParcel->ref = $pallet_request->ref;
+        $imParcel->cref = $pallet_request->ref;
+        $imParcel->pkg = $pallet_request->pkg;
+        $imParcel->state = $cnee->state;
+        $imParcel->postcode = $cnee->postcode;
+        $imParcel->currency = 1;
+        $imParcel->weight = $pallet_request->weight;
+        $imParcel->cbm = $pallet_request->cbm;
+        $imParcel->mdata['amzon_pallet'] = $pallet_request->pallets;
+        /**
+         * set charge code
+         */
+        $chargecode = '';
+        $chargecodeSetting = SystemSetting::model()->findByAttributes(array('key'=>'TLDChargecode'));
+        if (!empty($chargecodeSetting)) {
+            if ($consol->dpt_id == 106) {   // Sydney
+                if ($consol->service == ImcoConsol::AIRCONSOL) {
+                    $chargecode = !empty($chargecodeSetting->mdata['pallet_request_chargecode']['syd'][$ownerId]['air']) ? $chargecodeSetting->mdata['pallet_request_chargecode']['syd'][$ownerId]['air'] : '';
+                } else {
+                    // sea consol
+                    $chargecode = !empty($chargecodeSetting->mdata['pallet_request_chargecode']['syd'][$ownerId]['sea']) ? $chargecodeSetting->mdata['pallet_request_chargecode']['syd'][$ownerId]['sea'] : '';
+                }
+            } else if ($consol->dpt_id == 218) {    // Melbourne
+                if ($consol->service == ImcoConsol::AIRCONSOL) {
+                    $chargecode = !empty($chargecodeSetting->mdata['pallet_request_chargecode']['mel'][$ownerId]['air']) ? $chargecodeSetting->mdata['pallet_request_chargecode']['mel'][$ownerId]['air'] : '';
+                } else {
+                    // sea consol
+                    $chargecode = !empty($chargecodeSetting->mdata['pallet_request_chargecode']['mel'][$ownerId]['sea']) ? $chargecodeSetting->mdata['pallet_request_chargecode']['mel'][$ownerId]['sea'] : '';
+                }
+            } else if ($consol->dpt_id == 530) {    // Brisbane
+                if ($consol->service == ImcoConsol::AIRCONSOL) {
+                    $chargecode = !empty($chargecodeSetting->mdata['pallet_request_chargecode']['bne'][$ownerId]['air']) ? $chargecodeSetting->mdata['pallet_request_chargecode']['bne'][$ownerId]['air'] : '';
+                } else {
+                    // sea consol
+                    $chargecode = !empty($chargecodeSetting->mdata['pallet_request_chargecode']['bne'][$ownerId]['sea']) ? $chargecodeSetting->mdata['pallet_request_chargecode']['bne'][$ownerId]['sea'] : '';
+                }
+            } else if ($consol->dpt_id == 811) {    // Perth
+                if ($consol->service == ImcoConsol::AIRCONSOL) {
+                    $chargecode = !empty($chargecodeSetting->mdata['pallet_request_chargecode']['per'][$ownerId]['air']) ? $chargecodeSetting->mdata['pallet_request_chargecode']['per'][$ownerId]['air'] : '';
+                } else {
+                    // sea consol
+                    $chargecode = !empty($chargecodeSetting->mdata['pallet_request_chargecode']['per'][$ownerId]['sea']) ? $chargecodeSetting->mdata['pallet_request_chargecode']['per'][$ownerId]['sea'] : '';
+                }
+            }
+        }
+        if (!empty($chargecode)) {
+            $imParcel->mdata['chargecode'] = $chargecode;
+        }
+        //$imParcel->mdata['cargo_delivery'] = 1;
+        //$imParcel->mdata['cargo_ignore_scan'] = 1;
+        //$imParcel->mdata['isPalletRequest'] = 1;
+        $imParcel->created = date('Y-m-d');
+        $imParcel->note = 'Generated from pallet request.';
+        $imParcel->save();
+        return $imParcel->id;
+    }
+
+    /**
+     * Generate cnor or cnee
+     */
+    private function generateAddress($consol, $ownerId, $isSender = false, $courier = '')
+    {
+        // Generate cnor address
+        $address = new Addr();
+        if ($isSender) {
+            $address->name = 'TLA';
+            $address->country = 'AU';
+            $address->tel = '0000000000';
+            switch ($consol->dpt_id) {
+                case 106:
+                    $address->address = '1/233 Milperra Rd';
+                    $address->suburb = 'BANKSTOWN AERODROME';
+                    $address->state = 'NSW';
+                    $address->postcode = '2200';
+                    break;
+                case 218:
+                    $address->address = '3B/8 Judge St';
+                    $address->suburb = 'Sunshine';
+                    $address->state = 'VIC';
+                    $address->postcode = '3020';
+                    break;
+                case 530:
+                    $address->address = '6/55 Musgrave Rd';
+                    $address->suburb = 'Coopers Plains';
+                    $address->state = 'QLD';
+                    $address->postcode = '4108';
+                    break;
+            }
+        } else {    // Generate cnee address
+            switch ($ownerId) {
+                case 2619: // 4PX
+                    $address->name = '4PX';
+                    $address->country = 'AU';
+                    $address->tel = '0000000000';
+                    if ($consol->dpt_id == 106) {
+                        $address->address = 'Block G2 391 Park Road';
+                        $address->suburb = 'Regents Park';
+                        $address->state = 'NSW';
+                        $address->postcode = '2143';
+                    } /* else if ($consol->dpt_id == 218) {
+                        $address->address = '1/414 Lower Dandenong Road';
+                        $address->suburb = 'Braeside';
+                        $address->state = 'VIC';
+                        $address->postcode = '3195';
+                    } */
+                    break;
+                case 3551: // IEPOCH
+                    $address->name = 'IEPOCH';
+                    $address->country = 'AU';
+                    $address->tel = '0000000000';
+                    if ($consol->dpt_id == 106) {
+                        $address->address = '23 Iraking Ave';
+                        $address->suburb = 'Moorebank';
+                        $address->state = 'NSW';
+                        $address->postcode = '2170';
+                    } else if ($consol->dpt_id == 218) {
+                        $address->address = '60 Smith Road';
+                        $address->suburb = 'Springvale';
+                        $address->state = 'VIC';
+                        $address->postcode = '3171';
+                    } /* else if ($consol->dpt_id == 530) {
+                        $address->address = 'Gate 1, Basement 2/30 Gow Street';
+                        $address->suburb = 'Moorooka';
+                        $address->state = 'QLD';
+                        $address->postcode = '4105';
+                    } */
+                    break;
+                case 4501: // 华鑫
+                    $address->name = 'Hua Xin';
+                    $address->country = 'AU';
+                    $address->tel = '0000000000';
+                    if ($consol->dpt_id == 218) {
+                        $address->address = '47 Pauljoseph Wy';
+                        $address->suburb = 'Truganina';
+                        $address->state = 'VIC';
+                        $address->postcode = '3029';
+                    }
+                    break;
+                case 3390:  // AUK
+                    $address->name = 'AUK';
+                    $address->country = 'AU';
+                    $address->tel = '0000000000';
+                    if ($consol->dpt_id == 218) {
+                        $address->address = '16-20 Third Ave';
+                        $address->suburb = 'Sunshine';
+                        $address->state = 'VIC';
+                        $address->postcode = '3020';
+                    }
+                    break;
+                case 4432: // AUE/STS
+                    $address->name = 'AUE/STS';
+                    $address->country = 'AU';
+                    $address->tel = '0000000000';
+                    if ($consol->dpt_id == 218) {
+                        $address->address = '189 Browns Rd';
+                        $address->suburb = 'Noble Park North';
+                        $address->state = 'VIC';
+                        $address->postcode = '3174';
+                    }
+                    break;
+                case 4321:  // 鼎达
+                    $address->name = 'DING DA';
+                    $address->country = 'AU';
+                    $address->tel = '0000000000';
+                    if ($consol->dpt_id == 106) {
+                        $address->address = '8 Jullian Cl';
+                        $address->suburb = 'Banksmeadow';
+                        $address->state = 'NSW';
+                        $address->postcode = '2019';
+                    }
+                    break;
+                case 4117: // FASTGO
+                    $address->name = 'FASTGO';
+                    $address->country = 'AU';
+                    $address->tel = '0000000000';
+                    if ($consol->dpt_id == 106) {
+                        $address->address = '1233 Canterbury Rd';
+                        $address->suburb = 'Punchbowl';
+                        $address->state = 'NSW';
+                        $address->postcode = '2196';
+                    }
+                    break;
+                case 4063:
+                case 2740:  // ZTO
+                    $address->name = 'ZTO';
+                    $address->country = 'AU';
+                    $address->tel = '0000000000';
+                    if ($consol->dpt_id == 218) {
+                        $address->address = '37-39 Smirth Road';
+                        $address->suburb = 'Springvale';
+                        $address->state = 'VIC';
+                        $address->postcode = '3171';
+                    }
+                    break;
+                case 4483:
+                case 3321:  //EBG(AC)
+                    $address->name = 'EBG(AC)';
+                    $address->country = 'AU';
+                    $address->tel = '0000000000';
+                    if ($consol->dpt_id == 218) {
+                        $address->address = '2/ 34 Efficient Drive';
+                        $address->suburb = 'Truganina';
+                        $address->state = 'VIC';
+                        $address->postcode = '3029';
+                    }
+                    break;
+                case 4669:  // Dai Post
+                case 4660:  // EWE ITEM
+                case 4657:  // EWE KG
+                case 4564:  // PANAICIA
+                case 2716:  // Globavend
+                    if (!empty($courier) && $courier == 'courierplease') {
+                        $address->name = 'Courier Please';
+                        $address->country = 'AU';
+                        $address->tel = '0000000000';
+                        $address->address = '5/7 Shirley Street';
+                        $address->suburb = 'Rosehill';
+                        $address->state = 'NSW';
+                        $address->postcode = '2142';
+                    } else if (!empty($courier) && $courier == Org::ORGID_COURIER_FASTWAY) {
+                        $address->name = 'FastWay';
+                        $address->country = 'AU';
+                        $address->tel = '0000000000';
+                        $address->address = '56A Anzac St';
+                        $address->suburb = 'Chullora';
+                        $address->state = 'NSW';
+                        $address->postcode = '2190';
+                    }
+                    break;
+            }
+        }
+        $address->save();
+        return $address->id;
+    }
+
+    private function createConsol($pallet_request)
+    {
+        $currentMonth = date('Ym');
+        switch ($pallet_request->dpt_id) {
+            case 106:
+                $consolNumber = 'SPR' . $currentMonth;
+                $pol = 'AUSYD';
+                $pod = 'AUSYD';
+                break;
+            case 218:
+                $consolNumber = 'MPR' . $currentMonth;
+                $pol = 'AUMEL';
+                $pod = 'AUMEL';
+                break;
+            case 530:
+                $consolNumber = 'BPR' . $currentMonth;
+                $pol = 'AUBNE';
+                $pod = 'AUBNE';
+                break;
+            case 811:
+                $consolNumber = 'PPR' . $currentMonth;
+                $pol = 'AUPER';
+                $pod = 'AUPER';
+                break;
+            default:
+                $consolNumber = 'SPR' . $currentMonth;
+                $pol = 'AUSYD';
+                $pod = 'AUSYD';
+        }
+        $sql = 'SELECT * FROM consol WHERE `no` = "' . $consolNumber . '" AND `dpt_id` = ' . $pallet_request->dpt_id . ' AND `status` != ' . ImcoConsol::Status_Cancelled;
+        $consol = Consol::model()->findBySql($sql);
+        if (!empty($consol)) {
+            return $consol->id;
+        } else {
+            $consol = new ImcoConsol();
+            $consol->no = $consolNumber;
+            $consol->owner_id = 0;
+            $consol->dpt_id = $pallet_request->dpt_id;
+            $consol->carrier_id = 0;
+            $consol->type = Consol::IMCOCONSOLTYPE;
+            $consol->service = 0;
+            $consol->pol = $pol;
+            $consol->pod = $pod;
+            $consol->eta = date('Y-m-d');
+            $consol->created = date('Y-m-d');
+            $consol->status = ImcoConsol::NEW_TYPE;
+            $consol->save();
+            return $consol->id;
+        }
+    }
+
+    /**
+     * Generate pallet request based on courier
+     */
+    public function generatePalletRequestByCourier($consol, $ownerId)
+    {
+        $errors = [];
+        $fastwayShipments = [];
+        $courierPleaseShipments = [];
+        foreach ($consol->shipments as $shipment) {
+            if (ImParcelService::checkGatePassTypeOfShipment($shipment) == Org::ORGID_COURIER_FASTWAY && in_array($shipment->status, [ImParcel::STATE_CLEAR, ImParcel::STATE_LOCAL_ARRIVAL])) {
+                array_push($fastwayShipments, $shipment);
+            } else if (ImParcelService::checkGatePassTypeOfShipment($shipment) == 'courierplease' && in_array($shipment->status, [ImParcel::STATE_CLEAR, ImParcel::STATE_LOCAL_ARRIVAL])) {
+                array_push($courierPleaseShipments, $shipment);
+            }
+        }
+
+        if (count($fastwayShipments) > 0) {
+            $errors = $this->pushShipmentsToPalletRequest($consol, $ownerId, $fastwayShipments, Org::ORGID_COURIER_FASTWAY);
+        }
+
+        if (count($courierPleaseShipments) > 0) {
+            $errors = $this->pushShipmentsToPalletRequest($consol, $ownerId, $courierPleaseShipments, 'courierplease');
+        }
+
+        return $errors;
+    }
+
+    private function pushShipmentsToPalletRequest($consol, $ownerId, $shipments, $courier)
+    {
+        $errors = [];
+        $palletRequest = new CargoProcessPlan();
+        if ($consol->service == Consol::AIRCONSOL) {
+            switch ($consol->dpt_id) {
+                case 106:
+                    $palletRequest->ref = 'SPR' . $consol->awb . '_' . $courier;
+                    break;
+                case 218:
+                    $palletRequest->ref = 'MPR' . $consol->awb . '_' . $courier;
+                    break;
+                case 530:
+                    $palletRequest->ref = 'BPR' . $consol->awb . '_' . $courier;
+                    break;
+                default:
+                    $palletRequest->ref = 'SPR' . $consol->awb . '_' . $courier;
+            }
+            $palletRequest->mdata['Ref'] = $consol->awb . '_' . $courier;
+        } else if ($consol->service == Consol::SEACONSOL) {
+            switch ($consol->dpt_id) {
+                case 106:
+                    $palletRequest->ref = 'SPR' . $consol->container_no . '_' . $courier;
+                    break;
+                case 218:
+                    $palletRequest->ref = 'MPR' . $consol->container_no . '_' . $courier;
+                    break;
+                case 530:
+                    $palletRequest->ref = 'BPR' . $consol->container_no . '_' . $courier;
+                    break;
+                default:
+                    $palletRequest->ref = 'SPR' . $consol->container_no . '_' . $courier;
+            }
+            $palletRequest->mdata['Ref'] = $consol->container_no . '_' . $courier;
+        }
+
+        // If pallet request already exists, return
+        $oldPalletRequest = CargoProcessPlan::model()->findByAttributes(array('ref' => $palletRequest->ref), 'status != 100');
+        if (!empty($oldPalletRequest)) {
+            array_push($errors, 'Pallet request already exists.');
+            return $errors;
+        }
+
+        $palletRequest->agent_id = $ownerId;
+        $palletRequest->dpt_id = $consol->dpt_id;
+        $palletRequest->ot_id = 50; // Department: Top Courier Service
+        $palletRequest->type = 30;
+        if (!empty($consol->mdata['ContainerUnloadDate'])) {
+            $palletRequest->schedule_time = date('Y-m-d H:i:s', strtotime($consol->mdata['ContainerUnloadDate'] . '+1 day'));
+            $palletRequest->due_time = date('Y-m-d H:i:s', strtotime($consol->mdata['ContainerUnloadDate'] . '+2 day'));
+        } else {
+            $palletRequest->schedule_time = date('Y-m-d 00:00:00', strtotime(date('Y-m-d') . '+1 day'));
+            $palletRequest->due_time = date('Y-m-d 00:00:00', strtotime(date('Y-m-d') . '+2 day'));
+        }
+
+        $weight = 0.0;
+        $cbm = 0.0;
+        $totalCbm = 0;
+        $pkg = 0;
+        $hbns = '';
+        $shipmentIds = [];
+        foreach ($shipments as $s) {
+            $weight += $s->weight;
+            $totalCbm += $s->cbm * $s->pkg;
+            $pkg += $s->pkg;
+            $hbns .= $s->hbn . ", ";
+            array_push($shipmentIds, $s->id);
+        }
+        $cbm = round($totalCbm / $pkg, 5);
+        if ($courier == Org::ORGID_COURIER_FASTWAY) {
+            $pallets = !empty($consol->mdata['pallet_count_fastway']) ? intval($consol->mdata['pallet_count_fastway']) : 0;
+            $cages = !empty($consol->mdata['cage_count_fastway']) ? intval($consol->mdata['cage_count_fastway']) : 0;
+        } else {
+            $pallets = !empty($consol->mdata['pallet_count_courier_plz']) ? intval($consol->mdata['pallet_count_courier_plz']) : 0;
+            $cages = !empty($consol->mdata['cage_count_courier_plz']) ? intval($consol->mdata['cage_count_courier_plz']) : 0;
+        }
+        
+        // if cages is odd, pallets = cages + 1; otherwise pallets = cages
+        if ($cages % 2 != 0) {
+            $palletRequest->pallets = $pallets + $cages + 1;
+        } else {
+            $palletRequest->pallets = $pallets + $cages;
+        }
+        $palletRequest->pallets_note = $pallets . " pallets, " . $cages . " cages.";
+        $palletRequest->mdata['dim_delivery'] = 1;  // Dimension info: pallets  
+        $palletRequest->note = $hbns;
+
+        // if number of pallets = 0: set pallet request status to New; else set it to Confirmed
+        if ($palletRequest->pallets == 0) {
+            $palletRequest->status = 10; // status New
+        } else {
+            $palletRequest->status = 20;    // status Confirmed
+        }
+        $palletRequest->creater = !empty(Yii::app()->user) ? Yii::app()->user->id : 0;
+        $palletRequest->create_time = date('Y-m-d H:i:s');
+        $palletRequest->need_invoice = 2;   // Need Create Invoice: Cartage
+        $palletRequest->weight = $weight;
+        $palletRequest->cbm = $cbm;
+        $palletRequest->pkg = $pkg;
+        $palletRequest->mdata['shipment_ids'] = $shipmentIds;
+        $palletRequest->mdata['consol_id'] = $consol->id;
+        $palletRequest->mdata['generated_from_consol'] = 1;
+        if ($palletRequest->save()){
+            $shipmentId = $this->generateShipment($consol, $palletRequest, $ownerId, $courier);
+            $imParcel = ImParcel::model()->findByPk($shipmentId);
+            if (!empty($imParcel)) {
+                $palletRequest->mdata['cnor']['name'] = $imParcel->cnor->name;
+                $palletRequest->mdata['cnor']['tel'] = $imParcel->cnor->tel;
+                $palletRequest->mdata['cnor']['address'] = $imParcel->cnor->address;
+                $palletRequest->mdata['cnor']['suburb'] = $imParcel->cnor->suburb;
+                $palletRequest->mdata['cnor']['city'] = $imParcel->cnor->city;
+                $palletRequest->mdata['cnor']['state'] = $imParcel->cnor->state;
+                $palletRequest->mdata['cnor']['postcode'] = $imParcel->cnor->postcode;
+                $palletRequest->mdata['cnor']['country'] = $imParcel->cnor->country;
+                $palletRequest->mdata['cnee']['name'] = $imParcel->cnee->name;
+                $palletRequest->mdata['cnee']['tel'] = $imParcel->cnee->tel;
+                $palletRequest->mdata['cnee']['address'] = $imParcel->cnee->address;
+                $palletRequest->mdata['cnee']['suburb'] = $imParcel->cnee->suburb;
+                $palletRequest->mdata['cnee']['city'] = $imParcel->cnee->city;
+                $palletRequest->mdata['cnee']['state'] = $imParcel->cnee->state;
+                $palletRequest->mdata['cnee']['postcode'] = $imParcel->cnee->postcode;
+                $palletRequest->mdata['cnee']['country'] = $imParcel->cnee->country;
+                $palletRequest->mdata['shipment_id'] = $imParcel->ref;
+                $palletRequest->mdata['shipment_id_no'] = $imParcel->id;
+                $palletRequest->save();
+            }
+
+            $maniMap = ManiMap::model()->findByAttributes(array('fid' => $shipmentId));
+            if (!empty($maniMap)) {
+                foreach ($shipments as $s) {
+                    $tempManiMap = new ManiMap();
+                    $tempManiMap->mani_id = $maniMap->mani_id;
+                    $tempManiMap->model = 'ImParcel';
+                    $tempManiMap->fid = $s->id;
+                    $tempManiMap->mdata['cargo_process_id'] = $maniMap->mdata['cargo_process_id'];
+                    $tempManiMap->status = 10;
+                    $tempManiMap->save();
+                }
+            }
+
+            $gatepass=new GatepassShipment();
+            $gatepass->scan_time=date('Y-m-d H:i:s');
+            $gatepass->fid= $shipmentId;
+            $gatepass->connote_no=$imParcel->ref;
+            $gatepass->sno=0;
+            $gatepass->courier_id=114;
+            $gatepass->shipment_status=$imParcel->status;
+            $gatepass->warehouse=$consol->dpt_id;
+            $gatepass->status = 0;
+            $gatepass->save();
+        } else {
+            array_push($errors, 'Pallet request save failed.');
+        }
+        return $errors;
+    }
+}

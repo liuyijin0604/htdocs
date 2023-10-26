@@ -1,0 +1,216 @@
+<style type="text/css">
+	
+	.container {
+    padding-right: 15px;
+    padding-left: 15px;
+    margin-right: auto;
+    margin-left: auto
+}
+
+
+@media (min-width: 1600px) {
+    .container {
+        width: 1800px;
+    }
+}
+
+
+
+</style>
+<script type="text/javascript" src="<?php echo Yii::app()->request->baseUrl; ?>/js/echarts.min.js"></script>
+<?php
+	echo CHtml::link("goSummary",$this->createUrl('shipmentScan/getCheckinDash'),['id'=>'goSummary','style'=>'display:none;','class'=>'tab_link','title'=>'112']);
+	echo CHtml::link("goDetail",$this->createUrl('shipmentScan/getCheckinDashDetail'),['id'=>'goDetail','style'=>'display:none;','class'=>'tab_link','title'=>'123']);
+?>
+<div id = "checkin_dash_left<?=$_GET['tabid']?>" style="width:70em;height:50em;display: inline-block;margin-right:10em;">
+</div>
+<div id = "checkin_dash_right<?=$_GET['tabid']?>" style="width:40em;height:50em;display: inline-block;">
+</div>
+
+
+<script type="text/javascript">
+	
+var chartDom = document.getElementById('checkin_dash_left<?=$_GET['tabid']?>');
+var myChart = echarts.init(chartDom);
+var option;
+var colors = ['rgb(255,112,112)', 'rgb(159,223,127)', 'rgb(92,123,217)'];
+option = {
+  title: {
+    text: 'Checkin of <?=$provide['depot']?> Today',
+    textStyle:{
+    	fontSize:'2em'
+    },
+    subtext: 'Total:<?=$provide['total']?>    On Hand:<?=$provide['onHand']?>',
+    left: 'center',
+    subtextStyle:{
+    	fontSize:'2em'
+    }
+  },
+  tooltip: {
+    trigger: 'item'
+  },
+  legend: {
+    orient: 'vertical',
+    left: 'left'
+  },
+  series: [
+    {
+      name: 'Scan Data',
+      type: 'pie',
+      radius: '70%',
+      label: {
+      textStyle: {
+        fontSize: '2em' // Set the font size for the labels within the pie chart
+      }
+      },
+      data: [
+        { value: <?=$provide['left']?>, name: 'Left: <?=$provide['left']?>'},
+        { value: <?=$provide['done']?>, name: 'Done: <?=$provide['done']?>(<?=$provide['scanPercent']?>)' },
+        { value: <?=$provide['onRoad']?>, name: 'On Road: <?=$provide['onRoad']?>' }
+      ],
+      emphasis: {
+        itemStyle: {
+          shadowBlur: 10,
+          shadowOffsetX: 0,
+          shadowColor: 'rgba(0, 0, 0, 0.5)'
+        }
+      }
+    }
+  ],
+  color: colors
+};
+
+option && myChart.setOption(option);
+
+
+
+
+
+var chartDom2 = document.getElementById('checkin_dash_right<?=$_GET['tabid']?>');
+var myChart2 = echarts.init(chartDom2);
+var option2;
+
+option2 = {
+	title: {
+	    text: 'Done Percent In All Depots',
+	    textStyle:{
+	    	fontSize:'2em'
+	    },
+	  },
+  tooltip: {
+    trigger: 'axis',
+    axisPointer: {
+      type: 'shadow'
+    }
+  },
+  dataset: {
+    source: [
+      ['Percentage', 'Depots'],
+      <?php
+      foreach ($provide['rightData'] as $key => $value) {
+      	echo "[".$value.", '".$key."'],";
+      }
+      ?>
+    ]
+  },
+  legend: {},
+  grid: {
+    left: '3%',
+    right: '4%',
+    bottom: '3%',
+    containLabel: true
+  },
+  grid: { containLabel: true },
+  xAxis: {
+  	name: '(%)',
+  	axisLabel: {
+      fontSize: '2em' // Set the font size for the yAxis labels
+    }
+  },
+  yAxis: {
+  	type: 'category',
+  	axisLabel: {
+      fontSize: '2em' // Set the font size for the yAxis labels
+    },
+    data:[
+    	  <?php
+    	  echo '"'.join('","',array_keys($provide['rightData'])).'"';
+	      ?>
+    	]
+  },
+
+  series: [
+    {
+      type: 'bar',
+      encode: {
+        // Map the "amount" column to X axis.
+        x: 'Percentage',
+        // Map the "product" column to Y axis
+        y: 'Depots'
+      }
+    }
+  ],
+  color:"rgb(159,223,127)"
+};
+
+
+
+// option2 = {
+//   title: {
+//     text: 'All Depots'
+//   },
+//   tooltip: {
+//     trigger: 'axis',
+//     axisPointer: {
+//       type: 'shadow'
+//     }
+//   },
+//   legend: {},
+//   grid: {
+//     left: '3%',
+//     right: '4%',
+//     bottom: '3%',
+//     containLabel: true
+//   },
+//   xAxis: {
+//     type: 'value',
+//     boundaryGap: [0, 0.01]
+//   },
+//   yAxis: {
+//     type: 'category',
+//     data: ['Percentage %']
+//   },
+//   series: [
+//     {
+//       name: 'SYD',
+//       type: 'bar',
+//       data: ['80']
+//     },
+//     {
+//       name: 'MEL',
+//       type: 'bar',
+//       data: ['90']
+//     },
+//     {
+//       name: 'BNE',
+//       type: 'bar',
+//       data: ['70']
+//     }
+//   ]
+// };
+
+
+
+option2 && myChart2.setOption(option2);
+myChart2.on('click', function(params){
+	$('#goSummary').attr('href','<?=$this->createUrl('shipmentScan/getCheckinDash')?>'+'?depot='+params.name.split("(")[0]);
+  $('#goSummary').attr('title',params.name.split("(")[0]+" WHDASH");
+	$('#goSummary').click();
+});
+myChart.on('click', function(params){
+	$('#goDetail').attr('href','<?=$this->createUrl('shipmentScan/getCheckinDashDetail')?>'+'?depot=<?=$provide['checkDepotId']?>');
+  $('#goDetail').attr('title',"<?=$provide['depot']?> WHDASHDETAIL");
+	$('#goDetail').click();
+});
+
+</script>

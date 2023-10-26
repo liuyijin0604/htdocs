@@ -1,0 +1,1029 @@
+<?php
+
+$objShipment = $model->shipment;
+$strHbn = $objShipment->hbn;
+$numWeight = $objShipment->weight;
+$numPkg = $objShipment->pkg;
+$numCBM = $model->getTotalCBM();
+$numChargeCode = @$objShipment->mdata['chargecode'];
+$numMaxCm = 0;
+$numMaxKg = $numWeight / $numPkg;
+if (!empty($objShipment->packs)) {
+	foreach ($objShipment->packs as $list) {
+		$numMaxCm = max($numMaxCm, max($list['length'], $list['height'], $list['width']));
+		$numMaxKg = max($numMaxKg, $list['weight']);
+	}
+}
+
+$isFreeUnloading = 0;
+//if (($numWeight < 250 && $numMaxCm < 100 && $numMaxKg < 25) || preg_match('/SKP88|MKP88|BKP88/i',$objShipment->ref)) {
+if (($numWeight < 250 && $numMaxCm < 150 && $numMaxKg < 25) || preg_match('/'.CargoProcess::$hasForkliftRegular.'/i',$numChargeCode)|| preg_match('/'.CargoProcess::$newNoForkliftRegular.'/i',$numChargeCode)|| preg_match('/SKP88|MKP88|BKP88/i',$objShipment->ref)) {
+	$isFreeUnloading = 1;
+}
+
+$strFullAddressRaw = $objShipment->cnee->fullAddress();
+$listFilter = [
+	'1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
+	'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+	'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+	' ', ',', '，', '/', '-',
+];
+$strFullAddress = '';
+for ($i = 0; $i < strlen($strFullAddressRaw); $i++) {
+	if (in_array($strFullAddressRaw[$i], $listFilter)) {
+		$strFullAddress .= $strFullAddressRaw[$i];
+	}
+}
+
+// $strName = $objShipment->cnee->name;
+$strName = str_replace('"', ' ', $objShipment->cnee->name);
+$strName = str_replace("'", ' ', $strName);
+
+$strTel = $objShipment->cnee->tel;
+$strEmail = $objShipment->cnee->email;
+
+$strContactNumber = '02 90668206';
+if ($objShipment->ddpt_id == Org::PCAE_DEPARTMENT_MELBOURNE) {
+	$strContactNumber = '03 91175890';
+}
+
+$objCargoProcessJob = new CargoProcessJob;
+$listJob = $objCargoProcessJob->getAvailableJob($model->id);
+
+$strDeliveryTime = 'The delivery dates are available to select after all information confirmed or invoice paid.';
+$strDivDeliveryOrOther = '#divDelivery';
+// only sydney & has available time schedule will show datetime.
+// SYDNEY
+
+if(!$model->shipment->scanCount()>0){
+	$unloadingDate = @$objShipment->mdata['ContainerUnloadDate'];
+	if(!empty($unloadingDate)&&strtotime($unloadingDate)>=strtotime(date('Y-m-d'))){
+		$preStrDate = date('Y-m-d',strtotime($unloadingDate) + (2 * 24 * 3600));
+		//$preEndDate = date('Y-m-d',strtotime($unloadingDate) + (6 * 24 * 3600));
+		$strDeliveryTime = 'Your shipment will be delivered start from '.$preStrDate.' 4 business days';
+		$strDivDeliveryOrOther = '#divOther';
+	}else{
+		$strDeliveryTime = 'Your shipment will be delivered in the next 2-4 business days or as your request.';
+		$strDivDeliveryOrOther = '#divOther';
+	}
+}else{
+	if (empty($listJob)) { //$model->dpt_id != Org::TLA_DEPARTMENT_SYDNEY ||
+		$strDeliveryTime = 'Your shipment will be delivered in the next 2-4 business days or as your request.';
+		$strDivDeliveryOrOther = '#divOther';
+	}
+	// over 150CM do not allow choose c_job schedule;
+	if ($numMaxCm > 150) {
+		$strDeliveryTime = 'Your shipment will be delivered in the next 2-4 business days or as your request.';
+		$strDivDeliveryOrOther = '#divOther';
+	}
+}
+
+//KYLE needs 2023/01/06
+if ($model->dpt_id == 106) { //$model->dpt_id != Org::TLA_DEPARTMENT_SYDNEY ||
+	$strDeliveryTime = 'Your shipment will be delivered in the next 5-7 business days or as your request.';
+}
+$strDivDeliveryOrOther = '#divInputDelivery';
+
+$strProvidDropOff = 'Shipment will be drop off at street level, near curbside.<br/>';
+
+//$strHtmlImportantNotice = '<p>*Important Notices:</p><p>Change of address, specific delivery time request, exceed 15mins wait time, re-delivery and special unloading request may incur extra charges.</p><p>The delivery service may be refused if wrong or misleading information is provided.</p><p>Redelivery fee will be applied if the confirmed options differ from the unloading conditions on the day of delivery.</p><p>We do not move the cargo upstairs.</p><p>We do not unpacking boxes and removing rubbish.</p><br/><p>I have already read the important notice as above.</p>';
+$strHtmlImportantNotice = '<h4>*Important Notices:</h4><p>If no one is on site to accept the delivery, our courier will take it back, you can send email to : </p><p>cartage@toplogistics.com.au</p><p>for either paying for redelivery or making appointment for picking up from our depot.</p>';
+$strHtmlProvideFree = '<h4>Notices</h4><p>We will update delivery date and you can stay updated at <a href=http://www.toplogistics.com.au>www.toplogistics.com.au</a></p><p>We will also text (email) you a notification to let you know the delivery is coming on the next day</p><h4>THE SERVICES WE PROVIDE</h4><p>1.The cargo will be dropped off at the street level or on curbside only form vehicle by the courier.</p><p>2.' . $strDeliveryTime . '</p><h4>THE SERVICES WE DO NOT PROVIDE</h4><p>1.Moving the cargo upstairs</p><p>2.Unpacking boxes and removing rubbish </p><p>3.Changing address on the day of delivery is not allowed.</p>';
+$strHtmlProvideForkOrSelf = '<h4>THE SERVICES WE PROVIDE</h4><p>1.' . $strDeliveryTime . '</p><p>2.Email notification will be automatically sent one day before the delivery day.</p><h4>THE SERVICES WE DO NOT PROVIDE</h4><p>1.Moving the cargo upstairs</p><p>2.Unpacking boxes and removing rubbish </p>';
+$strHtmlProvideFee = '<h4>THE SERVICES WE PROVIDE</h4><p>1.The cargo will be dropped off at the street level or on curbside only form vehicle by the courier.</p><p>2.' . $strDeliveryTime . '</p><h4>THE SERVICES WE DO NOT PROVIDE</h4><p>1.Moving the cargo upstairs</p><p>2.Unpacking boxes and removing rubbish</p>';
+
+
+
+?>
+
+<style type="text/css">
+	p {
+		font-size: 16px;
+		color: black;
+	}
+
+	.display_none {
+		display: none;
+	}
+
+	.btn_next {
+		color: #fff;
+		background-color: #007aff;
+		border: 1px solid #007aff;
+		width: 200px;
+		height: 40px;
+		float: right;
+	}
+
+	.btn_prev {
+		color: #007aff;
+		/* background-color: #007aff; */
+		border: 1px solid #007aff;
+		width: 200px;
+		height: 40px;
+		float: right;
+		margin-right: 10px;
+	}
+
+	.sb10 {
+		color: #fff;
+		background-color: #007aff;
+		border: 1px solid #007aff;
+		width: 100%;
+		height: 40px;
+		margin-right: 10px;
+		position: sticky;
+		bottom: 10px;
+	}
+</style>
+
+
+
+
+<div class="content-padded">
+	<div class="form">
+		<?php
+
+
+		$form = $this->beginWidget('CActiveForm', array(
+			'id' => 'cargo-confirm-form',
+			'enableAjaxValidation' => false,
+		)); ?>
+
+		<div class="row">
+			<div id="divChangeAddress" class="col-12" style="padding-left: 5px;">
+				<?php echo CHtml::hiddenField('inputIsChangeAddress', false); ?>
+				<h3>Please confirm details before delivery:</h3>
+				<br />
+				<br />
+				<h4>Your shipment Information</h4>
+				<p>Ref No.<?= $strHbn ?></p>
+				<div>
+					Weight: <?= $numWeight ?> kg<br />
+					Qty: <?= $numPkg ?> pcs<br />
+					Volume: <?= $numCBM ?> cbm<br />
+				</div>
+				<br />
+				<p>Your Address: <?= $strFullAddress ?></p>
+				<p>Your Name: <?= $strName ?></p>
+				<p>Your Mobile: <?= $strTel ?></p>
+				<p>Your Email: <?= $strEmail ?></p>
+				<br />
+				<h4>Is the address correct?</h4>
+				<?php
+				echo CHtml::RadioButtonList('change_address', 'no_change_address', ['no_change_address' => 'Yes', 'change_address' => 'No, I want to change (extra fee applies)'], ['labelOptions' => ['class' => 'radio_label'], 'separator' => '<br/>'])
+				?>
+				<br />
+				<br />
+				<button type="button" onclick="funcChangeAddress()" class="btn_next">Next</button>
+			</div>
+			<div id="divNewAddress" class="col-12 display_none" style="padding-left: 5px;">
+				<?php echo CHtml::hiddenField('inputIsNewAddress', false); ?>
+				<h3>Please confirm delivery details: Steps 1/5 </h3>
+				<br />
+				<br />
+				<h4>Your shipment Information</h4>
+				<br />
+				<p>CONTACT PERSON: <?= $strName ?></p>
+				<p>CONTACT NUMBER: <?= $strTel ?></p>
+				<p>CONTACTY EMAIL: <?= $strEmail ?></p>
+				<p>ADDRESS: <?= $strFullAddress ?></p>
+				<br />
+				<h4>New Address</h4>
+				Unit / House No.
+				<?php echo CHtml::textField('address_line') ?>
+				Street name:
+				<?php echo CHtml::textField('address_street') ?>
+				Suburb:
+				<?php echo CHtml::textField('address_suburb') ?>
+				Postcode:
+				<?php echo CHtml::textField('address_postcode') ?>
+				<br />
+				<br />
+				<p>1.PLS find the invoice at the end of this process and make payment, otherwise the change would not be successful</p>
+				<p>2.Your new address is over our stantanard delivery range, pls contact:cartage@toplogistics.com.au</p>
+				<button type="button" onclick="funcNewAddress()" class="btn_next">Next</button>
+				<button type="button" onclick="funcNewAddressPrev()" class="btn_prev">Previous</button>
+			</div>
+			<!-- Address book section -->
+			<div id="address_book" class="col-12 display_none" style="padding-left: 5px;">
+				<h3>We have some stored information for this address: Steps 2/5</h3>
+				<br />
+				<br />
+				<div id="address_book_info" style="padding-left: 5px;">
+				</div>
+				<br />
+				<br />
+				<h4>Is this information correct?</h4>
+				<input type="radio" id="address_book_correct" name="address_book_info" value="correct" checked>
+				<label for="address_book_correct">Yes</label>
+				<br>
+				<input type="radio" id="address_book_incorrect" name="address_book_info" value="incorrect">
+				<label for="address_book_incorrect">No</label>
+				<br>
+				<button type="button" onclick="funcAddressBookNext()" class="btn_next">Next</button>
+				<button type="button" onclick="funcAddressBookPrev()" class="btn_prev">Previous</button>
+			</div>
+
+			<div id="divShipment" class="col-12 display_none" style="padding-left: 5px;">
+				<h3>Please confirm delivery details: Steps 2/5 </h3>
+				<br />
+				<br />
+				<h4>Is Your Address</h4>
+				<?php echo CHtml::RadioButtonList(
+					'address_type', 
+					'apartment', 
+						[
+							'apartment' => 'Apartment', 
+							'house/townhouse' => 'House / Townhouse',
+							'warehouse/logistic/storagecenter'=>'Warehouse / Logistic Centre / Storage Centre',
+							'shoproadside'=>'Shop (Roadside)',
+							'shop'=>'Shop (Inside Shopping Centre)',
+							'office'=>'Office Building'
+						], ['labelOptions' => ['class' => 'radio_label'], 'separator' => '<br/>']) ?>
+				<!-- <?php //echo CHtml::RadioButtonList('address_type', 'residential', ['residential' => 'Residential', 'business' => 'Business'], ['labelOptions' => ['class' => 'radio_label'], 'separator' => '<br/>']) ?> -->
+				<br />
+				<br />
+				<button type="button" onclick="funcNextShipment()" class="btn_next">Next</button>
+				<button type="button" onclick="funcNextShipmentPrev()" class="btn_prev">Previous</button>
+			</div>
+			<!-- divUnloadingBusiness -->
+			<div id="divUnloadingBusiness" class="col-12 display_none" style="padding-left: 5px;">
+				<h3>Please confirm delivery details: Steps 3/5 </h3>
+				<?php echo CHtml::hiddenField('inputIsUnloadingBusiness', false); ?>
+				<br />
+				<br />
+				<h4>Unloading</h4>
+				<?php
+				//if ($numMaxCm > 200) {
+				//is not use forklift chargecode then ask if they need unloading service.
+				echo CHtml::RadioButtonList(
+							'business_unloading',
+							'fork',
+							[
+								'fork' => 'Folklift is Available on site to unload',
+								'nofork' => 'Folklift is Not Available on site to unload',
+							],
+							['labelOptions' => ['class' => 'radio_label'], 'separator' => '<br/>']
+						);
+				?>
+				<!-- <p>This service only unload goods to street level.</p> -->
+				<br />
+				<br />
+				<button type="button" onclick="funcNextUnloadingBusiness()" class="btn_next">Next</button>
+				<button type="button" onclick="funcNextUnloadingBusinessPrev()" class="btn_prev">Previous</button>
+			</div>
+			<!-- divUnloadingResidential -->
+			<div id="divUnloadingResidential" class="col-12 display_none" style="padding-left: 5px;">
+				<h3>Please confirm delivery details: Steps 3/5 </h3>
+				<?php echo CHtml::hiddenField('inputIsUnloadingResidential', false); ?>
+				<br />
+				<br />
+				<h4>ATL</h4>
+				<!-- <p>If no one onsite on the day of delivery, I/We authorised to <span style="color:red;">leave at the address.</span></p> -->
+				<!-- <p>(a photo will be taken if ATL is selected)</p> -->
+				<p>Authorise to leave package at door.</p>
+				<?php echo CHtml::RadioButtonList('leave_at_address', 'yes', ['yes' => 'YES', 'no' => 'NO'], ['labelOptions' => ['class' => 'radio_label'], 'separator' => '<br/>']) ?>
+				<br />
+				<br />
+				<button type="button" onclick="funcNextUnloadingResidential()" class="btn_next">Next</button>
+				<button type="button" onclick="funcNextUnloadingResidentialPrev()" class="btn_prev">Previous</button>
+			</div>
+			<div id="business_hours" class="col-12 display_none" style="padding-left: 5px;">
+				<h3>Please confirm delivery details: Steps 2/5 </h3>
+				<br />
+				<br />
+				<h4>Business Hours</h4>
+				<label for="business_open">Opening Time:</label>
+				<select id="business_open" name="business_open">
+					<option value="7:00">7:00</option>
+					<option value="7:30">7:30</option>
+					<option value="8:00">8:00</option>
+					<option value="8:30">8:30</option>
+					<option value="9:00">9:00</option>
+					<option value="9:30">9:30</option>
+					<option value="10:00">10:00</option>
+					<option value="10:30">10:30</option>
+					<option value="11:00">11:00</option>
+					<option value="11:30">11:30</option>
+				</select>
+				<label for="business_close">Closing Time:</label>
+				<select id="business_close" name="business_close">
+					<option value="12:00">12:00</option>
+					<option value="12:30">12:30</option>
+					<option value="13:00">13:00</option>
+					<option value="13:30">13:30</option>
+					<option value="14:00">14:00</option>
+					<option value="14:30">14:30</option>
+					<option value="15:00">15:00</option>
+					<option value="15:30">15:30</option>
+					<option value="16:00">16:00</option>
+					<option value="16:30">16:30</option>
+					<option value="17:00">17:00</option>
+					<option value="17:30">17:30</option>
+					<option value="18:00">18:00</option>
+					<option value="18:30">18:30</option>
+					<option value="19:00">19:00</option>
+					<option value="19:30">19:30</option>
+					<option value="20:00">20:00</option>
+					<option value="20:30">20:30</option>
+				</select>
+				<br>
+				<button type="button" onclick="funcBusinessHourNext()" class="btn_next">Next</button>
+				<button type="button" onclick="funcBusinessHourPrev()" class="btn_prev">Previous</button>
+			</div>
+			<div id="divUnloadingOptions" class="col-12 display_none" style="padding-left: 5px;">
+				<h3>Please confirm delivery details: Steps 4/5 </h3>
+				<br />
+				<br />
+				<h4>Unloading:</h4>
+				<?php
+				if($isFreeUnloading){
+					echo CHtml::RadioButtonList(
+						'business_unloading',
+						'self',
+						[
+							'self' => 'We can unload by ourselves.',
+							'hand_unloading_service_oversize' => 'We need unloading service',
+						],
+						['labelOptions' => ['class' => 'radio_label'], 'separator' => '<br/>']
+					);
+				}else{
+					echo CHtml::RadioButtonList(
+						'business_unloading',
+						'self',
+						[
+							'self' => 'We can unload by ourselves.',
+							//'hand_unloading_service' => 'We need unloading service ($' . round($numUnloadingFee * 1.1, 2) . ' Inc GST) (PS: street level, no moving upstairs.)',
+							'hand_unloading_service' => 'We need unloading service',
+						],
+						['labelOptions' => ['class' => 'radio_label'], 'separator' => '<br/>']
+					);
+				}
+				//if ($numMaxCm > 200) {
+				//is not use forklift chargecode then ask if they need unloading service.
+				?>
+				<!-- <span><input id="cb_unloading_street" name='cb_unloading_street' type='checkbox' value='1' />Unloading Service</span><br />
+				<span><input id="cb_unloading_street_oversize" name='cb_unloading_street_oversize' type='checkbox' value='1' />Unloading Service Oversize</span><br /> -->
+				<br />
+				<br />
+				<button type="button" onclick="funcNextUnloadingBusiness()" class="btn_next">Next</button>
+				<button type="button" onclick="funcNextUnloadingBusinessPrev()" class="btn_prev">Previous</button>
+			</div>
+
+			<div id="divDelivery" class="col-12 display_none" style="padding-left: 5px;">
+				<h3>Please confirm delivery details: Steps 5/5 </h3>
+				<br />
+				<br />
+				<h4>Please select delivery time:</h4>
+				<!-- <div id="divDeliveryNote"></div>
+				<div id="divDeliveryTime"></div> -->
+				<?php
+				echo CHtml::RadioButtonList('current_delivery_time', '', $listJob, ['labelOptions' => ['class' => 'radio_label'], 'separator' => '<br/>']);
+				?>
+
+				<br />
+				<br />
+				<button type="button" onclick="funcNextDelivery()" class="btn_next">Next</button>
+				<button type="button" onclick="funcNextDeliveryPrev()" class="btn_prev">Previous</button>
+			</div>
+			<!-- 2023/2/10 unput delivery date -->
+			<div id="divInputDelivery" class="col-12 display_none" style="padding-left: 5px;">
+				<h3>Please confirm delivery details: Steps 5/5 </h3>
+				<br />
+				<br />
+				<h4>Do you have any special delivery time:</h4>
+				<br />
+				<?php echo CHtml::RadioButtonList( 'special_delivery_time', 'no', ['no' => 'NO','yes' => 'YES (extra fee applies)'], ['onclick'=>'funInputdelivery(this)','labelOptions' => ['class' => 'radio_label'], 'separator' => '<br/>']) ?>
+				<!-- <div id="divDeliveryNote"></div>
+				<div id="divDeliveryTime"></div> -->
+				<br />
+				<div id="divSpecialDeliveryTime" class="col-12 display_none" style="padding-left: 5px;">
+				<p>Preferred Date.
+				<?php echo CHtml::textField('preferred_date') ?>
+				</p>
+				<p>
+				Preferred Time.
+				<?php echo CHtml::textField('preferred_time') ?>
+				</p>
+				</div>
+				<br />
+				<button type="button" onclick="funcNextIntputDelivery()" class="btn_next">Next</button>
+				<button type="button" onclick="funcNextInputDeliveryPrev()" class="btn_prev">Previous</button>
+			</div>
+
+			<div id="divOther" class="col-12 display_none" style="padding-left: 5px;">
+				<h3>Please confirm delivery details: Steps 5/5 </h3>
+				<br />
+				<br />
+				<h4>Special notes: (30 words max)</h4>
+				<p><?php echo CHtml::textarea('other_inquery', '', array('maxlength' => 100, 'rows' => 3, 'cols' => 60)) ?></p>
+				<?= $strHtmlImportantNotice ?>
+				<p style="text-align: center;"><input id="agree" type="checkbox">Agree</p>
+				<br />
+				<button type="button" onclick="funcNextOther()" class="btn_next">Next</button>
+				<button type="button" onclick="funcNextOtherPrev()" class="btn_prev">Previous</button>
+			</div>
+			<!-- <div id="divRedelivery" class="col-12 display_none" style="padding-left: 5px;">
+				<br/>
+				<br/>
+				<h4>Redelivery F</h4>
+				<p>Please make sure someone onsite on the day of delivery.</p>
+				<p>(Re-delivery fee applied.)</p>
+				<button type="button" onclick="funcNextRedelivery()" class="btn_next">Next</button>
+			</div> -->
+			<div id="divSummary" class="col-12 display_none" style="padding-left: 5px;">
+				<h3>DELIVERY CONFIRMATION:</h3>
+				<br />
+				<br />
+				<div id="divSummaryDetails">
+				</div>
+				<br />
+				<button type="button" onclick="funcSubmitPrev()" class="btn_prev">Previous</button>
+				<br />
+				<br />
+				<br />
+				<?php echo CHtml::hiddenField('summary', ''); ?>
+				<?php echo CHtml::hiddenField('caref', $model->getRef()); ?>
+				<?php echo CHtml::button($this->t('Confirm'), ['class' => 'save_btn btn btn-primary btn-block sb10', 'onclick' => 'funcSubmit()']); ?>
+
+			</div>
+
+
+		</div>
+
+		<?php $this->endWidget(); ?>
+
+	</div>
+</div>
+
+
+
+
+<script type="text/javascript">
+	numPkg = <?= $numPkg ?>;
+	numWeight = <?= $numWeight ?>;
+	strFullAddress = "<?= $strFullAddress ?>";
+	isFreeUnloading = <?= $isFreeUnloading ?>;
+
+	isUnloadingResidentialWeight = false;
+	isUnloadingResidential = false;
+	isUnloadingBusiness = false;
+	// isRedelivery = false;
+
+	strSummaryChangeAddress = '';
+	strSummaryNewAddress = '';
+	strSummaryAddressType = '';
+	strSummaryUnloading = '';
+	strSummaryUnloadingOptions = '';
+	// strSummaryRedelivery = '';
+	strSummaryDeliveryTime = '';
+
+	strDivPrevShipment = '';
+	strDivPrevUnloadingOptions = '';
+	strDivPrevDelivery = '';
+	strDivPrevOther = '';
+	var hasAddressBook = false;
+	var addressBook = '';
+	function funcChangeAddress() {
+		$("#divChangeAddress").addClass("display_none");
+		strChangeAddress = $("input[name='change_address']:checked").val();
+		if (strChangeAddress == 'no_change_address') {
+			$.ajax({
+				method: 'POST',
+				url: '<?= Yii::app()->createUrl("booking/checkAddressbook"); ?>',
+				data: {
+					tel: "<?=$strTel?>"
+				},
+				success: function(response) {
+					res = jQuery.parseJSON(response);
+					addressBook = res.addressBook;
+					if (res.success == true) {
+						//console.log(res);
+						// found address book record
+						$('#address_book_info').empty();
+						let strHtml = '<p style="font-weight: 600;">Address type: <span style="color: red;">'+getAddressType(res.addressBook)+'</span></p>';
+						strHtml += '<p style="font-weight: 600;">Authorize to leave at door: <span style="color: red;">'+getAtl(res.addressBook)+'</span></p>';
+						strHtml += '<p style="font-weight: 600;">Folklift is available on site to unload: <span style="color: red;">'+getFolklift(res.addressBook)+'</span></p>';
+						strHtml += '<p style="font-weight: 600;">We need unloading service: <span style="color: red;">'+getUnloading(res.addressBook)+'</span></p>';
+						strHtml += '<p style="font-weight: 600;">Business hours: <span style="color: red;">'+getBusinessHours(res.addressBook)+'</span></p>';
+						$('#address_book_info').append(strHtml);
+						/* $('p#address_book_type').text('Address type: ' + getAddressType(res.addressBook));
+						$('p#address_book_atl').text('Authorize to leave at door: ' + getAtl(res.addressBook));
+						$('p#address_book_folklift').text('Folklift is available on site to unload: ' + getFolklift(res.addressBook));
+						$('p#address_book_unloading').text('We need unloading service: ' + getUnloading(res.addressBook));
+						$('p#address_book_business_hours').text('Business hours: ' + getBusinessHours(res.addressBook)); */
+						$('#address_book').removeClass('display_none');
+						hasAddressBook = true;
+						// set default values according to address book
+						switch(res.addressBook.mdata.address_type) {
+							case 1:
+								$('#address_type_0').attr('checked', 'checked');
+								$('input[name="inputIsUnloadingResidential"]').val(true);
+								break;
+							case 2:
+								$('#address_type_1').attr('checked', 'checked');
+								$('input[name="inputIsUnloadingResidential"]').val(true);
+								break;
+							case 3:
+								$('#address_type_2').attr('checked', 'checked');
+								$('input[name="inputIsUnloadingBusiness"]').val(true);
+								break;
+							case 4:
+								$('#address_type_3').attr('checked', 'checked');
+								$('input[name="inputIsUnloadingBusiness"]').val(true);
+								break;
+							case 5:
+								$('#address_type_4').attr('checked', 'checked');
+								$('input[name="inputIsUnloadingBusiness"]').val(true);
+								break;
+							case 6:
+								$('#address_type_5').attr('checked', 'checked');
+								$('input[name="inputIsUnloadingBusiness"]').val(true);
+								break;		
+						}
+						if (res.addressBook.mdata.authorize_to_leave == 1) {
+							$('#leave_at_address_0').attr('checked', 'checked');
+						} else {
+							$('#leave_at_address_1').attr('checked', 'checked');
+						}
+
+						if (res.addressBook.mdata.open != '' && res.addressBook.mdata.close != '') {
+							$('#business_open').val(res.addressBook.mdata.open);
+							$('#business_close').val(res.addressBook.mdata.close);
+						}
+
+						/* if (res.addressBook.mdata.has_folklift == 1 || res.addressBook.mdata.need_unloading_service == 0) {
+							$('#business_unloading_0').attr('checked', 'checked');
+						} else {
+							$('#business_unloading_1').attr('checked', 'checked');
+						} */
+						if (res.addressBook.mdata.has_folklift == 1) {
+							$('#business_unloading_0').attr('checked', 'checked');
+							$('input[name="business_unloading"]').val('fork');
+						} else {
+							$('#business_unloading_1').attr('checked', 'checked');
+							$('input[name="business_unloading"]').val('nofork');
+						}
+						if (res.addressBook.mdata.need_unloading_service == 1) {
+							$('#business_unloading_0').attr('checked', 'checked');
+							$('input[name="business_unloading"]').val('hand_unloading_service_oversize');
+						} else {
+							$('#business_unloading_1').attr('checked', 'checked');
+							$('input[name="business_unloading"]').val('self');
+						}
+						
+					} else {
+						strDivPrevShipment = 'divChangeAddress';
+						$("#divShipment").removeClass("display_none");
+					}
+				}
+			});
+		} else { // change address
+			$("#divNewAddress").removeClass("display_none");
+		}
+	}
+
+	function getAddressType(addressBook)
+	{
+		let type = addressBook.mdata.address_type;
+		let strAddressType = '';
+		switch(type) {
+			case 1:
+				strAddressType = 'Apartment/Unit';
+				break;
+			case 2:
+				strAddressType = 'House/Townhouse';
+				break;
+			case 3:
+				strAddressType = 'Warehouse/Logistic Centre/Storage Centre';
+				break;
+			case 4:
+				strAddressType = 'Shop(Roadside)';
+				break;
+			case 5:
+				strAddressType = 'Shop(Inside Shopping Center)';
+				break;
+			case 6:
+				strAddressType = 'Office Building';
+				break;
+		}
+		return strAddressType;
+	}
+
+	function getAtl(addressBook)
+	{
+		if (addressBook.mdata.authorize_to_leave == 1) {
+			return "Yes";
+		} else {
+			return "No";
+		}
+	}
+
+	function getFolklift(addressBook)
+	{
+		if (addressBook.mdata.has_folklift == 1) {
+			return "Yes";
+		} else {
+			return "No";
+		}
+	}
+
+	function getUnloading(addressBook)
+	{
+		if (addressBook.mdata.need_unloading_service == 1) {
+			return "Yes";
+		} else {
+			return "No";
+		}
+	}
+
+	function getBusinessHours(addressBook)
+	{
+		let strBusinessHours = '';
+		if (addressBook.mdata.hasOwnProperty('open') && addressBook.mdata.hasOwnProperty('close')) {
+			strBusinessHours = addressBook.mdata.open + ' ~ ' + addressBook.mdata.close;
+		}
+		return strBusinessHours;
+	}
+
+	function funcNewAddress() {
+
+		strLine = $("#address_line").val();
+		strStreet = $("#address_street").val();
+		strSuburb = $("#address_suburb").val();
+		strPostcode = $("#address_postcode").val();
+		strFullAddress = strLine + ' ' + strStreet + ' ' + strSuburb + ' ' + strPostcode;
+
+		var listData = new FormData();
+		listData.append("caref", $('#caref').val());
+		listData.append("strSuburb", strSuburb);
+		listData.append("numPostcodeNew", strPostcode);
+
+		htmlobj = $.ajax({
+			type: "POST",
+			url: "<?= $this->createUrl('booking/changeAddressFee'); ?>",
+			data: listData,
+			async: false,
+			contentType: false,
+			processData: false,
+		});
+		obj = JSON.parse(htmlobj.responseText);
+		if (obj.isSuccess) {
+			numChangeAddressFee = Math.round(obj.numFee * 110) / 100;
+			if (confirm('$' + numChangeAddressFee + ' Fee Applies. Do you want to change address?') == true) {
+				$("#inputIsChangeAddress").val(true);
+				$("#divNewAddress").addClass("display_none");
+				strDivPrevShipment = 'divNewAddress';
+				$("#divShipment").removeClass("display_none");
+			} else {
+				$("#inputIsChangeAddress").val(false);
+				$("#divNewAddress").addClass("display_none");
+				$("#divChangeAddress").removeClass("display_none");
+			}
+		} else {
+			alert(obj.strMessage);
+		}
+	}
+
+	function funcNewAddressPrev() {
+		$("#inputIsChangeAddress").val(false);
+		$("#divNewAddress").addClass("display_none");
+		$("#divChangeAddress").removeClass("display_none");
+	}
+
+	function funcNextShipment() {
+		$("#divShipment").addClass("display_none");
+		strAddressType = $("input[name='address_type']:checked").val();
+
+		strAddressName = $("input[name='address_type']:checked").next("label").text();
+		strSummaryAddressType = "<h4>Is Your Address</h4>"+strAddressName+"<br/><br/>";
+		// if (strAddressType == 'residential') {
+		// 	strSummaryAddressType = "<h4>Is Your Address</h4>Residental<br/><br/>";
+		// } else { //business
+		// 	strSummaryAddressType = "<h4>Is Your Address</h4>Business<br/><br/>";
+		// }
+		
+		//remove residential one, all use business 2022/3/18
+		strLeaveAtAddress = 'Authorised to leave at yard/loading dock/reception';
+		
+		$("input[value='leave_at_address']").next("label").text(strLeaveAtAddress);
+		$("#divUnloadingBusiness").removeClass("display_none");
+		//isUnloadingBusiness = true;
+		// $("#inputIsUnloadingBusiness").val(true);
+		if (strAddressType=='apartment'||strAddressType=='house/townhouse'){
+			$("#divUnloadingBusiness").addClass("display_none");
+			$("#divUnloadingResidential").removeClass("display_none");
+			$("#inputIsUnloadingResidential").val(true);
+			$("#inputIsUnloadingBusiness").val(false);
+		}else{
+			$("#inputIsUnloadingResidential").val(false);
+			$("#inputIsUnloadingBusiness").val(true);
+		}
+		//else if(strAddressType=='warehouse/logistic/storagecenter'||strAddressType=='shoproadside'||strAddressType=='shop'){
+		// 	strLeaveAtAddress = 'Authorised to leave at Loading Dock';
+		// 	if(strAddressType=='warehouse/logistic/storagecenter'){
+		// 		$("input[value='fork']").removeClass("display_none");
+		// 		$("input[value='fork']").next("label").removeClass("display_none");
+		// 	}else{
+		// 		$("input[value='fork']").addClass("display_none");
+		// 		$("input[value='fork']").next("label").addClass("display_none");
+		// 	}
+		// }else{
+		// 	strLeaveAtAddress = 'Authorised to leave at Reception';
+		// 	$("input[value='fork']").addClass("display_none");
+		// 	$("input[value='fork']").next("label").addClass("display_none");
+		// }
+		
+		// if (isFreeUnloading) {
+		// 	$("#divUnloadingResidential").removeClass("display_none");
+		// 	isUnloadingResidential = true;
+		// 	$("#inputIsUnloadingResidential").val(true);
+		// } else {
+		// 	$("#divUnloadingBusiness").removeClass("display_none");
+		// 	isUnloadingBusiness = true;
+		// 	$("#inputIsUnloadingBusiness").val(true);
+		// }
+	}
+
+	function funcNextShipmentPrev() {
+		if (hasAddressBook) {
+			$("#divShipment").addClass("display_none");
+			$('#address_book').removeClass('display_none');
+		} else {
+			$("#divShipment").addClass("display_none");
+			$("#" + strDivPrevShipment).removeClass("display_none");
+		}
+	}
+
+
+
+	function funcNextUnloadingResidential() {
+		//$("#inputIsUnloadingResidential").val(true);
+		$("#divUnloadingResidential").addClass("display_none");
+		strDivPrevUnloadingOptions = 'divUnloadingResidentialWeight';
+		strLeaveAtAddress = $("input[name='leave_at_address']:checked").val();
+		if (strLeaveAtAddress == 'yes') {
+			strSummaryUnloading = "<h4>ATL</h4><p>If no one onsite on the day of delivery, I/We authorised to <span style='color:red;'>leave at the address.</span></p><p>(a photo will be taken if ATL is selected)</p>YES<br/><br/>";
+		} else {
+			strSummaryUnloading = "<h4>ATL</h4><p>If no one onsite on the day of delivery, I/We authorised to <span style='color:red;'>leave at the address.</span></p><p>(a photo will be taken if ATL is selected)</p>NO<br/><br/>";
+		}
+		strSummaryUnloadingOptions = "<?= $strHtmlProvideFree ?>";
+
+		strDivPrevDelivery = "divUnloadingResidential";
+		strDivPrevOther = "divUnloadingResidential";
+		$("<?= $strDivDeliveryOrOther ?>").removeClass("display_none");
+
+	}
+
+	function funcNextUnloadingResidentialPrev() {
+		// $("input[name='leave_at_address'][value='yes']").attr("checked",true); 
+		// $("input[name='leave_at_address'][value='no']").removeAttr("checked");
+		$("#divUnloadingResidential").addClass("display_none");
+		$("#divShipment").removeClass("display_none");
+	}
+
+	function funcNextUnloadingBusiness() {
+		$("#divUnloadingBusiness").addClass("display_none");
+		strDivPrevUnloadingOptions = 'divUnloadingBusiness';
+		//debugger;
+		if ($("input[name='business_unloading']:checked").val() == "fork") {
+			$('#cb_unloading_street').prop('checked', false);
+			strSummaryUnloading = "<h4>Unloading</h4>Fork is available on site to unload<br/><br/>";
+			strSummaryUnloadingOptions = "<?= $strHtmlProvideForkOrSelf ?>";
+			strDivPrevDelivery = "divUnloadingBusiness";
+			strDivPrevOther = "divUnloadingBusiness";
+			$("<?= $strDivDeliveryOrOther ?>").removeClass("display_none");
+		} 
+		else if ($("input[name='business_unloading']:checked").val() == "nofork") {
+			$("#divUnloadingBusiness").addClass("display_none");
+			$("#divUnloadingOptions").removeClass("display_none");
+		}
+		else if ($("input[name='business_unloading']:checked").val() == "self") {
+			$("#divUnloadingOptions").addClass("display_none");
+			$('#cb_unloading_street').prop('checked', false);
+			strSummaryUnloading = "<h4>Unloading</h4>We can unload ourselves in 30 minutes<br/><br/>";
+			strSummaryUnloadingOptions = "<?= $strHtmlProvideForkOrSelf ?>";
+			strDivPrevDelivery = "divUnloadingBusiness";
+			strDivPrevOther = "divUnloadingBusiness";
+			$("<?= $strDivDeliveryOrOther ?>").removeClass("display_none");
+		} 
+		else if ($("input[name='business_unloading']:checked").val() == "hand_unloading_service") {
+			$("#divUnloadingOptions").addClass("display_none");
+			//for receive unloading fee;
+			//$('#cb_unloading_street').prop('checked', true);
+			//for not receive;
+			$('#cb_unloading_street').prop('checked', false);
+			strSummaryUnloading = "<h4>Unloading</h4>We need unloading service<br/><br/>";
+			strSummaryUnloadingOptions = "<?= $strHtmlProvideFee ?>";
+			strDivPrevDelivery = "divUnloadingBusiness";
+			strDivPrevOther = "divUnloadingBusiness";
+			$("<?= $strDivDeliveryOrOther ?>").removeClass("display_none");
+		} 
+		else if($("input[name='business_unloading']:checked").val() == "hand_unloading_service_oversize"){
+			$("#divUnloadingOptions").addClass("display_none");
+			$('#cb_unloading_street_oversize').prop('checked', true);
+			strSummaryUnloading = "<h4>Unloading</h4>We need unloading service<br/><br/>";
+			strSummaryUnloadingOptions = "<?= $strHtmlProvideFee ?>";
+			strDivPrevDelivery = "divUnloadingBusiness";
+			strDivPrevOther = "divUnloadingBusiness";
+			$("<?= $strDivDeliveryOrOther ?>").removeClass("display_none");
+		} 
+		//else if($("input[name='business_unloading']:checked").val() == "leave_at_address"){
+		// 	$('#cb_unloading_street_oversize').prop('checked', true);
+		// 	strLeaveAtAddress = $("input[value='leave_at_address']").next("label").text();
+		// 	strSummaryUnloading = "<h4>Unloading</h4>"+strLeaveAtAddress+"<br/><br/>";
+		// 	strSummaryUnloadingOptions = "<?= $strHtmlProvideFee ?>";
+		// 	strDivPrevDelivery = "divUnloadingBusiness";
+		// 	strDivPrevOther = "divUnloadingBusiness";
+		// 	$("<?= $strDivDeliveryOrOther ?>").removeClass("display_none");
+		// }
+	}
+
+	function funcNextUnloadingBusinessPrev() {
+		$("#divUnloadingBusiness").addClass("display_none");
+		$("#divUnloadingOptions").addClass("display_none");
+		$("#divShipment").removeClass("display_none");
+	}
+
+	function funcNextDelivery() {
+		strDeliveryTime = $("input[name='current_delivery_time']:checked").val();
+		if (strDeliveryTime == null) {
+			alert('Please select delivery time.');
+			return;
+		}
+
+		$("#divDelivery").addClass("display_none");
+		strDeliveryTime = $("input[name='current_delivery_time']:checked").next().text();
+		strSummaryDeliveryTime = '<h4>Delivery Time</h4>' + strDeliveryTime + '<br/><br/>';
+
+		strDivPrevOther = "divDelivery";
+		$("#divOther").removeClass("display_none");
+	}
+
+	function funcNextIntputDelivery() {
+		$("#divInputDelivery").addClass("display_none");
+		strDivPrevOther = "divInputDelivery";
+		$("#divOther").removeClass("display_none");
+	}
+
+	function funInputdelivery(){
+		strSpecialDeliveryTime = $("input[name='special_delivery_time']:checked").val();
+		if(strSpecialDeliveryTime == 'yes'){
+			$("#divSpecialDeliveryTime").removeClass("display_none");
+		}else{
+			$("#divSpecialDeliveryTime").addClass("display_none");
+		}
+	}
+
+	function funcNextDeliveryPrev() {
+		$("#divDelivery").addClass("display_none");
+		$("#" + strDivPrevDelivery).removeClass("display_none");
+	}
+
+	function funcNextInputDeliveryPrev() {
+		if (hasAddressBook) {
+			$("#divInputDelivery").addClass("display_none");
+			$('#address_book').removeClass('display_none');
+		} else {
+			$("#divInputDelivery").addClass("display_none");
+			$("#" + strDivPrevDelivery).removeClass("display_none");
+		}
+		
+	}
+
+	function funcNextOther() {
+		if(!document.getElementById("agree").checked){
+			alert("Please tick the agree checkbox.");
+			return false;
+		}
+
+		$("#divOther").addClass("display_none");
+		$("#divSummary").removeClass("display_none");
+
+		if (hasAddressBook && $('#address_book_correct').is(':checked')) {
+			let strHtml = '';
+			strHtml += '<h4>Your shipment Information</h4> <p>Ref No.<?= $strHbn ?></p><div>Weight: <?= $numWeight ?> kg<br/>Qty: <?= $numPkg ?> pcs<br/>Volume: <?= $numCBM ?> cbm<br/></div><br/>';
+			strHtml += '<p>Your Address: ' + strFullAddress + '</p><p>Your Name: <?= $strName ?></p><p>Your Mobile: <?= $strTel ?></p><p>Your Email: <?= $strEmail ?></p><br/><br/>';
+			strHtml += strSummaryChangeAddress;
+			strHtml += strSummaryNewAddress;
+			strHtml += strSummaryAddressType;
+			if (addressBook.mdata.address_type == 1 || addressBook.mdata.address_type == 2) {
+				// Residential Address
+				strHtml += '<h4>ATL</h4>';
+				strHtml += '<p>If no one onsite on the day of delivery, I/We authorised to <span style="color:red;">leave at the address</span>.</p>'
+				strHtml += '<p>(a photo will be taken if ATL is selected)</p>';
+				if (addressBook.mdata.authorize_to_leave == 1) {
+					strHtml += '<p>YES</p><br>';
+				} else {
+					strHtml += '<p>NO</p><br>';
+				}
+			} else {
+				// Business Address
+				if (addressBook.mdata.has_folklift == 1) {
+					strHtml += '<h4>Unloading</h4>';
+					strHtml += '<p>Fork is available on site to unload</p><br>';
+				} else {
+					// No folklift
+					if (addressBook.mdata.need_unloading_service == 1) {
+						// Need unloading service
+						strHtml += '<h4>Unloading</h4>';
+						strHtml += '<p>We need unloading service</p><br>';
+					} else {
+						// customer unload items by themselves
+						strHtml += '<h4>Unloading</h4>';
+						strHtml += '<p>We can unload ourselves in 30 minutes</p><br>';
+					}
+				}
+			}
+			strHtml += '<h4>THE SERVICES WE PROVIDE</h4>';
+			strHtml += '<p>1.Your shipment will be delivered in the next 5-7 business days or as your request.</p>';
+			strHtml += '<p>2.Email notification will be automatically sent one day before the delivery day.</p><br>';
+			strHtml += '<h4>THE SERVICES WE DO NOT PROVIDE</h4>';
+			strHtml += '<p>1.Moving the cargo upstairs</p>';
+			strHtml += '<p>2.Unpacking boxes and removing rubbish</p><br>';
+			strHtml += "<br/><br/><p>Contact Us:</p><p>Top Logistics Australia</p><p>Email: cartage@toplogistics.com.au</p><br/><br/>";
+			$('#divSummaryDetails').append(strHtml);
+			$("#summary").val(strHtml);
+		} else {
+			//summary details
+			strDetailHtml = '<h4>Your shipment Information</h4> <p>Ref No.<?= $strHbn ?></p><div>Weight: <?= $numWeight ?> kg<br/>Qty: <?= $numPkg ?> pcs<br/>Volume: <?= $numCBM ?> cbm<br/></div><br/>';
+			strDetailHtml += strSummaryDeliveryTime;
+			strDetailHtml += '<p>Your Address: ' + strFullAddress + '</p><p>Your Name: <?= $strName ?></p><p>Your Mobile: <?= $strTel ?></p><p>Your Email: <?= $strEmail ?></p><br/><br/>';
+
+			strDetailHtml += strSummaryChangeAddress;
+			strDetailHtml += strSummaryNewAddress;
+			strDetailHtml += strSummaryAddressType;
+			strDetailHtml += "<h4>Special notes: (30 words max)</h4>";
+			strDetailHtml += $("#other_inquery").val();
+			strDetailHtml += strSummaryUnloading;
+			strDetailHtml += strSummaryUnloadingOptions;
+			// strDetailHtml+=strSummaryRedelivery;
+
+
+			// strDetailHtml+="<h4>Delivery Time Frame</h4><p>Business hours: 9:00-17:00 Monday to Friday.</p><p>Delivery will be within 5 business day after confirmation.</p><p>You will be informed by SMS text the day before delivery.</p><br/>";
+			strDetailHtml += "<br/><br/><p>Contact Us:</p><p>Top Logistics Australia</p><p>Email: cartage@toplogistics.com.au</p><br/><br/>";
+			//strDetailHtml += "<br/><br/><?= $strHtmlImportantNotice ?><br/><p>Contact Us:</p><p>Top Logistics Australia</p><p>Email: cartage@toplogistics.com.au</p><br/><br/>";
+			$("#summary").val(strDetailHtml);
+			$("#divSummaryDetails").html(strDetailHtml);
+		}
+	}
+
+	function funcNextOtherPrev() {
+		$("#divOther").addClass("display_none");
+		$("#" + strDivPrevOther).removeClass("display_none");
+
+	}
+
+	function funcSubmit() {
+		strUrl = window.location.href;
+		listData = $('#cargo-confirm-form').serializeArray();
+		htmlobj = $.ajax({
+			type: "POST",
+			url: strUrl,
+			data: listData,
+			async: false
+		});
+		obj = JSON.parse(htmlobj.responseText);
+		if (obj.isSuccess) {
+			window.location.replace(strUrl);
+		} else {}
+
+	}
+
+	function funcSubmitPrev() {
+		$("#divSummary").addClass("display_none");
+		$("#divOther").removeClass("display_none");
+	}
+
+	function funcAddressBookNext()
+	{
+		if ($('#address_book_correct').is(':checked')) {
+			$('#address_book').addClass('display_none');
+			$('#divUnloadingOptions').addClass('display_none');
+			$('#divInputDelivery').removeClass('display_none');
+		} else {
+			$('#address_book').addClass('display_none');
+			$('#business_hours').removeClass('display_none');
+		}
+		
+	}
+
+	function funcAddressBookPrev()
+	{
+		$('#address_book').addClass('display_none');
+		$('#divChangeAddress').removeClass('display_none');
+	}
+
+	function funcBusinessHourNext()
+	{
+		$('#business_hours').addClass('display_none');
+		$('#divShipment').removeClass('display_none');
+	}
+
+	function funcBusinessHourPrev()
+	{
+		$('#business_hours').addClass('display_none');
+		$('#address_book').removeClass('display_none');
+	}
+</script>

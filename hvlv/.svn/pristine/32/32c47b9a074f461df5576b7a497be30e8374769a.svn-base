@@ -1,0 +1,92 @@
+<?php
+
+class ApiInboundAction extends CAction
+{
+    public $ctlr;
+    public $debug;
+    public $user;
+
+    public function run()
+    {
+        $this->ctlr = $this->getController();
+        if (!empty($_POST['method']) && method_exists($this, $_POST['method'])) {
+			if (!in_array($_POST['method'], ['get'])) {
+				$this->log(json_encode($_POST));
+			}
+			$this->{$_POST['method']}();
+		} else {
+			throw new CHttpException(400, 'API method not found!');
+		}
+    }
+
+    public function log($l)
+    {
+        $tmp = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR . 'inboundapi' . DIRECTORY_SEPARATOR ;
+        if (!is_dir($tmp)) {
+            mkdir($tmp);
+        }
+		file_put_contents($tmp.'inbound_api_'  . date('Y-m-d') . '.log', date('Y-m-d H:i:s').' '.$l."\n", FILE_APPEND);
+    }
+
+    public function checkContainer()
+    {
+        $data = json_decode($_POST['data']);
+        $response = new stdClass;
+
+        if (is_object($data)) {
+            if (!empty($data->containerNumber) && !empty($data->houseBill)) {
+                $sql = 'SELECT * FROM shipment WHERE `hbn` = "' . $data->houseBill . '" AND consol_id IN (SELECT id FROM consol WHERE container_no = "' . $data->containerNumber . '")';
+                $shipment = ImParcel::model()->findBySql($sql);
+                if (!empty($shipment)) {
+                    $containerNumber = $shipment->consol->container_no;
+                    $availabilityDate = @$shipment->consol->mdata['available_date'];
+                    $storageStartDate = @$shipment->consol->mdata['input_storage_date'];
+                    $facilityName = '';
+                    $depot = $shipment->consol->dpt_id;
+                    switch ($depot) {
+                        case 106:
+                            $facilityName = 'Sydney';
+                            break;
+                        case 218:
+                            $facilityName = 'Melbourne';
+                            break;
+                        case 530:
+                            $facilityName = 'Brisbane';
+                            break;
+                        case 811:
+                            $facilityName = 'Perth';
+                            break;
+                    }
+
+                    $response->containerNumber = $containerNumber;
+                    $response->availabilityDate = date('Y-m-d H:i:s', strtotime($availabilityDate));
+                    $response->storageStartDate = date('Y-m-d H:i:s', strtotime($storageStartDate));
+                    $response->facilityName = $facilityName;
+
+                    echo json_encode($response);
+                } else  {
+                    $response->status = 'Error';
+                    $response->message = 'We cannot find this shipment in our system.';
+                    echo json_encode($response);
+                }
+            } elseif (empty($data->checkContainer)) {
+                $response->status = 'Error';
+                $response->message = 'Container number is mandatory.';
+                echo json_encode($response);
+            } elseif (empty($data->houseBill)) {
+                $response->status = 'Error';
+                $response->message = 'House bill is mandatory.';
+                echo json_encode($response);
+            }
+        } else {
+            $response->status = 'Error';
+            $response->message = 'Json data malformatted.';
+            echo json_encode($response);
+        }
+    }
+
+    public function handleInboundBooking()
+    {
+        
+    }
+}

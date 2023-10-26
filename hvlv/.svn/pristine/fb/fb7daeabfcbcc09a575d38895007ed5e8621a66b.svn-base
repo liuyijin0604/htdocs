@@ -1,0 +1,513 @@
+<?php
+
+class UnpackContainerController extends Controller
+{
+	/**
+	 * Declares class-based actions.
+	 */
+	protected $nonAjax = ['index','genYlwLabel'];
+	protected $skipAcl = ['genYlwLabel'];
+
+	protected $org;
+	protected $type;
+	protected $warehouseProcessService;
+
+	public function beforeAction($action)
+	{
+		if(!Yii::app()->request->isAjaxRequest) $this->layout = 'whscan';
+		if (!Yii::app()->user->isGuest) {
+			$this->org = Org::model()->findByPk(Yii::app()->user->org);
+			$this->type = 'sc';
+		}
+		$this->warehouseProcessService = new WarehouseProcessService();
+		return parent::beforeAction($action);
+	}
+	
+	public function actionIndex()
+	{
+		$this->render('index',[]);
+	}	
+
+	private function getDptId()
+	{
+		$tempWareHouse=106;
+		if (!empty(Yii::app()->session['scan_warehouse']) && Yii::app()->session['scan_warehouse']=='melbourne') {
+			$tempWareHouse=218;
+		}else if (!empty(Yii::app()->session['scan_warehouse']) && Yii::app()->session['scan_warehouse']=='brisbane') {
+			$tempWareHouse=530;
+		}
+		return $tempWareHouse;
+	}
+
+	public function actionCheckContainerDetail(){
+		if(!empty($_GET['id']))
+		{
+			$op ='printout';
+			$consol = Consol::model()->findByPk($_GET['id']);
+			$shipments = $consol->shipments;
+			$model=new ImParcel('search');
+			$model->unsetAttributes();  // clear any default values
+			$model->id = array_column($shipments,'id');
+			$this->render('print_out_container', ['model' => $model, 'consol' => $consol]);
+		}		
+	}
+	private function consolCheck(&$barcode,&$r,$groupSound)
+	{
+		$containerNo = $barcode;
+		$msg = "";
+		$msgArr= [];
+		$consol = Consol::model()->find("container_no = :container_no",[":container_no"=>$containerNo]);
+		if(empty($consol))
+		{
+			$consol = Consol::model()->find("awb = :awb",[":awb"=>$containerNo]);
+		}
+
+		if(empty($consol))
+		{
+			$r->color = 'red';
+			$r->sound = 'not_found';
+			$r->stop = 0;
+			$r->msg = 'Consol: '.$barcode." not found ";
+			$r->status = 'not_found';
+			$r->nosound = 0;
+			$r->found = 0;
+			$groupSound();
+			echo json_encode($r);
+			Yii::app()->end();
+		}
+		foreach ($consol->shipments as $key => $p) 
+		{
+			if(!empty($p->bag_tag))
+			{
+				$shipmentScans = ShipmentScan::model()->findAll('pid = :pid and type = 5',[":pid"=>$p->bag_tag->import_bag_id]);
+				if(empty($shipmentScans))
+				{
+					if(!in_array($p->bag_tag->bag_tag, $msgArr))
+					{
+						$msg .="</br>Bag ".$p->bag_tag->bag_tag." haven't scan record";
+						$msgArr[] = $p->bag_tag->bag_tag;
+					}
+
+				}
+			}
+		}
+		if($msg=="")
+		{
+			$r->color = 'green';
+			$r->sound = 'all_scan';
+			$r->stop = 0;
+			$r->msg = 'Consol: '.$barcode." all scan ";
+			$r->print=1;
+			$r->consol_id = $consol->id;
+			$groupSound();
+			echo json_encode($r);
+			// $this->showRelatedShipments();
+			Yii::app()->end();
+		}else
+		{
+			$r->color = 'red';
+			$r->sound = 'bag_miss_scan';
+			$r->stop = 0;
+			$r->msg = 'Consol: '.$barcode.$msg;
+			$r->status = 'bag_miss_scan';
+			$r->nosound = 0;
+			$r->found = 0;			
+			$groupSound();
+			echo json_encode($r);
+			Yii::app()->end();
+		}
+	}
+
+	public function actionShowRelatedShipments(){
+		if(isset($_GET['consol_id'])){
+			$consolId = $_GET['consol_id'];
+			$model= Consol::model()->with('shipments')->findByPk($consolId);
+			$shipmentsModel = $model->shipments;
+			// print_r($model->shipments);
+			// Yii::app()->end();
+			if(isset($model)){
+				$this->renderPartial('consol_related_shipments_list',['model'=>$shipmentsModel]);
+				return ;
+			}
+			else{
+				echo '{"done":false,"msg":"no shipments."}';
+            	return ;
+			}			
+		}
+		else{
+			echo '{"done":false,"msg":"no shipments."}';
+            return ;
+		}
+	}
+
+	public function actionPrintAllPalletLabels()
+	{		
+		if(!empty($_POST['id'])){
+			// print_r($_POST['id']);
+			// Yii::app()->end();
+			$model= Consol::model()->findByPk($_POST['id']);
+			if ($model===null) {
+				throw new CHttpException(404, 'The printed page does not exist.');
+			}
+			if (!empty($model->shipments)) {
+				$this->getPalletLabelMultiZpl($model->shipments);
+			}
+		}
+		else{
+			$model= Consol::model()->findByPk($_GET['id']);
+			if ($model===null) {
+				throw new CHttpException(404, 'The printed page does not exist.');
+			}
+			if (!empty($model->shipments)) {
+				$this->render('all_plt_label',array('model' => $model));
+			}
+		}		
+	}
+
+	public function actionExportUnpackList($id)
+	{		
+		$model= Consol::model()->findByPk($id);
+		if ($model===null) {
+			throw new CHttpException(404, 'The container number does not exist.');
+		}
+		$imConsolService = new ImConsolService();
+		$imConsolService->exportUnpackList($model);
+	}
+
+	public function actionGenYlwLabel(){	
+		$model = null;
+		$shipmentId = -1;
+		if(!empty($_GET['id']))
+		{
+			$id = $_GET['id'];
+			$model=ImParcel::model()->findByPk($id);
+			if(empty($model))
+			{
+				$model=ImParcelArchive::model()->findByPk($id);
+			}
+
+			if ($model===null) {
+				throw new CHttpException(404, 'The requested page does not exist.');
+			}
+			$this->render('ylw_plt_label',array('model' => $model));
+			return ;
+		}
+
+		if(!empty($_GET['shipmentId'])){
+			$shipmentId=$_GET['shipmentId'];			
+			$imParcelService = new ImParcelService();
+			if (!$imParcelService->checkShipmentPalletLabel($shipmentId)){
+				// throw new CHttpException(404, 'This shipment can not print out Yellow Pallet Label.');
+				print_r('This shipment can not print out Pallet Label.');
+				Yii::app()->end();
+			}
+			$_POST['id'] = $_GET['shipmentId'];
+			$_POST['date'] = $_GET['date'];			
+			$_POST['total_pcs'] = $_GET['total_pcs'];
+			$_POST['total_pallets'] = $_GET['total_pallets'];
+			$_POST['notes'] = $_GET['notes'];
+			if(isset($_GET['cont_no'])){
+				$_POST['cont_no'] = @$_GET['cont_no'];
+			}
+			else{
+				$_POST['awb'] = @$_GET['awb'];
+			}
+
+			$imParcelService->generateYlwLabel($shipmentId);
+			return ;
+		}
+		
+	}
+
+	public function actionGenerateYlwLabelZpl(){
+        if(isset($_POST['id'])){
+        	$id = $_POST['id'];
+        	$this->generateYlwLabelZpl($id);
+        }
+    }
+
+    public function generateYlwLabelZpl($id, $output=false){
+    	$allData = "";
+        $numOfPallets = 0;
+        $cs = [];   
+     
+        if(!isset($id)){
+        	throw new CHttpException(404, 'The shipment does not exist.');
+        }
+        $model=ImParcel::model()->findByPk($id);
+		if(empty($model))
+		{
+			$model=ImParcelArchive::model()->findByPk($id);
+		}		
+
+		if ($model===null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+
+        $parent = $model->getParentShipment();
+        if(!empty($parent)&&(($parent->status!=ImParcel::STATE_LOCAL_ARRIVAL&&$parent->status<ImParcel::STATE_CLEAR)||$parent->status==ImParcel::STATE_CANCELLED))
+        {
+            echo "not ready for WDT shipments";
+            return;
+        }
+
+        $copyShipment = $model->getCopyShipment();
+        if(!empty($copyShipment))
+        {
+            $model = $copyShipment;
+        }
+
+        $pltCodes = WmsLocation::model()->findAll("shipment_id = :shipment_id",[":shipment_id"=>$model->id]);
+        if(isset($pltCodes)){
+            $cs = array_merge($cs, array_column($pltCodes, "code"));
+        }
+
+        if(isset($_POST['previous_label'])&&$_POST['previous_label']==1){
+            if(!isset($pltCodes)){
+            	echo "no previous labels.";
+            	Yii::app()->end();
+            }
+            $numOfPallets += count($cs);
+    	}
+
+        $numOfPallets += $_POST['total_pallets'];
+        $cs = array_merge($cs,WmsLocation::genCodes($_POST['total_pallets'], 50, $model->consol->dpt_id, $model->id));           
+        if($model->consol->service == ImcoConsol::AIRCONSOL){
+            $inputModel=['id'=>$_POST['id'],'date'=>$_POST['date'],'awb'=>$_POST['awb'],'total_pcs'=>$_POST['total_pcs'],'total_pallets'=>$numOfPallets,'notes'=>$_POST['notes']];              
+        }
+        else{
+            $inputModel=['id'=>$_POST['id'],'date'=>$_POST['date'],'cont_no'=>$_POST['cont_no'],'total_pcs'=>$_POST['total_pcs'],'total_pallets'=>$numOfPallets,'notes'=>$_POST['notes']];
+        }
+
+        $nn=count($cs);
+        for($pkg_sn = $nn-$inputModel['total_pallets']+1; $pkg_sn <= $nn; $pkg_sn++){
+        	$allData .= $this->renderPartial('_label_plt_ylw_sgl_zpl', array('model' => $model, 'inputModel' => $inputModel, 'cs' => $cs, 'pkg_sn' =>$pkg_sn, 'dup' => false), true);
+        }
+        if(!$output){
+        	echo json_encode(array("result" => true, "msg" => "订单完成, 等待打印", "file" => $allData));
+        	Yii::app()->end();
+        }
+        else{
+        	return $allData;
+        }
+            
+    }
+
+    public function getPalletLabelMultiZpl($shipments)
+    {    	
+        $notPintShipment = [];
+        $ps = [];
+        $cs = [];
+        $normalLabel = [];
+        $consolNum = $shipments[0]->consol->no;
+        $allData = ""; 
+        $imParcelService= new ImParcelService();
+        foreach ($shipments as $key => $d)
+        {
+            if (!$imParcelService->checkShipmentPalletLabel($d->id)){
+                unset($shipments[$key]);
+            }
+            else
+            {
+                $notPintShipment[] = $d;
+            }
+        }
+
+        if(isset($_POST['previous_label'])&&$_POST['previous_label']==1){
+    		foreach ($shipments as $key => $d)
+        	{
+        		$copyShipment = $d->getCopyShipment();
+	            if(!empty($copyShipment))
+	            {
+	                $d = $copyShipment;
+	            }
+
+	            if($d->consol->service == ImcoConsol::AIRCONSOL){
+                $inputModel=['id'=>$d->id,'date'=>$_POST['date'],'awb'=>$_POST['awb'],'total_pcs'=>$d->pkg,'notes'=>$_POST['notes']];                
+	            }
+	            else{
+	                $inputModel=['id'=>$d->id,'date'=>$_POST['date'],'cont_no'=>$_POST['cont_no'],'total_pcs'=>$d->pkg,'notes'=>$_POST['notes']];
+	            }
+
+	            $pltCodes = WmsLocation::model()->findAll("shipment_id = :shipment_id",[":shipment_id"=>$d->id]);
+	            $cs = array_column($pltCodes, "code");
+	            if(!isset($pltCodes)){
+	            	echo "no previous labels.";
+	            	Yii::app()->end();
+	            }
+	            foreach ($cs as $key => $c)
+	            {
+	            	 $allData .= $this->renderPartial('_label_plt_ylw_sgl_zpl', array('model' => $d, 'inputModel' => $inputModel, 'cs' => $cs, 'pkg_sn' =>$key+1, 'dup' => false), true);
+	            }	            
+        	}
+        	echo json_encode(array("result" => true, "msg" => "订单完成, 等待打印", "file" => $allData));
+            Yii::app()->end();
+    	}
+        
+        foreach ($shipments as $key => $d)
+        {
+        	$_POST['total_pallets'] = $d->getNumOfPallets();
+            $_POST['total_pcs'] = $d->pkg;
+            $allData .= $this->generateYlwLabelZpl($d->id,true);                    
+        }
+
+        echo json_encode(array("result" => true, "msg" => "订单完成, 等待打印", "file" => $allData));
+            Yii::app()->end();
+    }
+
+    public function actionList()
+	{
+		$nextthreedays = date("Y-m-d", strtotime("+3 day"));
+		$pastthreedays = date("Y-m-d", strtotime("-3 day"));
+
+		$model=new ImcoConsol('search');
+		$unpackteam = User::currentUserOrgId();	
+		if(!empty($unpackteam)){
+			$model2 = Consol::model()->with('process')->findAll(['condition'=>'JSON_VALUE(t.meta,"$.ContainerUnloadDate") <= :nextthreedays AND service = :service AND JSON_VALUE(t.meta,"$.ContainerUnloadDate") >= :pastthreedays AND JSON_VALUE(process.meta,"$.unpacking_team") = :unpackteam', 'params'=>[':nextthreedays' => $nextthreedays, ':pastthreedays' => $pastthreedays, ':unpackteam' => $unpackteam,":service"=>Consol::SEACONSOL], 'order'=>'JSON_VALUE(t.meta,"$.ContainerUnloadDate") ASC, JSON_VALUE(process.meta,"$.unpack_status") ASC']);
+		}
+		else{
+			$model2 = [];
+		}	
+
+		// $model2 = Consol::model()->with('process')->findAll(['condition'=>'JSON_VALUE(t.meta,"$.ContainerUnloadDate") <= :nextthreedays AND service = :service AND JSON_VALUE(t.meta,"$.ContainerUnloadDate") >= :pastthreedays', 'params'=>[':nextthreedays' => $nextthreedays, ':pastthreedays' => $pastthreedays, ":service"=>Consol::SEACONSOL], 'order'=>'JSON_VALUE(t.meta,"$.ContainerUnloadDate") ASC, JSON_VALUE(process.meta,"$.unpack_status") ASC']);
+
+		// if(!empty($model2)){
+		// 	$model->id = array_column($model2,'id');
+		// }
+		// else{
+		// 	$model = null;
+		// }		
+
+		// if (isset($_GET['ImcoConsol'])) {
+		// 	$model->attributes=$_GET['ImcoConsol'];
+		// }
+		// $delivery_type='All Type';
+		// if (!empty($_GET['delivery_type'])) {
+		// 	$model->service=$_GET['delivery_type'];
+		// 	switch ($_GET['delivery_type']) {
+		// 				case 10: $delivery_type='Air';break;
+		// 				case 20: $delivery_type="Sea";break;
+		// 			}
+		// }
+
+		$filtersForm=new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+		$filteredData=$filtersForm->filter($model2);
+		$dataprovider=new CArrayDataProvider($filteredData);
+		$dataprovider->pagination=['pageSize' =>60,];
+		$sort=new CSort();
+		$dataprovider->sort=$sort;
+		$this->render('unpack_container_list', [
+			'model'=>$dataprovider
+		]);
+	}
+
+	public function actionUploadContainerPhotos()
+	{
+		$consolId = $_GET['id'];
+		$consol = Consol::model()->findByPk($consolId);
+		// print_r($_FILES);
+		// Yii::app()->end();
+		if(isset($_FILES['seal_file'])){
+			$this->uploadContainerPhotos($_FILES['seal_file'],FileRepo::UNPACK_CONTAINER_SEAL_PHOTO,$consol,"seal");
+		}
+		else{
+			echo 'Fail';
+			return ;
+		}		
+		if(isset($_FILES['container_front_file'])){
+			$this->uploadContainerPhotos($_FILES['container_front_file'],FileRepo::UNPACK_CONTAINER_FRONT_PHOTO,$consol,"container_front");
+		}
+		else{
+			echo 'Fail';
+			return ;
+		}
+		if(isset($_FILES['container_back_file'])){
+			$this->uploadContainerPhotos($_FILES['container_back_file'],FileRepo::UNPACK_CONTAINER_BACK_PHOTO,$consol,"container_back");
+		}
+		else{
+			echo 'Fail';
+			return ;
+		}
+		if(isset($_FILES['process_100_file'])){
+			$this->uploadContainerPhotos($_FILES['process_100_file'],FileRepo::UNPACK_CONTAINER_100PROCESS_PHOTO,$consol,"process_100");
+		}
+		else{
+			echo 'Fail';
+			return ;
+		}
+		if(isset($_FILES['process_0_file'])){
+			$this->uploadContainerPhotos($_FILES['process_0_file'],FileRepo::UNPACK_CONTAINER_0PROCESS_PHOTO,$consol,"process_0");
+		}
+		else{
+			echo 'Fail';
+			return ;
+		}
+		if(isset($_FILES['container_left_file'])){
+			$this->uploadContainerPhotos($_FILES['container_left_file'],FileRepo::UNPACK_CONTAINER_LEFT_PHOTO,$consol,"container_left");
+		}
+		if(isset($_FILES['container_right_file'])){
+			$this->uploadContainerPhotos($_FILES['container_right_file'],FileRepo::UNPACK_CONTAINER_RIGHT_PHOTO,$consol,"container_right");
+		}
+		if(isset($_FILES['process_50_file'])){
+			$this->uploadContainerPhotos($_FILES['process_50_file'],FileRepo::UNPACK_CONTAINER_50PROCESS_PHOTO,$consol,"process_50");
+		}
+		if(isset($_FILES['extra_file'])){
+			// $total = count($_FILES['extra_file']['name']);
+			$this->uploadExtraInfoPhotos($_FILES['extra_file'],FileRepo::UNPACK_CONTAINER_EXTRA_PHOTO,$consol,"extra_info");			
+		}
+		if(!isset($consol->process->mdata['unpack_status'])||$consol->process->mdata['unpack_status']=='0'){
+			$consol->process->mdata['unpack_status'] = '1';
+			$consol->process->updateMeta();
+		}
+
+		echo 'done';
+	}
+
+	public function uploadExtraInfoPhotos($f,$type,$consol,$pname=null){
+		$total = count($f['name']);
+		$i = 0;
+
+		foreach ($f['name'] as $key => $value) {
+			$filename = $f['tmp_name'][$key];
+			$name = $f['name'][$key];
+			if(empty($name)) return "empty files";
+			$namearr = explode('.', $name);
+			$name = $consol->no."_".$pname."_".$i.".".end($namearr);
+
+			$hash = FileRepo::uploadHash($consol, $type);
+			if(!is_uploaded_file($filename)) return false;
+			$thisHash = $hash;
+			$filesize = filesize($filename);
+			$date = date('Y-m-d H:i:s');
+			$fileHash = hash_file('crc32b', $filename).hash('crc32b', $filesize);
+			$finfo = finfo_open(FILEINFO_MIME_TYPE);
+			$mime = finfo_file($finfo, $f['tmp_name'][$key]);
+			$fr = Service::updateUploadSingleFile($filesize,$date,$fileHash,$finfo,$mime,$filename,$name, $thisHash,false,false,false,true,FileRepo::ACTIVE);
+			$i++;
+		}
+	}
+
+	public function uploadContainerPhotos($file,$type,$consol,$pname=null)
+	{
+		$f = $file;
+		$filename = $f['tmp_name'];
+		$name = $f['name'];
+		if(empty($name)) return "empty files";
+		$namearr = explode('.', $name);
+		$name = $consol->no."_".$pname.".".end($namearr);
+
+		$hash = FileRepo::uploadHash($consol, $type);
+		if(!is_uploaded_file($filename)) return false;
+		$thisHash = $hash;
+		$filesize = filesize($filename);
+		$date = date('Y-m-d H:i:s');
+		$fileHash = hash_file('crc32b', $filename).hash('crc32b', $filesize);
+		$finfo = finfo_open(FILEINFO_MIME_TYPE);
+		$mime = finfo_file($finfo, $f['tmp_name']);
+		$fr = Service::updateUploadSingleFile($filesize,$date,$fileHash,$finfo,$mime,$filename,$name, $thisHash,false,false,false,true,FileRepo::ACTIVE);
+		return true;
+	}
+}

@@ -1,0 +1,188 @@
+<?php
+$modelOTinvoices = [];
+
+$modelOTlines = InvLine::model()->with('invoice')->findAll('(invoice.status != 8 and invoice.status != 10) and (t.linkto like "%' . $model->hbn . '%" or t.linkto like "%' . $model->ref . '%")');
+
+$otTotal = 0;
+foreach ($modelOTlines as $line) {
+	$otTotal += ($line->amount*$line->qty)-$line->gst;
+	$modelOTinvoices[$line->inv_id] = $line->invoice;
+}
+
+$result=$model->getChargeByChargecode('',false,null,true,false);
+$surcharge=$model->getChargeByChargecode('',false,null,true,false,true);
+if(!empty($result['rate'])&&is_object($result['rate']))
+{
+	echo "<h5>chargecode: ".$model->mdata['chargecode']."</h5>";
+	echo "<h5>Weight Low: ".$result['rate']->weight_lo."  Weight High: ".$result['rate']->weight_hi."</h5>";
+	echo "<h5>Zone: ".$result['rate']->zone."</h5>";
+}elseif(!empty($result['rate']))
+{
+	echo "<h5>PE number: ".$model->mdata['pe_number']."</h5>";
+}
+$orgRateService = new OrgRateService();
+$oToll = $orgRateService->calculateCheaperCourierCost($model,[$model->mdata['org_rate_id']]);
+$cost1 = empty($oToll->status)?0:$oToll->minCost;
+$costZone = $orgRateService->getShipmentCostZone($model->mdata['org_rate_id'],$model);
+$numOTInvoice = 0;
+//for cargoprocess cost and costzone
+$modelCargoPorcesses = CargoProcess::model()->findAll('shipment_id = :shipment_id and status !=:status',[':shipment_id'=>$model->id,':status'=>CargoProcess::DELETED]);
+$sysInterstateCost=$sysBaseCost=0;
+if(!empty($modelCargoPorcesses)){
+	$cost1=0;
+	foreach($modelCargoPorcesses as $modelCargoPorcess){
+		$numOTInvoice = $modelCargoPorcess->getRelatedOTFee();
+		$cargoProcessFee = $modelCargoPorcess->getCargoProcessFeeReCal();
+		$sysInterstateCost = $modelCargoPorcess->getSystemInterstateCost();
+		$sysBaseCost = $modelCargoPorcess->getSystemBaseCost();
+		if($cargoProcessFee!="n/a")
+		{
+			$cost1+=$cargoProcessFee;
+		}
+		$numOrgRate = !empty($modelCargoPorcess->mdata['orgRateId'])? $modelCargoPorcess->mdata['orgRateId']:0;
+		$costZone = $orgRateService->getShipmentCostZone($numOrgRate,$model);
+	}
+}
+$arrOTInvoiceNo = [];
+[$app_name, Yii::app()->name] = [Yii::app()->name, 'TLA'];
+//$modelOTinvoices = InvLine::model()->with('invoice')->findAll('(invoice.status != 8 or invoice.status != 10) and (t.linkto like "%' . $model->hbn . '%" or t.linkto like "%' . $model->ref . '%")');
+if(!empty($modelOTinvoices)){
+	foreach($modelOTinvoices as $modelOTinvoice){
+		$arrOTInvoiceNo[$modelOTinvoice->id] = $modelOTinvoice->no;
+	}
+}
+Yii::app()->name = $app_name;
+$strOTInvoiceNo = "";
+if(!empty($arrOTInvoiceNo)){
+	foreach($arrOTInvoiceNo as $strinvNo){
+		$strOTInvoiceNo = $strOTInvoiceNo." ".$strinvNo;
+	}
+}
+echo "<h5>Delivery fee exclude GST:".(is_array($result)?$result['amount']:$result).(!empty($otTotal)?("+OT:".$otTotal):"")."</h5>";
+echo "<h5>Surcharge: ".$surcharge['amount']."</h5>";
+echo "<h5>MHDescription: ".$surcharge['MHDescription']." = ".$surcharge['MHCharge']."</h5>";
+echo "<h5>MH2Description: ".$surcharge['MH2Description']." = ".$surcharge['MH2Charge']."</h5>";
+echo "<h5>OSDescription: ".$surcharge['OSDescription']." = ".$surcharge['OSCharge']."</h5>";
+echo "<h5>REDescription: ".$surcharge['REDescription']." = ".$surcharge['RECharge']."</h5>";
+echo "<h5>LevyDescription: ".$surcharge['LevyDescription']." = ".$surcharge['LevyCharge']."</h5>";
+echo "<h5>FuelDescription: ".$surcharge['FuelDescription']." = ".$surcharge['FuelCharge']."</h5>";
+echo "<h5>KpDiscountDescription: ".$surcharge['KpDiscountDescription']." = ".$surcharge['KpDiscountCharge']."</h5>";
+echo "<h5>RSDDescription: ".$surcharge['RSDDescription']." = ".$surcharge['RSDCharge']."</h5>";
+if($numOTInvoice!=0){
+	echo "<h5>OTInvoice: exclude GST = ".$numOTInvoice."</h5>";
+}
+
+if(!empty($strOTInvoiceNo)){
+	echo "<h5>OT No.:".$strOTInvoiceNo."</h5>";
+}
+echo "</br>";
+echo "</br>";
+
+
+
+
+echo "<h5>Cost: $".$cost1."</h5>";
+echo "<h5>Base Cost: $".$sysBaseCost."</h5>";
+echo "<h5>Interstate Cost: $".$sysInterstateCost."</h5>";
+foreach ($costZone as $key => $value) {
+	echo "<h5>{$key}: ".$value."</h5>";
+}
+
+
+$invoices = Invoice::model()->with("lines")->findAll('(pid = :pid or (lines.fid=:pid and lines.model="ImParcel")) AND status NOT IN (10,8)', [':pid' => $model->id]);
+$dp = new CArrayDataProvider($invoices, ['id' => 'imconsol_real_invoices-'.$_GET["tabid"]
+]);
+$dp->pagination=['pageSize' => 30];
+	$total = 0;
+foreach ($invoices as $invoice) {
+	$total += $invoice->total;
+}
+$currency="AUD";
+$this->widget('zii.widgets.grid.CGridView', [
+	'id'=>$_GET["tabid"].'_ordereport-grid',
+	'cssFile' => false,
+	'dataProvider' => $dp,// $dp->search(),
+	'filter' => null,
+	'enableSorting' => false,
+	'columns'=>[
+		['name' => 'no', 'value' => '$data->no', ],
+		['name' => 'bill_to', 'value' => '@$data->cust->name', ],
+		['name' => 'status', 'value' => '$data->getStatus()', 'footer' => 'Total: ', 'footerHtmlOptions' => ['align' => 'right']],
+		['header' => 'Invoice Total', 'value' => '$data->getCurrency().$data->total', 'footer' => $currency . ' ' . AppHelper::money_format("%i", $total)],
+		[
+			'class'=>'oButtonColumn',
+			'template'=>'{view}',
+			'buttons'=>[
+				'view' => [
+					'url' => 'Yii::app()->createURL("parcelStatus/print", array("id" => $data->id,"pid"=>'.$model->id.'))',
+					'imageUrl'=>false,
+					'options' => ['class' => 'grid_view_btn', 'target' => '_blank'],
+				],
+			],
+		],
+	]]);
+
+?>
+<br />
+
+
+
+<div class="form">
+<?php
+$form = $this->beginWidget('CActiveForm', [
+	'id' => 'imparcel-billing-note-form',
+	'enableAjaxValidation' => false,
+]);
+?>
+<?php if (preg_match('/^AGDSY\d+$/', $model->hbn)): ?>
+<div class="air-input-fileds" style="clear:both;">
+	<div class="row rowcol rowleft">
+	<?php echo CHtml::label('Customs Declaration (AUD)', 'for_item'); ?>
+	<?php echo CHtml::textField('mdata[inv_item_cd]', isset($model->mdata['inv_item_cd']) ? $model->mdata['inv_item_cd'] : '85', ['size'=>20]); ?>
+	</div> 
+   <div class="row rowcol">
+	<?php echo CHtml::label('Custom Lines', 'for_item');?>
+	<?php echo CHtml::textField('mdata[cust_duty_lines]', isset($model->mdata['cust_duty_lines'])?$model->mdata['cust_duty_lines']:'', ['size'=>20]);?>
+	</div>
+	<div class="row rowcol" id="document">
+		<?php echo CHtml::label('Airline Document Fee (AUD)', 'for_item'); ?>
+		<?php echo CHtml::textField('mdata[inv_item_ad]', isset($model->mdata['inv_item_ad']) ? $model->mdata['inv_item_ad'] : '50', ['size'=>20]); ?>
+	</div>
+	<div class="row rowcol">
+		<?php echo CHtml::label('CMR Fee (AUD)', 'for_item'); ?>
+		<?php echo CHtml::textField('mdata[inv_item_cmr]', isset($model->mdata['inv_item_cmr']) ? $model->mdata['inv_item_cmr'] : '15', ['size'=>20]); ?>
+	</div>
+	<div class="row rowcol rowleft">
+		<?php echo CHtml::label('Airline Terminal Fee (AUD)', 'for_item'); ?>
+		<?php echo CHtml::textField('mdata[inv_item_at]', isset($model->mdata['inv_item_at']) ? $model->mdata['inv_item_at'] : '0.50', ['size'=>20]); ?> /kg
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('Airline Breakbulk Fee (AUD)', 'for_item'); ?>
+		<?php echo CHtml::textField('mdata[inv_item_ab]', isset($model->mdata['inv_item_ab']) ? $model->mdata['inv_item_ab'] : '0.10', ['size'=>20]); ?> /kg
+	</div>
+	<div class="row rowcol">
+		<?php echo CHtml::label('Delivery Fee (AUD)', 'for_item'); ?>
+		<?php echo CHtml::textField('mdata[inv_item_dlv]', isset($model->mdata['inv_item_dlv']) ? $model->mdata['inv_item_dlv'] : '0', ['size'=>20]); ?> /kg
+	</div>
+	<div class="row rowcol">
+		<?php echo CHtml::label('Customs Duties & Fees (AUD)', 'for_item'); ?>
+		<?php echo CHtml::textField('mdata[cust_duty_fee]', @$model->mdata['cust_duty_fee'], ['size'=>20]); ?>
+	</div>
+</div>
+<?php endif; ?>
+<div class="row">
+<h2>Add Note</h2>
+<?php
+echo CHtml::textArea('mdata[billing_note]', @$model->mdata['billing_note'], ['rows' => 4, 'cols' => 60]);
+?>
+</div>
+<div class="row buttons">
+<?php
+echo CHtml::submitButton('Save');
+?>
+</div>
+<?php
+$this->endWidget();
+?>
+</div>

@@ -1,0 +1,253 @@
+<?php
+
+/**
+ * This is the model class for table "edimsg".
+ *
+ * The followings are the available columns in table 'edimsg':
+ * @property string $id
+ * @property string $fid
+ * @property string $rid
+ * @property string $dt
+ * @property integer $status
+ * @property integer $type
+ * @property string $mid
+ * @property string $sender
+ * @property string $receiver
+ * @property string $msg
+ * @property string $meta
+ */
+class Edimsg extends CActiveRecord
+{
+	const STATUSPND = 19;
+	const STATUSLGD = 50;
+	const STATUSERR = 44;
+	const STATUSRJT = 60;
+
+	public static $states = array(
+		'10' => 'RCV',
+        '18' => 'SCU', // on schedule current only for UBMREQ message
+		'19' => 'PND',
+		'20' => 'QUE',
+		'30' => 'SNT',
+		'40' => 'ACK',
+		'44' => 'ERR',
+		'50' => 'LGD',
+		'60' => 'RJT',
+		'90' => 'DEL',
+	);
+
+	public static $types = ['CONTRL' => 'Acknowlege', 'CARST' => 'Cargo Status', 'AIRCRR' => 'ACR Response', 'AIRCR-S' => 'Shipment ACR', 'AIRCR-C' => 'Consol. ACR', 'UBMREQ' => 'Underbond', 'UBMREQR' => 'Underbond Resp.', 'UBMREQE' => 'Underbond Error', 'AIROUT' => 'Air Outturn', 'AIROUTR' => 'Air Outturn Resp.', 'ESMR' => 'ESM Response', 'ESM' => 'Export Submanifest', 'SEACRR' => 'SCR Response', 'SEACR-S' => 'Shipment SCR', 'SEACR-C' => 'Consol. SCR', 'SEAOUT' => 'Sea Outturn', 'SEAOUTR' => 'Sea Outturn Resp.', 'EXD' => 'Export Declaration', 'EXDR' => 'Export Dec. Resp.', 'IDL' => 'IDL - Idle EDN/ECN'];
+	
+	public $mdata=array();
+	public $contrl_msg;
+	
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName(){
+		return 'edimsg';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules(){
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('fid, rid, dt, status, type, mid, sender, receiver, msg, meta', 'safe'),
+			array('status', 'numerical', 'integerOnly'=>true),
+			array('fid', 'length', 'max'=>11),
+			array('mid, sender, receiver', 'length', 'max'=>50),
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, fid, rid, dt, status, type, mid, sender, receiver, msg, meta', 'safe', 'on'=>'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations(){
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+			'rmsg' => array(self::BELONGS_TO, 'Edimsg', 'rid'),
+		);
+	}
+
+	public function getType(){
+		$mp = ['CONTRL' => 'Acknowlege', 'CARST' => 'Cargo Status', 'AIRCRR' => 'ACR Response', 'AIRCR-S' => 'Shipment ACR', 'AIRCR-C' => 'Consol. ACR', 'UBMREQ' => 'Underbond', 'UBMREQR' => 'Underbond Resp.', 'UBMREQE' => 'Underbond Error', 'AIROUT' => 'Air Outturn', 'AIROUTR' => 'Air Outturn Resp.', 'ESMR' => 'ESM Response', 'ESM' => 'Export Submanifest', 'SEACRR' => 'SCR Response', 'SEACR-S' => 'Shipment SCR', 'SEACR-C' => 'Consol. SCR', 'SEAOUT' => 'Sea Outturn', 'SEAOUTR' => 'Sea Outturn Resp.', 'EXD' => 'Export Declaration', 'EXDR' => 'Export Dec. Resp.', 'IDL' => 'IDL - Idle EDN/ECN','EME'=>'Email Sent Error'];
+		return isset($mp[$this->type])? $mp[$this->type] : $this->type;
+	}
+
+	public function getSender(){
+		if($this->sender == Yii::app()->params['ics']['customs_id']){
+			return 'Customs';
+		}elseif($this->sender == Yii::app()->params['ics']['prod_site']){
+			return 'HVLV';
+		}
+		return $this->sender;
+	}
+
+	public function getRecvr(){
+		if($this->receiver == Yii::app()->params['ics']['customs_id']){
+			return 'Customs';
+		}elseif($this->receiver == Yii::app()->params['ics']['prod_site']){
+			return 'HVLV';
+		}
+		return $this->receiver;
+	}
+	
+	public function send(){
+		if($this->hasErrors()) return false;
+		$mailer = new icsMailer();
+		$mailer->addEDI($this);
+		$sent = $mailer->Send();
+		if ($sent === true) {
+			$this->status = 30;
+			$this->save();
+			return true;
+		}else{
+			$this->addError('dt', $sent);
+			return false;
+		}
+	}
+	
+	public static function strEscape($str, $esc = true){
+		$str = AppHelper::semiAngle(trim($str));
+		$str = trim(preg_replace(['/â€™|[‘’]+/', '/[\s]+/','/[\]\[\#\x00-\x1F\x7F-\xFF]/'], ["'", ' ', ''], $str));
+		$str = iconv('UTF-8', 'ISO-8859-1//IGNORE', $str);
+		if($esc) $str = preg_replace('/([\+\:\'\?])/','?\\1', $str);
+		return $str;
+	}
+
+	public static function strSegment($str, $l, $s=1){
+		$str = self::strEscape($str, false);
+		$str = preg_replace('/[\n\r]+/', '', $str);
+		$ls = str_split($str, $l);
+		$ls = array_slice($ls, 0, $s);
+		foreach($ls as $i=>$v){
+			$ls[$i] = preg_replace('/([\+\:\'\?])/','?\\1', $v);
+		}
+		for($i = 0; $i < $s - sizeof($ls); $i++) $ls[] = '';
+
+		return implode(':', $ls);
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels(){
+		return array(
+			'id' => 'ID',
+			'fid' => 'Fid',
+			'rid' => 'Rid',
+			'dt' => 'Time',
+			'status' => 'Status',
+			'type' => 'Type',
+			'mid' => 'MsgID',
+			'sender' => 'Sender',
+			'receiver' => 'Receiver',
+			'msg' => 'Msg',
+			'meta' => 'Meta',
+		);
+	}
+	
+	public function getStatus(){
+		return empty(self::$states[$this->status])? $this->status : self::$states[$this->status];
+	}
+	
+	public function beforeSave(){
+		if(!empty($this->mdata)) $this->meta = json_encode($this->mdata);
+		if(!isset($this->mdata['ackreq'])) $this->mdata['ackreq'] = $this->type == 'CONTRL'? 0 : 1;
+		return true;
+	}
+	
+	public function afterFind(){
+		if(!empty($this->meta)) $this->mdata = json_decode($this->meta, true);
+		
+		return true;
+	}
+
+	public function isLatest(){
+		return self::model()->count('dt > :dt AND fid = :fid AND type = :t AND status = 19', [':dt' => $this->dt, ':fid' => $this->fid, ':t' => $this->type]) == 0;
+	}
+
+	public function ctrlMsg(){
+		if(isset($this->mdata['ackreq']) && $this->mdata['ackreq'] == 1){
+			$cm = Edimsg::model()->find('type = "CONTRL" AND rid = :id', [':id' => $this->id]);
+			if(!empty($cm)) return false;
+			$cm = new Edimsg;
+			$cm->dt = date('Y-m-d H:i:s');
+			$cm->type = 'CONTRL';
+			$cm->sender = $this->receiver;
+			$cm->receiver = $this->sender;
+			$cm->status = 20;
+			$cm->fid = $this->fid;
+			$cm->rid = $this->id;
+			$cm->save();
+			$cm->mid = sprintf('%06s', substr($cm->id,-6));
+
+			$edi = "UNH+".$cm->mid."+CONTRL:D:3:UN'
+UCI+".$this->mid."+".$cm->receiver."+".$cm->sender."+7'
+UCM+".$this->mdata['mrn']."+".$this->type.":D:99B:UN+7'
+UNT+4+".$cm->mid."'
+";
+			$cm->msg = $edi;
+			$cm->save();
+			return $edi;
+		}
+		return false;
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search(){
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('id',$this->id);
+		$criteria->compare('fid',$this->fid);
+		$criteria->compare('rid',$this->rid);
+		$criteria->compare('dt',$this->dt,true);
+		$criteria->compare('status',$this->status);
+		$criteria->compare('type',$this->type);
+		$criteria->compare('mid',$this->mid,true);
+		$criteria->compare('sender',$this->sender,true);
+		$criteria->compare('receiver',$this->receiver,true);
+		$criteria->compare('msg',$this->msg,true);
+		$criteria->compare('meta',$this->meta,true);
+
+		return new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+			'sort'=>array(
+    			'defaultOrder'=>'dt DESC',
+  			),
+			'pagination'=>array(
+				'pageSize'=>'30',
+            ),
+		));
+	}
+
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return Edimsg the static model class
+	 */
+	public static function model($className=__CLASS__){
+		return parent::model($className);
+	}
+}

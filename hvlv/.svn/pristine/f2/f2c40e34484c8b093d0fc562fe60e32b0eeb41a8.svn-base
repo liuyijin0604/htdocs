@@ -1,0 +1,757 @@
+<?php
+
+/**
+ * This is the model class for table "import_charge_code".
+ *
+ * The followings are the available columns in table 'import_charge_code':
+ * @property string $id
+ * @property string $chargecode
+ * @property string $couriers
+ * @property string $created
+ * @property integer $status
+ * @property integer $type
+ * @property integer $charge_wt   // 0 means chargeWeight based on the max of weight based on cbm and gross weigth........ 1  based on gross weight.
+ * @property integer $status_mode   // 0 means new  1 means air arrival
+ * @property integer $ignore_sac     //0 sac   1 ignore sac
+ * @property string  meta   json format
+ * @property string $v_from
+ * @property string $v_to
+ * @property string $note
+ * @property integer $dpmt
+ * @property string $description
+ */
+class ImportChargeCode extends CActiveRecord//
+{
+	public $owner_name;
+	public $oids=[];
+	public $mdata=[];
+	
+	
+	const SYDNEY_AUPOST_ID=101;
+	const SYDNEY_AUPOST_ID_2020=730;
+	const MELBOUNE_AUPOST_ID=110;
+	const BRISBANE_AUPOST_ID=811;
+	const PERTH_AUPOST_ID=775;
+	const SYDNEY_AUPOST_ID_CODE='au_post_eparcel_2019';
+	const MELBOUNE_AUPOST_ID_CODE='au_post_eparcel_mel';
+	const BRISBANE_AUPOST_ID_CODE='au_post_eparcel_bri';
+	const PERTH_AUPOST_ID_CODE='au_post_eparcel_per';
+	const AUPOST_INTERNATIONAL_CODE='aupost_international';
+	const AUPOST_EXPRESS_CODE='aupost_express';
+	const AUPOST_EXPRESS_ID =848;
+	const AUPOST_RETURN_CODE='aupost_return';
+
+	const ECOF_AUPOST_ID=519;
+	const GV_4PORTS=648;
+	const D2Z_COUNTRY_ID=193;
+	const D2Z_COUNTRY_OLD=261;
+	const D2Z_ETOWER_ID=137;
+	const FASTWAY_ID=52;
+	const FASTWAY_MEL_3PL_ID=10303;
+	const FASTWAY_D2Z=288;
+	const TNT_SYDNEY_ID=109;
+	const TNT_SYDNEY_ID_TOP=778;
+	const TNT_MELBOURNE_ID=309;
+	const TNT_MELBOURNE_ID_TOP=781;
+	const TNT_MELBOURNE_TOP_CODE = 'au_tnt_mel_TO';
+	const TNT_BRISBANE_TOP_CODE = 'au_tnt_bne_TO';
+	const TNT_PERTH_TOP_CODE = 'au_tnt_per_TO';
+	const TNT_MELBOURNE_AMAZON_CODE = 'au_tnt_mel_amazon_TO';
+	const TNT_BRISBANE_AMAZON_CODE = 'au_tnt_bne_amazon_TO';
+	const TNT_PERTH_AMAZON_CODE = 'au_tnt_per_amazon_TO';
+	const TNT_BRISBANE_ID_TOP=784;
+	const TNT_PERTH_ID_TOP=914;
+	const TNT_BRISBANE_ID=597;
+	const HUNTER_SYDNEY_ID=371;
+	const GLOBAVEND_POSTAGE_ID = 652;
+	const FASTWAY_ID_OLD = 724;
+	const DFE_ID = 710;
+	const DFE_ID_TOP = 796;
+	const DFE_MEL_ID_TOP = 824;
+	const DFE_BNE_ID_TOP = 827;
+	const CHUKOU1_ID = 830;
+	const SF_ID = 854;
+	const SF_MEL_ID = 967;
+	const SF_TRUCK_ID = 961;
+	const SF_CODE_ID = 970;
+	const EIZ_TOLL_ID = 925;
+	const EIZ_TOLL_MEL_ID = 926;
+	const EIZ_TOLL_BNE_ID = 927;
+	const EIZ_ALLIED_ID = 924;
+	const EIZ_ALLIED_MEL_ID = 934;
+	const EIZ_ALLIED_BNE_ID = 937;
+	const EIZ_ALLIED_PER_ID = 940;
+	const EIZ_ALLIED_ADL_ID = 943;
+
+	const MYBORDER_SYD_ID = 769;
+	const EIZ_BORDER_ID = 1006;
+	const EIZ_BORDER_MEL_ID = 994;
+	const EIZ_BORDER_BNE_ID = 997;
+	const EIZ_BORDER_PER_ID = 1000;
+	const EIZ_BORDER_ADL_ID = 1003;
+
+	const MYTOLL_SYD_ID = 1007;
+	const MYTOLL_MEL_ID = 1021;
+	const MYTOLL_BNE_ID = 1024;
+	const MYTOLL_PER_ID = 1027;
+	const MYTOLL_SYD_PLT_ID = 10312;
+
+	const AUK_SYD_CODE = 'AUK_TOLL_SYD';
+	const AUK_MEL_CODE = 'AUK_TOLL_MEL';
+	const AUK_SYD_ID = 10522;
+	const AUK_MEL_ID = 10525;
+
+	const TRUCK_SYD_ID = 70;
+	const TRUCK_MEL_ID = 525;
+	const TRUCK_BNE_ID = 675;
+
+	const D2Z_COUNTRY_3PORT=229;
+	const D2Z_ETOWER_3PORT=235;
+	const D2Z_ETOWER_SYD=243;
+	const D2Z_COUNTRY_SYD=240;
+ 	const AUSTWAY_TRUCK_DELIVERY = 726;
+ 	const AUSTWAY_TRUCK_ZONE = 928;
+ 	const AUSTWAY_TRUCK_ZONE_CODE = "austway_delivery_zon";
+	const TLD_TRUCK_ZONE_CODE = 'TLD_DELIVERY_ZONE';
+ 	const ZHONGWAI_TRUCK_DELIVERY = 766;
+ 	const TRUCK_DELIVERY = 763;
+	const STARTRACK_MEL=223;
+	const STARTRACK_SYDNEY=38;
+	const STARTRACK_AIR=42;
+	const BPA_ID=45;
+	
+	const TEST_PETER=199;
+	const TEST_MICHELLE=205;
+	
+	const COST_MELBOUNE_AJUST=0.35;
+	const COST_BRISBANE_AJUST=2.5;
+	const D2Z_COST_AJUST=0.5;
+	const D2Z_COST_SYDNEY_AJUST=0.3;
+
+	const D2Z_SYDNEY = 495;
+	const D2Z_PERTH = 492;
+	const D2Z_MEL = 489;
+	const D2Z_BNE = 486;
+	const D2Z_LOCAL = 522;
+	const D2Z_LOCAL_MEL = 600;
+	const ACTIVE = 1;
+
+	const STARTRACK_TNT_3PL = 1858;
+	const CHARGECODE3PL = ["3131","6554","8737","7909"];//,"4174","6160","3034"
+	const LETTER_BIG = 85;
+	const LETTER_SMALL = 86;
+	const PRIORITY_LETTER_BIG = 633;
+	const PRIORITY_LETTER_SMALL = 636;
+	const LETTER_BIG_CODE = 'AuBigLetter';
+	const LETTER_SMALL_CODE = 'AuBigLetter';
+	const PRIORITY_LETTER_BIG_CODE = 'PriorityBigLetter';
+	const PRIORITY_LETTER_SMALL_CODE = 'PrioritySmallLetter';
+	const DFE_SYD_CODE = 'DFE_SYD';
+	const DFE_TOP_SYD_CODE = 'DFE_SYD_TOP';
+	const DFE_TOP_MEL_CODE = 'DFE_MEL_TOP';
+	const DFE_TOP_BNE_CODE = 'DFE_BNE_TOP';
+	const TRUCK_DELIVERY_SYD_CODE = 'PCAE_SYD';
+	const TRUCK_DELIVERY_MEL_CODE = 'PCAE_MEL';
+	const TRUCK_DELIVERY_BNE_CODE = 'PCAE_BNE';
+	const EIZ_ALLIED_SYD_CODE = 'EIZ_ALLIED_SYD';
+	const EIZ_ALLIED_MEL_CODE = 'EIZ_ALLIED_MEL';
+	const EIZ_ALLIED_BNE_CODE = 'EIZ_ALLIED_BNE';
+	const EIZ_ALLIED_PER_CODE = 'EIZ_ALLIED_PER';
+	const EIZ_ALLIED_ADL_CODE = 'EIZ_ALLIED_ADL';
+
+	const FL_HUNTER_SYD = 'F&L_HUNTER_SYD';
+	const FL_HUNTER_MEL = 'F&L_HUNTER_MEL';
+	const FL_HUNTER_BNE = 'F&L_HUNTER_BNE';
+
+	const EIZ_BORDER_SYD_CODE = 'EIZ_BORDER_SYD';
+	const EIZ_BORDER_MEL_CODE = 'EIZ_BORDER_MEL';
+	const EIZ_BORDER_BNE_CODE = 'EIZ_BORDER_BNE';
+	const EIZ_BORDER_PER_CODE = 'EIZ_BORDER_PER';
+	const EIZ_BORDER_ADL_CODE = 'EIZ_BORDER_ADL';
+
+
+	const MYTOLL_SYD_CODE = 'MYTOLL_SYD';
+	const MYTOLL_MEL_CODE = 'MYTOLL_MEL';
+	const MYTOLL_BNE_CODE = 'MYTOLL_BNE';
+	const MYTOLL_PER_CODE = 'MYTOLL_PER';
+	const MYTOLL_SYD_PLT_CODE = 'MYTOLL_SYD_PLT';
+	const EIZ_TOLL_SYD_CODE = 'EIZ_TOLL_SYD';
+	const EIZ_TOLL_MEL_CODE = 'EIZ_TOLL_MEL';
+	const EIZ_TOLL_BNE_CODE = 'EIZ_TOLL_BNE';
+	const UBI_TOLL_SYD_CODE = 'UBI_TOLL_SYD';
+	const UBI_TOLL_MEL_CODE = 'UBI_TOLL_MEL';
+	const PICKUP_CODE = 'pickup_only';
+	const PICKUP_NON_REF_CODE = 'pickup_non_ref';
+	const PICKUP_3PL_CODE = 'pickup_3pl_only';
+	const FASTWAY_SYD_COST_CODE = 'FWSYD2020';
+
+
+	const SYDNEY_GV_AUPOST_ID_CODE='GV_eparcel_syd';
+	const MELBOURNE_GV_AUPOST_ID_CODE='GV_eparcel_mel';
+	const MELBOURNE_GV_AUPOST_ID_CODE_2 = 'GV_eparcel_mel_2022';
+	const BRISBANE_GV_AUPOST_ID_CODE='GV_eparcel_bne';
+	const PERTH_GV_AUPOST_ID_CODE='GV_eparcel_per';
+	const SYDNEY_GV_AUPOST_ID=10285;
+	const MELBOUNE_GV_AUPOST_ID=10288;
+	const BRISBANE_GV_AUPOST_ID=10291;
+	const PERTH_GV_AUPOST_ID=10294;
+
+
+	const EIZ_TOLL_CODES=[self::EIZ_TOLL_SYD_CODE,
+		self::EIZ_TOLL_MEL_CODE,
+		self::EIZ_TOLL_BNE_CODE,
+	];
+	const EIZ_ALLIED_CODES=[
+		self::EIZ_ALLIED_SYD_CODE,
+		self::EIZ_ALLIED_MEL_CODE,
+		self::EIZ_ALLIED_BNE_CODE,
+		self::EIZ_ALLIED_PER_CODE,
+		self::EIZ_ALLIED_ADL_CODE
+	];
+
+	const FL_HUNTER=[
+		self::FL_HUNTER_SYD,
+		self::FL_HUNTER_MEL,
+		self::FL_HUNTER_BNE
+	];
+
+	const EIZ_BORDER_CODES=[
+		self::EIZ_BORDER_SYD_CODE,
+		self::EIZ_BORDER_MEL_CODE,
+		self::EIZ_BORDER_BNE_CODE,
+		self::EIZ_BORDER_PER_CODE,
+		self::EIZ_BORDER_ADL_CODE
+	];
+
+
+	const THIRD_PARTY_CODES=[
+		self::EIZ_TOLL_SYD_CODE,
+		self::EIZ_TOLL_MEL_CODE,
+		self::EIZ_TOLL_BNE_CODE,
+		self::EIZ_ALLIED_SYD_CODE,
+		self::EIZ_ALLIED_MEL_CODE,
+		self::EIZ_ALLIED_BNE_CODE,
+		self::EIZ_ALLIED_PER_CODE,
+		self::EIZ_ALLIED_ADL_CODE,
+		self::EIZ_BORDER_SYD_CODE,
+		self::EIZ_BORDER_MEL_CODE,
+		self::EIZ_BORDER_BNE_CODE,
+		self::EIZ_BORDER_PER_CODE,
+		self::EIZ_BORDER_ADL_CODE,
+		self::UBI_TOLL_SYD_CODE,
+		self::UBI_TOLL_MEL_CODE
+	];
+
+	const ETD = 1;
+	const ETA = 2;
+	const SCREATE = 3;
+
+	public static $searchCriteria = [
+		1=>"by consol etd",
+		2=>"by consol eta",
+		3=>"shipment create date"
+
+	];
+
+	const AUPOST_CODES = [ImportChargeCode::SYDNEY_AUPOST_ID_CODE,ImportChargeCode::AUPOST_EXPRESS_CODE,ImportChargeCode::MELBOUNE_AUPOST_ID_CODE, ImportChargeCode::BRISBANE_AUPOST_ID_CODE, ImportChargeCode::PERTH_AUPOST_ID_CODE,ImportChargeCode::LETTER_BIG_CODE, ImportChargeCode::LETTER_SMALL_CODE, ImportChargeCode::PRIORITY_LETTER_BIG_CODE, ImportChargeCode::PRIORITY_LETTER_SMALL_CODE, ImportChargeCode::UBI_SYD_CODE, ImportChargeCode::UBI_MEL_CODE, ImportChargeCode::UBI_BNE_CODE, ImportChargeCode::UBI_PER_CODE, ImportChargeCode::UBI_ADL_CODE,ImportChargeCode::PICKUP_CODE,ImportChargeCode::SYDNEY_GV_AUPOST_ID_CODE,ImportChargeCode::MELBOURNE_GV_AUPOST_ID_CODE, ImportChargeCode::BRISBANE_GV_AUPOST_ID_CODE, ImportChargeCode::PERTH_GV_AUPOST_ID_CODE,ImportChargeCode::MELBOURNE_GV_AUPOST_ID_CODE_2,ImportChargeCode::PICKUP_NON_REF_CODE,ImportChargeCode::AUPOST_RETURN_CODE];
+	
+	const UBI_TOLL_CODES=[self::UBI_TOLL_SYD_CODE,
+		self::UBI_TOLL_MEL_CODE
+	];
+
+	public static $d2z_services = [
+		'syd' => self::D2Z_SYDNEY,
+		'mel' => self::D2Z_MEL,
+		'bne' => self::D2Z_BNE,
+		'per' => self::D2Z_PERTH,
+		'auto' => self::D2Z_LOCAL,
+		'local' => self::D2Z_LOCAL,
+		'local-mel' => self::D2Z_LOCAL_MEL,
+	];
+
+	const UBI_SYD = 688;
+	const UBI_MEL = 684;
+	const UBI_ADL = 685;
+	const UBI_PER = 686;
+	const UBI_BNE=  687;
+	const UBI_SYD_CODE = 'UBI_LOCAL_SYD';
+	const UBI_MEL_CODE = 'UBI_LOCAL_MEL';
+	const UBI_ADL_CODE = 'UBI_LOCAL_ADL';
+	const UBI_PER_CODE = 'UBI_LOCAL_PER';
+	const UBI_BNE_CODE = 'UBI_LOCAL_BNE';
+	public static $ubi_services = [
+		'syd' => self::UBI_SYD,
+		'mel' => self::UBI_MEL,
+		'adl' => self::UBI_ADL,
+		'per' => self::UBI_PER,
+		'bne' => self::UBI_BNE,
+	];
+	
+	public static $unsetKeys=[
+		self::D2Z_COUNTRY_3PORT,self::D2Z_ETOWER_3PORT,self::D2Z_ETOWER_SYD,self::D2Z_COUNTRY_SYD,
+		self::TEST_PETER,self::TEST_MICHELLE,self::STARTRACK_AIR,self::BPA_ID,self::FASTWAY_D2Z,
+		47, 48, 328, 331, 334, 337,137,193,261,371,519,652,790,38,101,109,710,724,787,110,223,309,471,793,685,111,597
+	];
+
+	public static $states = [
+		0 => 'Disable',
+		1 => 'Active',
+	];
+	public static $charge_weight=[
+		0=>'CBM Weight',
+		1=>'Gross Weight',
+	];
+	public static $charge_code_types=[
+		0=>'self use',
+		1=>'Client Use'
+	];
+	
+	public static $status_mode_types=[
+		0=>'Manifest',
+		1=>'Local Arrival',
+	];
+	public static $ignore_sac_types=[
+		0=>'sac',
+		1=>'ignore sac(>AUD500)',
+	];
+	public static $direct_courier_types=[
+		0=>'Lodge after clear(Normal)',
+		1=>'Ad-hoc Direct Lodge',
+		2=>'All Direct Lodge',
+	];
+	public static $custom_service_only=[
+		0=>'Use Our Couriers',
+		1=>'Not Use Our Couriers',
+	];
+	public static $no_calculate_invoice=[
+		0=>'Calculate invoice',
+		1=>'Not calculate invoice',
+	];
+	public static $service_types=[
+		1=>'空',
+		2=>'清',
+		4=>'派',
+		8=>'不带电',
+		16=>'带电',
+		32=>'纯电',
+	];
+	public static $cubic_factors=[
+		0=>'4000',
+		1=>'6000',
+		2=>'5000',
+	];
+	public static $chargecode_types=[
+		0=>'PCA',
+		1=>'tier 1 client',
+	];
+	public $couriersObj = [];
+
+	public function getStatus()
+	{
+		return isset(static::$states[$this->status])? Yii::t(strtolower(__CLASS__), static::$states[$this->status]) : $this->status;
+	}
+
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName()
+	{
+		return 'import_charge_code';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return [
+			['chargecode,org_id', 'required'],
+			['status,charge_wt,status_mode,ignore_sac,type', 'numerical', 'integerOnly'=>true],
+			['chargecode', 'length', 'max'=>6],
+			['couriers', 'length', 'max'=>500],
+			['note', 'length', 'max'=>500],
+			['created, v_from, v_to,meta,ignore_sac,dpmt', 'safe'],
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			['id, chargecode,org_id, couriers, created,oids,status,charge_wt,status_mode,ignore_sac, v_from,type, v_to, note,owner_name,meta,dpmt,description', 'safe', 'on'=>'search'],
+		];
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return [
+			'owner' => [self::BELONGS_TO, 'Org', 'org_id'],
+			'allSurcharge' => [self::HAS_MANY, 'ImportsFlexibleSurcharge', 'chargecode_id','on'=>'status!=100'],
+			'surcharge' => [self::HAS_MANY, 'ImportsFlexibleSurcharge', 'chargecode_id','on'=>'status!=100 and type!="fuel_surcharge"'],
+			'courier_surcharge' => [self::HAS_MANY, 'ImportsFlexibleSurcharge', 'chargecode_id','on'=>'status!=100 and type!="fuel_surcharge" and courier_type="Courier Surcharge"'],
+			'truck_delivery' => [self::HAS_MANY, 'ImportsFlexibleSurcharge', 'chargecode_id','on'=>'status!=100 and type!="fuel_surcharge" and courier_type="TLD Surcharge"'],
+		];
+	}
+
+	/**
+	 * if chargecode is empty , we create it now
+	 * @return bool
+	 */
+	public function beforeValidate()
+	{
+		if (empty($this->chargecode)) {
+			$this->chargecode = $this->genChargeCode();
+		}
+		return true;
+	}
+
+	public function getCourierSurcharge($start)
+	{
+		$check = ImportsFlexibleSurcharge::model()->find("chargecode_id = :chargecodeId and type!='fuel_surcharge' and courier_type='Courier Surcharge' and start<=:start",[":chargecodeId"=>$this->id,":start"=>$start]);
+		if(!empty($check))
+		{
+			$courierSurcharge = ImportsFlexibleSurcharge::model()->findAll("chargecode_id = :chargecodeId and type!='fuel_surcharge' and courier_type='Courier Surcharge' and status=:status and version=:version",[":chargecodeId"=>$this->id,":status"=>$check->status,":version"=>$check->version]);
+			return $courierSurcharge;
+		}
+		return [];
+	}
+
+
+	public function getTruckDelivery($start)
+	{
+		$check = ImportsFlexibleSurcharge::model()->find("chargecode_id = :chargecodeId and type!='fuel_surcharge' and courier_type='TLD Surcharge' and start<=:start",[":chargecodeId"=>$this->id,":start"=>$start]);
+		if(!empty($check))
+		{
+			$courierSurcharge = ImportsFlexibleSurcharge::model()->findAll("chargecode_id = :chargecodeId and type!='fuel_surcharge' and courier_type='TLD Surcharge' and status=:status and version=:version",[":chargecodeId"=>$this->id,":status"=>$check->status,":version"=>$check->version]);
+			return $courierSurcharge;
+		}
+		return [];
+	}
+
+	public function getCourierFuelSurcharge($start)
+	{
+		$check = ImportsFlexibleSurcharge::model()->find("chargecode_id = :chargecodeId and type='fuel_surcharge' and courier_type='Courier Surcharge' and start<=:start",[":chargecodeId"=>$this->id,":start"=>$start]);
+		if(!empty($check))
+		{
+			$courierSurcharge = ImportsFlexibleSurcharge::model()->find("chargecode_id = :chargecodeId and type='fuel_surcharge' and courier_type='Courier Surcharge' and status=:status and version=:version",[":chargecodeId"=>$this->id,":status"=>$check->status,":version"=>$check->version]);
+			return $courierSurcharge->p_percent;
+		}
+		return 0;
+	}
+
+	public function getTruckDeliveryFuel($start)
+	{
+		$check = ImportsFlexibleSurcharge::model()->find("chargecode_id = :chargecodeId and type='fuel_surcharge' and courier_type='Courier Surcharge' and start<=:start",[":chargecodeId"=>$this->id,":start"=>$start]);
+		if(!empty($check))
+		{
+			$courierSurcharge = ImportsFlexibleSurcharge::model()->find("chargecode_id = :chargecodeId and type='fuel_surcharge' and courier_type='TLD Surcharge' and status=:status and version=:version",[":chargecodeId"=>$this->id,":status"=>$check->status,":version"=>$check->version]);
+			return $courierSurcharge->p_percent;
+		}
+		return 0;
+	}
+
+
+
+	/**
+	 * if chargecode is empty , we create it now
+	 * @return bool
+	 */
+	public function beforeSave()
+	{
+		if (empty($this->dpmt)) $this->dpmt = 10;
+		if (empty($this->chargecode)) {
+			$this->chargecode = $this->genChargeCode();
+		}
+		if (!empty($this->couriersObj)) {
+			$this->couriers = json_encode($this->couriersObj);
+		}
+		$this->meta = empty($this->mdata)? '' : json_encode($this->mdata);
+
+		if(!$this->isNewRecord)
+		{
+			$oldModel = ImportChargeCode::model()->findByPk($this->id);
+			if(json_encode($oldModel->getAttributes())!=json_encode($this->getAttributes()))
+			{
+				$extra = [];
+				if($oldModel->couriers!=$this->couriers)
+				{
+					$oldCourierArr = json_decode($oldModel->couriers,true);
+					$newCourierArr = json_decode($this->couriers,true);
+					$oldCourierStr = "";
+					$newCourierStr = "";
+					if(!empty($oldCourierArr))
+					{
+						$oldOrgRates =  OrgRate::model()->findAll(" id in (".join($oldCourierArr).")");
+						foreach ($oldOrgRates as $key => $value) 
+						{
+							$oldCourierStr .= $value->name.",";
+						}
+					}
+					if(!empty($newCourierArr))
+					{
+						$newOrgRates =  OrgRate::model()->findAll(" id in (".join($newCourierArr).")");
+						foreach ($newOrgRates as $key => $value) {
+							$newCourierStr .= $value->name.",";
+						}
+					}
+					$extra["CourierData"] = " Old: ".$oldCourierStr." changed to: ".$newCourierStr;
+
+				}
+				$extra["oldData"] = json_encode($oldModel->getAttributes());
+				TlaLog::add($this, $this->isNewRecord? 3 : 4, array_merge(['status' => $this->getStatus()], $extra));
+			}
+		}
+
+
+		return true;
+	}
+
+	public function log($action)
+	{
+		$extra =["action"=>$action];
+		TlaLog::add($this, $this->isNewRecord? 3 : 4, array_merge(['status' => $this->getStatus()], $extra));
+	}
+
+
+	public function afterFind()
+	{
+		if (!empty($this->meta)) {
+			$this->mdata = json_decode($this->meta, true);
+		}
+		if (!empty($this->couriers)) {
+			$this->couriersObj = json_decode($this->couriers, true);
+		}
+	}
+
+	public static function isActive($chargeCode){
+		return ImportChargeCode::model()->count('chargecode = :ccode AND status = 1', [':ccode' => $chargeCode]) > 0;
+	}
+
+	public static function isPriorityLetter($chargecode){
+		$cc = ImportChargeCode::model()->find('chargecode = :ccode AND status = 1', [':ccode' => $chargeCode]);
+		if(empty($cc)) return false;
+		return in_array(633, $this->couriersObj) || in_array(636, $this->couriersObj);
+	}
+
+	/**
+	 * create random 4 digitals charge code
+	 * @return string
+	 */
+	private function genChargeCode()
+	{
+		$digits = 4;
+		$chargecode = '';
+		while (true) {
+			$chargecode = str_pad(rand(0, pow(10, $digits) - 1), $digits, '0', STR_PAD_LEFT);
+			$query = ImportChargeCode::model()->find('chargecode = :ccode', [':ccode' => $chargecode]);
+			if (empty($query)) {
+				break;
+			}
+		}
+		return $chargecode;
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return [
+			'id' => 'ID',
+			'chargecode' => 'Chargecode',
+			'couriers' => 'Couriers',
+			'created' => 'Created',
+			'status' => 'Status',
+			'v_from' => 'V From',
+			'v_to' => 'V To',
+			'note' => 'Backend DES',
+			'description' => 'FRONT DES'
+		];
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search()
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+				
+		$criteria->with = ['owner'];
+		$criteria->compare('t.id', $this->id, true);
+		$criteria->compare('chargecode', $this->chargecode, true);
+		$criteria->compare('couriers', $this->couriers, true);
+		$criteria->compare('created', $this->created, true);
+		$criteria->compare('t.status', $this->status);
+		$criteria->compare('t.type', $this->type);
+		$criteria->compare('owner.name', $this->owner_name, true);
+		$criteria->compare('v_from', $this->v_from, true);
+		$criteria->compare('v_to', $this->v_to, true);
+		$criteria->compare('note', $this->note, true);
+		$criteria->compare('description', $this->description, true);
+		$criteria->compare('t.dpmt', $this->dpmt);
+		if (!empty($this->oids)) {
+			$criteria->addInCondition('t.org_id', $this->oids);
+		}
+
+		return new CActiveDataProvider($this, [
+			'criteria'=>$criteria,
+			'sort' => [
+				'attributes' => [
+					'owner_name' => [
+						'asc' => 'owner.name',
+						'desc' => 'owner.name DESC',
+					],
+					'*',
+				],
+			],
+			'pagination'=>[
+				'pageSize'=>50,
+			],
+		]);
+	}
+	/*
+	 * To check if the chargecode set up the rate for the postcode on the specify weight;
+	 *
+	 * @Param    $shipment  Imparcel Model
+	 * @return   array with status and msg    1=> find, 0=>not found;
+	 */
+	public function hasChargeSetUp($shipment)
+	{
+		$resp=['status'=>false,'msg'=>''];
+		if(!empty($shipment->mdata['pe_number']))
+		{
+			$resp=['status'=>true,'msg'=>''];
+			return $resp;
+		}
+		$isCBM = !empty($this->mdata['calculate_cbm']);
+		$chargeWeight = empty($this->charge_wt)? $shipment->chargeWeight() : $shipment->weight;
+		$chargeLabel = "Weight";
+		if($isCBM){
+			$chargeWeight = empty($this->charge_wt)? $shipment->chargeCbm() : $shipment->cbm;
+			$chargeLabel = "CBM";
+		}
+
+		if($this->chargecode=='5492')
+		{
+			$dfeApi = new DFEAPI('syd');
+			$o = $dfeApi->getRevenue($this,$shipment->cnee->suburb,$shipment->cnee->postcode,$chargeWeight);
+			if($o->code==1)
+			{
+				$resp['msg']='with postcode: '.$shipment->cnee->postcode.' Not in the Chargecode:'.$this->chargecode.' delivery Zone!';
+			}else if($o->code==2)
+			{
+				$resp['msg']='with Weight: '.$shipment->weight.'kg, CBM: '.$shipment->pkg.' &times; '.$shipment->cbm.'M<sup>3</sup>, Chargeble '.$chargeLabel.': '.$chargeWeight.'kg not in the Chargecode: '. $this->chargecode.' weight Range!';
+			}else
+			{
+				$resp['status']=true;
+				return $resp;
+			}
+			return $resp;
+		}
+
+		$code = "";
+		$courierList = [];
+
+		foreach ($this->couriersObj as $key => $courierId) {
+			$courier = OrgRate::model()->findByPk($courierId);
+			$courierList[] = $courier->org_id;
+		}
+
+		if(!empty($this->couriersObj)&&count($this->couriersObj)==1){
+			$courierId= $this->couriersObj[0];
+			$courier = OrgRate::model()->findByPk($courierId);
+			$code = $courier->code;
+		}
+
+
+
+		if($code==ImportChargeCode::AUPOST_INTERNATIONAL_CODE)//for international
+		{
+			$country = $shipment->cnee->country;
+			$zone = SystemSetting::getIntZone();
+			if(!empty($zone[$country]))
+			{
+				$zoneRates = ZoneRate::model()->findAll('chargecode_id = :cid AND weight_lo <=:w AND weight_hi >= :w AND zone = :z AND base+item+perkg+minimum > 0', [':cid' => $this->id, ':w' => ceil($theWeight*10)/10, ':z' => $zone[$country]]);
+				if (!empty($zoneRates)) {
+					$resp['status']=true;
+					return $resp;
+				}
+				$resp['msg']='with Weight: '.$shipment->weight.'kg, CBM: '.$shipment->pkg.' &times; '.$shipment->cbm.'M<sup>3</sup>, Chargeble '.$chargeLabel.': '.$chargeWeight.'kg not in the Chargecode: '. $this->chargecode.' weight Range!';
+			}else
+			{
+				$resp['msg']='with postcode: '.$shipment->cnee->postcode.' Not in the international Chargecode:'.$this->chargecode.' delivery Zone!';
+			}
+
+			return $resp;
+		}
+
+
+
+		$zoneMaps = ZoneMap::model()->findAll('chargecode_id = :cid AND pc_lo <= :pc AND pc_hi >= :pc', [':cid' => $this->id, ':pc' => $shipment->cnee->postcode]);
+		if (!empty($zoneMaps)) {
+			foreach ($zoneMaps as $zoneMap) {
+				$theWeight = $chargeWeight;
+				if(((isset($this->mdata['eparcel_single'])&&$this->mdata['eparcel_single']==0)||empty($this->mdata['eparcel_single']))&&$shipment->pkg > 1){
+					if(in_array(Org::ORGID_COURIER_AUPOST, $courierList))
+					{
+						$maxWeight = Yii::app()->db->createCommand('SELECT MAX(weight_hi) FROM `zone_rate` WHERE chargecode_id = :cid AND zone = :z AND base+item+perkg+minimum > 0')->bindValues([':cid' => $this->id, ':z' => $zoneMap['z1']])->queryScalar();
+						if($maxWeight < 100){
+							$theWeight = $chargeWeight / $shipment->pkg;
+						}
+					}
+				}
+
+				$zoneRates = ZoneRate::model()->findAll('chargecode_id = :cid AND weight_lo <=:w AND weight_hi >= :w AND zone = :z AND base+item+perkg+minimum > 0', [':cid' => $this->id, ':w' => ceil($theWeight*10)/10, ':z' => $zoneMap['z1']]);
+				if (!empty($zoneRates)) {
+					$resp['status']=true;
+					return $resp;
+				}
+			}
+			$resp['msg']='with Weight: '.$shipment->weight.'kg, CBM: '.$shipment->pkg.' &times; '.$shipment->cbm.'M<sup>3</sup>, Chargeble '.$chargeLabel.': '.$chargeWeight.'kg not in the Chargecode: '. $this->chargecode.' weight Range!';
+		} else {
+			$resp['msg']='with postcode: '.$shipment->cnee->postcode.' Not in the Chargecode:'.$this->chargecode.' delivery Zone!';
+		}
+		return $resp;
+	}
+	
+	public function isInternational()
+	{
+		$code = "";
+		if(!empty($this->couriersObj)&&count($this->couriersObj)>0){
+			$courierId= $this->couriersObj[0];
+			$courier = OrgRate::model()->findByPk($courierId);
+			$code = $courier->code;
+		}
+
+		if($code==ImportChargeCode::AUPOST_INTERNATIONAL_CODE)
+		{
+			return true;
+		}else
+		{
+			return false;
+		}
+	}
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return ImportChargeCode the static model class
+	 */
+	public static function model($className=__CLASS__)
+	{
+		return parent::model($className);
+	}
+}

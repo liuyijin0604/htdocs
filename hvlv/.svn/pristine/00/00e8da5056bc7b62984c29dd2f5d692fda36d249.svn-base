@@ -1,0 +1,1245 @@
+<?php
+class KpiService extends Service
+{
+   public function calculateMonthEmailKPI($month,$refresh=false,$debug=false,$userId=false,$isDetail=false)
+   {
+        $cache = $this->getCacheData('calculateMonthEmailKPI:'.$month);
+
+        if(!$isDetail)
+        {
+          if(empty($cache)&&$refresh==false)
+          {
+            return [];
+          }
+
+          if(!empty($cache)&&$refresh==false)
+          {
+            return $cache;
+          }
+        }
+
+        if($debug||$isDetail)
+        {
+          $importMails = ImportsMail::model()->with("mail_users")->findAll("mail_users.id is not null and mail_users.user_id=:userId and DATE_FORMAT(mail_users.create_time,'%Y-%m')=:month ",[":month"=>$month,":userId"=>$userId]);
+        }else
+        {
+          $importMails = ImportsMail::model()->with("mail_users")->findAll("mail_users.id is not null and DATE_FORMAT(mail_users.create_time,'%Y-%m')=:month ",[":month"=>$month]);
+        }
+       
+        $provide = [];
+        $details = [];
+        foreach ($importMails as $key => $mail) {
+            if(strtotime($mail->getDeadline())<strtotime($mailUser->create_time))
+            {
+              continue;
+            }
+            $checkIsClosed = false;
+
+            foreach ($mail->mail_users as $key => $mailUser) {
+               if(!empty($mailUser->close_time)&&$mailUser->close_time!="0000-00-00 00:00:00")
+               {
+                    $checkIsClosed= true;
+                    break;
+               }
+           }
+
+           if(!$checkIsClosed)
+           {
+                foreach ($mail->mail_users as $key => $mailUser) {
+                  if(strtotime($mailUser->getDeadline())<strtotime(date("Y-m-d")))
+                  {
+                    if(!isset($provide[$mailUser->user_id]))
+                        {
+                            $provide[$mailUser->user_id] =[0,0];
+                        }
+                        $provide[$mailUser->user_id][1]+= 1;
+                        if($isDetail)
+                        {
+                          $details[] =[$mail->no,$mailUser->create_time,"",$mail->getDeadline()];
+                        }
+                  }
+                }
+           }
+
+           foreach ($mail->mail_users as $key => $mailUser)
+           {
+                if(!empty($mailUser->close_time)&&$mailUser->close_time!="0000-00-00 00:00:00")
+                {
+                  $bonus = 0;
+                  if((strtotime(date("Y-m-d",strtotime($mailUser->close_time)))<=strtotime($mailUser->getDeadline())))
+                  {
+                    $bonus = 1;
+                  }
+
+                  if(!isset($provide[$mailUser->user_id]))
+                  {
+                    $provide[$mailUser->user_id] =[0,0];
+                  }
+
+                  if($debug)
+                  {
+                    if($bonus==0)
+                    {
+                      $provide[$mailUser->user_id][] = $mail->no;
+                    }
+                  }else
+                  {
+                    $provide[$mailUser->user_id][0]+= $bonus;
+                    $provide[$mailUser->user_id][1]+= 1;
+
+
+                    if($bonus==0)
+                    {
+                      if($isDetail)
+                      {
+                        $details[] =[$mail->no,$mailUser->create_time,$mailUser->close_time,$mailUser->getDeadline()];
+                      }
+                    }
+                  }
+              }
+          }
+        }
+
+        if($isDetail)
+        {
+          return $details;
+        }
+
+        if(!$debug)
+        {
+          foreach ($provide as $key => $value) {
+              $provide[$key][2] = number_format($provide[$key][0]/$provide[$key][1],2,'.','');
+          }
+          $this->setCacheData('calculateMonthEmailKPI:'.$month,$provide,86400);
+        }
+        return $provide;
+
+   }
+
+   public function calculateMonthTaskKPI($month,$refresh=false,$isDetail = false,$userId=null)
+   {
+      $details = [];
+       $cache = $this->getCacheData('calculateMonthTaskKPI:'.$month);
+       if(!$isDetail)
+       {
+          if(empty($cache)&&$refresh==false)
+          {
+            return [];
+          }
+
+          if(!empty($cache)&&$refresh==false)
+          {
+            return $cache;
+          }
+        }
+
+        $importTasks = TlaTask::model()->with("tlaTaskUsers","tlaTaskUsers.user")->findAll("t.status not in (5,101,110) and ete!='0000-00-00 00:00:00' and t.type != 10 and tlaTaskUsers.id is not null and DATE_FORMAT(t.ete,'%Y-%m')=:month and user.active=1",[":month"=>$month]);
+
+        $provide = [];
+        foreach ($importTasks as $key => $task) {
+            $checkIsClosed = false;
+
+            foreach ($task->tlaTaskUsers as $key => $tlaTaskUser) {
+               if(!empty($tlaTaskUser->close_time)&&$tlaTaskUser->close_time!="0000-00-00 00:00:00")
+               {
+                    $checkIsClosed= true;
+                    break;
+               }
+           }
+
+           if(!$checkIsClosed)
+           {
+              if(strtotime($task->ete)>strtotime(date('Y-m-d H:i:s'))||$task->type==DisputeTask::$my_type)
+              {
+                continue;
+              }
+                foreach ($task->tlaTaskUsers as $key => $tlaTaskUser) {
+                if($tlaTaskUser->user_id==$task->user_id)
+                {
+                  continue;
+                }
+
+                  if(!empty($userId)&&$userId!=$tlaTaskUser->user_id)
+                  {
+                    continue;
+                  }
+
+                    if(!isset($provide[$tlaTaskUser->user_id]))
+                        {
+                            $provide[$tlaTaskUser->user_id] =[0,0];
+                        }else
+                        {
+                            $provide[$tlaTaskUser->user_id][1]+= 1;
+                        }
+                        $details[] = [$task->task_no,$tlaTaskUser->close_time,$task->ete,0];
+                }
+           }
+
+           foreach ($task->tlaTaskUsers as $key => $tlaTaskUser) {
+              if($tlaTaskUser->user_id==$task->user_id)
+              {
+                continue;
+              }
+              
+              if(!empty($userId)&&$userId!=$tlaTaskUser->user_id)
+              {
+                continue;
+              }
+               if((!empty($tlaTaskUser->close_time)&&$tlaTaskUser->close_time!="0000-00-00 00:00:00")||$task->type==DisputeTask::$my_type)
+               {
+                    $ete = $task->ete;
+                    if(!empty($task->ete_bk)&&$task->ete_bk!="0000-00-00 00:00:00")
+                    {
+                      $ete = $task->ete_bk;
+                    }
+                    $deadLineDate = explode(" ", $ete)[0];
+                    $deadLineTime = explode(" ", $ete)[1];
+
+                    $closeDate = explode(" ", $tlaTaskUser->close_time)[0];
+                    $closeTime = explode(" ", $tlaTaskUser->close_time)[1];
+                    $closeHour = explode(":", $closeTime)[0];
+                    $checkCloseTime = $closeDate." ".$closeHour.":00:00";
+                    //before 17:30
+                    $bonus = 0;
+                    if(strtotime($checkCloseTime)<=strtotime($ete))//bonus1
+                    {
+                         $bonus = 1;
+                    }
+                     if(!isset($provide[$tlaTaskUser->user_id]))
+                    {
+                        $provide[$tlaTaskUser->user_id] =[0,0];
+                    }
+
+                    $provide[$tlaTaskUser->user_id][0]+= $bonus;
+                    $provide[$tlaTaskUser->user_id][1]+= 1;
+                    $details[] = [$task->task_no,$tlaTaskUser->close_time,$ete,$bonus];
+               }
+           }
+        }
+
+        if($isDetail)
+        {
+          return $details;
+        }
+
+        foreach ($provide as $key => $value) {
+            if(empty($provide[$key][1]))
+            {
+              $provide[$key][2] = 0;
+            }else
+            {
+              $provide[$key][2] = $provide[$key][0]/$provide[$key][1];
+            }
+        }
+
+        $this->setCacheData('calculateMonthTaskKPI:'.$month,$provide,86400);
+        return $provide;
+   }
+
+   public function calculateMonthAirOpKPI($month,$refresh=false,$isDetail = false,$userId=null)
+   {
+      $month2 = HolidayHelper::getMonthNextMonth($month);
+      $cache = $this->getCacheData('calculateMonthAirOpKPI:'.$month);
+      if(!$isDetail)
+      {
+       if(empty($cache)&&$refresh==false)
+       {
+         return [];
+       }
+
+       if(!empty($cache)&&$refresh==false)
+       {
+         return $cache;
+       }
+      }
+        $provide = [];
+        $consolDetails = [];
+        $details = [];
+        $users = User::model()->findAll("(occupation &:occupation)>0 and active =1",[":occupation"=>User::IM_AIR_OP]);
+        $userIds = array_column($users, 'id');
+        $userIds[] = 0;
+        $consols = Consol::model()->findAll("service = :service and eta >= :month and eta < :month2 and no not like 'WDT%'",[":month"=>$month."-01",":month2"=>$month2."-01",":service"=>ImcoConsol::AIRCONSOL]);
+        foreach ($consols as $key => $consol)
+        {
+          $log = Log::model()->findAll(['condition'=>'(model=:model or model = "Consol") and lid=:id and meta like "%SCO Sent%" and user_id in ('.join(',',$userIds).')','order'=>'time asc','params'=>[":model"=>Consol::$types[$consol->type],":id"=>$consol->id]]);
+          if(!empty($log))
+          {
+            $log =  $log[0];
+            if(!empty($userId)&&($userId!=$log->user_id&&$log->user_id!=0))
+            {
+              
+            }else
+            {
+              $logDate = explode(" ", $log->time)[0];
+              if(strtotime($consol->eta)<strtotime($logDate))
+              {
+                $days=HolidayHelper::getWeekdaysBetweenTwoDates($consol->eta,$logDate,'AUSYD');
+                if(!isset($consolDetails[$log->user_id]))
+                {
+                  $consolDetails[$log->user_id] =[];
+                }
+                if(!isset($consolDetails[$log->user_id][$consol->id]))
+                {
+                  $consolDetails[$log->user_id][$consol->id] =[];
+                }
+                $consolDetails[$log->user_id][$consol->id]['aout'] = $days;
+
+                // if($days>3)
+                // {
+                //     if(!empty($provide[$log->user_id]))
+                //     {
+                //       $provide[$log->user_id][0] += 1;
+                //     }else
+                //     {
+                //       $provide[$log->user_id] = [1];
+                //     }
+                // }
+
+                $details[$consol->id."-1"] = [$consol->no,"A/SCO Sent",$consol->eta,$logDate,$days,0];
+              }
+
+            }
+
+          }
+
+          $log = Log::model()->findAll(['condition'=>'(model=:model or model = "Consol") and lid=:id and meta like "%Manifested%" and user_id in ('.join(',',$userIds).')','order'=>'time asc','params'=>[":model"=>Consol::$types[$consol->type],":id"=>$consol->id]]);
+          if(!empty($log))
+          {
+            $log =  $log[0];
+            if(!empty($userId)&&($userId!=$log->user_id&&$log->user_id!=0))
+            {
+            
+            }else
+            {
+              $logDate = explode(" ", $log->time)[0];
+              if(strtotime($consol->eta)<strtotime($logDate))
+              {
+               $days=HolidayHelper::getWeekdaysBetweenTwoDates($consol->eta,$logDate,'AUSYD');
+               
+               if(!isset($consolDetails[$log->user_id]))
+               {
+                 $consolDetails[$log->user_id] =[];
+               }
+               if(!isset($consolDetails[$log->user_id][$consol->id]))
+               {
+                 $consolDetails[$log->user_id][$consol->id] =[];
+               }
+               $consolDetails[$log->user_id][$consol->id]['manifest'] = $days;
+  
+                // if($days>3)
+                // {
+                //     if(!empty($provide[$log->user_id]))
+                //     {
+                //       $provide[$log->user_id][0] += 1;
+                //     }else
+                //     {
+                //       $provide[$log->user_id] = [1];
+                //     }
+                // }
+  
+                $details[$consol->id."-2"] = [$consol->no,"manifest",$consol->eta,$logDate,$days,0];
+  
+              }
+
+            }
+          }
+        }
+
+        foreach ($consolDetails as $userId => $userConsol)
+        {
+          if(!isset($provide[$userId]))
+          {
+            $provide[$userId] = [0=>0];
+          }
+
+          foreach ($userConsol as $consolId => $consolDetail)
+          {
+
+            if($consolDetail['aout']>3)
+            {
+              if(!empty($details[$consolId."-1"]))
+              {
+               $details[$consolId."-1"][5] = 1;
+              }
+            }else if($consolDetail['manifest']>3)
+            {
+              if(!empty($details[$consolId."-2"]))
+              {
+                $details[$consolId."-2"][5] = 1;
+              }
+            }
+
+            if($consolDetail['aout']>3||$consolDetail['manifest']>3)
+            {
+              if(!isset($provide[$userIds[0]]))
+              {
+                $provide[$userIds[0]] = [0=>1];
+              }else
+              {
+                $provide[$userIds[0]][0] ++;
+              }
+            }
+            
+          }
+        }
+        if($isDetail)
+        {
+          array_multisort(array_column($details, 4),SORT_DESC,$details);
+          return $details;
+        }
+        $this->setCacheData('calculateMonthAirOpKPI:'.$month,$provide,86400);
+        return $provide;
+   }
+
+   public function calculateMonthSeaOpKPI($month,$refresh=false,$isDetail = false,$userId=null)
+   {
+      $month2 = HolidayHelper::getMonthNextMonth($month);
+      $cache = $this->getCacheData('calculateMonthSeaOpKPI:'.$month);
+      if(!$isDetail)
+      {
+       if(empty($cache)&&$refresh==false)
+       {
+         return [];
+       }
+
+       if(!empty($cache)&&$refresh==false)
+       {
+         return $cache;
+       }
+      }
+        $provide = [];
+        $consolDetails = [];
+        $details = [];
+        $users = User::model()->findAll("(occupation &:occupation)>0 and active =1",[":occupation"=>User::IM_SEA_OP]);
+        $userIds = array_column($users, 'id');
+        $consols = Consol::model()->findAll("service = :service and eta >= :month and eta < :month2 and no not like 'WDT%' and id not in (120460,121591,122209)",[":month"=>$month."-01",":month2"=>$month2."-01",":service"=>ImcoConsol::SEACONSOL]);
+        foreach ($consols as $key => $consol)
+        {
+          $log = Log::model()->findAll(['condition'=>'(model=:model or model = "Consol") and lid=:id and meta like "%SCO Sent%" and user_id in ('.join(',',$userIds).')','order'=>'time asc','params'=>[":model"=>Consol::$types[$consol->type],":id"=>$consol->id]]);
+          if(!empty($log))
+          {
+            $log =  $log[0];
+
+            if(in_array($consol->dpt_id,[Org::TLA_DEPARTMENT_SYDNEY,Org::TLA_DEPARTMENT_BRISBANE]))
+            {
+              $log->user_id = 3181;
+            }elseif(in_array($consol->dpt_id,[Org::TLA_DEPARTMENT_MELBOURNE]))
+            {
+              $log->user_id = 3169;
+            }
+
+
+            if(!empty($userId)&&$userId!=$log->user_id)
+            {
+              
+            }else
+            {
+              $logDate = explode(" ", $log->time)[0];
+              if(strtotime($consol->eta)<strtotime($logDate))
+              {
+                $days=HolidayHelper::getWeekdaysBetweenTwoDates($consol->eta,$logDate,'AUSYD');
+                if(!isset($consolDetails[$log->user_id]))
+                {
+                  $consolDetails[$log->user_id] =[];
+                }
+                if(!isset($consolDetails[$log->user_id][$consol->id]))
+                {
+                  $consolDetails[$log->user_id][$consol->id] =[];
+                }
+                $consolDetails[$log->user_id][$consol->id]['aout'] = $days;
+
+                // if($days>3)
+                // {
+                //     if(!empty($provide[$log->user_id]))
+                //     {
+                //       $provide[$log->user_id][0] += 1;
+                //     }else
+                //     {
+                //       $provide[$log->user_id] = [1];
+                //     }
+                // }
+
+                $details[$consol->id."-1"] = [$consol->no,"A/SCO Sent",$consol->eta,$logDate,$days,0];
+              }
+
+            }
+            continue;
+
+          }
+
+          $log = Log::model()->findAll(['condition'=>'(model=:model or model = "Consol") and lid=:id and meta like "%Manifested%" and user_id in ('.join(',',$userIds).')','order'=>'time asc','params'=>[":model"=>Consol::$types[$consol->type],":id"=>$consol->id]]);
+          if(!empty($log))
+          {
+            $log =  $log[0];
+
+            if(in_array($consol->dpt_id,[Org::TLA_DEPARTMENT_SYDNEY,Org::TLA_DEPARTMENT_BRISBANE]))
+            {
+              $log->user_id = 3181;
+            }elseif(in_array($consol->dpt_id,[Org::TLA_DEPARTMENT_MELBOURNE]))
+            {
+              $log->user_id = 3169;
+            }
+
+            if(!empty($userId)&&$userId!=$log->user_id)
+            {
+            
+            }else
+            {
+              $logDate = explode(" ", $log->time)[0];
+              if(strtotime($consol->eta)<strtotime($logDate))
+              {
+               $days=HolidayHelper::getWeekdaysBetweenTwoDates($consol->eta,$logDate,'AUSYD');
+               
+               if(!isset($consolDetails[$log->user_id]))
+               {
+                 $consolDetails[$log->user_id] =[];
+               }
+               if(!isset($consolDetails[$log->user_id][$consol->id]))
+               {
+                 $consolDetails[$log->user_id][$consol->id] =[];
+               }
+               $consolDetails[$log->user_id][$consol->id]['manifest'] = $days;
+  
+                // if($days>3)
+                // {
+                //     if(!empty($provide[$log->user_id]))
+                //     {
+                //       $provide[$log->user_id][0] += 1;
+                //     }else
+                //     {
+                //       $provide[$log->user_id] = [1];
+                //     }
+                // }
+  
+                $details[$consol->id."-2"] = [$consol->no,"manifest",$consol->eta,$logDate,$days,0];
+  
+              }
+
+            }
+          }
+        }
+
+        foreach ($consolDetails as $userId => $userConsol)
+        {
+          if(!isset($provide[$userId]))
+          {
+            $provide[$userId] = [0=>0];
+          }
+
+          foreach ($userConsol as $consolId => $consolDetail)
+          {
+
+            if($consolDetail['aout']>5)
+            {
+              if(!empty($details[$consolId."-1"]))
+              {
+               $details[$consolId."-1"][5] = 1;
+              }
+            }else if($consolDetail['manifest']>5)
+            {
+              if(!empty($details[$consolId."-2"]))
+              {
+                $details[$consolId."-2"][5] = 1;
+              }
+            }
+
+            if($consolDetail['aout']>5||$consolDetail['manifest']>5)
+            {
+              if(!isset($provide[$userId]))
+              {
+                $provide[$userId] = [0=>1];
+              }else
+              {
+                $provide[$userId][0] ++;
+              }
+            }
+            
+          }
+        }
+        if($isDetail)
+        {
+          array_multisort(array_column($details, 4),SORT_DESC,$details);
+          return $details;
+        }
+        $this->setCacheData('calculateMonthSeaOpKPI:'.$month,$provide,86400);
+        return $provide;
+   }
+   public function calculateMonthCustomClearanceKPI($month,$refresh = false,$isDetail = false,$userId=null)
+   {
+      $theMonth = intval(explode("-", $month)[1]);
+      $month2 = HolidayHelper::getMonthNextMonth($month);
+      
+      $allLog = Log::model()->findAll(["condition"=>"model = 'ShipmentProcess' and meta = '{\"status\":\"Documents Received\"}' and time >:time and time <:time2 ","order"=>"lid asc, time asc","params"=>[":time"=>$month."-01 00:00:00",":time2"=>$month2."-01 00:00:00"]]);
+      $checkingList = [];
+      $provide = [];
+      foreach ($allLog as $key => $log)
+      {
+        if(empty($checkingList[$log->lid]))
+        {
+          $checkingList[$log->lid] = $log;
+        }
+      }
+      $result = [];
+      $user = User::model()->find("(occupation &:occupation)>0 and active =1",[":occupation"=>User::CUSTOM_CLEARENCE]);
+      $userId = empty($user)?0:$user->id;
+      $calculate = ["user_id"=>$userId,"all"=>0,"0-3"=>0,"4-5"=>0,"5-"=>0,"percentage"=>0];
+      $details = [];
+      foreach ($checkingList as $key => $log)
+      {
+        // $shipmentProcess = ShipmentProcess::model()->findBypk($log->lid);
+        $logDone = Log::model()->find(["condition"=>"model = 'ShipmentProcess' and meta = '{\"status\":\"Customs Done\"}' and lid = :lid","order"=>"lid asc, time asc","limit"=>"1","params"=>[":lid"=>$log->lid]]);
+        if(empty($logDone)) continue;
+        if(!empty($logDone))
+        {
+          $startDate = date("Y-m-d",strtotime($log->time));
+          $endDate = date("Y-m-d",strtotime($logDone->time));
+          $daysDiff = HolidayHelper::diffBetweenTwoDays($startDate, $endDate);
+
+          if($startDate==$endDate)
+          {
+            $daysDiff = 0;
+          }else
+          {
+            if($daysDiff>1)
+            {
+              $weekdates = HolidayHelper::getWeekdaysBetweenTwoDates($startDate,$endDate,"AUSYD");
+              $startDateIsHoliday = HolidayHelper::checkDateIsHoliday($startDate,"AUSYD");
+              $endDateIsHoliday = HolidayHelper::checkDateIsHoliday($endDate,"AUSYD");
+              $daysDiff = $weekdates-1;
+            }
+          }
+
+            if($daysDiff<=3)
+            {
+              $calculate["0-3"] +=1;
+            }elseif($daysDiff<=5)
+            {
+              $calculate["4-5"] +=1;
+            }else
+            {
+              $calculate["5-"] +=1;
+            }
+            $calculate["all"] += 1;
+            $result[$key] = $daysDiff;
+
+            if($isDetail)
+            {
+              $shipmentProcess = ShipmentProcess::model()->with("shipment")->findByPk($log->lid);
+              $details[$shipmentProcess->shipment->id] = [$shipmentProcess->shipment->hbn,$shipmentProcess->shipment->ref,$startDate,$endDate,$daysDiff];
+            }
+
+        }
+      }
+      $provide[$userId] = $calculate;
+      if($provide[$userId]["all"]>0)
+      {
+        $provide[$userId]["percentage"] = $provide[$userId]["0-3"]/$provide[$userId]["all"];
+      }
+      if($isDetail)
+      {
+        array_multisort(array_column($details, 4),SORT_DESC,$details);
+        return $details;
+      }
+      return $provide;
+   }
+
+   public function calculateWarehouseCheckinKPI($month,$refresh = false,$isDetail = false,$userId=null)
+   {
+      $report = $this->getCacheReport($month,ReportCache::CheckInReportMonthly);
+
+      $checkingList = [];
+      $provide = [];
+      $details = [106=>[],218=>[],530=>[]];
+      $result = [];
+      $warehouseProcessService = new WarehouseProcessService();
+      $users = User::model()->findAll("(occupation &:occupation)>0 and active =1",[":occupation"=>User::WH_CHECK_IN]);
+      if(!$isDetail)
+      {
+        foreach ($users as $key => $user) {
+          $dptId = $user->dpt_id;
+          $checkInDailyReport = $warehouseProcessService->getCheckInReport($dptId,true);
+          $totalArr = $checkInDailyReport[0];
+          $totalPkg  = $totalArr["pkg"];
+          if($totalPkg==0) continue;
+          $percentage = floatval(explode("%",$totalArr['scanPercent'])[0])/100;
+          $report[$dptId][$month.date("-d")] = $percentage;
+        }
+      }
+
+      foreach ($report as $dptId => $re) {
+        $total = 0;
+        $count = 0;
+        foreach ($re as $key => $value) {
+          if($key==$month) continue;
+          $total+=$value;
+          $count+=1;
+          if($isDetail)
+          {
+            $details[$dptId][] = [$key,($value*100)."%"];
+          }
+        }
+        if(empty($count))$count = 1;
+        $report[$dptId][$month] = number_format($total/$count,2,'.','');
+        $user = User::model()->find("(occupation &:occupation)>0 and active =1 and dpt_id=:dptId",[":occupation"=>User::WH_CHECK_IN,":dptId"=>$dptId]);
+        if(empty($user))
+        {
+          continue;
+        }
+        $provide[$user->id] =["percentage"=>$report[$dptId][$month]]; 
+      }
+
+      if($isDetail)
+      {
+        $thisUser = User::model()->findByPk($userId);
+        return $details[$thisUser->dpt_id];
+      }
+
+      $this->createReportCache($month,$report,ReportCache::CheckInReportMonthly);
+
+      return $provide;
+   }
+
+   public function calculateWarehouseInspectionKPI($month,$refresh = false,$isDetail = false,$userId=null)
+   {
+      $report = $this->getCacheReport($month,ReportCache::InspectionReportMonthly);
+      $details = [106=>[],218=>[],530=>[]];
+      $checkingList = [];
+      $provide = [];
+      $result = [];
+      $warehouseProcessService = new WarehouseProcessService();
+      $users = User::model()->findAll("(occupation &:occupation)>0 and active =1",[":occupation"=>User::WH_INSPECTION]);
+      if(!$isDetail)
+      {
+        foreach ($users as $key => $user) {
+          $dptId = $user->dpt_id;
+          $checkInDailyReport = $warehouseProcessService->getInspectionTotalInfo($dptId);
+          $totalArr = $checkInDailyReport;
+          $totalPkg  = $totalArr["total"];
+          if($totalPkg==0) continue;
+          $percentage = floatval(explode("%", $totalArr['donePercent'])[0])/100;
+          $report[$dptId][$month.date("-d")] = $percentage;
+        }
+      }
+
+      foreach ($report as $dptId => $re) {
+        $total = 0;
+        $count = 0;
+        foreach ($re as $key => $value) {
+          if($key==$month) continue;
+          $total+=$value;
+          $count+=1;
+          if($isDetail)
+          {
+            $details[$dptId][] = [$key,($value*100)."%"];
+          }
+        }
+        if(empty($count))$count = 1;
+        $report[$dptId][$month] = number_format($total/$count,2,'.','');
+        $user = User::model()->find("(occupation &:occupation)>0 and active =1 and dpt_id=:dptId",[":occupation"=>User::WH_INSPECTION,":dptId"=>$dptId]);
+        if(empty($user))
+        {
+          continue;
+        }
+        $provide[$user->id] =["percentage"=>$report[$dptId][$month]]; 
+      }
+
+      if($isDetail)
+      {
+        $thisUser = User::model()->findByPk($userId);
+        return $details[$thisUser->dpt_id];
+      }
+
+      $this->createReportCache($month,$report,ReportCache::InspectionReportMonthly);
+
+      return $provide;
+   }
+
+    public function calculateWarehouseSortHeldPutawayKPI($month,$refresh = false,$isDetail = false,$userId=null)
+    {
+      $report = $this->getCacheReport($month,ReportCache::PutawayReportMonthly);
+
+      $checkingList = [];
+      $details = [106=>[],218=>[],530=>[]];
+      $provide = [];
+      $result = [];
+      $warehouseProcessService = new WarehouseProcessService();
+      if(!$isDetail)
+      {
+        $users = User::model()->findAll("(occupation &:occupation)>0 and active =1",[":occupation"=>User::WH_SORTHELD_PUTAWAY]);
+        foreach ($users as $key => $user) {
+          $dptId = $user->dpt_id;
+          $checkInDailyReport = $warehouseProcessService->getPutawaySortHeldList($dptId);
+          $totalArr = $checkInDailyReport['total'];
+          $totalPkg  = $totalArr["total"];
+          if($totalPkg==0) continue;
+          $percentage = floatval(explode("%", $totalArr['donePercent'])[0])/100;
+          $report[$dptId][$month.date("-d")] = $percentage;
+        }
+      }
+
+      foreach ($report as $dptId => $re) {
+        $total = 0;
+        $count = 0;
+        foreach ($re as $key => $value) {
+          if($key==$month) continue;
+          $total+=$value;
+          $count+=1;
+          if($isDetail)
+          {
+            $details[$dptId][] = [$key,($value*100)."%"];
+          }
+        }
+        if(empty($count))$count = 1;
+        $report[$dptId][$month] = number_format($total/$count,2,'.','');
+        $user = User::model()->find("(occupation &:occupation)>0 and active =1 and dpt_id=:dptId",[":occupation"=>User::WH_SORTHELD_PUTAWAY,":dptId"=>$dptId]);
+        if(empty($user))
+        {
+          continue;
+        }
+        $provide[$user->id] =["percentage"=>$report[$dptId][$month]]; 
+      }
+
+      if($isDetail)
+      {
+        $thisUser = User::model()->findByPk($userId);
+        return $details[$thisUser->dpt_id];
+      }
+
+      $this->createReportCache($month,$report,ReportCache::PutawayReportMonthly);
+
+      return $provide;
+    }
+
+    public function calculateWarehousePreparationResortingKPI($month,$refresh = false,$isDetail = false,$userId=null)
+    {
+      $report = $this->getCacheReport($month,ReportCache::PreparationReportMonthly);
+
+      $checkingList = [];
+      $details = [106=>[],218=>[],530=>[]];
+      $provide = [];
+      $result = [];
+      $warehouseProcessService = new WarehouseProcessService();
+      if(!$isDetail)
+      {
+        $users = User::model()->findAll("(occupation &:occupation)>0 and active =1",[":occupation"=>User::WH_HELD_PREPARATION]);
+        foreach ($users as $key => $user) {
+          $params = ['pickupDate'=>'tomorrow'];
+          $dptId = $user->dpt_id;
+          $checkInDailyReport = $warehouseProcessService->getPreparationSummeryList($dptId,$params);
+          $totalArr = $checkInDailyReport['total'];
+          $totalPkg  = $totalArr["total"];
+          if($totalPkg!=0)
+          {
+            $percentage = floatval(explode("%", $totalArr['donePercent'])[0])/100;
+            $report[$dptId][$month.date("-d")] = $percentage;
+          }
+
+          $heldDailyReport = $warehouseProcessService->getHeldShipmentGatepassSummary($dptId);
+          $totalArr = $heldDailyReport[0];
+          $totalHeldPkg  = $totalArr["totalShipments"];
+          if($totalHeldPkg==0)
+          {
+            continue;
+          }else
+          {
+            $percentage = floatval(explode("%", $totalArr['donePercent'])[0])/100;
+            if($totalPkg==0)
+            {
+              $report[$dptId][$month.date("-d")] = $percentage;
+            }else
+            {
+              $report[$dptId][$month.date("-d")] = ($report[$dptId][$month.date("-d")]+$percentage)/2;
+            }
+          }
+
+        }
+      }
+
+      foreach ($report as $dptId => $re) {
+        $total = 0;
+        $count = 0;
+        foreach ($re as $key => $value) {
+          if($key==$month) continue;
+          $total+=$value;
+          $count+=1;
+          if($isDetail)
+          {
+            $details[$dptId][] = [$key,($value*100)."%"];
+          }
+
+        }
+        if(empty($count))$count = 1;
+        $report[$dptId][$month] = number_format($total/$count,2,'.','');
+        $user = User::model()->find("(occupation &:occupation)>0 and active =1 and dpt_id=:dptId",[":occupation"=>User::WH_HELD_PREPARATION,":dptId"=>$dptId]);
+        if(empty($user))
+        {
+          continue;
+        }
+        $provide[$user->id] =["percentage"=>$report[$dptId][$month]]; 
+      }
+
+
+      if($isDetail)
+      {
+        $thisUser = User::model()->findByPk($userId);
+        return $details[$thisUser->dpt_id];
+      }
+
+
+      $this->createReportCache($month,$report,ReportCache::PreparationReportMonthly);
+
+      return $provide;
+    }
+
+
+   private function getCacheReport($month,$reportType)
+   {
+      $report = ReportCache::model()->find('create_time = :month and type=:type',[':month'=>$month."-01 00:00:00",":type"=>$reportType]);
+      if(!empty($report))
+      {
+        $report = $report->mdata;
+      }else
+      {
+        $report = [Org::TLA_DEPARTMENT_SYDNEY=>[$month=>0,$month.date("-d")=>0],Org::TLA_DEPARTMENT_MELBOURNE=>[$month=>0,$month.date("-d")=>0],Org::TLA_DEPARTMENT_BRISBANE=>[$month=>0,$month.date("-d")=>0]];
+      }
+      return $report;
+   }
+   private function createReportCache($month,$report,$reportType)
+   {
+      $reportCache = ReportCache::model()->find('create_time = :month and type=:type',[':month'=>$month."-01 00:00:00",":type"=>$reportType]);
+      if(!empty($reportCache))
+      {
+        $reportCache->mdata=$report;
+        $reportCache->modify_time = date('Y-m-d H:i:s');
+        $reportCache->save();
+      }else
+      {
+        $reportCache = new ReportCache();
+        $reportCache->type = $reportType;
+        $reportCache->status = 1;
+        $reportCache->mdata=$report;
+        $reportCache->create_time = $month."-01 00:00:00";
+        $reportCache->creater = 1;
+        $reportCache->modify_time = date('Y-m-d H:i:s');
+        $reportCache->save();
+      }
+   }
+
+   public function cacheKpiReportMonthly($month)
+   {
+      $result = [];
+      $totalData = [];
+      $result["header"] = ["Operator","Occupation","A","B","C(Email)","C(Task)"];
+      //imports KPI
+      $opAirData = $this->calculateMonthAirOpKPI($month,true);
+      $opSeaData = $this->calculateMonthSeaOpKPI($month,true);
+      $emailMonthData =$this->calculateMonthEmailKPI($month,true);
+      $taskMonthData = $this->calculateMonthTaskKPI($month,true);
+      $customMonthData = $this->calculateMonthCustomClearanceKPI($month,true);
+
+      // warehouse kpi
+
+      $whCheckinData = $this->calculateWarehouseCheckinKPI($month,true);
+      $whInspectionData = $this->calculateWarehouseInspectionKPI($month,true);
+      $whPutawayData =$this->calculateWarehouseSortHeldPutawayKPI($month,true);
+      $whPreparationData = $this->calculateWarehousePreparationResortingKPI($month,true);
+
+
+
+
+      foreach ($emailMonthData as $userId => $value) {
+        if(!empty($totalData[$userId]))
+        {
+          $totalData[$userId][4] = (number_format($value[2],2,'.','')*100)."%"."({$value[0]}/{$value[1]})";
+        }else
+        {
+          $totalData[$userId] = [$userId,"","","",(number_format($value[2],2,'.','')*100)."%"."({$value[0]}/{$value[1]})",""];
+        }
+      }
+
+      foreach ($taskMonthData as $userId => $value) {
+        if(!empty($totalData[$userId]))
+        {
+          $totalData[$userId][5] = (number_format($value[2],2,'.','')*100)."%"."({$value[0]}/{$value[1]})";
+        }else
+        {
+          $totalData[$userId] = [$userId,"","","","",(number_format($value[2],2,'.','')*100)."%"."({$value[0]}/{$value[1]})"];
+        }
+      }
+
+      foreach ($opAirData as $userId => $value) {
+        $user = User::model()->findByPk($userId);
+        if(($user->occupation&User::IM_AIR_OP)==0) continue;
+
+        if(!empty($totalData[$userId."-".User::IM_AIR_OP]))
+        {
+          $totalData[$userId."-".User::IM_AIR_OP][2] = $value[0]."|<=15";
+        }else
+        {
+          $totalData[$userId."-".User::IM_AIR_OP] = [$userId,User::IM_AIR_OP,$value[0]."|<=15","","",""];
+        }
+      }
+
+      foreach ($opSeaData as $userId => $value) {
+        $user = User::model()->findByPk($userId);
+        if(($user->occupation&User::IM_SEA_OP)==0) continue;
+        if(!empty($totalData[$userId."-".User::IM_SEA_OP]))
+        {
+          $totalData[$userId."-".User::IM_SEA_OP][2] = $value[0]."|<=10";
+        }else
+        {
+          $totalData[$userId."-".User::IM_SEA_OP] = [$userId,User::IM_SEA_OP,$value[0]."|<=10","","",""];
+        }
+      }
+
+      foreach ($customMonthData as $userId => $value) {
+        $user = User::model()->findByPk($userId);
+        $str = (number_format($value["percentage"],2,'.','')*100)."%"."({$value['0-3']}/{$value['all']})";
+        if(!empty($totalData[$userId."-".User::CUSTOM_CLEARENCE]))
+        {
+          $totalData[$userId."-".User::CUSTOM_CLEARENCE][2] = $str."|>=90%";
+        }else
+        {
+          $totalData[$userId."-".User::CUSTOM_CLEARENCE] = [$userId,User::CUSTOM_CLEARENCE,$str."|>=90%","","",""];
+        }
+      }
+
+      foreach ($whCheckinData as $userId => $value) {
+        $user = User::model()->findByPk($userId);
+        $str = (number_format($value["percentage"],2,'.','')*100)."%";
+        if(!empty($totalData[$userId."-".User::WH_CHECK_IN]))
+        {
+          $totalData[$userId."-".User::WH_CHECK_IN][2] = $str."|>=95%";
+        }else
+        {
+          $totalData[$userId."-".User::WH_CHECK_IN] = [$userId,User::WH_CHECK_IN,$str."|>=95%","","",""];
+        }
+      }
+
+
+
+      foreach ($whInspectionData as $userId => $value) {
+        $user = User::model()->findByPk($userId);
+        $str = (number_format($value["percentage"],2,'.','')*100)."%";
+        if(!empty($totalData[$userId."-".User::WH_INSPECTION]))
+        {
+          $totalData[$userId."-".User::WH_INSPECTION][2] = $str."|>=95%";
+        }else
+        {
+          $totalData[$userId."-".User::WH_INSPECTION] = [$userId,User::WH_INSPECTION,$str."|>=95%","","",""];
+        }
+      }
+
+
+      foreach ($whPutawayData as $userId => $value) {
+        $user = User::model()->findByPk($userId);
+        $str = (number_format($value["percentage"],2,'.','')*100)."%";
+        if(!empty($totalData[$userId."-".User::WH_SORTHELD_PUTAWAY]))
+        {
+          $totalData[$userId."-".User::WH_SORTHELD_PUTAWAY][2] = $str."|>=95%";
+        }else
+        {
+          $totalData[$userId."-".User::WH_SORTHELD_PUTAWAY] = [$userId,User::WH_SORTHELD_PUTAWAY,$str."|>=95%","","",""];
+        }
+      }
+
+      foreach ($whPreparationData as $userId => $value) {
+        $user = User::model()->findByPk($userId);
+        $str = (number_format($value["percentage"],2,'.','')*100)."%";
+        if(!empty($totalData[$userId."-".User::WH_HELD_PREPARATION]))
+        {
+          $totalData[$userId."-".User::WH_HELD_PREPARATION][2] = $str."|>=95%";
+        }else
+        {
+          $totalData[$userId."-".User::WH_HELD_PREPARATION] = [$userId,User::WH_HELD_PREPARATION,$str."|>=95%","","",""];
+        }
+      }
+
+
+      foreach ($totalData as $key => $value) {
+        $userId = explode("-", $key)[0];
+        $user = User::model()->findBypk($userId);
+        
+        $warehouse = Org::model()->findByPk($user->dpt_id);
+        $name = @$user->fname." ".@$user->lname;
+        if(!empty($warehouse))
+        {
+          $warehouseName = explode(" ", $warehouse->name)[0];
+          $name = @$user->fname." ".@$user->lname."(".$warehouseName.")";
+        }
+
+        $totalData[$key][0] = $name;
+
+
+
+        $totalData[$key][1] = empty($totalData[$key][1])?"":User::$occupations[$totalData[$key][1]];
+        if(!empty($totalData[$key][1]))
+        {
+          $totalData[$key][4] = "";
+          $totalData[$key][5] = "";
+        }else
+        {
+          if(empty($value[4])) $totalData[$key][4] = "0%";
+          if(empty($value[5])) $totalData[$key][5] = "0%";
+        }
+      }
+
+      $result["totalData"] = $totalData;
+
+      $reportCache = ReportCache::model()->find('create_time = :month and type=:type',[':month'=>$month."-01 00:00:00",":type"=>ReportCache::KpiReportMonthly]);
+      if(!empty($reportCache))
+      {
+        $reportCache->mdata=$result;
+        $reportCache->modify_time = date('Y-m-d H:i:s');
+        $reportCache->save();
+      }else
+      {
+        $reportCache = new ReportCache();
+        $reportCache->type = ReportCache::KpiReportMonthly;
+        $reportCache->status = 1;
+        $reportCache->mdata=$result;
+        $reportCache->create_time = $month."-01 00:00:00";
+        $reportCache->creater = 1;
+        $reportCache->modify_time = date('Y-m-d H:i:s');
+        $reportCache->save();
+      }
+    }
+
+
+    public function getKpiDetail($userId,$occupation,$type,$month)
+    {
+      $result = [];
+      $totalData = [];
+      if($type==2)
+      {
+        switch ($occupation) {
+          case User::IM_AIR_OP:
+            $result["header"] = ["Consol No.","Checking Type","StartDate","EndDate","Days","Count"];
+            $opAirData = $this->calculateMonthAirOpKPI($month,true,1,$userId);
+            $totalData = $opAirData;
+            break;
+          case User::IM_SEA_OP:
+            $result["header"] = ["Consol No.","Checking Type","StartDate","EndDate","Days","Count"];
+            $opSeaData = $this->calculateMonthSeaOpKPI($month,true,1,$userId);
+            $totalData = $opSeaData;
+            break;
+          case User::CUSTOM_CLEARENCE:
+            $result["header"] = ["HBN","Ref","StartDate","EndDate","Days"];
+            $customClearenceData = $this->calculateMonthCustomClearanceKPI($month,true,1,$userId);
+            $totalData = $customClearenceData;
+            break;
+          
+          case User::WH_CHECK_IN:
+            $result["header"] = ["Day","Percentage"];
+            $whCheckinData = $this->calculateWarehouseCheckinKPI($month,true,1,$userId);
+            $totalData = $whCheckinData;
+            break;
+          case User::WH_INSPECTION:
+            $result["header"] = ["Day","Percentage"];
+            $whInspectionData = $this->calculateWarehouseInspectionKPI($month,true,1,$userId);
+            $totalData = $whInspectionData;
+            break;
+          case User::WH_SORTHELD_PUTAWAY:
+            $result["header"] = ["Day","Percentage"];
+            $whPutawayData = $this->calculateWarehouseSortHeldPutawayKPI($month,true,1,$userId);
+            $totalData = $whPutawayData;
+            break;
+          case User::WH_HELD_PREPARATION:
+            $result["header"] = ["Day","Percentage"];
+            $whPreparationData = $this->calculateWarehousePreparationResortingKPI($month,true,1,$userId);
+            $totalData = $whPreparationData;
+            break;
+          
+          
+          default:
+            # code...
+            break;
+        }
+      }else if($type==3)
+      {
+
+
+      }else if($type==4)
+      {
+        $result["header"] = ["Email No","StartDate","CloseTime","Deadline"];
+        $emailMonthData =$this->calculateMonthEmailKPI($month,true,false,$userId,true);
+        $totalData = $emailMonthData;
+      }else if($type ==5)
+      {
+        $result["header"] = ["Task No","Close Time","Deadline","count"];
+        $taskMonthData = $this->calculateMonthTaskKPI($month,true,1,$userId);
+        $totalData = $taskMonthData;
+      }
+
+     $result['totalData'] =  $totalData;
+     return $result;
+
+    }
+
+   public function calculateMonthDisputeSupplierTaskKPI($month,$withToday = false)
+   {
+      $disputeSupplierTasks = DisputeSupplierTask::model()->findAll("type = :type and meta like '%dispute_id%' and status!=:status and  DATE_FORMAT(`create`,'%Y-%m') >='2022-09' ",[":type"=>DisputeSupplierTask::$my_type,":status"=>TlaTask::DELETED]);
+      $provide = [['id'=>'1','date'=>"Today",'dispute_amount'=>0,'credit_amount'=>0],['id'=>'2','date'=>"MTD",'dispute_amount'=>0,'credit_amount'=>0],['id'=>'3','date'=>"Total",'dispute_amount'=>0,'credit_amount'=>0]];
+      $todayDispute = 0;
+      $todayCredit = 0;
+      $mtdDispute = 0;
+      $mtdCredit = 0;
+      $totalDispute = 0;
+      $totalCredit = 0;
+
+      foreach ($disputeSupplierTasks as $key => $disputeSupplierTask)
+      {
+        if(date("Y-m-d",strtotime($disputeSupplierTask->create))==date("Y-m-d"))
+        {
+          $todayDispute+=$disputeSupplierTask->getDisputeAmount();
+        }
+
+        if(date("Y-m",strtotime($disputeSupplierTask->create))==date("Y-m"))
+        {
+          $mtdDispute+=$disputeSupplierTask->getDisputeAmount();
+        }
+
+        $totalDispute+=$disputeSupplierTask->getDisputeAmount();
+
+        $siReconcile = $disputeSupplierTask->getLinkObj();
+        if(!empty($siReconcile->mdata['disputeCreditNote']))
+        {
+          foreach ($siReconcile->mdata['disputeCreditNote'] as $no => $value)
+          {
+            foreach ($value as $vk => $v) {
+              if(!empty($vk))
+              {
+                $pbl = PaymentBilling::model()->find('meta like "%'.$vk.'%"');
+                $tDate = $pbl->transaction_date;
+                if($tDate==date("Y-m-d"))
+                {
+                  $todayCredit+=$v;
+                }
+
+                 if(date("Y-m",strtotime($pbl->transaction_date))==date("Y-m"))
+                {
+                  $mtdCredit+=$v;
+                }
+                
+                  $totalCredit+=$v;
+
+              }
+            }
+          }
+        }
+
+      }
+
+      $provide[0]['dispute_amount'] = $todayDispute;
+      $provide[0]['credit_amount'] = $todayCredit;
+      $provide[1]['dispute_amount'] = $mtdDispute;
+      $provide[1]['credit_amount'] = $mtdCredit;
+      $provide[2]['dispute_amount'] = $totalDispute;
+      $provide[2]['credit_amount'] = $totalCredit;
+
+      return $provide;
+   }
+
+}
+
+?>

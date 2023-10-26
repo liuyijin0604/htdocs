@@ -1,0 +1,1678 @@
+<?php
+
+/**
+ * This is the model class for table "org".
+ *
+ * The followings are the available columns in table 'org':
+ * The followings are the available columns in table 'org':
+ * @property string $id
+ * @property string $pid
+ * @property integer $type
+ * @property string $name
+ * @property string $code
+ * @property string $accode
+ * @property string $abn
+ * @property string $address
+ * @property string $suburb
+ * @property string $state
+ * @property string $postcode
+ * @property string $country
+ * @property string $email
+ * @property string $phone
+ * @property string $fax++++
+ * @property string $desc
+ * @property integer $status
+ * @property string $meta
+ * @property string $by
+ * @property string $manager
+ * @property integer $nln
+ * @property string $hash
+ *
+ * The followings are the available model relations:
+ * @property Filerepo[] $filerepos
+ * @property User[] $users
+ */
+class Org extends CActiveRecord
+{
+
+	// define courier org id
+	const REGISTERED_NAME = 'TARGET MEIDA AUSTRALIA PTY LTD';
+	const IM_COMPANY_NAME = 'Top Logistics Australia';
+	const IM_EMAIL = 'imports@toplogistics.com.au';
+	const IM_EMAIL_NAME = 'TLA Imports';
+	const IM_CS_EMAIL = 'importscs@toplogistics.com.au';
+	const IM_COMPANY_ADDRESS = "1/233 Milperra Rd";
+ 	const IM_COMPANY_CITY = "Bankstown Aerodrome NSW 2200";
+ 	const IM_COMPANY_CITY_TLA = "Bankstown Aerodrome NSW 2200";
+ 	const IM_COMPANY_POSTCODE = "2200";
+ 	const IM_COMPANY_SUBURB = "Bankstown Aerodrome";
+ 	const IM_COMPANY_STATE = "NSW";
+ 	const IM_COMPANY_ADDRESS_TLA = "1/233 Milperra Rd";
+ 	const IM_COMPANY_PHONE = '02-90668200';
+ 	const IM_COMPANY_PHONE_SHOW = '+61 2 9066 8200';
+ 	const COMPANY_NAME_S = "TOP LOGISTICS";
+ 	const COMPANY_NAME_SL = "Top Logistics";
+
+	const ORGID_COURIER_PCA = 114;
+	const ORGID_COURIER_TLA = 114;
+	const ORGID_COURIER_FASTWAY = 115;
+	const ORGID_COURIER_AUPOST = 101;
+	const ORGID_COURIER_AUPOST_EXPRESS = 3958;
+	const ORGID_COURIER_PICKUP = 199;
+	const ORGID_COURIER_TOLL = 1017;
+	const ORGID_COURIER_TOLL_IPEC = 3752;
+	const ORGID_COURIER_STARTRACK = 858;
+	const ORGID_COURIER_STARTRACK_TOP = 3463;
+	const ORGID_COURIER_AUSLETTER = 1301;
+	const ORGID_COURIER_D2Z = 1426;
+	const ORGID_COURIER_D2Z_SUB = 1656;
+	const ORGID_COURIER_D2Z_CUSTOMER = 1427;
+	const ORGID_COURIER_TNT = 976;
+	const ORGID_COURIER_TNT_TOP = 3466;
+	const ORGID_IMPORT_CASUAL_CUSTOMER = 3494;
+	const ORGID_CHINYUN = 1222;
+	const ORGID_COURIER_STARTRACK_MEL = 1888;
+	const ORGID_COURIER_HUNTER = 140;
+	const ORGID_COURIER_ECOF = 2707;
+	const ORGID_COURIER_SENDLE = 2992;
+	const ORGID_COURIER_UBI = 3079;
+	const ORGID_COURIER_UBI_TOLL = 3079;
+	const ORGID_COURIER_UBI_AP =3994;
+	const ORGID_COURIER_UBI_CLIENT = 3025;
+	const ORGID_COURIER_4PX = 2619;
+	const ORGID_CLIENT_4PX = 2619;
+	const ORGID_COURIER_DFE = 3189;
+	const ORGID_COURIER_BORDER = 3447;
+	const ORGID_COURIER_FL = 4282;
+	const ORGID_COURIER_DFE_TOP = 3460;
+	const ORGID_COURIER_ALLIED = 3701;
+	const ORGID_COURIER_ALLIED_TOP = 4429;
+	const ORGID_COURIER_EIZ = 3701;
+	const ORGID_COURIER_EIZ_TOLL = 3701;
+	const ORGID_COURIER_EIZ_ALLIED = 3702;
+	const ORGID_COURIER_CHUKOU1 = 3557;
+	const ORGID_SUPPLIER_AMI = 1363;
+	const ORGID_BROKER_AUTUMN = 3429;
+	const ORGID_COURIER_SF = 3590;
+	const ORGID_CLIENT_PCAE = 3441;
+	const ORGID_CLIENT_TLA = 3459;
+	const ORGID_CLIENT_SF = 3333;
+	const ORGID_CLIENT_ZTO = 2740;
+	const ORGID_CLIENT_TRACKING = 3706;
+	const ORGID_CLIENT_HENGAO = 4063;
+	const ORGID_CLIENT_YIYUNDA = 3527;
+	const ORGID_CLIENT_EWE_GROUP = 4618;
+	const ORGID_CLIENT_EWE_ITEM = 4660;
+	const ORGID_CLIENT_EWE_KG = 4657;
+	const ORGID_CLIENT_AOYING = 4612;
+
+
+	const TYPE_SUPPLIER = 70;
+	const TYPE_COURIER_AU = 15;
+	const ORGID_COURIER_GV_AUPOST = 3937;
+	const ORGID_COURIER_AUK = 4105;
+	const ORGID_COURIER_FL_HUNTER = 4282;
+	const ORGID_CLIENT_SHUNCHIDA = 4018;
+	const ORGID_CLIENT_INBOUND = 4555;
+	const ORGID_CLIENT_YONGZHE = 4534;
+	const ORGID_CLIENT_YANER = 4171;
+
+	const TPLORGRATE_COURIER_AUSPOST_SYD = 730;
+	const TPLORGRATE_COURIER_AUSPOST_SYD_EXPRESS = 848;
+	const TPLORGRATE_COURIER_AUSPOST_MEL = 805;
+	const TPLORGRATE_COURIER_FASTWAY_SYD = 799;
+	const TPLORGRATE_COURIER_FASTWAY_MEL = 471;
+	const TPLORGRATE_COURIER_TNT_SYD = 778;
+	const TPLORGRATE_COURIER_TNT_MEL = 781;
+	const TPLORGRATE_COURIER_EIZTOLL_SYD = 925;
+	const TPLORGRATE_COURIER_EIZTOLL_MEL = 926;
+	const TPLORGRATE_COURIER_SF_SYD = 854;
+	const TPLORGRATE_COURIER_SF_MEL = 967;
+	const TPLORGRATE_COURIER_ALLIED_SYD = 924;
+	const TPLORGRATE_COURIER_ALLIED_MEL = 934;
+	const TPLORGRATE_COURIER_TOLL_BNE = 927;
+	const TPLORGRATE_COURIER_ALLIED_BNE = 937;
+	const TPLORGRATE_COURIER_ALLIED_PER = 940;
+	const TPLORGRATE_COURIER_ALLIED_ADL = 943;
+	const TPLORGRATE_COURIER_UBI_TOLL_SYD = 952;
+	const TPLORGRATE_COURIER_UBI_TOLL_MEL = 955;
+	const TPLORGRATE_COURIER_UBI_AP_SYD = 688;
+	const TPLORGRATE_COURIER_UBI_AP_MEL = 684;
+	const TPLORGRATE_COURIER_SHINE666 = 985;
+	const TPLORGRATE_COURIER_MICHAELS = 10399;
+	const TPLORGRATE_COURIER_FAST_MOVER = 10426;
+	const TPLORGRATE_COURIER_TONYMEL = 10393;
+	const TPLORGRATE_COURIER_KEVIN = 10300;
+	const TPLORGRATE_COURIER_LIANGXU = 10456;
+	const TPLORGRATE_COURIER_LISTENTOBAIBAI = 10432;
+	const TPLORGRATE_COURIER_MYTOLL_SYD = 1007;
+	const TPLORGRATE_COURIER_MYTOLL_MEL = 1021;
+	const TPLORGRATE_COURIER_MYTOLL_BNE = 1024;
+	const TPLORGRATE_COURIER_UBI_BORDER_SYD = 10501;
+	const TPLORGRATE_COURIER_UBI_BORDER_MEL = 10504;
+
+	public static $couriers = [
+		self::ORGID_COURIER_AUPOST,
+		self::ORGID_COURIER_AUSLETTER,
+		self::ORGID_COURIER_FASTWAY,
+		self::ORGID_COURIER_STARTRACK,
+		self::ORGID_COURIER_STARTRACK_MEL,
+		self::ORGID_COURIER_STARTRACK_TOP,
+		self::ORGID_COURIER_TNT,
+		self::ORGID_COURIER_TNT_TOP,
+		self::ORGID_COURIER_D2Z,
+		self::ORGID_COURIER_HUNTER,
+		self::ORGID_COURIER_ECOF,
+		self::ORGID_SUPPLIER_GLOBAVEND,
+		self::ORGID_COURIER_UBI,
+		self::ORGID_COURIER_DFE,
+		self::ORGID_COURIER_DFE_TOP,
+	];
+
+	public static $couriersForImportsCost = [
+		self::ORGID_COURIER_AUPOST => 'AuPost',
+		self::ORGID_COURIER_FASTWAY => 'FastWay',
+		self::ORGID_COURIER_TNT => 'TNT',
+		self::ORGID_COURIER_TOLL_IPEC => 'TLA TOLL',
+		self::ORGID_COURIER_UBI => 'UBI',
+		self::ORGID_COURIER_EIZ => 'EIZ',
+	];
+
+	public static $bsl_ot = array(
+		self::ORGID_COURIER_STARTRACK,
+		self::ORGID_COURIER_STARTRACK_MEL,
+		self::ORGID_COURIER_TNT,
+	);
+
+	// define const for custom broker
+	const ORGID_BROKER_FYN = 1563;
+	const ORGID_BROKER_MASTER = 1828;
+	public static $brokers = [
+		self::ORGID_BROKER_FYN,
+		self::ORGID_BROKER_MASTER,
+	];
+
+	// define const for airport
+	const ORGID_AIRPORT_QANTAS = 955;
+	const ORGID_AIRPORT_MENZIES = 939;
+	const ORGID_AIRPORT_DNATA = 977;
+	const ORGID_AIRPORT_PCAETEMP = 949;
+	public static $airports = [
+		self::ORGID_AIRPORT_QANTAS,
+		self::ORGID_AIRPORT_MENZIES,
+		self::ORGID_AIRPORT_DNATA,
+		self::ORGID_AIRPORT_PCAETEMP,
+	];
+
+	public static $airportsCal = [
+		self::ORGID_AIRPORT_QANTAS,
+		self::ORGID_AIRPORT_MENZIES,
+		self::ORGID_AIRPORT_DNATA,
+		self::ORGID_SUPPLIER_AMI
+	];
+
+	// define const for client org
+	const ORGID_CLIENT_JIACHENG = 838;
+
+	// define const for supplier
+	const ORGID_SUPPLIER_AUSTWAY = 2668;
+	const ORGID_CLIENT_AUSTWAY = 1474;
+	const ORGID_CLIENT_GLODEN = 4261;
+	const ORGID_CLIENT_DINGDA = 4321;
+
+	const ORGID_CLIENT_AOCHEN = 3321;
+	const ORGID_CLIENT_AOLIAN = 4213;
+	const ORGID_CLIENT_ZHONGWAI = 3103;
+	const ORGID_CLIENT_GLOBAVEND = 2716;
+	const ORGID_SUPPLIER_GLOBAVEND = 2927;
+	const ORGID_CLIENT_NINJA = 4372;
+
+	// define const for 3PL
+	const ORGID_3PL_IGEA = 2872;
+	const ORGID_3PL_SMART_HUB = 1985;
+	const ORGID_3PL_NINJA_SHARK = 1985;
+	const ORGID_3PL_KWIKTEACH = 2393;
+	const ORGID_3PL_LIFESTYLE = 2939;
+	const ORGID_3PL_SUNNYA = 3308;
+	const ORGID_3PL_DWVERTEX = 1308;
+	const ORGID_3PL_COBAYER = 3302;
+	const ORGID_3PL_ELEKZON = 2067;
+	const ORGID_3PL_SUBEMO = 3841;
+	const ORGID_3PL_VMAX = 3596;
+	public static $easyships = [
+		self::ORGID_3PL_KWIKTEACH,
+		self::ORGID_3PL_LIFESTYLE,
+	];
+	const ORGID_3PL_XCSOURCE = 3058;
+	const ORGID_3PL_BIOPHYSICS = 1816;
+	const ORGID_3PL_AUSRIVER = 1247;
+	const ORGID_3PL_TAYLOR = 3122;
+	const ORGID_3PL_I_HOMDEC = 3817;
+	const ORGID_3PL_V_MAX = 3560;
+	public static $directLabel = [
+		self::ORGID_3PL_AUSRIVER,
+		self::ORGID_3PL_TAYLOR,
+		self::ORGID_3PL_REDBACK,
+	];
+	const ORGID_3PL_PEAKCARE = 3013;
+	const ORGID_3PL_ABUNDANT = 1319;
+	const ORGID_3PL_SKINPROJECT = 3375;
+	const ORGID_3PL_AUSTRALIA_888 = 3196;
+	const ORGID_3PL_REDBACK = 3363;
+	const ORGID_3PL_ECOMATTERS = 1275;
+
+	// define const for air&sea
+	const ORGID_AIRSEA_HOUPU = 1668;
+	const ORGID_AIRSEA_WGAU = 1457;
+	const ORGID_AIRSEA_HUANTANG = 2470;
+	const ORGID_AIRSEA_ACCESS_BRAND_MANAGEMENT = 2698;
+	public static $displayJobRef = [
+		self::ORGID_AIRSEA_HOUPU,
+		self::ORGID_AIRSEA_WGAU,
+		self::ORGID_AIRSEA_HUANTANG,
+		self::ORGID_AIRSEA_MINENSSEY,
+		self::ORGID_AIRSEA_ACCESS_BRAND_MANAGEMENT,
+	];
+
+	const ORGID_AIRSEA_AUMIAODE = 2025;
+	const ORGID_AIRSEA_MINENSSEY = 2659;
+	const ORGID_AIRSEA_WTMANAGE = 2966;
+	const ORGID_AIRSEA_ARRA = 3249;
+	public static $airsea_wh = [
+		// abm
+		self::ORGID_AIRSEA_AUMIAODE,
+		self::ORGID_AIRSEA_MINENSSEY,
+		self::ORGID_AIRSEA_WGAU,
+		self::ORGID_AIRSEA_WTMANAGE,
+		// 合生元
+		self::ORGID_AIRSEA_PINJUN,
+		self::ORGID_AIRSEA_PW,
+		self::ORGID_AIRSEA_FARMLAND,
+		self::ORGID_AIRSEA_HHGROUP,
+		self::ORGID_AIRSEA_SWISSEAU,
+		//
+		self::ORGID_AIRSEA_ARRA,
+	];
+	public static $airsea_abm = [
+		// abm
+		self::ORGID_AIRSEA_AUMIAODE,
+		self::ORGID_AIRSEA_MINENSSEY,
+		self::ORGID_AIRSEA_WGAU,
+		self::ORGID_AIRSEA_WTMANAGE,
+	];
+	public static $airsea_heshengyuan = [
+		// 合生元
+		self::ORGID_AIRSEA_PINJUN,
+		self::ORGID_AIRSEA_PW,
+		self::ORGID_AIRSEA_FARMLAND,
+		self::ORGID_AIRSEA_HHGROUP,
+		self::ORGID_AIRSEA_SWISSEAU,
+	];
+
+	public static $dg_org = [
+		self::ORGID_COURIER_DFE,
+		self::ORGID_COURIER_PCA,
+		self::ORGID_COURIER_PICKUP,
+	];
+	public static $dg_org_name = [
+		'DFE',
+		'Truck Delivery',
+		'Pickup',
+	];
+
+	const ORGID_AIRSEA_PINJUN = 1509;
+	const ORGID_AIRSEA_PW = 3251;
+	const ORGID_AIRSEA_FARMLAND = 886;
+	const ORGID_AIRSEA_HHGROUP = 888;
+	const ORGID_AIRSEA_SWISSEAU = 889;
+
+	const ORGID_IMPORT_JANCO = 2800;
+	const ORGID_IMPORT_EXPENSE = 3485;
+	const CUSTOMS_BROKER_TYPE = 72;
+	public $sync_xero = true;
+	public $nolog = false;
+	public $wmsQuotes = [];
+	public $oids = []; //store the org_Id and by ids
+
+	public static $types = [
+		10 => 'Courier - CN',
+		15 => 'Courier - AU',
+		20 => 'Warehouse - CN',
+		25 => 'Warehouse - AU',
+		30 => 'Client',
+		50 => 'Agent',
+		60 => 'Export Agent',
+		65 => 'Export Sub-Agent',
+		70 => 'Supplier', // for cost supplier
+		72 => 'Customs Broker',
+		82 => 'Truck Delivery Agent',
+	];
+
+	public static $types_agent = [
+		82 => 'Truck Delivery Agent',
+	];
+
+	public static $bwts = [
+		1 => 'Debtor',
+		2 => 'Creditor',
+		4 => 'Warehouse',
+		8 => 'Courier',
+		16 => 'Import Client',
+		32 => 'Export Client',
+		64 => 'Air/Sea Client',
+		128 => '3PL Client',
+		256 => 'Client Subsidiary',
+	];
+
+	public static $importWarehouseList = [
+		self::PCAE_DEPARTMENT_SYDNEY => 'SYD',
+		self::PCAE_DEPARTMENT_MELBOURNE => 'MEL',
+		self::PCAE_DEPARTMENT_BRISBANE => 'BNE',
+		self::PCAE_DEPARTMENT_ADELAIDE => 'ADL',
+		self::PCAE_DEPARTMENT_PERTH => 'PER',
+		self::PCAE_DEPARTMENT_FREMANTLE => 'FRE'
+	];
+
+	public static $ourWarehouseList = [
+		'AUSYD',
+		'AUMEL',
+		'AUBNE'
+	];
+
+	public static $validTerms = [
+		3 => '3 Months',
+		6 => '6 Months',
+		12 => '12 Months',
+	];
+
+	public static $states = [
+		1 => 'Active',
+		0 => 'Inactive',
+	];
+
+	public static $cdts = [
+		1 => 'Sydney Cargo Driver',
+		2 => 'Melbourne Cargo Driver',
+		4 => 'Adelaide Cargo Driver',
+		8 => 'Brisbane Cargo Driver',
+		16 => 'Perth Cargo Driver',
+	];
+
+	public static $upackingTypes = [
+		128 => 'Sydney Unpack',
+		256 => 'Melbourne Unpack',
+		512 => 'Adelaide Unpack',
+		1024 => 'Brisbane Unpack',
+		2048 => 'Perth Unpack'
+	];
+	
+	public static $upackingTypesRe = [
+		106 => 128 ,
+		218 => 256,
+		529 => 512,
+		530 => 1024,
+		811 => 2048
+	];
+
+	public static $shippingLine = [
+		3360=>"1upcargo",
+		2890=>"airwave",
+		1692=>"asea360",
+		1420=>"ABBA LOGISTICS",
+		3327=>"ACE GLOBAL",
+		1526=>"AGS",
+		2130=>"ANL",
+		1289=>"APL",
+		2503=>"AUSTIN",
+		1454=>"CARGOPORT",
+		3260=>"CH ROBINSON",
+		3134=>"Consol",
+		1283=>"COSCO",
+		1454=>"CP WORLD",
+		3775=>"Customs & Trade Solution(CTS)",
+		1477=>"ECU",
+		3889=>"Evans International Freight Consolidators",
+		1891=>"Evergreen shipping",
+		3411=>"Forwarding And Logictics Services Australia Pty Ltd",
+		3602=>"Gold star/ZIM",
+		1739=>"Hamburgsud",
+		1653=>"HLAG",
+		1858=>"HYUNDAI/HMM",
+		4444=>"inchcape",
+		1277=>"MAERSK",
+		1351=>"MSC",
+		4129=>"Nautical",
+		1798=>"Ocean Network Express / ONE",
+		1798=>"ONE",
+		1310=>"OOCL",
+		1988=>"PACIFIC ASIA EXPRESS",
+		1988=>"PAE/PIL",
+		1994=>"QUAY",
+		3689=>"SEAWAY LOGISTICS",
+		3659=>"Sila",
+		3697=>"Southern cross cargo(SCC)",
+		3237=>"TML",
+		3695=>"TOLL",
+		3204=>"TRANSTAR",
+		1748=>"TS Lines",
+		3369=>"UNITED WAYS",
+		1190=>"vanguard",
+		2869=>"WELLY",
+		1291=>"YM shipping line",
+		999999999=>'Other'
+	];
+
+	// define driver type
+	const SYDNEY_CARGO_DRIVER = 1;
+	const MELBOURNE_CARGO_DRIVER = 2;
+	const ALL_DRIVER = 31;
+
+	//define static client Type
+	const CLIENTTYPE = 30;
+
+	//define static client Type
+	const STATEACTIVE = 1;
+
+	// define system warehouse ID
+	const PCAE_DEPARTMENT_SYDNEY = 106;
+	const PCAE_DEPARTMENT_MELBOURNE = 218;
+	const PCAE_DEPARTMENT_BRISBANE = 530;
+	const PCAE_DEPARTMENT_ADELAIDE = 529;
+	const PCAE_DEPARTMENT_PERTH = 811;
+	const PCAE_DEPARTMENT_FREMANTLE = 2936;
+
+	const TLA_DEPARTMENT_SYDNEY = 106;
+	const TLA_DEPARTMENT_MELBOURNE = 218;
+	const TLA_DEPARTMENT_BRISBANE = 530;
+	const TLA_DEPARTMENT_ADELAIDE = 529;
+	const TLA_DEPARTMENT_PERTH = 811;
+	const TLA_DEPARTMENT_FREMANTLE = 2936;
+	const TLA_DEPARTMENT_MOXON = 4414;
+
+	const COURIERS = [
+		self::ORGID_COURIER_PCA,
+		self::ORGID_COURIER_TOLL,
+		self::ORGID_COURIER_AUSLETTER,
+		self::ORGID_COURIER_AUPOST,
+		self::ORGID_COURIER_TNT,
+		self::ORGID_COURIER_FASTWAY,
+		self::ORGID_COURIER_STARTRACK,
+		self::ORGID_COURIER_HUNTER,
+		self::ORGID_COURIER_STARTRACK_MEL,
+		self::ORGID_COURIER_D2Z,
+		self::ORGID_COURIER_ECOF,
+		self::ORGID_COURIER_UBI];
+
+	public static $warehouse_list = [
+		self::TLA_DEPARTMENT_SYDNEY=>'SYD', 
+		self::TLA_DEPARTMENT_MELBOURNE=>'MEL',
+		self::TLA_DEPARTMENT_BRISBANE=>'BNE',
+		self::TLA_DEPARTMENT_ADELAIDE=>'ADE',
+		self::TLA_DEPARTMENT_PERTH =>'PER',
+		self::TLA_DEPARTMENT_FREMANTLE=>'FRE',
+		self::TLA_DEPARTMENT_MOXON=>'MOXON'
+	];
+
+	public static $warehouse_list_id = [
+		'Sydney'=>self::TLA_DEPARTMENT_SYDNEY, 
+		'Melbourne'=>self::TLA_DEPARTMENT_MELBOURNE,
+		'Brisbane'=>self::TLA_DEPARTMENT_BRISBANE
+	];
+
+	/**
+	 * Returns the static model of the specified AR class.
+	 * @param string $className active record class name.
+	 * @return Org the static model class
+	 */
+	public static function model($className = __CLASS__)
+	{
+		return parent::model($className);
+	}
+
+	/**
+	 * get related WMS quote by quote index
+	 * @param $quoteIndex
+	 */
+	public function getWmsQuote($quoteIndex)
+	{
+		if (empty($this->wmsQuotes)) {
+			$this->wmsQuotes = WmsOrgQuote::getOrgQuotes($this->id);
+		}
+		if (empty($this->wmsQuotes)) {
+			return -1; // org wms quote not set or no valid one
+		}
+
+		if (!isset($this->wmsQuotes[$quoteIndex])) {
+			return -2; // specified quote index not existing
+		}
+
+		$quote = $this->wmsQuotes[$quoteIndex];
+
+		return $quote;
+	}
+
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName()
+	{
+		return 'org';
+	}
+
+	public $extra = [];
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return [
+			['type, name, country,phone,email', 'required'],
+			['pid, status, address, suburb, postcode, code, accode, email, phone, fax, abn, desc, state, meta, manager, nln, hash', 'safe'],
+			['type, status, by', 'numerical', 'integerOnly' => true],
+			['name, address', 'length', 'max' => 255],
+			['suburb, country', 'length', 'max' => 100],
+			['abn, code, accode', 'length', 'max' => 30],
+			['lat, lng', 'numerical'],
+			['postcode', 'length', 'max' => 10],
+			['phone, fax', 'length', 'max' => 50],
+			// The following rule is used by search().
+			// Please remove those attributes that should not be searched.
+			['id, pid, type, name, code, accode, abn, address, suburb, state,oids, postcode, country, email, phone, fax, desc, status, meta, by, manager,nln, hash,lat, lng, cargo_driver_type', 'safe', 'on' => 'search'],
+		];
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return [
+			'contacts' => [self::HAS_MANY, 'OrgContact', 'org_id', 'on' => 'contacts.status > 0'],
+			'users' => [self::HAS_MANY, 'User', 'org_id'],
+			'sales' => [self::BELONGS_TO, 'User', 'manager'],
+			'owner' => [self::BELONGS_TO, 'Org', 'by'],
+			'parent' => [self::BELONGS_TO, 'Org', 'pid'],
+			'childs' => [self::HAS_MANY, 'Org', 'by'],
+			'zoneMap' => [self::HAS_MANY, 'ZoneMap', 'org_id'],
+			'banks' => [self::HAS_MANY, 'OrgBankAccount', 'org_id'],
+		];
+	}
+
+	/**
+	 * save to Xero as well
+	 */
+	public function afterSave()
+	{
+		// in case save to Xero system as well
+		if ($this->sync_xero) {
+			if (in_array($this->type, [30, 50, 60, 65, 70])) {
+				$this->save2Xero();
+			}
+		}
+		if (!$this->nolog) {
+			Log::add($this, $this->isNewRecord ? 3 : 4);
+		}
+
+		// check DDP process
+		if ((!empty($this->extra['creditlimit']) && $this->getCurrentCreditOfLimit() < 1) || (!empty($this->extra['credit_ext_date']) && strtotime($this->extra['credit_ext_date']) > time())) {
+			$shipments = Shipment::model()->findAll('agent_id = :aid AND bwf & ' . ImParcel::CUSTOM_DDP . ' > 0', [':aid' => $this->id]);
+			foreach ($shipments as $shipment) {
+				if (!empty($shipment->process) && $shipment->process->status == ShipmentProcess::INFROM_CUSTOMER_PAY) {
+					$shipment->process->changeStatus(ShipmentProcess::CONFIRM_PAYMENT);
+				}
+			}
+		}
+
+		return parent::afterSave();
+	}
+
+	/**
+	 * sync all Org data with Xero system
+	 */
+	private function save2Xero()
+	{
+		$contact = new XeContact();
+		$contact->name = $this->name;
+		$contact->contactNumber = 'PORG-' . $this->id;
+		$contact->accountNumber = 'PORG-' . $this->id;
+		$contact->taxNumber = $this->abn;
+		if (filter_var($this->email, FILTER_VALIDATE_EMAIL)) {
+			$contact->emailAddress = $this->email;
+		}
+		$address = new XeAddress();
+		$address->addressType = XeAddress::AT_POBOX; //billing address
+		$address->addressLine1 = $this->address;
+		$address->city = $this->suburb;
+		$address->region = $this->state;
+		$address->postalCode = $this->postcode;
+		$contact->addresses->add($address);
+		if (!empty($this->phone)) {
+			$phone = new XePhone();
+			$phone->phoneCountryCode = '+61';
+			$phone->phoneNumber = $this->phone;
+			$contact->phones->add($phone);
+		}
+		if (!empty($this->fax)) {
+			$fax = new XePhone();
+			$fax->phoneType = 'FAX';
+			$fax->phoneNumber = $this->fax;
+			$contact->phones->add($fax);
+		}
+		try {
+			$rt = $contact->save();
+			if (!$rt) {
+				Yii::app()->xero->log('Failed to save Org - ' . $this->id, Xero::LOG_LEVEL_ERR);
+			}
+		} catch (Exception $ecp) {
+			$msg = 'Failed to save org - ' . $ecp->getMessage();
+			$msg .= PHP_EOL;
+			$msg .= 'Org Data : ' . json_encode($contact, JSON_PRETTY_PRINT);
+			Yii::app()->xero->log($msg, Xero::LOG_LEVEL_ERR);
+		}
+	}
+
+	/**
+	 * get Xero xml data from single contact object
+	 * @param $org
+	 * @return mixed
+	 */
+	public static function getXeroXmlData(&$org)
+	{
+		$contact = new XeContact();
+		$contact->name = $org->name;
+		//$contact->firstName = 'Michael';
+		//$contact->lastName = 'Yue';
+		$contact->contactNumber = 'PORG-' . $org->id;
+		$contact->accountNumber = 'PORG-' . $org->id;
+		$contact->taxNumber = $org->abn;
+		$contact->emailAddress = $org->email;
+		$address = new XeAddress();
+		$address->addressType = XeAddress::AT_POBOX; //billing address
+		$address->addressLine1 = $org->address;
+		$address->city = $org->suburb;
+		$address->region = $org->state;
+		$address->postalCode = $org->postcode;
+		$contact->addresses->add($address);
+		if (!empty($org->phone)) {
+			$phone = new XePhone();
+			$phone->phoneCountryCode = '+61';
+			$phone->phoneNumber = $org->phone;
+			$contact->phones->add($phone);
+		}
+		if (!empty($org->fax)) {
+			$fax = new XePhone();
+			$fax->phoneType = 'FAX';
+			$fax->phoneNumber = $org->fax;
+			$contact->phones->add($fax);
+		}
+		return $contact->getXmlData();
+	}
+
+	public function getPackageNums()
+	{
+	}
+	/**
+	 * sync all Orgs to Xero
+	 */
+	public static function sync2Xero()
+	{
+		$MAX_LOOP_ITEMS = 40;
+		$orgs = self::model()->findAll('status = 1 AND type in (30,50,60,65,70)');
+
+		$bulkXmlData = '';
+		$index = 0;
+		foreach ($orgs as $org) {
+			$bulkXmlData .= self::getXeroXmlData($org);
+			if ($index++ >= $MAX_LOOP_ITEMS) {
+				self::bulkSaveOrg2Xero($bulkXmlData);
+				$index = 0;
+				$bulkXmlData = '';
+			}
+		}
+
+		if (!empty($bulkXmlData)) {
+			self::bulkSaveOrg2Xero($bulkXmlData);
+		}
+	}
+
+	private static function bulkSaveOrg2Xero(&$data)
+	{
+		$bulkXmlData = '<?xml version="1.0"?><Contacts>';
+		$bulkXmlData .= $data;
+		$bulkXmlData .= '</Contacts>';
+		$xecontacts = new XeContacts();
+		try {
+			$xecontacts->setEndPoint('Contacts');
+			$rt = $xecontacts->bulkSave($bulkXmlData);
+			if (!$rt) {
+				Yii::app()->xero->log('Failed to sync Orgs unkown reason', Xero::LOG_LEVEL_ERR);
+			}
+		} catch (Exception $ecp) {
+			$msg = 'Failed to sync all Orgs - ' . $ecp->getMessage();
+			Yii::app()->xero->log($msg, Xero::LOG_LEVEL_ERR);
+		}
+	}
+
+	public function hasUser($id, $sub = true)
+	{
+		$u = User::model()->findByPk($id);
+		if (!$u) {
+			return false;
+		}
+		if ($this->id == $u->org_id) {
+			return true;
+		}
+		if ($sub && $u->org->by == $this->id) {
+			return true;
+		}
+		return false;
+	}
+
+	public static function fwdList()
+	{
+		return self::tList([30, 50]);
+	}
+
+	public static function dptList($t = [20, 25])
+	{
+		$a = self::tList($t);
+		foreach ($a as $k => $v) {
+			$a[$k] = trim(str_replace('Warehouse', '', $v));
+		}
+		return $a;
+	}
+
+	public static function dptList3PL($t = [20, 25])
+	{
+		$a = self::tList($t);
+		foreach ($a as $k => $v) {
+			if (!preg_match('/syd/i', $v) && !preg_match('/mel/i', $v) && !preg_match('/bri/i', $v)) {
+				unset($a[$k]);
+				continue;
+			}
+			$a[$k] = trim(str_replace('Warehouse', '', $v));
+		}
+		return $a;
+	}
+
+	public static function ownerList()
+	{
+		return self::tList([15, 30, 50, 60]);
+	}
+
+	public static function tList($t)
+	{
+		if (is_array($t)) {
+			$rs = self::model()->findAll('status =1 AND type IN (' . implode(',', $t) . ')');
+		} else {
+			$rs = self::model()->findAll('status =1 AND type = ' . $t);
+		}
+		$a = [];
+		foreach ($rs as $r) {
+			$a[$r->id] = $r->name;
+		}
+		return $a;
+	}
+
+	public function contactList($func)
+	{
+		$rt = [];
+		foreach ($this->contacts as $c) {
+			if ($c->func & 1 > 0) {
+				$rt[] = $c;
+			}
+		}
+		return $rt;
+	}
+
+	public function termList($t = false)
+	{
+		$ts = [];
+		if ($t) {
+			$ts[$t] = $t;
+		}
+		if (!empty($this->extra['payterm'])) {
+			$pts = explode("\n", $this->extra['payterm']);
+			foreach ($pts as $pt) {
+				if (empty($pt) || in_array($pt, $ts)) {
+					continue;
+				}
+				$ts[$pt] = $pt;
+			}
+		}
+		return $ts;
+	}
+
+	public function shortName($l = 1)
+	{
+		$n = explode(' ', $this->name);
+		return implode(' ', array_slice($n, 0, $l));
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		$al = [
+			'id' => 'ID',
+			'pid' => 'Parent',
+			'type' => 'Type',
+			'name' => 'Org Name',
+			'code' => 'Code',
+			'accode' => 'A/C Code',
+			'abn' => 'ABN',
+			'address' => 'Address',
+			'suburb' => 'City/Suburb',
+			'state' => 'State',
+			'postcode' => 'Post Code',
+			'country' => 'Country',
+			'email' => 'Email',
+			'phone' => 'Phone',
+			'fax' => 'Fax',
+			'desc' => 'Description',
+			'status' => 'Status',
+			'meta' => 'Meta',
+			'by' => 'Belongs To',
+			'certs' => 'Certificates',
+			'manager' => 'Sales Manager',
+			'lat' => 'Latitude',
+			'lng' => 'Longitude',
+			'cargo_driver_type' => 'Cargo Driver Type',
+		];
+		foreach ($al as $k => $l) {
+			$al[$k] = Yii::t(strtolower(__CLASS__), $l);
+		}
+		return $al;
+	}
+
+	public function genCode()
+	{
+		if (empty($this->name)) {
+			return '';
+		}
+		$w = preg_split('/ +/', $this->name);
+		if (sizeof($w) > 1) {
+			$c = $w[0][0] . $w[1][0];
+		} else {
+			$c = $w[0][0] . $w[0][1];
+		}
+		$s = self::model()->count('code LIKE :c', [':c' => $c . '%']);
+		return strtoupper($c) . ($s + 1);
+	}
+
+	public function genHash()
+	{
+		return hash('crc32b', $this->name . rand(100000, 999999));
+	}
+
+	public function storeName()
+	{
+		return $this->pid > 0 ? $this->ret->code . ' ' . $this->name : $this->name;
+	}
+
+	public function getType()
+	{
+		return Yii::t(strtolower(__CLASS__), empty(self::$types[$this->type]) ? 'System' : self::$types[$this->type]);
+	}
+
+	public function getStatus()
+	{
+		return Yii::t(strtolower(__CLASS__), empty(self::$states[$this->status]) ? '' : self::$states[$this->status]);
+	}
+
+	public function getCargoDriverType()
+	{
+		$cdtStr = "";
+		foreach (self::$cdts as $key => $value) {
+			if (($key & $this->cargo_driver_type) > 0) {
+				$cdtStr .= Yii::t(strtolower(__CLASS__), $value) . "      ";
+			}
+		}
+		return $cdtStr;
+	}
+
+	public function getAddress($country = true, $ml = true, $br = true)
+	{
+		$a = $this->address;
+		$a .= $ml ? ",\n" : ', ';
+		$a .= $this->suburb . ' ' . $this->state . ' ' . $this->postcode;
+		if ($country) {
+			$a .= $ml ? ",\n" : ', ';
+			$a .= $this->country;
+		}
+		return $br ? nl2br($a) : $a;
+	}
+
+	public function fullAddress($cs = [])
+	{
+		$cs = empty($cs) ? ['suburb', 'state', 'postcode', 'country'] : $cs;
+		$fa = [];
+		$addr = str_replace(',', ', ', $this->address);
+		foreach ($cs as $c) {
+			if ($c == 'address') {
+				continue;
+			}
+			$fa[] = $this->{$c};
+			//$addr = str_ireplace($this->{$c},'', $addr);
+		}
+		if (!in_array('country', $cs)) {
+			$addr = str_ireplace($this->country, '', $addr);
+		}
+		return preg_replace('/[ ]*,[, ]+/', ', ', $addr . ', ' . implode(', ', $fa));
+	}
+
+	public function getOwner()
+	{
+		if ($this->owner) {
+			return $this->owner->name;
+		} else {
+			return Yii::t(strtolower(__CLASS__), 'System');
+		}
+	}
+
+	public static function listSupplier($t = [13, 14], $short = false)
+	{
+		if (is_array($t)) {
+			$rs = self::model()->findAll('status = 1 AND type IN (' . implode(', ', $t) . ') ORDER BY name');
+		} else {
+			$rs = self::model()->findAll('status = 1 AND type = :t ORDER BY name', [':t' => $t]);
+		}
+		$rt = [];
+		foreach ($rs as $r) {
+			$rt[$r->id] = $short === false ? $r->name : $r->shortName($short);
+		}
+		return $rt;
+	}
+
+	public static function getRetailers()
+	{
+		$rs = self::model()->findAll('type = 20');
+		$t = [];
+		foreach ($rs as $r) {
+			$t[$r->id] = $r->name;
+		}
+		return $t;
+	}
+
+	public function getLabelNumber()
+	{
+		$v = '@nln_'.$this->id."_".hash('crc32b', microtime().rand(0, 999999));
+		Yii::app()->db->createCommand('UPDATE org SET nln=(' . $v . ':=nln)+1 WHERE id=:id')->bindValue(":id", $this->id)->execute();
+
+		return Yii::app()->db->createCommand('SELECT ' . $v . ';SET ' . $v . '=NULL;')->queryScalar();
+	}
+
+	public function meTo($by)
+	{
+		$waste = false;
+		if ($this->id == 3) { //meport
+			$rs = self::model()->findAll('status = 1 AND t.by = :b AND t.type = :t', [':b' => $by, ':t' => 30]);
+		} else {
+			switch ($this->type) {
+				case 30: //station
+					$rs = self::model()->findAll('status = 1 AND t.by = :b AND t.type = :t', [':b' => $by, ':t' => 31]);
+					break;
+				case 31: //slauther
+					$rs = self::model()->findAll('status = 1 AND t.by = :b AND t.type = :t', [':b' => $by, ':t' => 32]);
+					break;
+				case 32: //warehouse
+					$rs = self::model()->findAll('t.id = 6');
+					break;
+			}
+			$waste = self::model()->findByPk(4);
+		}
+		$o = [];
+		foreach ($rs as $r) {
+			$o[$r->id] = $r->name;
+		}
+		if ($waste) {
+			$o[$waste->id] = Yii::t(strtolower(__CLASS__), $waste->name);
+		}
+		return $o;
+	}
+
+	public function beforeSave()
+	{
+		if(!empty(User::getCurrentUser()))
+		{
+			if (!User::checkIsNotTruckUser()) {
+				$this->by = User::getCurrentUser()->org_id;
+			}
+		}
+		if (empty($this->by)) {
+			$this->by = 1;
+		}
+		if (empty($this->code)) {
+			$this->code = $this->genCode();
+		}
+		if (empty($this->hash)) {
+			$this->hash = $this->genHash();
+		}
+		if (!empty($this->email)) {
+			$emls = preg_split('/[;,\s]+/', $this->email);
+			if (count($emls) > 1) {
+				foreach ($emls as $k => $eml) {
+					$emls[$k] = (string) filter_var($eml, FILTER_VALIDATE_EMAIL);
+				}
+				$this->email = implode(';', $emls);
+			} else {
+				$this->email = (string) filter_var($this->email, FILTER_VALIDATE_EMAIL);
+			}
+		}
+		foreach (['outturn_email', 'client_billing_email'] as $extra_key) {
+			if (!empty($this->extra[$extra_key])) {
+				$emls = preg_split('/[;,\s]+/', $this->extra[$extra_key]);
+				if (count($emls) > 1) {
+					foreach ($emls as $k => $eml) {
+						$emls[$k] = (string) filter_var($eml, FILTER_VALIDATE_EMAIL);
+					}
+					$this->extra[$extra_key] = implode(';', $emls);
+				} else {
+					$this->extra[$extra_key] = (string) filter_var($this->extra[$extra_key], FILTER_VALIDATE_EMAIL);
+				}
+			}
+		}
+		$this->meta = json_encode($this->extra);
+		return true;
+	}
+
+	/**
+	 * get consumables sell mode
+	 * 0 - free
+	 * 1 - not free
+	 * @return int
+	 */
+	public function getCgSellModel()
+	{
+		// currently we save consumables price setting in the sell type table
+		// if ( isset($this->extra['cg_sell_model']) ) {
+		//     return $this->extra['cg_sell_model'];
+		// }
+		$ratesInfo = SellRate::getCgoodsRates($this->id);
+		return $ratesInfo['found'] ? 1 : 0;
+	}
+
+	public function afterFind()
+	{
+		$this->extra = json_decode($this->meta, true);
+
+		// for Import Client we give some initial credit settings if not set yet before
+		if (in_array($this->type, [30, 50, 60, 65])) {
+			if (!isset($this->extra['wthreshold'])) {
+				$this->extra['wthreshold'] = 5;
+			}
+		}
+
+		if (!isset($this->extra['credit_init_date'])) {
+			$this->extra['credit_init_date'] = date('Y-m-d');
+		}
+		if (!isset($this->extra['creditlimit'])) {
+			$this->extra['creditlimit'] = 1;
+		}
+		if (!isset($this->extra['creditterms'])) {
+			$this->extra['creditterms'] = 1; // credit
+		}
+
+		return true;
+	}
+
+	public function rUpdate($d)
+	{
+		if ($d->attr == 'meta') {
+			$this->extra = json_decode($d->val, true);
+		}
+		$this->{$d->attr} = $d->val;
+		$this->update([$d->attr]);
+	}
+
+	public function searchAll()
+	{
+		$criteria = new CDbCriteria;
+		$criteria->compare('t.type', $this->type);
+		$criteria->compare('t.id', '>5');
+		return self::model()->findAll($criteria, ['sort' => ['t.name ASC']]);
+	}
+
+	public function getWarehouseList()
+	{
+		$r = Yii::app()->cache->get('OrgWarehouseList_' . $this->id);
+		if (!empty($r)) {
+			return $r;
+		}
+		$r = [];
+		if (empty($this->extra['warehouse'])) {
+			return $r;
+		}
+		foreach ($this->extra['warehouse'] as $k) {
+			$w = self::model()->findByPk($k);
+			$r[$k] = $w->name;
+		}
+
+		Yii::app()->cache->set('OrgWarehouseList_' . $this->id, $r, 1800);
+
+		return $r;
+	}
+
+	public function creditBlock()
+	{
+		return empty($this->extra['creditlimit']) ? false : floatval($this->extra['creditlimit']) < 0;
+	}
+
+	public function overCreditLimit()
+	{
+		if (!empty($this->extra['credit_lock'])) {
+			return true;
+		}
+
+		if (empty($this->extra['credit_action'])) {
+			return false;
+		}
+
+		// return false; //temporarily turn credit check off;
+		if (!empty($this->extra['credit_ext_date']) && strtotime($this->extra['credit_ext_date']) > time()) {
+			return false;
+		}
+		if (date('N') > 5 || (date('N') == 5 && date("H") > 18)) {
+			return false;
+		} // from Friday 18:00 to Monday, can print labels
+		$ool = Yii::app()->cache->get('ORG_OVERLIMIT_' . $this->id);
+		if (!empty($ool)) {
+			return $ool;
+		}
+		Yii::app()->name = "TLA";
+		$limit = empty($this->extra['creditlimit']) ? 1 : floor($this->extra['creditlimit']);
+		$term = empty($this->extra['creditterms']) ? 1 : intval($this->extra['creditterms']);
+		$start = empty($this->extra['credit_init_date']) ? '1900-01-01' : date('Y-m-d', strtotime($this->extra['credit_init_date']));
+		if (isset($this->extra['credit_payment_method']) && $this->extra['credit_payment_method'] == 1) {
+			/*Option 2 payment method
+			 * 22th<=day<7th, consider the  <16th invoice of the last month.
+			 * 7th<=day<22th, consider the <1th invoice of the this month.*/
+			$considerDue = date('d') < 7 ? date('Y-m-16', strtotime("-1 month")) : date('Y-m-01');
+			$sql = "SELECT SUM(total) FROM `invoice` WHERE to_id= " . $this->id . " AND status IN(2,3,7) AND date >='" . $start . "' AND date <'" . $considerDue . "'";
+			$hasInvoiceNotPaid = Yii::app()->db_tla->createCommand($sql)->queryScalar();
+			$ool = $hasInvoiceNotPaid > 0;
+			Yii::app()->cache->set('ORG_OVERLIMIT_' . $this->id, $ool, 600);
+			Yii::app()->name = "HVLV";
+			return $ool;
+		} else {
+			/* The Default payment method, when the term due or invoice amount over credit, return true*/
+			$sql = "SELECT id FROM `invoice` WHERE to_id=" . $this->id . " AND status IN(2,3,7) AND date< DATE_SUB(CURDATE(), INTERVAL " . $term . " DAY) AND date >= '" . $start . "' ORDER BY date ASC";
+			$hasOverTermInvoice = Yii::app()->db_tla->createCommand($sql)->queryScalar();
+			if (!empty($hasOverTermInvoice)) {
+				$ool = true;
+				Yii::app()->cache->set('ORG_OVERLIMIT_' . $this->id, $ool, 600);
+				Yii::app()->name = "HVLV";
+				return $ool;
+			}
+			$sql = "SELECT SUM(total) FROM invoice WHERE to_id = " . $this->id . " AND status IN(2,3) AND date >= '" . $start . "'";
+			$totalOverdue = Yii::app()->db_tla->createCommand($sql)->queryScalar();
+			if ($totalOverdue <= $limit) {
+				$invoices = Invoice::model()->findAll("to_id = " . $this->id . " AND status = 7 AND date >= '" . $start . "'");
+				foreach ($invoices as $r) {
+					$totalOverdue += $r->getBalance();
+				}
+			}
+			// $payments = Payment::model()->findAll('org_id = ' . $this->id . ' AND status = 6 AND ata > 0');
+			// foreach ($payments as $r) {
+			// 	$totalOverdue -= $r->ata;
+			// }
+			$ool = $totalOverdue >= $limit;
+			Yii::app()->cache->set('ORG_OVERLIMIT_' . $this->id, $ool, 600);
+			Yii::app()->name = "HVLV";
+			return $ool;
+		}
+	}
+
+	public function getCurrentCreditBalance()
+	{
+		Yii::app()->name= "TLA";
+		$limit = empty($this->extra['creditlimit']) ? 1 : floor($this->extra['creditlimit']);
+		if ($limit <= 0) {
+			return false;
+		}
+		$totalOverdue = $this->getCurrentCreditTotalOverDue();
+		return $limit-$totalOverdue;
+	}
+
+	public function getCurrentCreditTotalOverDue()
+	{
+		Yii::app()->name= "TLA";
+		$limit = empty($this->extra['creditlimit']) ? 1 : floor($this->extra['creditlimit']);
+		if ($limit <= 0) {
+			return false;
+		}
+		$term = empty($this->extra['creditterms']) ? 1 : intval($this->extra['creditterms']);
+		$start = empty($this->extra['credit_init_date']) ? '1900-01-01' : date('Y-m-d', strtotime($this->extra['credit_init_date']));
+		$sql = "SELECT SUM(total) FROM invoice WHERE to_id = " . $this->id . " AND status IN(2,3)  AND date >= '" . $start . "'";
+		$totalOverdue = Yii::app()->db_tla->createCommand($sql)->queryScalar();
+		$invoices = Invoice::model()->findAll("to_id = " . $this->id . " AND status = 7 AND date >= '" . $start . "'");
+		foreach ($invoices as $r) {
+			$totalOverdue += $r->getBalance();
+		}
+		// $payments = Payment::model()->findAll('org_id = ' . $this->id . ' AND status = 6 AND ata > 0');
+		// foreach ($payments as $r) {
+		// 	$totalOverdue -= $r->ata;
+		// }
+		return $totalOverdue;
+	}
+
+	public function getCurrentCreditOfLimit()
+	{
+		Yii::app()->name= "TLA";
+		$limit = empty($this->extra['creditlimit']) ? 1 : floor($this->extra['creditlimit']);
+		if ($limit <= 0) {
+			return false;
+		}
+		$totalOverdue = $this->getCurrentCreditTotalOverDue();
+		if($totalOverdue==false)
+		{
+			return false;
+		}
+		// $totalOverdue = max(0, $totalOverdue);
+		// echo $totalOverdue."\n";
+		return $totalOverdue/ $limit;
+	}
+
+	public function getCurrentCreditLeft()
+	{
+		$limit = empty($this->extra['creditlimit']) ? 1 : floor($this->extra['creditlimit']);
+		if ($limit <= 1) {
+			return 0;
+		}
+		$start = empty($this->extra['credit_init_date']) ? '1900-01-01' : date('Y-m-d', strtotime($this->extra['credit_init_date']));
+		$sql = "SELECT SUM(total) FROM invoice WHERE to_id = " . $this->id . " AND status IN(2,3)  AND date >= '" . $start . "'";
+		$totalOverdue = Yii::app()->db->createCommand($sql)->queryScalar();
+		$invoices = Invoice::model()->findAll("to_id = " . $this->id . " AND status = 7 AND date >= '" . $start . "'");
+		foreach ($invoices as $r) {
+			$totalOverdue += $r->getBalance();
+		}
+		// $payments = Payment::model()->findAll('org_id = ' . $this->id . ' AND status = 6 AND ata > 0');
+		// foreach ($payments as $r) {
+		// 	$totalOverdue -= $r->ata;
+		// }
+		$totalOverdue = max(0, $totalOverdue);
+		return round($limit - $totalOverdue, 2);
+	}
+
+	public function getCurrentCreditTerm()
+	{
+		$term = empty($this->extra['creditterms']) ? 1 : intval($this->extra['creditterms']);
+		$start = empty($this->extra['credit_init_date']) ? '1900-01-01' : date('Y-m-d', strtotime($this->extra['credit_init_date']));
+		$sql = "SELECT date, no FROM `invoice` WHERE to_id=" . $this->id . " AND status IN(2,3,7) AND date >= '" . $start . "' ORDER BY date ASC";
+		$invoice_oldest = Yii::app()->db->createCommand($sql)->queryRow(); //the oldedst unpaid invoice date;
+		if (isset($invoice_oldest['date'])) {
+			$inv_date = new DateTime($invoice_oldest['date'], new DateTimeZone('Australia/Sydney'));
+			$inv_now = new DateTime('now', new DateTimeZone('Australia/Sydney'));
+			$date = time(); // Change to whatever date you need
+			$dotw = date('w', $date);
+			$end = ($dotw == 7/* Friday */) ? $date : strtotime('next Sunday', $date);
+			$inv_end = new DateTime(date('Y-m-d', $end), new DateTimeZone('Australia/Sydney')); //end of this week, sunday
+			$daydiff = $inv_now->diff($inv_date)->format("%a");
+			$daydiffend = $inv_end->diff($inv_date)->format("%a");
+			if (isset($this->extra['credit_payment_method']) && $this->extra['credit_payment_method'] == 1) {
+				$considerDue = new DateTime(date('d') < 7 ? date('Y-m-16', strtotime("-1 month")) : date('Y-m-01'), new DateTimeZone('Australia/Sydney'));
+				$daydiffDue = $considerDue->diff($inv_date)->format('%a');
+				return [intval(-$daydiffDue), $invoice_oldest['no'], $invoice_oldest['date'], intval($term - $daydiffend)];
+			} else {
+				return [intval($term - $daydiff), $invoice_oldest['no'], $invoice_oldest['date'], intval($term - $daydiffend)];
+			}
+		}
+		return [$term, '', ''];
+	}
+
+	public function getCreditDetails()
+	{
+		$credit = [
+			'limit' => 0,
+			'balance' => 0,
+			'terms' => 14,
+			'left' => 14,
+			'currency' => 'AUD',
+			'balance_warning' => false,
+			'left_warning' => false,
+		]; // with default value
+		if (isset($this->extra['creditlimit'])) {
+			$credit['limit'] = floor($this->extra['creditlimit']);
+		}
+		if (isset($this->extra['creditterms'])) {
+			$credit['terms'] = intval($this->extra['creditterms']);
+		}
+		if (isset($this->extra['credit_init_date'])) {
+			$term_credit = $this->getCurrentCreditTerm();
+			$credit['left'] = $term_credit[0];
+		}
+		if (isset($this->extra['currency']) && !empty($this->extra['currency'])) {
+			$credit['currency'] = Invoice::$currencies[$this->extra['currency']];
+		}
+
+		// get credit balance
+		// balance = limit - all unpaid invoice
+
+		$credit['balance'] = isset($this->extra['creditlimit']) ? $this->getCurrentCreditBalance() :0;
+		$percent = $this->getCurrentCreditOfLimit();
+		if ($percent > 0.8) {
+			$credit['balance_warning'] = true;
+		}
+		if ($credit['left'] <= 3) {
+			$credit['left_warning'] = true;
+		}
+
+		$credit['percent'] = $percent;
+		$credit['action'] = @$this->extra['credit_action'];
+
+		return $credit;
+	}
+
+	/**
+	 * get total of need pay invoice for the specified owner and warehouse
+	 * @param $org
+	 * @param $dptId
+	 * @return mixed
+	 */
+	public function getOrgTotalNotPaidAmount($dptId = 0)
+	{
+
+		// get total of unpaid amount
+		$sql = 'SELECT SUM(total) FROM invoice WHERE type = 10 AND status < 7 AND to_id = ' . $this->id;
+		if ($dptId > 0) {
+			$sql .= ' AND dpt_id = ' . $dptId;
+		}
+		$rt = Yii::app()->db->createCommand($sql);
+		$total = $rt->queryScalar();
+
+		// get total of partially paid amount
+		$invs = Invoice::model()->findAll('type = 10 AND to_id = :id AND status = 7', [':id' => $this->id]);
+		foreach ($invs as $inv) {
+			// get patially paid amount
+			$sql = 'SELECT SUM(amount) FROM pay_inv WHERE inv_id = ' . $inv->id;
+			$rt = Yii::app()->db->createCommand($sql);
+			$totalPaid = $rt->queryScalar();
+			$total = $inv->total - $totalPaid;
+		}
+
+		return $total > 0 ? $total : 0;
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 * @return CActiveDataProvider the data provider that can return the models based on the search/filter conditions.
+	 */
+	public function search($pgn = true, $ps = 30, $ec = false)
+	{
+		// Warning: Please modify the following code to remove attributes that
+		// should not be searched.
+
+		$criteria = new CDbCriteria;
+
+		if (!User::checkIsNotTruckUser()) {
+			$this->by = User::getCurrentUser()->org_id;
+		}
+		$criteria->compare('t.id', $this->id);
+		$criteria->compare('pid', $this->pid);
+		$criteria->compare('t.type', '>1');
+		$criteria->compare('t.type', $this->type);
+		$criteria->compare('name', $this->name, true);
+		$criteria->compare('code', $this->code, true);
+		$criteria->compare('accode', $this->accode, true);
+		$criteria->compare('abn', $this->abn, true);
+		$criteria->compare('address', $this->address, true);
+		$criteria->compare('suburb', $this->suburb, true);
+		$criteria->compare('state', $this->state, true);
+		$criteria->compare('postcode', $this->postcode, true);
+		$criteria->compare('country', $this->country, true);
+		$criteria->compare('email', $this->email, true);
+		$criteria->compare('phone', $this->phone, true);
+		$criteria->compare('fax', $this->fax, true);
+		$criteria->compare('desc', $this->desc, true);
+		$criteria->compare('status', $this->status);
+		$criteria->compare('hash', $this->hash);
+		if (!empty($this->cargo_driver_type)) {
+			$criteria->addCondition(" (cargo_driver_type & {$this->cargo_driver_type}) > 0");
+		}
+		if (!empty($this->by) && empty($this->oids)) {
+			$criteria->compare('t.by', $this->by);
+		}
+		if (!empty($this->oids)) {
+			$criteria->addInCondition('t.id', $this->oids);
+		}
+
+		if (Yii::app()->name == 'PEP') {
+			$criteria->addInCondition('t.type', [60, 65]);
+		}
+
+		if ($ec) {
+			$criteria->mergeWith($ec);
+		}
+
+		return new CActiveDataProvider($this, [
+			'criteria' => $criteria,
+			'sort' => [
+				'defaultOrder' => 't.name ASC',
+			],
+			'pagination' => $pgn ? [
+				'pageSize' => $ps,
+			] : false,
+		]);
+	}
+
+	public function updateMeta()
+	{
+		$this->meta = json_encode($this->extra);
+		$this->update(['meta']);
+	}
+
+	public function getOPName()
+	{
+		if (empty($this->extra['op_id'])) {
+			return '';
+		}
+		$u = User::model()->findByPk($this->extra['op_id']);
+		return empty($u) ? '' : $u->name;
+	}
+
+	public function getSPName()
+	{
+		if (empty($this->extra['sp_id'])) {
+			return '';
+		}
+		$u = User::model()->findByPk($this->extra['sp_id']);
+		return empty($u) ? '' : $u->name;
+	}
+
+	public static function getName($id, $code = true)
+	{
+		$org = self::model()->findByPk($id);
+		if (!empty($org)) {
+			if ($code) {
+				return $org->code . ':' . $org->name;
+			} else {
+				return $org->name;
+			}
+		} else {
+			return '';
+		}
+	}
+
+	public function resetPassword()
+	{
+		$password = md5(date('YmdHis'));
+		$this->extra['password'] = md5($password);
+		$this->sync_xero = false;
+		$this->save();
+
+		Yii::log($password, 'warning', 'trace');
+
+		return $password;
+	}
+
+	public function cgLimit()
+	{
+		// orders
+		$orders = WmsTask::model()->findAll([
+			'condition' => 'type = :type AND is_request = 1 AND meta like :org_id AND status in (20,30,99)',
+			'params' => [
+				':type' => array_search('CG Delivery', WmsTask::$types),
+				':org_id' => '%"org":"' . $this->id . '"%',
+			],
+			'order' => 'id DESC',
+		]);
+
+		// total thermal and wrapper orded
+		$thermal_total = 0;
+		$wrapper_total = 0;
+		$tape_total = 0;
+		foreach ($orders as $order) {
+			foreach ($order->items as $item) {
+				if (preg_match('/热敏/', $item->mdata['sn'])) {
+					$thermal_total += $item->mdata['uq'];
+				} elseif (preg_match('/缠绕膜/', $item->mdata['sn'])) {
+					$wrapper_total += $item->mdata['uq'];
+				} elseif (preg_match('/透明胶带/', $item->mdata['sn'])) {
+					$tape_total += $item->mdata['uq'];
+				}
+			}
+		}
+
+		// shipments
+		if (!empty($order)) {
+			$shipments1 = Shipment::model()->count('agent_id = :org_id AND created >= :order_time AND (hbn like \'%EAU%\' or hbn like \'%DAU%\') AND status > 10 AND status < 100', [':org_id' => $this->id, ':order_time' => $order->schd_time]);
+			$shipments2 = Shipment::model()->count('agent_id = :org_id AND created >= :order_time AND status > 10 AND status < 100', [':org_id' => $this->id, ':order_time' => $order->schd_time]);
+		} else {
+			$shipments1 = 0;
+			$shipments2 = 0;
+		}
+
+		if (empty($this->extra['thermal_credit'])) {
+			$this->extra['thermal_credit'] = 0;
+			$this->sync_xero = false;
+			$this->save();
+		}
+		if (empty($this->extra['wrapper_credit'])) {
+			$this->extra['wrapper_credit'] = 0;
+			$this->sync_xero = false;
+			$this->save();
+		}
+		if (empty($this->extra['tape_credit'])) {
+			$this->extra['tape_credit'] = 0;
+			$this->sync_xero = false;
+			$this->save();
+		}
+
+		$thermal_prod = WmsProd::model()->find('status = 1 AND name like "%热敏面单%"');
+		$wrapper_prod = WmsProd::model()->find('status = 1 AND name like "%缠绕膜%"');
+		$tape_prod = WmsProd::model()->find('status = 1 AND name like "%透明胶带%"');
+		$thermal_limit = empty($thermal_prod) ? 0 : floor(($thermal_total * floatval($thermal_prod->mdata['bqtf']) - $shipments1) / (floatval($thermal_prod->mdata['bqtf']) + 50));
+		$thermal_limit = max($thermal_limit, 0);
+		$wrapper_limit = empty($wrapper_prod) ? 0 : floor(($wrapper_total * floatval($wrapper_prod->mdata['bqtf']) - $shipments2) / floatval($wrapper_prod->mdata['bqtf']));
+		$wrapper_limit = max($wrapper_limit, 0);
+		$tape_limit = empty($tape_prod) ? 0 : floor(($tape_total * floatval($tape_prod->mdata['bqtf']) - $shipments2) / floatval($tape_prod->mdata['bqtf']));
+		$tape_limit = max($tape_limit, 0);
+		return ['thermal_limit' => $thermal_limit, 'wrapper_limit' => $wrapper_limit, 'tape_limit' => $tape_limit, 'thermal_credit' => $this->extra['thermal_credit'], 'wrapper_credit' => $this->extra['wrapper_credit'], 'tape_credit' => $this->extra['tape_credit'], 'shipments1' => $shipments1, 'thermal_total' => $thermal_total, 'shipments2' => $shipments2, 'wrapper_total' => $wrapper_total, 'tape_total' => $tape_total];
+	}
+
+	public function cgDiscount()
+	{
+		$discount = SellRate::model()->find('org_id = :org_id AND type = 25 AND (vfrom <= :date AND (vto >= :date OR vto is null))', [':org_id' => $this->id, ':date' => date('Y-m-d')]);
+		return empty($discount) ? 0 : $discount->item;
+	}
+
+	public static function getDriverList($driverType = 0)
+	{
+		if ($driverType != 0) {
+			$drivers = [];
+			$byStr = "";
+			$byStr .= " and `by` = " . User::getCurrentUser()->org_id;
+
+			$orgs = self::model()->findAll("(cargo_driver_type & " . $driverType . ") > 0 and status = 1 " . $byStr);
+		} else {
+			$orgs = self::model()->findAll("(cargo_driver_type & " . self::ALL_DRIVER . ") > 0 and status = 1 ");
+		}
+		foreach ($orgs as $key => $org) {
+			$drivers[$org->id] = $org->name;
+		}
+		return $drivers;
+	}
+
+	public static function getAllCouriers()
+	{
+		$allOrgs = self::model()->findAll(" id in (" . join(',', self::COURIERS) . ")");
+		$result = [];
+		foreach ($allOrgs as $key => $value) {
+			$result[$value->id] = $value->name;
+		}
+		return $result;
+	}
+
+	public static function inVip()
+	{
+		if (!empty(self::model()->findByPk(Yii::app()->user->org)->extra['vipService'])) {
+			return true;
+		} else {
+			return false;
+		}
+	}
+
+	public static function isOurWarehouse($pod)
+	{
+		if (in_array($pod, self::$ourWarehouseList)) {
+			return true;
+		} else {
+			return false;
+		}
+	}
+
+	public function getBankAccount($url = true, $currency)
+	{
+		foreach ($this->banks as $bank) {
+			if ($bank->currency != $currency) continue;
+			if ($url) {
+				return '<a href="' . Yii::app()->createUrl('billing/orgBankAccount', ['org_id' => $this->id, 'currency' => $currency]) . '" class="jqm_link">' . $bank->bank_bsb . ' ' . $bank->bank_number . '</a>';
+			} else {
+				return $bank->bank_bsb . ' ' . $bank->bank_number;
+			}
+		}
+
+		if ($url) {
+			return '<a href="' . Yii::app()->createUrl('billing/orgBankAccount', ['org_id' => $this->id, 'currency' => $currency]) . '" class="jqm_link">Add</a>';
+		} else {
+			return 'Empty';
+		}
+	}
+
+	public static function getSpecialOrgByType($type) //this function is for managing those special clients so that the format will be looked better
+
+	{
+		switch ($type) {
+			case 0:return [1733,3113];
+			case 1:return [1316];
+			case 2:return [1474];
+			case 3:return [1474,3113];
+			default:return [1733];
+		}
+	}
+
+	public function getAccBalanceDetails()
+	{
+		if(empty($this->extra['credit_action'])) return 99999999;
+
+		$balance = isset($this->extra['creditlimit']) ? $this->getCurrentCreditBalance() :0;// the balance will be a minus number
+		if($balance<0||$balance>0)
+		{
+			$ps = ImParcel::model()->findAll("status = :status and agent_id = :agent_id",[":agent_id"=>$this->id,":status"=>ImParcel::STATE_ACCOUNT_HELD]);
+			foreach ($ps as $key => $p)
+			{
+				$balance+=$p->getValue();
+			}
+			return $balance;
+		}else
+		{
+			return 0;
+		}
+	}
+}

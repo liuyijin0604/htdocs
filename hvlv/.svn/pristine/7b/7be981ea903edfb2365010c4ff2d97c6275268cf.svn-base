@@ -1,0 +1,2612 @@
+<?php
+
+/**
+ * This is the model class for table "shipment".
+ *
+ * The followings are the available columns in table 'shipment':
+ * @property string $id
+ * @property string $owner_id
+ * @property string $agent_id
+ * @property string $consol_id
+ * @property string $man_id
+ * @property string $rec_id
+ * @property string $srec_id
+ * @property string $odpt_id
+ * @property string $ddpt_id
+ * @property string $cnor_id
+ * @property string $cnee_id
+ * @property string $receiver_id
+ * @property string $notify_id
+ * @property string $zr_id
+ * @property string $ot_id
+ * @property integer $status
+ * @property integer $type
+ * @property integer $pickup
+ * @property string $hbn
+ * @property string $ref
+ * @property string $cref
+ * @property string $pkg
+ * @property string $packages===>new adding
+ * @property string $items
+ * @property string $state
+ * @property string $postcode
+ * @property string $value
+ * @property string $dvalue
+ * @property integer $currency
+ * @property string $weight
+ * @property string $wtck
+ * @property string $cbm
+ * @property integer $sac
+ * @property string $exm
+ * @property string $can
+ * @property integer $bwf
+ * @property integer $cbwf
+ * @property string $meta
+ * @property string $scan
+ * @property string $note
+ * @property string $created
+ */
+
+class Shipment extends MetaModel
+{
+	public static $types = [
+		10 => 'ImParcel',
+		15 => 'ImBulk',
+		20 => 'ExParcel',
+		25 => 'ExAfs',
+		30 => 'CoParcel',
+		35 => 'CoBulk',
+		50 => 'ExDirect'
+	];
+
+	public static $states = [];
+	public static $bwfs = [];
+	public static $my_type = 0;
+	public static $my_ot_id = 0;
+
+	public $nolog = false;
+	public $custom_log_note = '';
+	public $mdata = [];
+	public $packs = [];
+	public $eitems = [];
+	public $scan_data = [];
+	public $_mkv = [];
+
+	public $fbas;
+	public $fbaIds;
+	public $pmc_ake_numbers;
+	public $mhbns;
+	public $mids;
+	public $agent_name;
+	public $cnee_name;
+	public $cnee_tel;
+	public $cnee_company;
+	public $cnee_email;
+	public $not_bwf;
+	public $cnee_cnid;
+	public $cnee_addr;
+	public $cnor_name;
+	public $cnor_tel;
+	public $consol_no;
+	public $exInfo;
+	public $consol_eta;
+	public $delay;
+	public $item_name;
+	public $awb_name;
+	public $schedule_date;
+	public $process_status;
+	public $process_not_status;
+	public $process_statuses;
+	public $process_broker;
+	public $process_doc_date;
+	public $afterArrival;
+	public $goodsAvailableAddress;
+	public $clear;
+	public $records;
+	public $warehouse_id;
+	public $rts_scan_date;
+	public $barcode;
+	public $files;
+	public $pbn;
+	public $fixUserId;
+	public $fixTime;
+
+	protected $palletData;
+	public function __construct($scenario='insert')
+	{
+		parent::__construct($scenario);
+		if (static::$my_type > 0) {
+			$this->type = static::$my_type;
+		}
+		if (static::$my_ot_id > 0) {
+			$this->ot_id = static::$my_ot_id;
+		}
+	}
+	
+	protected function instantiate($attr)
+	{
+		$cls = isset(self::$types[$attr['type']])? self::$types[$attr['type']] : get_class($this);
+		return new $cls(null);
+	}
+
+	public function defaultScope()
+	{
+		return empty(static::$my_type)? [] : ['condition' => $this->dbConnection->quoteColumnName($this->getTableAlias(false, false).'.type').'='.static::$my_type];
+	}
+
+	public function unsetAttributes($names = null)
+	{
+		parent::unsetAttributes($names = null);
+		if (static::$my_type > 0) {
+			$this->type = static::$my_type;
+		}
+		$this->ot_id = static::$my_ot_id;
+	}
+	
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName()
+	{
+		return 'shipment';
+	}
+
+	public function altGoods()
+	{
+		return;
+	}
+
+	public function shipWeight()
+	{
+		return $this->weight;
+	}
+
+	public function genWHD()
+	{
+		return [0,0,0];
+	}
+
+	public function getDvalue()
+	{
+		return $this->dvalue;
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return [
+			['consol_id, owner_id, agent_id, man_id, rec_id, srec_id, odpt_id, ddpt_id, cnor_id, cnee_id, receiver_id, notify_id, zr_id, ot_id, status, type, styp, pickup, hbn, ref, cref, pkg, items, state, postcode, value, dvalue, tariff, insurance, currency, weight, cbm, sac, exm, can, meta, bwf, cbwf, scan, scan_no,packages,note, created', 'safe'],
+			['status, type, pickup, currency, sac', 'numerical', 'integerOnly'=>true],
+			['consol_id, cnor_id, cnee_id, zr_id, pkg,notify_id', 'length', 'max'=>11],
+			['hbn, ref', 'length', 'max'=>50],
+			['hbn', 'unique', 'on'=>'create'],
+			['state', 'length', 'max'=>30],
+			//array('items', 'validItems'),
+			['postcode', 'length', 'max'=>20],
+			['value, dvalue, weight', 'length', 'max'=>11],
+			['wtck', 'length', 'max'=>12],
+			['cbm', 'length', 'max'=>15],
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			['id, owner_id, agent_id,process_status,not_bwf,process_statuses,cnee_company,cnee_email,process_not_status,process_broker, man_id, rec_id, srec_id, odpt_id, ddpt_id, consol_id,consol_eta, cnor_id, cnee_id,receiver_id,notify_id, zr_id, ot_id, status, type, styp, pickup, hbn, ref, cref, pkg, items, state, postcode, value, dvalue, tariff, insurance, currency, weight, wtck, cbm, sac, exm, can, bwf, cbwf, meta, note, agent_name, cnee_name, cnee_tel, cnee_cnid, cnee_addr, cnor_name, cnor_tel, mhbns,fbas,fbaIds,pmc_ake_numbers, mids, item_name, consol_no,exInfo, scan_no,delay, created, awb_name,packages,process_doc_date,customNote,goodsAvailableAddress,rack,bag_tag,scheDate,unloadDate,clear,warehouse_id,rts_scan_date,barcode,pbn', 'safe', 'on'=>'search'],
+		];
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return [
+			'consol' => [self::BELONGS_TO, 'Consol', 'consol_id'],
+			'manif' => [self::BELONGS_TO, 'Manifest', 'man_id'],
+			'rec' => [self::BELONGS_TO, 'Manifest', 'rec_id'],
+			'cnor' => [self::BELONGS_TO, 'Addr', 'cnor_id'],
+			'cnee' => [self::BELONGS_TO, 'Addr', 'cnee_id'],
+			'receiver'=>[self::BELONGS_TO, 'Addr', 'receiver_id'],
+			'notifier'=>[self::BELONGS_TO,'Addr', 'notify_id'],
+			'zrate' => [self::BELONGS_TO, 'ZoneRate', 'zr_id'],
+			'trans' => [self::HAS_MANY, 'Tranship', 'pid'],
+			'tracks' => [self::HAS_MANY, 'Tracking', 'pid', 'order'=>'tracks.dt ASC'],
+			'owner' => [self::BELONGS_TO, 'Org', 'owner_id'],
+			'agent' => [self::BELONGS_TO, 'Org', 'agent_id'],
+			'odepot' => [self::BELONGS_TO, 'Org', 'odpt_id'],
+			'ddepot' => [self::BELONGS_TO, 'Org', 'ddpt_id'],
+			'logs' => [self::HAS_MANY, 'Log', 'lid', 'on' => "logs.model = '".get_called_class()."'", 'order' => 'logs.time ASC'],
+			'srec' => [self::BELONGS_TO, 'ShipmentReceipt', 'srec_id'],
+			'process' => [self::HAS_ONE,'ShipmentProcess','pid'],
+			'err_record' => [self::HAS_ONE,'ShipmentErrRecord','fid'],
+			'cargo_delivery_info' => [self::HAS_ONE, 'CargoDeliveryInfo', 'shipment_id'],
+			'amazon_info' => [self::HAS_ONE, 'AmazonInfo', 'fid'],
+			'rack_record' => [self::HAS_MANY, 'WmsRackShipment', 'shipment_id', 'on' => "rack_record.status=0"],
+			'csls' => [self::HAS_MANY, 'ChangeShipmentLabel', 'pid'],
+			'cogs' => [self::HAS_ONE, 'CogsLine', 'fid', 'on' => "cogs.model='" . get_called_class() . "'"],
+			'mms' => [self::HAS_MANY, 'ManiMap', 'fid', 'on' => "mms.model='ImParcel'"],
+			'cargo_process' => [self::HAS_ONE, 'CargoProcess', 'shipment_id', 'order' => 'cargo_process.id desc'],
+			'metaData' => [self::HAS_MANY, 'Meta', 'fid', 'on' => "metaData.model = '".get_called_class()."'"],
+			'rts_record' => [self::HAS_MANY, 'ShipmentRtsRecord', 'shipment_id'],
+			'shipmentCharge' => [self::HAS_ONE, 'ImportsShipmentCharge', 'shipment_id'],
+			'fakParent' => [self::HAS_ONE, 'ImportsShipmentFakRelations', 'cid'],
+		];
+	}
+
+	public function getOdpt()
+	{
+		if (empty($this->odpt_id)) {
+			return '';
+		}
+		$n = preg_replace('/Warehouse/i', '', $this->odepot->name);
+		return trim($n);
+	}
+
+	public function validItems()
+	{
+		$this->cleanItems();
+		if (empty($this->eitems['q'])) {
+			$this->addError('items', Yii::t(strtolower(__CLASS__), 'Pelase enter at least one item'));
+			return false;
+		}
+		$valid = true;
+
+		foreach ($this->eitems['q'] as $i => $q) {
+			if (!is_numeric($q)) {
+				$this->addError('items', Yii::t(strtolower(__CLASS__), 'Item {item}: quantity has non numeric value', ['{item}' => $this->eitems['g'][$i]]));
+				$valid = false;
+			}
+			$v = $this->eitems['v'][$i];
+			if (!empty($v) && !is_numeric($v)) {
+				$this->addError('items', Yii::t(strtolower(__CLASS__), 'Item {item}: value has non numeric value', ['{item}' => $this->eitems['g'][$i]]));
+				$valid = false;
+			}
+		}
+		
+		return $valid;
+	}
+
+	public function importMultiItems($gs, $qs, $vs, $hs='')
+	{
+		if (preg_match('/[;,\/]+/', $gs) > 0 || (!empty($qs) && strpos('/[;,\/]+/', $qs) > 0) ||  (!empty($vs) && strpos('/[;,\/]+/', $vs) > 0)) {//read multiple item
+			$gd = preg_split('/[;,\/]+/', $gs);
+			$it = preg_split('/[;,\/]+/', $qs);
+			$uv = preg_split('/[;,\/]+/', $vs);
+			$hsa = preg_split('/[;,\/]+/', $hs);
+			$valid = true;
+
+			if (sizeof($gd) != sizeof($it) || sizeof($gd) != sizeof($uv) || sizeof($it) != sizeof($uv)) {
+				$this->addError('items', 'Items description, quantity, value have different counts.');
+				$valid = false;
+			}
+
+			if (!empty($hs)) {
+				if (sizeof($hsa) != sizeof($it)) {
+					$this->addError('items', 'Items HS code have different counts.');
+					$valid = false;
+				}
+			}
+
+			if (!$valid) {
+				return $this->getErrors();
+			}
+
+			$this->eitems = [
+				'g' => [],
+				'q' => [],
+				'hs' => [],
+				'v' => [],
+			];
+			
+			foreach ($gd as $g) {
+				$this->eitems['g'][] = $g;
+			}
+
+			foreach ($it as $i=>$t) {
+				if (!is_numeric($t)) {
+					$this->addError('items', 'Items quantity has non numeric value.');
+					continue;
+				}
+				$this->eitems['q'][] = $t;
+				$this->eitems['hs'][] = empty($hsa[$i])? $hs : $hsa[$i];
+			}
+
+			$tv = 0;
+			foreach ($uv as $t) {
+				if (!is_numeric($t)) {
+					$this->addError('items', 'Items value has non numeric value.');
+					continue;
+				}
+				$this->eitems['v'][] = $t;
+				$tv += $t;
+			}
+			$this->value = number_format((float)$tv, 2, '.', '') ;
+		} else {//single item
+			$this->eitems = [
+				'g' => [$gs],
+				'q' => [$qs],
+				'hs' => [$hs],
+				'v' => [$vs],
+			];
+		}
+		
+		return $this->getErrors();
+	}
+
+	/**
+	 * check to see if the value of parcel can be SAC
+	 *  only value < 750USD can SAC
+	 *  or 1000 AUD can be SAC (Self Assessed Clearance) only
+	 * @param $p
+	 * @return bool
+	 */
+	public function canSAC($after=false)
+	{
+
+		// in case we should ignore SAC setting , will always return false
+		if (($this->bwf&ImParcel::BWF_NON_SAC)>0) {
+			return false;
+		}
+
+		if (isset($this->mdata['ignore_sac']) && $this->mdata['ignore_sac']) {
+			return false;
+		}
+		
+		$sac_aud_value = 1000;
+		//2.from chargcode setting to determine if sac >400 instead of 1000;
+		if (!$after) {
+			if (isset($this->mdata['chargecode'])) {
+				$chargecode= $this->mdata['chargecode'];
+				$chargeCodeInfo = ImportChargeCode::model()->find('chargecode = :ccode', [':ccode' => $chargecode]);
+				if (!empty($chargeCodeInfo)&&$chargeCodeInfo->status==1) {
+					if (($this->bwf&ImParcel::BWF_SAC)>0) {
+						$this->sac = 1;
+						$sac_aud_value=1000;
+					}else if (isset($chargeCodeInfo->ignore_sac)&&$chargeCodeInfo->ignore_sac==1) {
+						$sac_aud_value=500;
+					}
+				}
+			}
+		}
+		//3. according value
+		if ($this->currency == 1) { // AUD no more than 1000
+			$canSac = ($this->sac && $this->dvalue <= $sac_aud_value) ? true : false;
+		} else {
+			$exchage_rate = 0.750 ; // default one
+			$exchage_rate= Currency::getExrate(empty($this->consol->etd)? '' : $this->consol->etd, $this->currency)[0];
+			if (isset($this->mdata['exchange_rate']) && $this->mdata['exchange_rate'] > 0.0) {
+				$exchage_rate = floatval($this->mdata['exchange_rate']);
+			}
+			$sacValue = $sac_aud_value * $exchage_rate;
+			$canSac = ($this->sac && $this->dvalue <= $sacValue) ? true : false;
+		}
+		return $canSac;
+	}
+
+	public function getStatus()
+	{
+		return isset(static::$states[$this->status])? Yii::t(strtolower(__CLASS__), static::$states[$this->status]) : $this->status;
+	}
+
+	/*
+	 * get the value based on AUS
+	 * Dollar
+	 */
+	public function getValue()
+	{
+		return $this->currency == 1? $this->dvalue : round($this->dvalue/Currency::getExrate('', $this->currency)[0], 2);
+	}
+
+	public function getDesc()
+	{
+		return empty($this->cref)? $this->cnee->nameInit().', '.$this->state.' '.$this->postcode : $this->cref;
+	}
+
+	public function getAwb()
+	{
+		if (empty($this->consol_id)) {
+			return false;
+		}
+		if (empty($this->consol->awb)) {
+			if (empty($this->consol->mdata['subc'])) {
+				return false;
+			}
+			$sql = "SELECT m.id FROM manifest m INNER JOIN mani_map mm ON mm.mani_id = m.id WHERE m.type = 60 AND m.consol_id = ".$this->consol_id." AND mm.fid = ".$this->id;
+			$mid = Yii::app()->db->createCommand($sql)->queryScalar();
+			foreach ($this->consol->mdata['subc'] as $sc) {
+				$pids = explode(',', $sc['pids']);
+				if (in_array($mid, $pids)) {
+					return $sc['awb'];
+				}
+			}
+		} else {
+			return $this->consol->awb;
+		}
+	}
+	public function isManifest()
+	{
+		if(!empty($this->trans))
+		{
+			$trans = $this->trans;
+			$tran = end($trans);
+			if(!empty($tran->mdata['oid']))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public function getCopyShipment()
+	{
+		if(!empty($this->mdata['copy_shipment_id']))
+		{
+			$cship = TplParcel::model()->findByPk($this->mdata['copy_shipment_id']);
+			return $cship;
+		}
+		return null;
+
+	}
+
+	public function trackingInfo($ttt = 0, $live_update = true,$front = true,$api = false)
+	{
+		$copyShipment = $this->getCopyShipment();
+		if(!empty($copyShipment))
+		{
+			return $copyShipment->trackingInfo($ttt ,$live_update,$front,$api);
+		}
+
+		// if (empty($ttt) && (in_array($this->agent_id, [800, 861]) || $this->agent->by == 861)) {
+		// 	return false;
+		// }
+		// if (!empty($ttt) && $ttt != $this->agent_id) {
+		// 	return false;
+		// }
+
+		if (empty($this->tracks)) {
+			return false;
+		}
+		
+		if($live_update && strtotime($this->created) > time() - 8640000){
+			if ($this->type == 20 && in_array($this->status, [80, 90])) {
+				include_once(Yii::app()->basePath.DIRECTORY_SEPARATOR.'commands'.DIRECTORY_SEPARATOR.'trackingCommand.php');
+				$tc = new trackingCommand('tracking', 'run');
+				$tc->run(['update', $this->hbn]);
+				$this->refresh();
+			//@exec(Yii::app()->basePath.DIRECTORY_SEPARATOR.'yiic tracking update '.$this->hbn);
+			} elseif ($this->type==10 && $this->status>=60 && $this->isManifest()) {
+				if (!preg_match("/(7RFZ|4XHZ)\d{8}/i", $this->ref)&&!preg_match("/(24683|24751)\d{8}/i", $this->ref)) {
+					include_once(Yii::app()->basePath.DIRECTORY_SEPARATOR.'commands'.DIRECTORY_SEPARATOR.'trackingCommand.php');
+					$tc = new trackingCommand('tracking', 'run');
+					$tc->run(['update', $this->hbn]);
+					//@exec(Yii::app()->basePath.DIRECTORY_SEPARATOR.'yiic tracking update '.$this->hbn);
+					$this->refresh();
+				}
+			}
+		}
+
+		foreach ($this->tracks as $t) {
+			if (empty($t['depot'])) {
+				continue;
+			}
+			$t1 = $t;
+			break;
+		}
+
+		$odpt = "";
+		$consol =$this->consol;
+		if(!empty($consol))
+		{
+			$polInfo = SystemSetting::getPodSetting(substr($this->consol->pol,0,2),$this->consol->pol);
+			$odpt = !empty($polInfo)?$polInfo[0]:"";
+		}else
+		{
+			$odpt = "";
+		}
+
+		$o = new stdClass;
+		$o->odpt = $odpt;
+		$amap = [];
+		switch ($this->type) {
+			case 10:  // import parcel
+			case 30:  // co parcel
+				$df = 'd/m/Y';
+				$dtf = 'd/m/Y H:i:s';
+				$ddpts = [
+					'NSW' => 'Sydney',
+					'VIC' => 'Melbourne',
+					'QLD' => 'Brisbane',
+				];
+				$o->ddpt = empty($ddpts[$this->state])? 'AU' : $ddpts[$this->state];
+				if (empty($t1)) {
+					$o->eta = date('d/m/Y', strtotime('+4 day'));
+				} else {
+					$o->eta = date('d/m/Y', strtotime($t1['dt'] . ' +4 day'));
+				}
+				$o->cs_link = 'https://ims.toplogistics.com.au/customerService/cneeShipmentQuery.app?ref='.$this->ref;
+				$amap = ['Customs Held' => '<b style="color:#BE3426">Customs Held</b>'];
+				$status = ImParcel::$states[$this->status];
+			break;
+			case 20: // export parcel
+				$df = 'Y-m-d';
+				$dtf = 'Y-m-d H:i:s';
+				$o->ddpt = '中国'.(empty($this->state)?  '' : $this->state);
+				$o->eta = ''; //date($df, strtotime($t1['dt'].' +10 day'));
+				$status = ExParcel::$states[$this->status];
+				$o->ot = OriginTrace::model()->count('pid = :pid AND bdate IS NOT NULL', [':pid' => $this->id]) > 0;
+				$o->cnid = !empty($this->cnee->cnid_id);
+				$o->consol = empty($this->consol_id)? '' : $this->consol->no;
+				$o->cnee = $this->cnee->name;
+			break;
+			case 50: // export direct parcel
+				$df = 'Y-m-d';
+				$dtf = 'Y-m-d H:i:s';
+				$o->ddpt = '中国'.(empty($this->state)?  '' : $this->state);
+				$o->eta = date($df, strtotime($t1['dt'].' +2 day'));
+				$status = ExDirect::$states[$this->status];
+			break;
+		}
+		$o->odate = empty($t1)? '' : date($df, strtotime($t1['dt']));
+		$o->ttk = empty($this->trans)? '' : $this->trans[sizeof($this->trans) - 1]->infoLink(true);
+		$o->status = $status;
+		$o->manifest_status = $this->getManifestStatus();
+		$o->ref = $this->ref;
+		$o->tracks = [];
+
+		$clearanceKey = "";
+		$lastStatus = "";
+
+		foreach ($this->tracks as $key => $t) {//because the custom may release cargo and held cargo multiple times, so find the last state
+			if($t->type==Tracking::CLEARED_TYPE)
+			{
+				$clearanceKey = $key;
+			}
+		}
+		foreach ($this->tracks as $key => $t) {
+			if($this->type == 10&&!$this->is3PL()&&preg_match('/os.pcaex.com/', $t->activity))
+			{
+				$t->activity = str_replace('os.pcaex.com', 'os.toplogistics.com.au', $t->activity);
+			}
+			if(($t->type<70||$t->type>90) && in_array($this->agent_id, Org::getSpecialOrgByType(1))&&$front)
+			{
+				continue;
+			}
+
+			if (isset($amap[$t->activity])) {
+				$t->activity = $amap[$t->activity];
+			}
+			if($t->type==Tracking::CLEARED_TYPE&&$key==$clearanceKey&&!in_array($this->agent_id, Org::getSpecialOrgByType(0))&&$front)
+			{
+				if($this->type == ImParcel::$my_type && @$this->scanCount()==0)//this is for showing the cleared tracking data only when the parcel is scanned
+				{
+					$t= isset($this->tracks[$key-1])?$this->tracks[$key-1]:null;
+					$o->status = "";
+					break;
+				}
+			}
+
+			$thisTrackingStatus = $t->getTrackingStatus($lastStatus);
+			$lastStatus = $thisTrackingStatus;
+			$o->tracks[] = [$t->activity, $t->depot, date($dtf, strtotime($t->dt)),$thisTrackingStatus];
+
+			if (empty($o->odate) && $this->type == 50 && $t->type == 50) {
+				$o->odate = date($df, strtotime($t->dt));
+			}
+		}
+
+		//add clearance track
+		if ($this->type == 20 && $t->type == 50 && strtotime($t->dt) < (time() - 172800)) {
+			$bt = strtotime($t->dt);
+			$q = ceil((time() - 172800 - $bt) / 172800);
+			for ($i = 0; $i < $q; $i++) {
+				$v = ($this->id + $i * 13) % 600;
+				$dt = $bt + 172800 * ($i+1) + $v * ($v % 2 == 0? 1 : -1);
+				$o->tracks[] = ['清关处理中，请等待', $t->depot, date($dtf, $dt)];
+			}
+		}
+		if ($this->type == 20 && strtotime($this->created) > strtotime('2018-06-30')){
+			$o->tracks[] = ['<b style="background: #ff0">Tracking info provided on behalf of <a href="http://www.turtle-express.net/" target="_blank" style="color:#c00">PEP</a></b>', 'NOTICE', '2018-07-01'];
+		}
+		
+		$o->lastscan = !empty($t)?date($dtf, strtotime($t->dt)):"";
+
+		// for import parcel, we check to see if we should and more virtual transit status
+		// logic :
+		// if last scan time over 3 days still not deliveried
+		// we should insert on virtual transit
+		//        if ( $this->type == 10 && ($this->status < 90 && $this->status > 55) ) {
+//
+		//            // currently for Australia post only
+		//            if ( preg_match('/^AMQ\d{7}/', $this->ref) ) {
+//
+		//                // check to see if we should stop add virtual shipping events
+		//                // flag will be set in trackingCommand.php auPost Function
+		//                if ( !isset($this->mdata['virtual_event_stop']) ) {
+		//                    $lastTime = new DateTime($t->dt, new DateTimeZone('Australia/Sydney'));
+		//                    $curTime = new DateTime('now', new DateTimeZone('Australia/Sydney'));
+		//                    $spanDays = $curTime->diff($lastTime)->format("%a");
+		//                    if ($spanDays > 3) {
+//
+		//                        $spanUnit = floor($spanDays / 3);
+		//                        $timeLastSpan = strtotime($t->dt);
+		//                        for ($i = 0; $i < $spanUnit; $i++) {
+		//                            // insert virtual one
+		//                            $this->addTracking(70, 'In Transit In Australia', '', date('Y-m-d h:i:s', $timeLastSpan + ($i + 1) * 3 * 86400));
+		//                            $o->tracks[] = array('In Transit In Australia', 0, date($dtf, $timeLastSpan + ($i + 1) * 3 * 86400));
+		//                        }
+		//                    }
+		//                }
+		//            }
+		//        }
+
+		return $o;
+	}
+	
+	public function rating($or)
+	{
+		$z = ZoneMap::getZone($or->org_id, $this->postcode);
+		if (!$z) {
+			return false;
+		}
+		$zrs = ZoneRate::model()->findAll("rate_id = :rid AND (zone = :z OR zone = '') AND weight_hi >= :w", ['rid' => $or->id, ':z' => $z, ':w' => $this->weight]);
+		if (empty($zrs)) {
+			return false;
+		}
+		
+		$rs = [];
+		foreach ($zrs as $zr) {
+			$rs[] = [$zr->id, $this->getRate($zr), $zr];
+		}
+		return $rs;
+	}
+
+	public function getManifestStatus()
+	{
+		if (!empty($this->trans)) {
+			foreach ($this->trans as $ts) {
+				if ($ts->connote != $this->ref) {
+					continue;
+				}
+				if (!empty($ts->mdata['oid'])) {
+					// in case Aupost or Startrack
+					// only when trhanship order id existing which means has been lodged
+					return "[M]";
+				}
+			}
+		}
+		return "";
+	}
+	
+	public function getPerformanceDates()
+	{
+		$dates = [null,null,null];
+		foreach ($this->tracks as $t) {
+			if (in_array($t->type, [12,18]) && empty($dates[0])) {
+				$dates[0] = substr($t->dt, 0, 10);
+				if ($t->type == 18) {
+					$dates[5] = $dates[0];
+				}
+			} elseif ($t->type == 18 && empty($dates[5])) {
+				$dates[5] = substr($t->dt, 0, 10);
+			} elseif ($t->type == 38 && empty($dates[1])) {
+				$dates[1] = substr($t->dt, 0, 10);
+			} elseif ($t->type == 90) {
+				$dates[2] = substr($t->dt, 0, 10);
+				break;
+			}
+		}
+		if (!empty($dates[0]) && !empty($dates[1])) {
+			$dates[3] = ceil((strtotime($dates[1]) - strtotime($dates[0])) / 86400);
+		}
+		if (!empty($dates[0]) && !empty($dates[2])) {
+			$dates[4] = ceil((strtotime($dates[2]) - strtotime($dates[0])) / 86400);
+		}
+
+		return $dates;
+	}
+	
+	public function bestRate()
+	{
+		$rs = OrgRate::model()->findAll('type < 30 AND vfrom <= :today AND (vto >= :today OR vto IS NULL)', [':today' => (empty($this->consol->eta) || $this->consol->eta == '0000-00-00')? date('Y-m-d') : $this->consol->eta]);
+		$rate = false;
+		$rid = 0;
+		foreach ($rs as $or) {
+			$ras = $this->rating($or);
+			if (!$ras) {
+				continue;
+			}
+			foreach ($ras as $ra) {
+				if ($rate === false || $ra[1] < $rate) {
+					$rid = $ra[0];
+					$rate = $ra[1];
+				}
+			}
+		}
+		$this->zr_id = $rid;
+		$this->save();
+	}
+	
+	public function getRate($zr=null)
+	{
+		if (empty($zr)) {
+			$zr = $this->zrate;
+		}
+		$r = $zr->base;
+		if ($zr->perkg > 0) {
+			$r += ($zr->nkg > 1? ceil($this->weight/$zr->nkg) : $this->weight) * $zr->perkg;
+		}
+		if ($r < $zr->minimum) {
+			$r = $zr->minimum;
+		}
+		if ($zr->gst == 2) {
+			$r *= 1.1;
+		}
+		
+		return round($r*100)/100;
+	}
+	
+	public function getSellRate()
+	{
+		if (empty($this->zr_id)) {
+			return false;
+		}
+		if ($this->weight > 5) {
+			$rid = 4;
+		} else {
+			$rid = $this->zrate->orgrate->org_id == 101? 4 : 5;
+		}
+		
+		$zr = ZoneRate::model()->find("rate_id = :rid AND (zone = :z OR zone = '') AND weight_lo <= :w AND weight_hi > :w", ['rid' => $rid, ':z' => $this->zrate->zone, ':w' => $this->weight]);
+		if (empty($zr)) {
+			return false;
+		}
+		$r = $zr->base;
+		if ($zr->perkg > 0) {
+			$r += $this->weight * $zr->perkg;
+		}
+		if ($r < $zr->minimum) {
+			$r = $zr->minimum;
+		}
+		
+		return [$zr->id, round($r*100)/100, $zr];
+	}
+	
+	public function addTracking($type, $act, $dpt='', $dt = '', $tid = 0, $srid = 0, $meta='')
+	{
+		$dt = empty($dt)? date('Y-m-d H:i:s') : $dt;
+		$t = Tracking::model()->find('pid = :pid AND dt = :dt AND type = :type', [':pid' => $this->id, ':dt' => $dt, ':type' => $type]);
+		if ($t) {
+			return $t;
+		}
+		$t = new Tracking('create');
+		$t->pid = $this->id;
+		$t->tid = $tid;
+		$t->srid = $srid;
+		$t->dt = $dt;
+		$t->activity = $act;
+		$t->depot = $dpt;
+		$t->type = $type;
+		$t->meta = $meta;
+		$t->save();
+		return $t;
+	}
+
+	public function addTrackingLimited($type, $act, $dpt='', $dt = '', $tid = 0, $srid = 0, $meta='')
+	{
+		$dt = empty($dt)? date('Y-m-d H:i:s') : $dt;
+		$t = Tracking::model()->find('pid = :pid AND type = :type', [':pid' => $this->id, ':type' => $type]);
+		if ($t) {
+			return $t;
+		}
+		$t = new Tracking('create');
+		$t->pid = $this->id;
+		$t->tid = $tid;
+		$t->srid = $srid;
+		$t->dt = $dt;
+		$t->activity = $act;
+		$t->depot = $dpt;
+		$t->type = $type;
+		$t->meta = $meta;
+		$t->save();
+		$this->updateTranshipTime();
+		return $t;
+	}
+
+	public function updateTracking($type, $act, $dpt='', $dt = '', $tid = 0, $srid = 0, $meta='')
+	{
+		$this->updateTranshipTime();
+		$dt = empty($dt)? date('Y-m-d H:i:s') : $dt;
+		$t = Tracking::model()->find('pid = :pid AND type = :type', [':pid' => $this->id, ':type' => $type]);
+		if (!empty($t))
+		{
+			$t->activity = $act;
+			$t->save();
+			return $t;
+		}
+		$t = new Tracking('create');
+		$t->pid = $this->id;
+		$t->tid = $tid;
+		$t->srid = $srid;
+		$t->dt = $dt;
+		$t->activity = $act;
+		$t->depot = $dpt;
+		$t->type = $type;
+		$t->meta = $meta;
+		$t->save();
+		return $t;
+	}
+
+	//only for FL Hunter
+	public function addActTrackingLimited($type, $act, $dpt='', $dt = '', $tid = 0, $srid = 0, $meta=''){
+		$dt = empty($dt)? date('Y-m-d H:i:s') : $dt;
+		if($act=="Delivered"){
+			$type = 90;
+		}
+
+		$t = Tracking::model()->find('pid = :pid AND type = :type And activity = :act And dt = :dt', [':pid' => $this->id, ':act' => $act, ':dt'=>$dt,':type'=>$type]);
+		if ($t) {
+			return $t;
+		}
+		
+		$t = new Tracking('create');
+		$t->pid = $this->id;
+		$t->tid = $tid;
+		$t->srid = $srid;
+		$t->dt = $dt;
+		$t->activity = $act;
+		$t->depot = $dpt;
+		$t->type = $type;
+		$t->meta = $meta;
+		$t->save();
+
+		if($this->status<90){
+			//if($act=="InTransit"){
+				$this->status = ImParcel::STATE_COURIER;
+				$this->save();
+			//}
+		}
+
+		if($act=="Delivered"){
+			$this->status = ImParcel::DELIVERED;
+			$this->save();
+		}
+
+		return $t;
+	}
+
+	public function updateTranshipTime()
+	{
+		$sql = 'UPDATE tranship SET time = NOW() WHERE pid = :pid';
+		Yii::app()->db->createCommand($sql)->bindValues([':pid' => $this->id])->execute();
+		// foreach ($this->trans as $key => $t) {
+		// 	$t->time = date("Y-m-d H:i:s");
+		// 	$t->save();
+		// }
+	}
+	
+	/**
+	 * check if the shipment already have a tracking of the same type
+	 * @$params $type
+	 * @return  boolean
+	 */
+	public function hasTracking($type)
+	{
+		$t= Tracking::model()->find('pid=:pid AND type=:type AND json_value(t.meta,"$.cargo_process_id") is null', [':pid'=>$this->id,':type'=>$type]);
+		if ($t) {
+			return true;
+		}
+		return false;
+	}
+
+	public function hasCargoProcessTracking($type,$cargoProcessId)
+	{
+		$t= Tracking::model()->find('pid=:pid AND type=:type AND json_value(t.meta,"$.cargo_process_id") = :cid', [':pid'=>$this->id,':type'=>$type,':cid'=>$cargoProcessId]);
+		if ($t) {
+			return true;
+		}
+		return false;
+	}
+
+	public function hasTrackingToday($type){
+		$now_time = strtotime(date('Y-m-d H:i:s'));
+		$t= Tracking::model()->find('pid=:pid AND type=:type order by dt desc', [':pid'=>$this->id,':type'=>$type]);
+		if ($t) {
+			if(!empty($t->dt)){
+				$show_time= strtotime($t->dt);
+				$dur = $now_time - $show_time;
+				if($dur < 3600){
+					return true;
+				}
+				return false;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * get if the shipment already have a tracking of the same type
+	 * @$params $type
+	 * @return  boolean
+	 */
+	public function getTracking($type)
+	{
+		$t= Tracking::model()->find('pid=:pid AND type=:type order by dt desc', [':pid'=>$this->id,':type'=>$type]);
+		if ($t) {
+			return $t;
+		}
+		return false;
+	}
+
+	/**
+	 * get parcel departure time from tracking table
+	 */
+	public function getDepartueTime()
+	{
+		$t = Tracking::model()->find('pid = :pid AND type = 38', [':pid' => $this->id]);
+		if (empty($t)) {
+			return false ;
+		}
+		return $t->dt;
+	}
+
+	/**
+	 * get parcel arrive time from tracking table
+	 */
+	public function getArriveTime()
+	{
+		$t = Tracking::model()->find('pid = :pid AND type = 40', [':pid' => $this->id]);
+		if (empty($t)) {
+			return false ;
+		}
+		return $t->dt;
+	}
+
+	/**
+	 * get all tranships
+	 * @return bool|string
+	 */
+	public function getTranships()
+	{
+		if (empty($this->trans)) {
+			return false;
+		}
+		$r = [];
+		
+		foreach ($this->trans as $t) {
+			$r[] = (isset($t->carrier) ? $t->carrier->code : '') .': '.$t->connote;
+		}
+		
+		return implode("\n", $r);
+	}
+
+	public function hasMovingTrans(){
+		$sql = 'SELECT id FROM tranship WHERE pid = :id AND status IN (11, 19) LIMIT 1';
+		return !empty(Yii::app()->db->createCommand($sql)->bindValues([':id' => $this->id])->queryScalar());
+	}
+
+	/**
+	 * return RTS tracking number
+	 * @return bool|string
+	 */
+	public function getRTSTranshipNo()
+	{
+		$rtsNo = '';
+		foreach ($this->trans as $t) {
+			if ($t->type == 90) {
+				$rtsNo = $t->connote;
+				break;
+			}
+		}
+		return $rtsNo;
+	}
+
+
+	/**
+	 * get RTS tranship new shipment ID
+	 * @return int|string
+	 */
+	public function getRTSTranshipNoId()
+	{
+		$rstNo = $this->getRTSTranshipNo();
+		$shipment = Shipment::model()->find('hbn = :hbn', [':hbn' => $rstNo]);
+		if (!empty($shipment)) {
+			return $shipment->id;
+		}
+		return 0;
+	}
+
+	/**
+	 * get Original RTS parcel No.
+	 * @return string
+	 */
+	public function getRTSOrgShipNo()
+	{
+		if (isset($this->mdata['rts_org_no'])) {
+			return $this->mdata['rts_org_no'];
+		}
+		return '';
+	}
+
+	/**
+	 * get  RTS  new parcel  ref
+	 */
+	public function getRtsNewShipmentRef()
+	{
+		$rstNo = $this->getRTSTranshipNo();
+		$shipment = Shipment::model()->find('hbn = :hbn', [':hbn' => $rstNo]);
+		if (!empty($shipment)) {
+			return $shipment->ref;
+		}
+		return '';
+	}
+
+	/**
+	 * get Original RTS parcel No. ID
+	 * @return int|string
+	 */
+	public function getRTSOrgShipNoId()
+	{
+		$rstNo = $this->getRTSOrgShipNo();
+		$shipment = Shipment::model()->find('hbn = :hbn', [':hbn' => $rstNo]);
+		if (!empty($shipment)) {
+			return $shipment->id;
+		}
+		return 0;
+	}
+
+	/**
+	 * get RTS shipment reshipping invoice html link content
+	 */
+	public function getRtsReshippingInvoiceLink()
+	{
+		// check to see if related pending invoice existing
+		$invLines = InvLine::model()->findAll('model = :model AND fid = :fid', [':model' => 'ImParcel','fid' => $this->getRTSTranshipNoId()]);
+		$invoice = null;
+		if (!empty($invLines)) {
+			// try to check related invoice belongs to RTS fee or not
+			foreach ($invLines as $invLine) {
+				$invoiceRts = Invoice::model()->findByPk($invLine->inv_id);
+				if (!empty($invoiceRts) && $invoiceRts->type == Invoice::INVOICE_TYPE_RTS_RESEND_FEE) {
+					$invoice = $invoiceRts;
+					break;
+				}
+			}
+		}
+		if (!empty($invoice)) {
+			$linkContent = "<a href=\"".Yii::app()->createURL("invoice/update", ["id" => $invoice->id])."\" class=\"tab_link\" title=\"".$invoice->no."\">".$invoice->no."</a>";
+			return $linkContent;
+		}
+		return '';
+	}
+
+
+	/**
+	 * get RTS invoice No.
+	 * @return string
+	 */
+	public function getRtsInvoiceNo()
+	{
+		// check to see if related pending invoice existing
+		$invLines = InvLine::model()->findAll('model = :model AND fid = :fid', [':model' => 'ImParcel','fid' => $this->id]);
+		$invoice = null;
+		if (!empty($invLines)) {
+			// try to check related invoice belongs to RTS fee or not
+			foreach ($invLines as $invLine) {
+				$invoiceRts = Invoice::model()->findByPk($invLine->inv_id);
+				if (!empty($invoiceRts) && $invoiceRts->type == Invoice::INVOICE_TYPE_RTS_RESEND_FEE) {
+					$invoice = $invoiceRts;
+					break;
+				}
+			}
+		}
+		if (!empty($invoice)) {
+			return $invoice->no;
+		}
+		return '';
+	}
+
+	/**
+	 * courier cost saved in tranship with cost field
+	 * @return int
+	 */
+	public function getCourierCost()
+	{
+		$cost = 0;
+		foreach ($this->trans as $t) {
+			if ($t->type == 80) { // delivery courier
+				$cost += $t->cost;
+			}
+		}
+		return round($cost, 2);
+	}
+
+	public function getFirstTrack()
+	{
+		return Tracking::model()->find(['condition' => 'pid = :id', 'params' => [':id' => $this->id], 'order' => 't.id ASC']);
+	}
+
+	public function getLastTrack()
+	{
+		return Tracking::model()->find(['condition' => 'pid = :id', 'params' => [':id' => $this->id], 'order' => 't.id DESC']);
+	}
+
+	public function getFirstLog()
+	{
+		return empty($this->logs)? false : $this->logs[0];
+	}
+
+	public function getLastLog()
+	{
+		return empty($this->logs)? false : $this->logs[sizeof($this->logs) - 1];
+	}
+
+	public function log($action)
+	{
+		$extra =["action"=>$action];
+		Log::add($this, $this->isNewRecord? 3 : 4, array_merge(['status' => $this->getStatus()], $extra));
+	}
+
+	public function cleanItems()
+	{
+		if (empty($this->eitems['q'])) {
+			return;
+		}
+		$cis = [];
+
+		if (!empty($this->eitems['w'])) {
+			foreach ($this->eitems['w'] as $i => $w) {
+				$this->eitems['w'][$i] = sprintf('%0.2f', $w);
+			}
+		}
+
+		foreach ($this->eitems['q'] as $i => $q) {
+			if (empty($q)) {
+				$cis[] = $i;
+			}
+		}
+		rsort($cis);
+		foreach ($cis as $i) {
+			foreach ($this->eitems as $k => $a) {
+				unset($this->eitems[$k][$i]);
+			}
+		}
+
+		//reset keys
+		foreach ($this->eitems as $k => $a) {
+			if (is_array($a)) {
+				$this->eitems[$k] = array_values($a);
+			}
+		}
+	}
+
+	public function beforeValidate()
+	{
+		if (!parent::beforeValidate()) {
+			return false;
+		}
+		if ($this->cnee_id > 0) {
+			if (empty($this->state)) {
+				$this->state = $this->cnee->state;
+			}
+			if (empty($this->postcode)) {
+				$this->postcode = $this->cnee->postcode;
+			}
+		}
+		return true;
+	}
+	
+	public function beforeSave()
+	{
+		if (!empty($this->mdata)) {
+			$this->meta = json_encode($this->mdata);
+		}
+		if (!empty($this->packs)) {
+			$this->packages= json_encode($this->packs);
+		}
+		if (!empty($this->scan_data)) {
+			$this->scan = json_encode($this->scan_data);
+		}
+		if (!empty($this->eitems)) {
+			$this->items = json_encode($this->eitems);
+		}
+		if (empty($this->created)) {
+			$this->created = date('Y-m-d');
+		}
+		if (empty($this->status)) {
+			$this->status = 10;
+		}
+		if (empty($this->hbn)) {
+			$this->hbn = $this->genHbn();
+		}
+		$this->hbn = strtoupper(trim($this->hbn));
+		return true;
+	}
+
+	public function genHbn()
+	{
+		$pfx = 'ECN';
+		if(time() >= strtotime('2020-08-01')) $pfx = 'TCN'; 
+		if(time() >= strtotime('2020-12-30'))
+		{
+			$pfx = 'TC';
+			if(!empty(Consol::$consolPrefix[$this->ddpt_id]))
+			{
+				$pfx = Consol::$consolPrefix[$this->ddpt_id];
+			}
+			$pfx = $pfx.'N';
+		}
+
+		return ($this->agent_id > 0)? $pfx . sprintf('%03s', $this->agent_id) . sprintf('%06s', $this->agent->getLabelNumber()) : '';
+	}
+
+	public function gen3PLHbn()
+	{
+		$pfx = 'SKP'; 
+		if(time() >= strtotime('2020-12-30'))
+		{
+			
+			if(($this->ddpt_id)==106)
+			{
+				$pfx = 'SKP'; 
+			}
+			else if(($this->ddpt_id)==218)
+			{
+				$pfx = 'MKP'; 
+			}
+			else if(($this->ddpt_id)==530)
+			{
+				$pfx = 'BKP'; 
+			}
+		}
+		return ($this->agent_id > 0)? $pfx . sprintf('%02s', "88") .sprintf('%04s', $this->agent_id). sprintf('%04s', $this->agent->getLabelNumber()) : '';
+		//return ($this->agent_id > 0)? $pfx . sprintf('%03s', "8888") . sprintf('%06s', $this->agent->getLabelNumber()) : '';
+	}
+
+	public function genBPHbn()
+	{
+		$pfx = 'SKP'; 
+		if(time() >= strtotime('2020-12-30'))
+		{
+			
+			if(($this->ddpt_id)==106)
+			{
+				$pfx = 'SKP'; 
+			}
+			else if(($this->ddpt_id)==218)
+			{
+				$pfx = 'MKP'; 
+			}
+			else if(($this->ddpt_id)==530)
+			{
+				$pfx = 'BKP'; 
+			}
+		}
+		return ($this->agent_id > 0)? $pfx . sprintf('%02s', "PR") .sprintf('%04s', $this->agent_id). sprintf('%04s', $this->agent->getLabelNumber()) : '';
+	}
+	
+	public function afterSave()
+	{
+		if ((!$this->nolog && !empty($this))||$this->status==100) {
+			$extra = empty($this->custom_log_note)? [] : ['note' => $this->custom_log_note];
+			Log::add($this, $this->isNewRecord? 3 : 4, array_merge(['status' => $this->getStatus()], $extra),$this->fixUserId,$this->fixTime);
+		}
+			
+	}
+	
+	public function afterFind()
+	{
+		if (!empty($this->packages)) {
+			$this->packs= json_decode($this->packages, true);
+		}
+		if (!empty($this->scan)) {
+			$this->scan_data = json_decode($this->scan, true);
+			$cachedData = Service::getJavaCacheData('scan:'.$this->id);
+			foreach ($cachedData as $k => $d) {
+				$this->scan_data[50][$k] = $d["time"];
+			}
+		}
+		if (!empty($this->items)) {
+			$this->eitems = json_decode($this->items, true);
+		}
+
+		if ($this->isTLA() && Yii::app() instanceof CWebApplication) [$app_name, Yii::app()->name] = [Yii::app()->name, 'TLA'];
+
+		// sometime we got mdata['dim'] as stdClass Object still don't know why it occured
+		// so we just force convert to array once object found for mdata['dim'] member
+		/*if ( isset($this->mdata['dim']) && !is_array($this->mdata['dim']) && get_class($this->mdata['dim']) === 'stdClass' ) {
+			$this->mdata['dim'] = json_decode(strtolower(json_encode($this->mdata['dim'])), true);
+			$this->updateMeta();
+		}*/
+		return parent::afterFind();
+	}
+
+	public function updateMeta($nolog=true)
+	{
+		$this->nolog = $nolog;
+		$this->meta = json_encode($this->mdata);
+		$this->update(['meta']);
+	}
+
+	public function updateMetaAndScan($nolog=true)
+	{
+		$this->nolog = $nolog;
+		$this->meta = json_encode($this->mdata);
+		if (!empty($this->scan_data)) {
+			$this->scan = json_encode($this->scan_data);
+		}
+		$this->update(['meta','scan']);
+	}
+
+	public function getScanTime()
+	{
+		return empty($this->mdata['scan_time'])? '' : $this->mdata['scan_time'];
+	}
+
+	public function isScanTimeToday()
+	{
+		if(!empty($this->mdata['scan_time'])){
+			if($this->mdata['scan_time']<date('Y-m-d')){
+				return true;
+			}
+		}
+		return false;
+	}
+	
+	public function getCarrier()
+	{
+		return empty($this->zrate)? '' : $this->zrate->orgrate->org->name;
+	}
+	
+	public function getCarrierCode()
+	{
+		return empty($this->zrate)? '' : $this->zrate->orgrate->org->code;
+	}
+
+	public function getGoods()
+	{
+		if (empty($this->eitems['g'])) {
+			return '';
+		}
+		return implode('/', empty($this->eitems['g'])? [] : $this->eitems['g']);
+	}
+
+	public function getGoodsDescription()
+	{
+		$str = [];
+		foreach ($this->eitems['g'] as $key => $value) {
+			$str[]=$this->eitems['g'][$key].":".$this->eitems['q'][$key];
+		}
+		
+		return join("|",$str);
+	}
+
+	public function itemsTotQty()
+	{
+		$t = 0;
+		if (empty($this->eitems['q'])) {
+			return $t;
+		}
+		foreach ($this->eitems['q'] as $q) {
+			$t += $q;
+		}
+		return $t;
+	}
+	
+	public function getWarnings($s=true, $d=false)
+	{
+		return AppHelper::bwf2warning($this, $s, $d);
+	}
+	
+	public function scanBarcode($attr)
+	{
+		$b = $attr[0]; // barcode
+		$d = $attr[1]; // depart id same with warehouse id
+		$t = $attr[2]; // parcel status
+		
+		if (strpos($b, '-') > 0) {
+			list($hbn, $sn) = explode('-', $b);
+		} else {
+			$hbn = $b;
+			$sn = 0;
+		}
+		
+		$p = self::model()->find('hbn = :h', [':h' => $hbn]);
+		if (empty($p) || (empty($sn) && $p->pkg > 1)) {
+			$o = ['id' => 0, 'bc' => $b];
+		} else {
+			$o = $p->attributes;
+			$o['bc'] = $b;
+			foreach ($p->cnee->attributes as $k=>$v) {
+				$o['cnee_'.$k] = $v;
+			}
+			foreach ($p->cnor->attributes as $k=>$v) {
+				$o['cnor_'.$k] = $v;
+			}
+			if (empty($p->scan_data[$t][$sn])) {
+				if (!isset($p->scan_data[$t])) {
+					$p->scan_data[$t] = [];
+				}
+				$p->scan_data[$t][$sn] = time();
+				$sc = sizeof($p->scan_data[$t]);
+				$p->odpt_id = $d;
+				if ($sc == $p->pkg) {
+					$p->status = $t;
+				}
+				$p->save();
+				$o['dup'] = 0;
+			} else {
+				$sc = sizeof($p->scan_data[$t]);
+				$o['dup'] = 1;
+			}
+			$o['sc'] = $sc;
+		}
+		return $o;
+	}
+	
+	//rAPI
+	public function rSave($attrs)
+	{
+		if (empty($attrs->id)) {//new
+			$cnor = new Addr;
+			$cnee = new Addr;
+			$par = new static();
+		} else {//update
+			$par = self::model()->findByPk($attrs->id);
+			$cnor = $par->cnor;
+			$cnee = $par->cnee;
+		}
+		
+		foreach ($attrs as $k=>$v) {
+			if (preg_match('/^cnee_/', $k)) {
+				$cnee->{substr($k, 5)} = $v;
+			} elseif (preg_match('/^cnor_/', $k)) {
+				$cnor->{substr($k, 5)} = $v;
+			} else {
+				if ($par->hasAttribute($k)) {
+					$par->{$k} = $v;
+				} elseif (in_array($k, ['custom_log_note', 'nolog'])) {
+					$par->{$k} = $v;
+				}
+			}
+		}
+		
+		if (!empty($attrs->eitems)) {
+			$par->eitems = (array) $attrs->eitems;
+		}
+		
+		$cnor->save();
+		$cnee->save();
+		$par->cnor_id = $cnor->id;
+		$par->cnee_id = $cnee->id;
+		$par->state = $cnee->state;
+		$par->postcode = $cnee->postcode;
+		$par->save();
+		//Yii::log(var_export($par->getErrors(), true), 'error');
+		return $par;
+	}
+	
+	public function rFind($q, $p)
+	{
+		$r = self::model()->find($q, $p);
+		if ($r) {
+			$o = $r->attributes;
+			foreach ($r->cnee->attributes as $k=>$v) {
+				$o['cnee_'.$k] = $v;
+			}
+			foreach ($r->cnor->attributes as $k=>$v) {
+				$o['cnor_'.$k] = $v;
+			}
+			$o['meta'] = $r->meta;
+			
+			return $o;
+		}
+		return false;
+	}
+	
+	public function rSearch($criteria)
+	{
+		$rs = self::model()->findAll($criteria);
+		$ra = [];
+		$i = 0;
+		foreach ($rs as $r) {
+			$o = $r->attributes;
+			$o['client'] = empty($r->owner)? '' : $r->owner->user;
+			$ra[] = $o;
+		}
+		return $ra;
+	}
+	
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return AppHelper::tArray(strtolower(__CLASS__), [
+			'id' => 'ID',
+			'consol_id' => 'Consol',
+			'consol_no' => 'Consol No',
+			'owner_id' => 'Owner',
+			'agent_id' => 'Agent',
+			'agent_name' => 'Agent Name',
+			'cnee_id' => 'Cnee',
+			'cnor_id' => 'Cnor',
+			'man_id' => 'Manifest',
+			'rec_id' => 'Rec. Manifest',
+			'zr_id' => 'Rate',
+			'ot_id' => 'Outturn',
+			'odpt_id' => 'Depot',
+			'ddpt_id' => 'Depot',
+			'status' => 'Status',
+			'type' => 'Type',
+			'styp' => 'Service',
+			'pickup' => 'Require Pickup',
+			'hbn' => 'Connote',
+			'mhbns' => 'Multiple Connotes',
+			'fbas' => 'Multiple FBA PO',
+			'fbaIds' => 'Multiple FBA Ids',
+			'pmc_ake_numbers' => 'PMC AKE Numbers',
+			'item_name' => 'Item Detail',
+			'ref' => 'Ref',
+			'cref' => 'Cust. Ref',
+			'pkg' => 'Package',
+			'items' => 'Items',
+			'state' => 'State',
+			'postcode' => 'Postcode',
+			'value' => 'Value',
+			'dvalue' => 'Dec. Value',
+			'currency' => 'Currency',
+			'weight' => 'Weight',
+			'wtck' => 'Checked Wt.',
+			'tariff' => 'Tariff',
+			'insurance' => 'Insurance',
+			'cbm' => 'CBM',
+			'sac' => 'Sac',
+			'exm' => 'Exempt Code',
+			'can' => 'Memo',
+			'meta' => 'Meta',
+			'note' => 'Note',
+			'delay' => 'Delay',
+			'created' => 'Created',
+			'cnor_name' => 'Cnor Name',
+			'cnor_tel' => 'Cnor Tel',
+			'cnee_tel' => 'Cnee Tel',
+			'cnee_cnid' => 'Cnee Cnid',
+			'cnee_addr' => 'Cnee Addr',
+			'cnee_name' => 'Cnee Name',
+			'prod' => 'Goods',
+			'exInfo' => 'ExInfo',
+			'bag_tag' => 'Bag Tag',
+			'sctime' => 'Scan Time',
+			'unloadDate' => 'Unpack Date',
+			'scheDate' => 'Sche Date',
+			'rts_scan_date'=>'RTS scan date',
+			'pbn'=>'Fak Pbn'
+		]);
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search($pgn=true, $ps = 30, $ec = false, $defaultOrder=true,$isBackend = false)
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+		if (!empty($this->agent_id)) {
+			$criteria->compare('t.agent_id', $this->agent_id, false);
+			if (!empty($this->hbn)) {
+				$criteria->compare('t.agent_id', 0, false, 'OR');
+				$criteria->compare('hbn', $this->hbn, true);
+			}
+		} else {
+			$criteria->compare('hbn', $this->hbn, true);
+		}
+			   
+		$criteria->compare('t.id', $this->id,true);
+		$criteria->compare('t.owner_id', $this->owner_id);
+		$criteria->compare('consol_id', $this->consol_id);
+		$criteria->compare('cnor_id', $this->cnor_id);
+		$criteria->compare('cnee_id', $this->cnee_id);
+		$criteria->compare('receiver_id', $this->receiver_id);
+		$criteria->compare('notify_id', $this->notify_id);
+		$criteria->compare('man_id', $this->man_id);
+		$criteria->compare('rec_id', $this->rec_id);
+		$criteria->compare('odpt_id', $this->odpt_id);
+		// $criteria->compare('t.ddpt_id', $this->ddpt_id);
+		// $criteria->compare('t.ddpt_id', $this->getUserDptId());
+		if(!empty($this->ddpt_id)&&$this->canUserCheckAll())
+		{
+			$with[] = 'consol';
+			$criteria->addCondition("t.ddpt_id = {$this->ddpt_id} or consol.dpt_id = {$this->ddpt_id}");
+		}else
+		{
+			if(!empty($this->getUserDptId())&&!$isBackend)
+			{
+				$criteria->addCondition("t.ddpt_id = {$this->getUserDptId()} or consol.dpt_id = {$this->getUserDptId()}");
+			}
+		}
+
+		$criteria->compare('zr_id', $this->zr_id);
+		$criteria->compare('ot_id', $this->ot_id);
+		if (empty($this->status) && empty($this->hbn)&&empty($this->ref)) {
+			$criteria->addCondition('t.status != 100');
+		} else {
+			$criteria->compare('t.status', $this->status);
+		}
+		//$criteria->compare('t.type',$this->type);
+		$criteria->compare('ref', $this->ref, true);
+		$criteria->compare('cref', $this->cref, true);
+		$criteria->compare('t.styp', $this->styp);
+		$criteria->compare('pkg', $this->pkg, true);
+		$criteria->compare('t.state', $this->state, true);
+		$criteria->compare('t.postcode', $this->postcode, true);
+		$criteria->compare('value', $this->value, true);
+		$criteria->compare('dvalue', $this->dvalue, true);
+		$criteria->compare('tariff', $this->tariff, true);
+		$criteria->compare('currency', $this->currency);
+		$criteria->compare('weight', $this->weight, true);
+		$criteria->compare('wtck', $this->wtck, true);
+		$criteria->compare('cbm', $this->cbm, true);
+		$criteria->compare('sac', $this->sac);
+		$criteria->compare('exm', $this->exm, true);
+		$criteria->compare('can', $this->can, true);
+		$criteria->compare('scan_no', $this->scan_no);
+		$criteria->compare('t.note', $this->note, true);
+		$criteria->compare('t.created', $this->created, true);
+
+		if (!empty($this->mhbns)) {
+			$ns = preg_split('/[\s,;]+/', trim($this->mhbns));
+			if (sizeof($ns) > 1000) {
+				$ns = array_slice($ns, 0, 1000);
+			}
+			$sc1 = new CDbCriteria;
+			$sc1->addInCondition("hbn", $ns);
+			$sc1->addInCondition("ref", $ns, 'OR');
+			$sc1->addInCondition("cref", $ns, 'OR');
+			$criteria->mergeWith($sc1);
+		}
+
+		if (!empty($this->mids)) {
+			$criteria->addCondition('t.id in ('.join(',',$this->mids).') ');
+		}
+
+		if (!empty($this->bwf)) {
+			$criteria->addCondition('t.bwf & ' . $this->bwf . ' > 0');
+		}
+		if (!empty($this->not_bwf)) {
+			$criteria->addCondition('t.bwf & ' . $this->not_bwf . ' = 0');
+		}
+
+		if (!empty($this->cbwf)) {
+			$criteria->addCondition('t.cbwf & ' . $this->cbwf . ' > 0');
+		}
+
+		$with = [];
+		if (!empty($this->agent_name)) {
+			$with[] = 'agent';
+			$criteria->addCondition('agent.name LIKE :agt_name OR t.agent_id = :agt_id');
+			$criteria->params[':agt_name'] = '%'.$this->agent_name.'%';
+			$criteria->params[':agt_id'] = $this->agent_name;
+		}
+
+		if (!empty($this->cnee_name)) {
+			$with[] = 'cnee';
+			$criteria->compare('cnee.name', $this->cnee_name, true);
+		}
+
+		if (!empty($this->cnee_tel)) {
+			$with[] = 'cnee';
+			$criteria->compare('cnee.tel', $this->cnee_tel, true);
+		}
+
+		if (!empty($this->cnee_addr)) {
+			$with[] = 'cnee';
+			$criteria->compare('cnee.address', $this->cnee_addr, true);
+		}
+
+		if (!empty($this->cnee_cnid)) {
+			$with[] = 'cnee';
+			$with[] = 'cnee.cnid';
+			$criteria->compare('cnid.no', $this->cnee_cnid, true);
+		}
+
+		if (!empty($this->cnor_name)) {
+			$with[] = 'cnor';
+			$criteria->compare('cnor.name', $this->cnor_name, true);
+		}
+
+		if (!empty($this->cnor_tel)) {
+			$with[] = 'cnor';
+			$criteria->compare('cnor.tel', $this->cnor_tel, true);
+		}
+
+		if (!empty($this->consol_no)) {
+			$with[] = 'consol';
+			$criteria->compare('consol.no', $this->consol_no, true);
+		}
+		if (!empty($this->consol_eta)) {
+			$with[] = 'consol';
+			$criteria->compare('consol.eta', $this->consol_eta, true);
+		}
+		
+		if (!empty($this->awb_name)) {
+			$with[]='consol';
+			$criteria->compare('consol.awb', $this->awb_name, true);
+		}
+		
+		if (!empty($this->process_status)) {
+			$with[] = 'process';
+			$criteria->compare('process.status', $this->process_status);
+		}
+		
+		if (!empty($this->process_statuses)) {
+			$with[] = 'process';
+			$criteria->addInCondition('process.status', $this->process_statuses);
+		}
+		
+		if (!empty($this->process_not_status)) {
+			$with[] = 'process';
+			$criteria->addNotInCondition('process.status', $this->process_not_status);
+		}
+		
+		if (!empty($this->process_doc_date)) {
+			$with[] = 'process';
+			$criteria->compare('process.date', $this->process_doc_date, true);
+		}
+		
+		if (!empty($this->process_broker)) {
+			$with[] = 'process';
+			$criteria->compare('process.broker_id', $this->process_broker);
+		}
+		
+		if (!empty($this->item_name)) {
+			$criteria->compare('t.items', $this->item_name, true);
+		}
+
+		if (!empty($this->rts_scan_date)) {
+			$with[] = 'rts_record';
+			$criteria->addCondition('rts_record.record_time like "%'.$this->rts_scan_date.'%"');
+		}
+
+		if (!empty($_GET['sort'])&&($_GET['sort']=='rts_scan_date'||$_GET['sort']=='rts_scan_date.desc')) {
+			$with[] = 'rts_record';
+		}
+
+		if ($ec) {
+			$criteria->mergeWith($ec);
+		}
+		
+		$sort = new CSort(get_called_class());
+		$sort->attributes = [
+			'cnor_name'=>[
+				'asc'=>'cnor.name',
+				'desc'=>'cnor.name DESC',
+			],
+			'cnee_name'=>[
+				'asc'=>'cnee.name',
+				'desc'=>'cnee.name DESC',
+			],
+			'cnee_addr'=>[
+				'asc'=>'cnee.address',
+				'desc'=>'cnee.address DESC',
+			],
+			'process_doc_date'=>[
+				'asc'=>'process.date',
+				'desc'=>'process.date DESC'
+			],
+			'awb_name'=>[
+				'asc'=>'consol.awb',
+				'desc'=>'consol.awb DESC',
+			],
+			'agent_name'=>[
+				'asc'=>'agent.name',
+				'desc'=>'agent.name DESC',
+			],
+			'consol_no'=>[
+				'asc'=>'consol.no',
+				'desc'=>'consol.no DESC',
+			],
+			'consol_eta'=>[
+				'asc'=>'consol.eta',
+				'desc'=>'consol.eta  DESC',
+			],
+			'meta'=>[
+				'asc'=>'meta',
+				'desc'=>'meta DESC',
+			],
+			'rts_scan_date'=>[
+				'asc'=>'rts_record.record_time',
+				'desc'=>'rts_record.record_time desc',
+			],
+						
+			'*',
+		];
+		if ($defaultOrder) {
+			$sort->defaultOrder = 't.bwf DESC, t.id DESC';
+		} else {
+			$sort->defaultOrder = 't.id DESC';
+		}
+
+		$sob = $sort->getOrderBy();
+		$sobs = preg_split('/, */', $sob);
+		foreach ($sobs as $ob) {
+			if (!strpos($ob, '.')) {
+				continue;
+			}
+			list($m, $f) = explode('.', $ob);
+			if (str_replace('`', '', $m) == 't') {
+				continue;
+			}
+			$with[] = $m;
+		}
+
+		if (!empty($with)) {
+			$criteria->with = array_unique($with);
+			$criteria->together = true;
+		}
+
+		// in case sub-gridview, we need consol_id set by parent grid view
+		$pagerparams = $_GET;
+		if ($this->consol_id  > 0) {
+			$pagerparams['consoleId'] = $this->consol_id;
+		}
+
+		return new CActiveDataProvider($this, [
+			'criteria'=>$criteria,
+			'sort'=>$sort,
+			'pagination'=> $pgn? [
+				'pageSize' => $ps,
+				'params' => $pagerparams,
+			] : false,
+		]);
+	}
+
+	public function getLocation($o=false)
+	{
+		$sl = StorageLog::findItem($this);
+		if (empty($sl)) {
+			return '';
+		}
+		return $o? $sl->storage : $sl->storage->name;
+	}
+
+	public function getClientEntry()
+	{
+		if (!empty($this->mdata["client_entry"])) {
+			$cltent = $this->mdata['client_entry'];
+			if (!empty($cltent["items"]["g"])) {
+				$gs = [];
+				foreach ($cltent["items"]["g"] as $gi => $g) {
+					$gs[] = $cltent["items"]["q"][$gi]." * ".$g;
+				}
+				return implode(' ', $gs);
+			}
+		}
+	}
+
+	public function hasInsurance()
+	{
+		return !empty(InvLine::model()->find('ccode = "Shipment Insurance" AND fid = :fid', [':fid' => $this->id]));
+	}
+  	
+  	public function updateAllFiles()
+  	{
+  		$files = FileRepo::model()->findAll(" fid = :fid and type = :type and status = :status",[":fid"=>$this->id,":type"=>FileRepo::IMPORTPODFILE, ":status"=>FileRepo::PENDING]);
+  		foreach ($files as $key => $file) {
+  			$file->status = FileRepo::ACTIVE;
+  			$file->update(["status"]);
+  		}
+  	}
+
+	/**
+	 * @param $shipmentRef
+	 * @return int
+	 */
+	public static function getCourierCostByShipment($shipmentRef, $org_rate_id, $chargeWeight = null,$isHunter = false,$noRemote = false,$isNoFuel = false,$month="",$cargoProcessId = null)
+	{
+		$orgRate = OrgRate::model()->findByPk($org_rate_id);
+		$price = 0;
+		$consolId = 0;
+		$shipment = Shipment::model()->find('ref = :ref OR hbn = :ref OR can = :ref', [':ref' => $shipmentRef]);
+		if (!empty($shipment)) {
+			if($orgRate->code==ImportChargeCode::FASTWAY_SYD_COST_CODE)
+			{
+				if(!empty($chargeWeight))
+				{
+					$chargeWeight = $shipment->getFastwayWeight($chargeWeight);
+				}
+			}
+
+
+			$consolId = empty($shipment->consol_id)?0:$shipment->consol_id;
+			if (empty($chargeWeight)) {
+				$weight = $shipment->weight;
+			} else {
+				$weight = $chargeWeight;
+			}
+			/*************************************************For CBM courier******************************************/
+			if($orgRate->type==OrgRate::CBM_COST_RATE)
+			{
+				$amount = self::calculateCourierCostByCBMPricing($shipment,$orgRate,$chargeWeight);
+				return ['price' => $amount, 'consol_id' => 0];
+
+			}
+			/*******************************************For DFE***********************************************************/
+			if(in_array($orgRate->org_id,[Org::ORGID_COURIER_DFE,Org::ORGID_COURIER_DFE_TOP]))
+			{
+				$o = DFEAPI::getCost($org_rate_id, $shipment->cnee->suburb, $shipment->cnee->postcode, $weight);
+				if($o->msg=='success')
+				{
+					return ['price' => $o->data, 'consol_id' => $consolId];
+				}
+			}
+
+			if(in_array($orgRate->org_id,[Org::ORGID_COURIER_EIZ_TOLL]))
+			{
+				$o = EizAPI::getCost($org_rate_id, $shipment->cnee->suburb, $shipment->cnee->postcode, $weight);
+				if($o->msg=='success')
+				{
+					return ['price' => $o->data, 'consol_id' => $consolId];
+				}
+			}
+
+			if(in_array($orgRate->org_id,[Org::ORGID_COURIER_UBI])&&!preg_match('/LOCAL/i', $orgRate->code))
+			{
+				$o = EtowerAPI::getCost($org_rate_id, $shipment->cnee->suburb, $shipment->cnee->postcode, $weight,false,$shipment);
+				if($o->msg=='success')
+				{
+					return ['price' => $o->data, 'consol_id' => $consolId];
+				}
+			}
+
+			if(in_array($orgRate->org_id,[Org::ORGID_COURIER_TOLL_IPEC]))
+			{
+				$o = MyTollAPI::getCost($org_rate_id, $shipment->cnee->suburb, $shipment->cnee->postcode, $weight,$noRemote,false,$shipment);
+				if($o->msg=='success')
+				{
+					return ['price' => $o->data, 'consol_id' => $consolId];
+				}
+			}
+
+			if(in_array($orgRate->org_id,[Org::ORGID_COURIER_BORDER]))
+			{
+				$o = BorderAPI::getCost($org_rate_id, $shipment->cnee->suburb, $shipment->cnee->postcode, $weight);
+				if($o->msg=='success')
+				{
+					return ['price' => $o->data, 'consol_id' => $consolId];
+				}
+			}
+
+			if(in_array($orgRate->org_id,[Org::ORGID_COURIER_FL_HUNTER]))
+			{
+				$o = FLHunterFTP::getCost($org_rate_id, $shipment->cnee->suburb, $shipment->cnee->postcode, $weight,$noRemote,$isNoFuel);
+				if($o->msg=='success')
+				{
+					return ['price' => $o->data, 'consol_id' => $consolId];
+				}
+			}
+
+			if(in_array($orgRate->org_id,[Org::ORGID_COURIER_ALLIED_TOP]))
+			{
+				$o = HvlvJavaAPI::getCost($org_rate_id, $shipment->cnee->suburb, $shipment->cnee->postcode, $weight,false,false,$isNoFuel);
+				if($o->msg=='success')
+				{
+					return ['price' => $o->data, 'consol_id' => $consolId];
+				}
+			}
+
+			/*************************************For general*****************************************************/
+			$zoneMap = ZoneMap::model()->find(
+				'org_id = :oid AND zone_id = :zoneid AND pc_lo <= :code AND pc_hi >= :code',
+				[':oid' => $orgRate->org_id, ':zoneid' => $orgRate->zone_id, ':code' => $shipment->cnee->postcode]
+			);
+
+			$chargeCode = 'xxxxxxx';
+			if (!empty($zoneMap) && !empty($zoneMap['z1'])) {
+				$chargeCode = $zoneMap['z1'];
+			}
+
+			if($isHunter)//hunter use hunter_postcode_mapping
+			{
+				$chargeCode = HunterPortcode::model()->find('suburb = :suburb AND postcode = :postcode',
+				[':suburb' => strtoupper(trim($shipment->cnee->suburb)), ':postcode' => $shipment->cnee->postcode]
+				);
+				if($chargeCode!=null)
+				{
+					$chargeCode = $chargeCode['zonecode'];
+				}
+			}
+
+			if($orgRate->org_id==Org::ORGID_COURIER_AUPOST)
+			{
+				$weight = $weight/$shipment->pkg;
+			}
+			// base charge code to get zone rate
+			$zrs = ZoneRate::model()->findAll(
+				"zone = :s AND (weight_lo < :w AND weight_hi >= :w) AND rate_id = :rateid AND base+item+perkg > 0 ",
+				[':s' => $chargeCode, ':w' => $weight, ':rateid' => $orgRate->id]
+			);
+			if($orgRate->code==ImportChargeCode::AUPOST_INTERNATIONAL_CODE)//for international
+			{
+				$country = $shipment->cnee->country;
+				$zone = SystemSetting::getIntZone();
+				if(!empty($zone[$country]))
+				{
+					$zrs = ZoneRate::model()->findAll('rate_id = :cid AND weight_lo <=:w AND weight_hi >= :w AND zone = :z AND base+item+perkg+minimum > 0', [':cid' => $orgRate->id, ':w' => $weight, ':z' => $zone[$country]]);
+				}
+			}
+
+			if($shipment->checkIsCargoProcessWithRef())
+			{
+				$cost = CargoProcessService::getShipmentCargoProcessCost($shipment,$cargoProcessId);
+				return  ['price' => $cost, 'consol_id' => $consolId];
+			}
+
+			if (!empty($zrs)) {
+				foreach ($zrs as $zr) {
+					$temp = $zr['base'] + ($zr['item'] * $shipment->pkg);
+					if ($zr['nkg'] > 0) {
+						$wl = $weight - ($zr['base'] > 0 ? $zr['nkg'] : 0);
+						$temp += ceil($wl / $zr['nkg']) * $zr['perkg'];
+					} else {
+						$temp += $weight * $zr['perkg'];
+					}
+					if ($zr['minimum'] > 0 && $temp < $zr['minimum']) {
+						$temp = $zr['minimum'];
+					}
+					$price = max($price, $temp);
+
+					if(!$isNoFuel)
+					{
+						if(in_array($orgRate->org_id,[ORG::ORGID_COURIER_UBI,ORG::ORGID_COURIER_GV_AUPOST]))
+						{
+							$month = empty($month)?date("Y-m"):$month;
+							$auspostFuelSetting = SystemSetting::getAupostFuelChargeSetting();
+							if(!empty($auspostFuelSetting[$month]))
+							{
+								$price=$price+($price*(floatval($auspostFuelSetting[$month])/100));
+							}
+
+						}else
+						{
+							if(!empty($orgRate->mdata["fuel"]))
+							{
+								$price=$price+($price*$orgRate->mdata["fuel"]);
+							}
+						}
+					}
+
+				}
+			}
+		}
+		if ($org_rate_id == ImportChargeCode::GLOBAVEND_POSTAGE_ID) {
+			$price *= 1.021 * 1.03; 
+		}
+		return ['price' => $price, 'consol_id' => $consolId];
+	}
+
+	public static function calculateCourierCostByCBMPricing($shipment,$orgRate,$chargeWeight)
+	{
+		$amount=0;
+		$cbm = $chargeWeight;
+		//for the delivery calculate by weight
+		$zoneMap = ZoneMap::model()->find('org_id = :oid AND zone_id = :zoneid AND pc_lo <= :code AND pc_hi >= :code',
+				[':oid' => $orgRate->org_id, ':zoneid' => $orgRate->zone_id, ':code' => $shipment->cnee->postcode]);
+		$chargeCode = 'N1';
+		if (!empty($zoneMap) && !empty($zoneMap['z1'])) {
+			$chargeCode = $zoneMap['z1'];
+		}
+		$zoneRates = ZoneRate::model()->findAll("zone = :s AND (weight_lo < :w AND weight_hi >= :w) AND rate_id = :rateid AND minimum+item+perkg > 0 ",
+				[':s' => $chargeCode, ':w' =>ceil(floatval($cbm) * 10) / 10, ':rateid' => $orgRate->id]);
+		if (empty($zoneRates)) {
+			$zoneRates = ZoneRate::model()->findAll("zone = :s AND (weight_lo < :w AND weight_hi >= :w) AND rate_id = :rateid AND minimum+item+perkg > 0 ",
+				[':s' => $chargeCode, ':w' =>ceil($cbm * 10) / 10, ':rateid' => $orgRate->id]);
+		}
+		if (empty($zoneRates)) {
+			return 0;
+		} else {
+			foreach ($zoneRates as $zoneRate) {
+				$result = 0;
+				//if the cbm is lower than the minimum_cbm
+				if (!empty($zoneRate['min_incl'])) {
+					if ($cbm<=$zoneRate['min_incl']) {
+						$base = max($zoneRate['base'], $zoneRate['minimum']);
+						$result = max($base, $cbm*$zoneRate['perkg'])+$zoneRate['item'];
+					} else {
+						$base = max($zoneRate['base'], $zoneRate['minimum']);
+						$leaseCBM = $cbm-floatval($zoneRate['min_incl']);
+						// $ncbm = $zoneRate['nkg']>0?$zoneRate['nkg']:1;
+						$result = $base+($leaseCBM*$zoneRate['perkg'])+$zoneRate['item'];
+					}
+				} else {
+					$base = max($zoneRate['base'], $zoneRate['minimum']);
+					$result = max($base, $cbm*$zoneRate['perkg'])+$zoneRate['item'];
+				}
+
+				$truckDeliveryInfo = $orgRate->mdata['truck_delivery'];
+				$chargeCodeWidth = $truckDeliveryInfo['extra_width'];
+				//if the dimension is longer than limitation
+				if (@max(@$shipment->mdata['dim']['w'], @$shipment->mdata['dim']['h'], @$shipment->mdata['dim']['d'])>$chargeCodeWidth) {
+					$result+=$cbm* $truckDeliveryInfo['extra_width_fee'];
+				}
+
+				// if the distance is longer than limitation
+				if ($truckDeliveryInfo['extra_distance']>0) {
+					$distance = GoogleMapAPI::getDistance($shipment);
+
+					if ($distance>$truckDeliveryInfo['extra_distance']) {
+						$countDistance = $distance - $truckDeliveryInfo['extra_distance'];
+						$result+=ceil($countDistance / $truckDeliveryInfo['extra_distance_limit'])*$truckDeliveryInfo['extra_distance_fee'];
+					}
+				}
+
+				if ($shipment->styp==Imparcel::EXPRESS_STYP) {
+					if (@$truckDeliveryInfo['express']>1) {
+						$result =$result*$truckDeliveryInfo['express'];
+					}
+				} elseif ($shipment->styp==Imparcel::EXTRA_EXPRESS_STYP) {
+					if (@$truckDeliveryInfo['extra_express']>1) {
+						$result =$result*$truckDeliveryInfo['extra_express'];
+					}
+				}
+
+				if ($truckDeliveryInfo['fuel_surcharge']>0) {
+					$fuel_surcharge = 1+$truckDeliveryInfo['fuel_surcharge'];
+					$result=$result*$fuel_surcharge;
+				}
+				if ($result>$amount) {
+					//$amount = $result;
+					$selectedRate = $zoneRate;
+				}
+				$amount =max($amount, $result);
+			}
+		}
+		return $amount;
+
+	}
+
+	public function isTLA()
+	{
+		if($this->type==10 && !empty($this->consol_id)&& !empty($this->consol)&& (strtotime($this->consol->eta)>=strtotime('2020-08-01')||strtotime($this->consol->created)>=strtotime('2020-08-01')))
+		{
+			return $this->consol->isTLA() ? true : false;
+		}else if (preg_match('/^T/', $this->hbn)&&strtotime($this->created)>=strtotime('2020-08-01'))
+		{
+			return true;
+		}
+		return false;
+	}
+
+	public function getFastwayWeight($chargeWeight)
+	{
+		$fw = new FastwayAPI(true, false, 'syd');
+		$weight = $fw->roundWeight($chargeWeight,$this->cnee->state);
+		if(preg_match('/^2X/i', $this->ref)&&$weight<=0.3)
+		{
+			return 0.51;
+		}
+	}
+
+	public function getCubeWeight()
+	{
+		// because cbm is for each item only , but weight is for total
+		// so we should get total cbm by multiplied with pkg
+		$totalCbm = $this->cbm * ($this->pkg > 0 ? $this->pkg : 1);
+		$cubWeight = $totalCbm * 250;
+		return round(max($this->weight, $cubWeight),2);
+	}
+
+	public function getSingleCubeWeight()
+	{
+		// because cbm is for each item only , but weight is for total
+		// so we should get total cbm by multiplied with pkg
+		$cbm = $this->cbm;
+		$cubWeight = $cbm * 250;
+		return round(max($this->weight/$this->pkg, $cubWeight),2);
+	}
+
+	public function isTopCourierServiceDelivery($isCal = false)
+	{
+		if(!empty($this->cargo_process)&&$this->cargo_process->status!=CargoProcess::DELETED)
+		{
+			if($isCal)
+			{
+				if (!empty($this->trans))
+				{
+					foreach ($this->trans as $ts) {
+						if ($ts->connote != $this->ref) {
+							return false;
+						}
+						
+						if (!empty($ts->mdata['oid'])) {
+							return false;
+						}
+					}
+				}
+			}
+			return true;
+		}else
+		{
+			return false;
+		}
+	}
+
+	public function getRegion()
+	{
+		$dptId = $this->ddpt_id;
+		if(empty($this->ddpt_id))
+		{
+			if(!empty($this->consol_id))
+			{
+				$dptId = $this->consol->dpt_id;
+			}
+		}
+
+		if(empty($dptId))
+		{
+			return "";
+		}
+
+		if(!empty($this->mdata['region']))
+		{
+			return $this->mdata['region'];
+		}else
+		{
+			$orgRate = OrgRate::model()->find("code = :code and json_value(meta,'$.ddpt_id') = :dptId",[":code"=>ImportChargeCode::AUSTWAY_TRUCK_ZONE_CODE,":dptId"=>$dptId]);
+			if(!empty($orgRate))
+			{
+		        $zoneMaps = ZoneMap::model()->findAll("org_id = :orgId and zone_id = :zoneId  and pc_hi>=:postcode and pc_lo<=:postcode",[":orgId"=>$orgRate->org_id,":zoneId"=>$orgRate->zone_id,":postcode"=>$this->cnee->postcode]);
+		        foreach ($zoneMaps as $key => $z) {
+		        	$this->mdata['region'] = $z->z1;
+		        	$pre = $this->nolog;
+		        	$this->nolog = true;
+		        	$this->updateMeta();
+		        	$this->nolog = $pre;
+		        	return $z->z1;
+		        }
+	    	}
+			return "";
+		}
+	}
+
+	public function getTLDRegion()
+	{
+		$region = $this->getRegion();
+		$dptId = $this->ddpt_id;
+		if(empty($this->ddpt_id))
+		{
+			if(!empty($this->consol_id))
+			{
+				$dptId = $this->consol->dpt_id;
+			}
+		}
+		
+		if (!empty($region) && !empty($dptId) && $dptId == 106) { // Only print region information for Sydney depot
+			if ($this->pkg > 5) {
+				return "";
+			}
+			$packages = empty($this->packages)?[]:json_decode($this->packages);
+			$weightValidate = true;
+			foreach ($packages as $package) {
+				if ($package->weight > 30) {
+					$weightValidate = false;
+					break;
+				}
+			}
+			if ($weightValidate) {
+				if (preg_match('/northeast/i', $region)) {
+					return preg_replace('/northeast/i', 'NE', $region);
+				} else if (preg_match('/northwest/i', $region)) {
+					return preg_replace('/northwest/i', 'NW', $region);
+				} else if (preg_match('/southeast/i', $region)) {
+					return preg_replace('/southeast/i', 'SE', $region);
+				} /*else if (preg_match('/southwest/i', $region)) {
+					return preg_replace('/southwest/i', 'SW', $region); 
+				}*/ else if (preg_match('/NORTH EAST/i', $region)) {
+					return preg_replace('/NORTH EAST/i', 'NE', $region);
+				} else if (preg_match('/NORTH WEST/i', $region)) {
+					return preg_replace('/NORTH WEST/i', 'NW', $region);
+				} else if (preg_match('/SOUTH EAST/i', $region)) {
+					return preg_replace('/SOUTH EAST/i', 'SE', $region);
+				}/* else if (preg_match('/SOUTH WEST/i', $region)) {
+					return preg_replace('/SOUTH WEST/i', 'SW', $region);
+				} else if (preg_match('/OUTER EAST/i', $region)) {
+					return preg_replace('/OUTER EAST/i', 'OE', $region);
+				} else if (preg_match('/OUTER WEST/i', $region)) {
+					return preg_replace('/OUTER WEST/i', 'OW', $region);
+				} else if (preg_match('/east/i', $region)) {
+					return preg_replace('/east/i', 'E', $region);
+				} else if (preg_match('/south/i', $region)) {
+					return preg_replace('/south/i', 'S', $region);
+				} else if (preg_match('/west/i', $region)) {
+					return preg_replace('/west/i', 'W', $region);
+				}*/ else if (preg_match('/north/i', $region)) {
+					return preg_replace('/north/i', 'N', $region);
+				} else {
+					return '';
+				}
+			} else {
+				return '';
+			}
+		} else {
+			return "";
+		}
+	}
+
+	public function getCargoProcessJobNo()
+	{
+		if(!empty($this->cargo_process))
+		{
+			if(!empty($this->cargo_process->job_relation))
+			{
+				if(!empty($this->cargo_process->job_relation->job))
+				{
+					return $this->cargo_process->job_relation->job->job_no;
+				}
+			}
+		}
+		return "";
+	}
+
+	public function getCargoProcessJobPalletNo()
+	{
+		if(!empty($this->cargo_process))
+		{
+			return empty($this->cargo_process->mdata['job_pallet_no'])?"":$this->cargo_process->mdata['job_pallet_no'];
+		}
+		return "";
+	}
+
+	public function checkIsCargoProcessWithRef()
+	{
+		if ((preg_match("/SKP|MKP|BKP|PKP|PICKUP/i", $this->ref))||!empty($this->mdata['cargo_delivery'])||!empty($this->mdata['cargo_pickup']))
+		{
+			return true;
+		}
+		return false;
+	}
+
+	public function checkIsKPWithRef()
+	{
+		if ((preg_match("/SKP|MKP|BKP|PKP/i", $this->ref))||!empty($this->mdata['cargo_delivery']))
+		{
+			return true;
+		}
+		return false;
+	}
+
+	public function getDpmt()
+	{
+		if($this->isTopCourierServiceDelivery(true))
+		{
+			return Invoice::DPMT_COURIER_SERVICE;
+		}else if($this->is3PL())
+		{
+			return Invoice::DPMT_3PL;
+		}
+		return Invoice::DPMT_IMPORT;
+	}
+
+	public function getPalletData()
+	{
+		if(!empty($this->palletData))
+		{
+			return $this->palletData;
+		}
+		if(!empty($this->mdata['amzon_pallet']))
+		{
+			$weight = max($this->weight/$this->mdata['amzon_pallet'],($this->getTotalCBM()*330)/$this->mdata['amzon_pallet']);
+			$this->palletData = [$this->mdata['amzon_pallet'],$this->getTotalCBM()/$this->mdata['amzon_pallet'],$weight];
+			return $this->palletData;
+		}
+		$this->palletData = [0,0,0];
+		return $this->palletData;
+	}
+
+	public function canBeDelete()
+	{
+		if(!empty($this->consol)&&$this->consol->isWDT())
+		{
+			$re = ImportsShipmentRelations::model()->find("cid = :cid",[":cid"=>$this->id]);
+			if(!empty($re))
+			{
+				return $re->original->canBeUpdate();
+			}
+		}
+		return $this->canBeUpdate();
+	}
+
+	public function canBeUpdate()
+	{
+		if($this->status <= ImParcel::NEW_STATUS||$this->status==ImParcel::STATE_CANCELLED)
+		{
+			return true;
+		}
+		
+		if($this->status == ImParcel::STATE_LOCAL_ARRIVAL&&!(!empty($this->consol)&&$this->consol->isWDT()))
+		{
+			return true;
+		}
+
+
+		return false;
+	}
+
+	public function isWms()
+	{
+		if(preg_match('/^T\d{6,7}$/', $this->cref)&&!empty($this->mdata['wmstask_id']))
+		{
+			return true;
+		}else
+		{
+			return false;
+		}
+	}
+
+	public function getRTSBarcodes($isHTML = false,$isReason = false)
+	{
+		if(empty($this->records))
+		{
+			$this->records = ShipmentRTSRecord::model()->findAll("shipment_id =:shipmentId and  status =:status",[":shipmentId"=>$this->id,":status"=>ShipmentRtsRecord::NEW]);
+		}
+
+		$str = "";
+		foreach ($this->records as $key => $record)
+		{
+			if($isHTML)
+			{
+				$str.='<p>'.$record->barcode.'</p>';
+			}else
+			{
+				$str.=$record->barcode.",";
+			}
+		}
+		return $str;
+	}
+
+
+	public function getRTSLocation($isHTML = false,$isReason = false)
+	{
+		if(empty($this->records))
+		{
+			$this->records = ShipmentRTSRecord::model()->findAll("shipment_id =:shipmentId and  status =:status",[":shipmentId"=>$this->id,":status"=>ShipmentRtsRecord::NEW]);
+		}
+		$str = "";
+		foreach ($this->records as $key => $record)
+		{
+			if($isHTML)
+			{
+				$str.='<p>'.$record->location->code.'</p>';
+			}else
+			{
+				$str.=$record->location->code.",";
+			}
+		}
+		return $str;
+	}
+
+	public function getRTSReasons($isHTML = false,$isReason = false)
+	{
+		if(empty($this->records))
+		{
+			$this->records = ShipmentRTSRecord::model()->findAll("shipment_id =:shipmentId and  status =:status",[":shipmentId"=>$this->id,":status"=>ShipmentRtsRecord::NEW]);
+		}
+		$str = "";
+		foreach ($this->records as $key => $record)
+		{
+			if($isHTML)
+			{
+				$str.='<p>'.$record->reason.'</p>';
+			}else
+			{
+				$str.=$record->reason.",";
+			}
+		}
+		return $str;
+	}
+
+	public function getRTSWarehouse($isHTML = false,$isReason = false)
+	{
+		if(empty($this->records))
+		{
+			$this->records = ShipmentRTSRecord::model()->findAll("shipment_id =:shipmentId and  status =:status",[":shipmentId"=>$this->id,":status"=>ShipmentRtsRecord::NEW]);
+		}
+		$str = "";
+		foreach ($this->records as $key => $record)
+		{
+			if($isHTML)
+			{
+				$str.='<p>'.$record->warehouse->name.'</p>';
+			}else
+			{
+				$str.=$record->warehouse->name.",";
+			}
+			break;
+		}
+		return $str;
+	}
+
+	public function getRTSImages($isHTML = false,$isReason = false)
+	{
+		if(empty($this->records))
+		{
+			$this->records = ShipmentRTSRecord::model()->findAll("shipment_id =:shipmentId and  status =:status",[":shipmentId"=>$this->id,":status"=>ShipmentRtsRecord::NEW]);
+		}
+		$str = "";
+		foreach ($this->records as $key => $record)
+		{
+			$str.=$record->getUrl();
+			break;
+		}
+		return $str;
+	}
+
+	public function getRTSRecordTime($isHTML = false,$isReason = false)
+	{
+		if(empty($this->records))
+		{
+			$this->records = ShipmentRTSRecord::model()->findAll("shipment_id =:shipmentId and  status =:status",[":shipmentId"=>$this->id,":status"=>ShipmentRtsRecord::NEW]);
+		}
+
+		$str = "";
+		foreach ($this->records as $key => $record)
+		{
+			if($isHTML)
+			{
+				$str.='<p>'.$record->record_time.'</p>';
+			}else
+			{
+				$str.=$record->record_time.",";
+			}
+		}
+		return $str;
+	}
+
+	public function getRTSError($isHTML = false,$isReason = false)
+	{
+		if(empty($this->records))
+		{
+			$this->records = ShipmentRTSRecord::model()->findAll("shipment_id =:shipmentId and  status =:status",[":shipmentId"=>$this->id,":status"=>ShipmentRtsRecord::NEW]);
+		}
+
+		$str = "";
+		foreach ($this->records as $key => $record)
+		{
+			if($isHTML)
+			{
+				if($record->second_rts>0)
+				{
+					$str.='<span class="red">Repeat RTS</span>';
+				}
+			}else
+			{
+				$str.=$record->record_time.",";
+			}
+		}
+		return $str;
+	}
+
+	
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return Consol the static model class
+	 */
+	public static function model($className=__CLASS__)
+	{
+		return parent::model(get_called_class());
+	}
+}

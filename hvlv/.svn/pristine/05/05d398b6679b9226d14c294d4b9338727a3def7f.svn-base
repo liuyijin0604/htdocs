@@ -1,0 +1,60 @@
+<h3><?=$name?></h3>
+<style>
+    .cloumn_red{
+        background-color:pink;
+    }  
+    .column_direct{
+        color: green;
+        font-weight: bold;
+    }
+</style>
+<?php $this->widget('zii.widgets.grid.CGridView', [
+	'id'=>$_GET["tabid"].'_consol_process_grid',
+	'cssFile' => false,
+	'dataProvider'=>$consol->search(true, 30),
+	'filter'=>$consol,
+	'columns'=>[
+		['name' => 'no', 'type' => 'raw','cssClassExpression' => '$data->type==70?"column_direct" : ""',
+			'value' => '"<a href=\"".Yii::app()->createURL(($data->type==15||$data->type==90)?"imcoConsol/update":"dmawbConsol/update", array("id" => $data->id))."\" class=\"tab_link\" title=\"".$data->no."\">".$data->no."</a>"',],
+		['name' => 'awb', 'type' => 'raw', 'value' => '$data->getReal()->AwbTracking()'],
+		['header'=>'Customer','name' => 'owner_name','value' => '$data->getReal()->getOwnerName()'],
+		['name' => 'status', 'value' => '$data->getReal()->getStatus()',
+			'filter'=>CHtml::dropDownList('ImcoConsol[status]', $consol->status, $this->t($consol::$states), ['prompt'=>$this->t('All')]),],
+		['name'=>'process_status','value'=>'$data->getProcessStatus()','filter'=>CHtml::dropDownList('ImcoConsol[process_status]', $consol->process_status, $this->t(ConsolProcess::$states), ['prompt'=>$this->t('All')]),],
+		// ['name' => 'dpt_id', 'value' => '$data->depot->name',
+		// 	'filter'=>CHtml::dropDownList('ImcoConsol[dpt_id]', $consol->dpt_id, $this->t(Org::dptList()), ['prompt'=>$this->t('All')]),],
+		array('name'=>'process_airport','header'=>'Pick Up Airport','value'=>'@$data->process->airport'),
+		'flight',
+		'pol',
+		'pod',
+		['name'=>'eta','cssClassExpression' => '$data->getEtaToNow()>=3? "cloumn_red" : ""'],
+		['header' => 'Cargo Type', 'value' => '@$data->mdata["cargo_type"]','filter'=>CHtml::dropDownList('ImcoConsol[cargoType]', @$consol->mdata['cargoType'], $this->t(['LCL'=>'LCL','FCL'=>'FCL']), ['prompt'=>$this->t('All')])],
+		['header' => 'Notes', 'value' => '@$data->process->mdata["process_note"]'],
+		['header' => 'Shipments', 'value' => '$data->getReal()->totShipments()'],
+		['header' => 'Weight', 'value' => '$data->getReal()->totWeight()'],
+		['header' => 'B/L pcs', 'value' => '$data->getReal()->getBLpcs()'],
+		['header' => 'Chargeable Weight', 'value' => '@$data->getReal()->mdata["cgb_wt"]'],
+		['header' => 'Air Type', 'value' => 'empty($data->getReal()->mdata["air_type"])?"":ImcoConsol::$air_types[$data->getReal()->mdata["air_type"]]'],
+		['header' => 'UnScanPacks', 'value' => '$data->getReal()->totLeftPacks()'],
+		['header'=>'extra Info','type'=>'raw','value'=>'$data->getReal()->getConsolDGWarnings()','filter'=>CHtml::dropDownList('Consol[exInfo]', $consol->exInfo, $this->t(Consol::$exInfos), ['prompt'=>'All'])],
+		['header'=>'AOUT','value'=>'$data->getReal()->getAOutStatus()'],
+		['class'=>'oButtonColumn',
+			'template'=>'{operate}&nbsp;{log}',
+			'buttons'=>[
+				'operate' => [
+					'url'=>'Yii::app()->createURL("consolProcess/operation",array("id"=>$data->id))',
+					'imageUrl'=>false,
+					'visible'=>'true',
+					'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => '$data->no'],
+				],
+				'log' => [
+					'imageUrl'=>false,
+					'options' => ['class' => 'jqm_link grid_view_btn', 'label' => 'Log', 'data-win-class' => 'L'],
+					'visible' => 'true',
+					'url' => 'Yii::app()->createUrl("consolProcess/log", ["id" => $data->id])',
+					'label' => 'Log'
+				],
+			],
+		],
+	],
+]); ?>

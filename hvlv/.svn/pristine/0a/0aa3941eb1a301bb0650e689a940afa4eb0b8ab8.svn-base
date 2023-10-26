@@ -1,0 +1,16 @@
+AddDefaultCharset UTF-8
+Options -Indexes +FollowSymLinks
+
+#
+# Setting rewrite rules
+#
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  # Set next line to your Frog root - if not in subdir, then just /
+  RewriteBase /hvlv/wma/booking
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteCond %{REQUEST_FILENAME} !-l
+  RewriteRule ^(.*)$ index.php [L,QSA]
+</IfModule>

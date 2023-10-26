@@ -1,0 +1,635 @@
+<?php
+
+/**
+ * This is the model class for table "gatepass_shipment".
+ *
+ * The followings are the available columns in table 'gatepass_shipment':
+ * @property integer $id
+ * @property integer $fid
+ * @property integer $warehouse
+ * @property integer $courier_id
+ * @property string $scan_time
+ * @property string $gate_pass_time
+ * @property integer $parent_id
+ * @property integer $shipment_status
+ * @property integer $sno
+ * @property string connote_no
+ * @property integer $status
+ * @property string $meta
+ */
+class GatepassShipment extends CActiveRecord
+{
+    
+    public $mdata = [];
+    public $ids, $courier_ids,$gatepassNo,$pickupDate,$hbn,$ref,$service,$memo,$cname,$pkg,$weight,$pickupBookingTime,$tel,$address,$suburb,$state,$postcode,$caIds,$cargoProcess,$gsIds,$awb;
+	/**
+	 * @return string the associated database table name
+	 */
+        const GATEPASS_FINISHED=10;
+	public function tableName()
+	{
+		return 'gatepass_shipment';
+	}
+        
+        public static $states=array(
+            0=>"Waiting To Generate GatePass",
+           10=> "GatePass Finished"
+        );
+        /**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('fid, scan_time', 'required'),
+			array('fid, parent_id, status,warehouse,courier_id,sno,shipment_status', 'numerical', 'integerOnly'=>true),
+                        array('connote_no', 'length', 'max'=>255),
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, fid, scan_time, gate_pass_time,warehouse,courier_id,ids,connote_no,shipment_status,parent_id,sno,courier_ids,status,hbn,ref,service,memo,cname,pkg,weight,pickupBookingTime,tel,address,suburb,state,postcode', 'safe', 'on'=>'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+                    'shipment'=>array(self::BELONGS_TO,'Shipment','fid'),
+                    'imparcel'=>array(self::BELONGS_TO,'ImParcel','fid')
+		);
+	}
+
+    public function getStatusAtScan()
+    {
+        return (isset(ImParcel::$states[$this->shipment_status])?ImParcel::$states[$this->shipment_status]:'').$this->shipment->getManifestStatus();
+    }
+
+        /**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return array(
+			'id' => 'ID',
+			'fid' => 'Fid',
+			'scan_time' => 'Scan Time',
+			'gate_pass_time' => 'Gate Pass Time',
+			'parent_id' => 'Parent',
+			'status' => 'Status',
+            'sno'=>'Sno',
+            'courier_id'=> 'Couirer Id',
+            'connote_no' => 'Connote No',
+            'warehouse'=> 'Warehouse',
+			'meta' => 'Meta',
+		);
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+        
+	public function search($pgn=true,$group = true,$isSign = false)
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('t.id', $this->id);
+		$criteria->compare('t.fid',$this->fid);
+		$criteria->compare('t.scan_time',$this->scan_time,true);
+        if(!empty($this->warehouse))
+        {
+            $criteria->addCondition(' t.warehouse ='.$this->warehouse." or consol.dpt_id=".$this->warehouse);
+        }
+
+        $criteria->with=array('imparcel','imparcel.consol');
+        if(!(isset($this->courier_id)&&in_array($this->courier_id, [GatepassCourier::TPCOURIER,2619,3025,Org::ORGID_COURIER_FASTWAY,'AUP','ALH','moving','pp','allied','toll','auk',Org::ORGID_COURIER_SF,4018,4117,4432,Org::ORGID_COURIER_GV_AUPOST,'Other'])))
+        {
+        	$criteria->compare('t.courier_id',$this->courier_id);
+    	}
+
+    	if(!empty($this->courier_id)&&($this->courier_id==Org::ORGID_COURIER_SF))
+    	{
+    		$criteria->addCondition("((connote_no like 'SF%' or connote_no like '08007%' or connote_no like '08008%')  and t.courier_id=114) or t.courier_id=".$this->courier_id);
+    	}
+
+
+    	if(!empty($this->courier_ids)||(!empty($this->courier_id)&&!in_array($this->courier_id, [GatepassCourier::TPCOURIER,2619,2797,Org::ORGID_COURIER_FASTWAY,'ALH','AUP','pp','3578','moving','allied','toll','auk',4018,4432,Org::ORGID_COURIER_FL_HUNTER,Org::ORGID_COURIER_GV_AUPOST,'Other'])))
+    	{
+    		$criteria->with=array('imparcel','imparcel.cargo_process','imparcel.consol');
+    		$criteria->addCondition(' cargo_process.id is null');
+    		// if(!empty($this->courier_ids))
+    		// {
+    		// 	$criteria->addCondition(' cargo_process.id is null ');
+    		// }else
+    		// {
+    		// 	$criteria->addCondition(' cargo_process.id is null');
+    		// }
+    	}
+
+    	if ($this->courier_id == 2619) 
+    	{
+			$criteria->addCondition('imparcel.agent_id = 2619 and imparcel.status >= 60 and imparcel.status < 90 and imparcel.created > "2020-01-01"');
+		}
+
+        if($this->courier_id == 4117)
+        {
+            $criteria->with=array('imparcel','imparcel.cargo_process','imparcel.consol');
+            $criteria->addCondition('imparcel.agent_id = 4117 and cargo_process.id is null and (ref like "SP%" or ref like "BNE%" or ref like "SYD%" or ref like "MEB%")');
+        }
+
+        if($this->courier_id == 4432)
+        {
+            $criteria->with=array('imparcel','imparcel.consol');
+            $criteria->addCondition('imparcel.agent_id = 4432');
+        }
+
+		if(!empty($this->courier_id)&&preg_match('/^3025-[A-Z]{3}/', $this->courier_id)) 
+    	{
+    		$criteria->with=array('imparcel','imparcel.cargo_process','imparcel.bag_tag','imparcel.bag_tag.importBag','imparcel.consol');
+    		if($this->courier_id == '3025-SYD')
+    		{
+    			$criteria->addCondition('bag_tag.bag_tag like "%UBA1050032SKU0%" or can="SYD" or json_value(importBag.meta,"$.destination") = "SYD"');
+    		}
+    		else if ($this->courier_id == '3025-MEL') 
+    		{
+    			$criteria->addCondition('bag_tag.bag_tag like "%UBA1050034SKU0%" or can="MEL" or json_value(importBag.meta,"$.destination") = "MEL"');
+    		}
+    		else if ($this->courier_id == '3025-BNE') 
+    		{
+    			$criteria->addCondition('bag_tag.bag_tag like "%UBA1050033SKU0%" or can="BNE" or json_value(importBag.meta,"$.destination") = "BNE"');
+    		}
+    		else if ($this->courier_id == '3025-ADL') 
+    		{
+    			$criteria->addCondition('bag_tag.bag_tag like "%UBA1050035SKU0%" or can="ADL" or json_value(importBag.meta,"$.destination") = "ADL"');
+    		}
+			$criteria->addCondition('imparcel.agent_id = 3025 and imparcel.status >= 60 and imparcel.status < 90 and imparcel.created > "2020-01-01" and json_value(imparcel.meta,"$.UBI_edit_to_clear") is null');
+		}
+
+		if(!empty($this->courier_id)&&(in_array($this->courier_id, [GatepassCourier::TPCOURIER,4018])))
+    	{
+    		$criteria->join=" join cargo_process cp on cp.shipment_id = t.fid ";
+    		$criteria->addCondition("(json_value(t.meta,'$.cargo_process_id') is null or json_value(t.meta,'$.cargo_process_id')=cp.id) and imparcel.status<90");
+
+            if($this->courier_id == 4018)
+            {
+                $criteria->addCondition('imparcel.agent_id in (4018,4162) and cp.type = '.CargoProcess::PICKUP_CARGO);
+            }
+    	}
+
+    	if(!empty($this->courier_id)&&($this->courier_id=='moving'))
+    	{
+    		$criteria->join=" join cargo_process cp on cp.shipment_id = t.fid join shipment s on s.id = cp.shipment_id join consol c on c.id = s.consol_id join addr cnee on s.cnee_id = cnee.id left outer join edimsg e on s.id =e.fid ";
+    		$criteria->addCondition("(json_value(t.meta,'$.cargo_process_id') is null or json_value(t.meta,'$.cargo_process_id')=cp.id) and cp.status<100 and e.type in ('SEACR-S','AIRCR-C')");
+    		$criteria->addCondition("s.status >= ".ImParcel::STATE_CLEAR." or s.status=".ImParcel::STATE_LOCAL_ARRIVAL." or s.status=".ImParcel::STATE_TRANSHIP." or s.status=".ImParcel::STATE_CONCLEAR);
+    		if(!empty($this->awb))
+    		{
+    			$criteria->addCondition(" (json_value(c.meta,'$.container_no') = '".$this->awb."') or c.awb = '".$this->awb."'");
+    		}else
+    		{
+    			$criteria->addCondition(" 1>2 ");
+    		}
+    		$pod = SystemSetting::getCargoProcessPodSetting($this->warehouse);
+			$state = @$pod["postcode"];
+			$selectStateStr = "postcode like ";
+			$sql ="";
+			if(empty($state))
+			{
+				$state = @$pod["state"];
+				$selectStateStr = "state = ";
+			}
+
+			$state = "'".$state."'";
+			$criteria->addCondition(" (cp.type != 3 and (cnee.{$selectStateStr} {$state} or json_value(cp.meta,'$.goods_state') = {$state}) ) or (cp.type = 3 and c.dpt_id = ".$this->warehouse.") and cp.type!=2");
+
+    	}
+
+    	if(!empty($this->courier_id)&&($this->courier_id=='AUP'))
+    	{
+    		$criteria->addCondition("t.courier_id = 114 and ((imparcel.agent_id = 1804 and (ref like '2020%' or hbn like '2020%') ) or imparcel.agent_id = 3551)");
+    	}
+
+        if(!empty($this->courier_id)&&($this->courier_id=='pp'))
+        {
+            $criteria->addCondition("t.courier_id = 114 and imparcel.agent_id = 3025 and hbn like '001934%' ");
+        }
+
+    	if(!empty($this->courier_id)&&($this->courier_id=='ALH'))
+    	{
+    		$criteria->addCondition("t.courier_id = 114 and imparcel.agent_id = 3578 ");
+    	}
+
+        if(!empty($this->courier_id)&&($this->courier_id=='toll'))
+        {
+            $criteria->addCondition("((t.courier_id = ".Org::ORGID_COURIER_EIZ." and ref not like 'AOE%') or (t.courier_id = ".Org::ORGID_COURIER_UBI." and ref like '8566%') ) or t.courier_id = ".Org::ORGID_COURIER_TOLL_IPEC." or t.courier_id = ".Org::ORGID_COURIER_AUK." or (imparcel.agent_id = 3390 and ref like '88684%') or (imparcel.agent_id = 4192 and ref like '88656%')  or (imparcel.agent_id = 4117 and ref like '887257%')");
+        }
+
+
+        if(!empty($this->courier_id)&&($this->courier_id=='allied'))
+        {
+            $criteria->addCondition("t.courier_id = ".Org::ORGID_COURIER_ALLIED_TOP." ");
+        }
+
+        if(!empty($this->courier_id)&&($this->courier_id==Org::ORGID_COURIER_FASTWAY))
+        {
+            $criteria->addCondition("t.courier_id = ".Org::ORGID_COURIER_FASTWAY." or ref like '2X%' or ref like 'QX%' or (ref like 'MP%' and agent_id=2716) ");
+        }
+
+
+		$criteria->compare('t.gate_pass_time',$this->gate_pass_time,true);
+		$criteria->compare('t.parent_id',$this->parent_id);
+		if(empty($this->status))
+		{
+			$criteria->addCondition( 't.status = 0 or t.status is null' );
+		}else
+		{
+        	$criteria->compare('t.status',$this->status);
+    	}
+
+        $criteria->compare('t.sno', $this->sno);
+        $criteria->compare('t.shipment_status', $this->shipment_status);
+
+        if(isset($this->courier_id)&&$this->courier_id==1301)
+        {
+            $criteria->addCondition('t.scan_time  > "2021-01-01"');
+    	}
+
+        if(!empty($this->ids)){
+            $criteria->addInCondition('t.fid', $this->ids);
+        }
+
+        if(!empty($this->caIds)){
+            $criteria->addInCondition('cp.id', $this->caIds);
+        }
+
+        if(!empty($this->gsIds)){
+            $criteria->addInCondition('t.id', $this->gsIds);
+        }
+
+        if(!empty($this->courier_id)&&in_array($this->courier_id,[GatepassCourier::TPCOURIER,4018]))
+        {
+             $criteria->addCondition('(imparcel.status >= 60 and imparcel.status<90) or imparcel.status = 42 or imparcel.status = 59 or (imparcel.cbwf & '.ImParcel::CBWF_FORCE_GATEPASS.')>0');
+        }else
+        {
+            $criteria->addCondition('((imparcel.status >= 60 and imparcel.status<90) or imparcel.status = 42 )and t.scan_time  > "2022-02-01"' );
+            // $criteria->addCondition('( (json_value(consol.meta,"$.ubmsent") is null or (json_value(consol.meta,"$.ubmsent")=9 and json_value(imparcel.meta,"$.acu") is not null)) and imparcel.status >= 60 and imparcel.status<90) or imparcel.status = 42');
+        }
+  		if(!empty($this->courier_id)&&($this->courier_id=='toll'))
+        {
+            $criteria->addCondition("((t.courier_id = ".Org::ORGID_COURIER_EIZ." and ref not like 'AOE%') or (t.courier_id = ".Org::ORGID_COURIER_UBI." and ref like '8566%') ) or t.courier_id = ".Org::ORGID_COURIER_TOLL_IPEC." or t.courier_id = ".Org::ORGID_COURIER_AUK." or (imparcel.agent_id = 3390 and ref like '88684%') or (imparcel.agent_id = 4192 and ref like '88656%')  or (imparcel.agent_id = 4117 and ref like '887257%')");
+        }
+        if (!empty($this->courier_ids)) {
+
+	    	if(in_array(101, $this->courier_ids))
+	    	{
+	    		$criteria->addCondition('(t.courier_id in ('.join(',',$this->courier_ids).') or json_value(imparcel.meta,"$.UBI_edit_to_clear") = 1 or t.connote_no like "F3X%" or t.connote_no like "33XHE%" or t.connote_no like "33XJM%" or t.connote_no like "33G7K%" or t.connote_no like "3CK20%" or t.connote_no like "33YVW%" or t.connote_no like "33YVQ%" or (t.connote_no like "34HWK%" and imparcel.agent_id = 3390) or (t.connote_no like "34VJ%" and imparcel.agent_id = 2740) or (t.connote_no like "34QJ%" and imparcel.agent_id = 4117)  ) and t.scan_time  > "2022-03-01" and t.connote_no not like "34WMP%"');
+	    	}else
+	    	{
+	    		$criteria->addInCondition('t.courier_id', $this->courier_ids);
+	    	}
+        }
+
+
+        if(!empty($this->courier_id)&&($this->courier_id=='auk'))
+        {
+            $criteria->addCondition("imparcel.agent_id = 3390 and t.courier_id != ".Org::ORGID_COURIER_AUK.' and t.connote_no not like "34HWK%" and t.connote_no not like "88684%" ');
+        }
+
+
+
+
+        if(!empty($this->courier_id)&&($this->courier_id==Org::ORGID_COURIER_GV_AUPOST))
+        {
+            $criteria->addCondition("t.courier_id = ".Org::ORGID_COURIER_GV_AUPOST." and ref like '34WMP%'");
+        }
+
+        if(isset($this->courier_id)&&in_array($this->courier_id,[GatepassCourier::TPCOURIER,'moving',4018])&&!$isSign)
+        {
+        	$criteria->group = 't.connote_no';
+    	}
+
+		return new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+                        'pagination'=> $pgn? array(
+				'pageSize' => 300,
+			) : false,
+		));
+	}
+        public  function afterFind(){
+            if(!empty($this->meta)) $this->mdata= json_decode($this->meta,true);
+        }
+        public  function beforeSave(){
+            if(!empty($this->mdata)) $this->meta= json_encode ($this->mdata);
+            return true; 
+        }
+        public function updateMeta(){
+            if(!empty($this->mdata)) $this->meta= json_encode ($this->mdata);
+            $this->update('meta');
+        }
+        public static function gatepassScan($shipment,$courier_id,$sn=0,$warehouse=106,$description = null,$caref = false,$mdata= false,$scanTime = null){
+            if(in_array($shipment->status, [ImParcel::STATE_LOCAL_ARRIVAL, ImParcel::STATE_CLEAR,ImParcel::STATE_CONCLEAR, ImParcel::STATE_COURIER,ImParcel::STATE_TRANSHIP])||($shipment->cbwf&ImParcel::CBWF_FORCE_GATEPASS)>0)
+            {
+            	if(!empty($caref))
+            	{
+               		$gatepass= GatepassShipment::model()->find('connote_no=:caref',array(':caref'=>$caref));
+            	}else
+            	{
+            		$gatepass= GatepassShipment::model()->find('fid=:fid and sno=:sn',array(':fid'=>$shipment->id,':sn'=>$sn==0?1:$sn));
+            	}
+
+                if(empty($gatepass)){
+                    $gatepass=new GatepassShipment();
+                    $gatepass->scan_time=empty($scanTime)?date('Y-m-d H:i:s'):$scanTime;
+                    $gatepass->fid= $shipment->id;
+                    if(!empty($caref))
+                    {
+                    	$gatepass->connote_no=$caref;
+                	}else
+                	{
+                		$gatepass->connote_no=empty($shipment->ref)?$shipment->hbn:$shipment->ref;
+                	}
+                    $gatepass->sno=$sn==0?1:$sn;
+                    $gatepass->courier_id=$courier_id;
+                    $gatepass->shipment_status=$shipment->status;
+                    $gatepass->warehouse=$warehouse;
+                    if($description!=null)
+                    {
+                    	$gatepass->mdata["description"] = @$gatepass->mdata["description"].$description;
+                	}
+                	if(!empty($mdata))
+                	{
+                		$gatepass->mdata = array_merge($gatepass->mdata,$mdata);
+                	}
+                    $gatepass->save();
+                    return false;
+                }else{
+                    if(!empty($courier_id))
+                    {
+                        $gatepass->courier_id = $courier_id;
+                    }
+                    $gatepass->scan_time=empty($scanTime)?date('Y-m-d H:i:s'):$scanTime;
+                    $gatepass->warehouse=$warehouse;
+                    $gatepass->shipment_status=$shipment->status;
+                    $gatepass->update(['scan_time','warehouse','shipment_status']);
+                    return true;
+                }
+            }
+            return false;
+        }
+        
+        public function getConnoteNumber(){
+            if($this->courier_id!=Org::ORGID_COURIER_ALLIED)
+            {
+            	if(!empty($this->connote_no)) return $this->connote_no;
+            }else
+            {
+            	$r=ImParcel::model()->findByPk($this->fid);
+            	return @$r->ref;
+            }
+            $r=ImParcel::model()->findByPk($this->fid);
+            return @$r->hbn;
+        }
+        public function getCneeName(){
+            $r= ImParcel::model()->findByPk($this->fid);
+             if(!empty($r->cnee->name)) return $r->cnee->name;
+           return '';
+            
+        }
+
+        public function getPreparedTruckOrPickupParcels($search_context="",$podId = 106,$pickupBookingNumber="")
+        {
+        	$hbns = []; // add a random string to prevent signature page from displaying all records when search field is empty
+            $bookedShipmentId = null;
+        	if (!empty($search_context)) 
+        	{
+				foreach (preg_split("/[;,\s\n]/", $search_context) as $hbn) 
+				{
+					if (empty(trim($hbn))) {
+							continue;
+					}else
+					{
+						$hbns[] = $hbn;
+					}
+				}
+			}
+            if(!empty($pickupBookingNumber))
+            {
+				foreach (preg_split("/[;,\s\n]/", $pickupBookingNumber) as $bookingNumber) {
+					$booking = PickupBooking::model()->findByAttributes(array('booking_number' => $bookingNumber, 'status' => PickupBooking::SCHEDULED));
+					if (!empty($booking) && !empty($booking->shipment_id)) {
+						$shipment = ImParcel::model()->findByPk($booking->shipment_id);
+						if (!empty($shipment)) {
+							$hbns[] = $shipment->hbn;
+						}
+					}
+					// When no booking record found, try use rego to find booking record.
+					if (empty($booking)) {
+						$bookings = PickupBooking::model()->findAllByAttributes(array('rego' => $bookingNumber, 'status' => PickupBooking::SCHEDULED));
+						if (!empty($bookings)) {
+							foreach ($bookings as $bk) {
+								if(!empty($bk->shipment_id)) {
+									$shipment = ImParcel::model()->findByPk($bk->shipment_id);
+									if (!empty($shipment)) {
+										$hbns[] = $shipment->hbn;
+									}
+								}
+							}
+						}
+					}
+				}
+                /* $bookedShipmentId = PickupBooking::model()->find("booking_number = :no and status =2",[':no'=>$pickupBookingNumber]);
+                if(!empty($bookedShipmentId))
+                {
+                    $bookedShipmentId = $bookedShipmentId->shipment_id;
+                }else
+                {
+                    $bookedShipmentId = -1;
+                } */
+            }
+
+			$criteria=new CDbCriteria;
+	        // $criteria->join ='join shipment s on s.id = t.shipment_id join shipment_wh_prepare swp on t.id = swp.cargo_process_id join gatepass_shipment gs on gs.fid = s.id left join consol c on c.id = s.consol_id join addr cnee on s.cnee_id = cnee.id ';
+            $criteria->join ='join shipment s on s.id = t.shipment_id join gatepass_shipment gs on gs.fid = s.id left join consol c on c.id = s.consol_id join addr cnee on s.cnee_id = cnee.id ';
+			if($podId !=null)
+			{
+				$criteria->compare('s.hbn',$this->hbn,true);
+				$criteria->compare('s.ref',$this->ref,true);
+				$criteria->compare('s.pkg',$this->pkg,true);
+				$criteria->compare('s.weight',$this->weight,true);
+				$criteria->compare('c.service',$this->service);
+				if(!empty($this->cbm))
+				{
+					if(preg_match('/[>|<|=]/', $this->cbm))
+					{
+						$criteria->addCondition(' (s.pkg*s.cbm) '.$this->cbm);
+					}else
+					{
+						$criteria->addCondition(' (s.pkg*s.cbm) = '.$this->cbm);
+					}
+				}
+
+				if(!empty($this->plt))
+				{
+					if(preg_match('/[>|<|=]/', $this->cbm))
+					{
+						$criteria->addCondition(' json_value(s.meta,"$.amzon_pallet") '.$this->plt);
+					}else
+					{
+						$criteria->addCondition(' json_value(s.meta,"$.amzon_pallet") = '.$this->plt);
+					}
+				}
+
+                if(!empty($bookedShipmentId))
+                {
+                    $criteria->addCondition("s.id = ".$bookedShipmentId);
+                }
+				if(!empty($this->pickupBookingTime))
+				{
+					$criteria->addCondition(' json_value(s.meta,"$.pickup_booking_time") like "%'.$this->pickupBookingTime.'%"');
+				}
+				$criteria->compare('s.can',$this->memo,true);
+				$criteria->compare('cnee.name',$this->cname,true);
+				$criteria->compare('cnee.tel',$this->tel,true);
+				$criteria->compare('cnee.address',$this->address,true);
+				$criteria->compare('cnee.suburb',$this->suburb,true);
+				$criteria->compare('cnee.state',$this->state,true);
+				$criteria->compare('cnee.postcode',$this->postcode,true);
+
+				$criteria->addCondition("t.dpt_id = {$podId} ");
+			}
+
+			if(!empty($this->gatepassNo))
+			{
+				$gateIds = [0];
+				$gatepass = GatePass::model()->findByPk($this->gatepassNo);
+				if(!empty($gatepass))
+				{
+					foreach ($gatepass->lines() as $key => $li) 
+					{
+						$gateIds[] = $li->mdata['cargo_process_id'];
+					}
+				}
+				$criteria->addInCondition('t.id',$gateIds);
+			}
+
+
+	        //$criteria->addCondition(' (gs.parent_id = 0 or  gs.parent_id is null) and swp.status = '.ShipmentWhPrepare::PREPARED.' and t.status < '.CargoProcess::PROCESSDONE);
+            $criteria->addCondition(' (gs.parent_id = 0 or  gs.parent_id is null) and ((s.status >= 60 and s.status<90) or s.status = 42 or s.status = 59 or (s.cbwf & '.ImParcel::CBWF_FORCE_GATEPASS.')>0 ) and t.status!=101');
+	        $criteria->group = 't.id';
+	        if(!empty($hbns))
+			{
+					if(sizeof($hbns)>1)
+					{
+						$likeHbnArr = [];
+						$likeRefArr = [];
+						foreach ($hbns as $key => $value) {
+							$likeHbnArr[]=" s.hbn like \"%{$value}%\" ";
+							$likeRefArr[]=" s.ref like \"%{$value}%\" ";
+						}
+						$likeHbnStr = join($likeHbnArr,' or ');
+						$likeRefStr = join($likeRefArr,' or ');
+						$allStr = join($hbns,"','");
+						$criteria->addCondition($likeHbnStr.' or '.$likeRefStr." or json_value(t.meta,'$.caref') in ('{$allStr}') ");
+					}else
+					{
+						$hbn = $hbns[0];
+						$criteria->addCondition(" s.hbn like '%{$hbn}%' or s.ref like '%{$hbn}%' or json_value(t.meta,'$.caref') = '{$hbn}' ");
+					}
+			}
+
+			if(empty($this->gatepassNo))
+			{
+				if(!empty($this->pickupDate))
+				{
+					if($this->pickupDate=="today")
+					{
+						$date = 0;
+					}elseif($this->pickupDate == "tomorrow")
+					{
+						$date = 1;
+					}elseif($this->pickupDate == "after tomorrow")
+					{
+						$date = 2;
+					}
+
+					$criteria->addCondition(" (to_days(json_value(s.meta,'$.pickup_booking_time')) - to_days(now())) <= $date  ");
+				}
+			}
+
+        	$cargoProcesses = CargoProcess::model()->findAll($criteria);
+
+
+        	return $cargoProcesses;
+        }
+
+    public function getRef()
+    {
+    	if(empty($this->mdata['cargo_process_id']))
+    	{
+    		return $this->shipment->ref;
+    	}else
+    	{
+    		return $this->connote_no;
+    	}
+    }
+
+    public function getPackages()
+    {
+    	if(!empty($this->mdata['cargo_process_id']))
+    	{
+    		if(empty($this->cargoProcess))
+    		{
+		    	$this->cargoProcess = CargoProcess::model()->findByPk($this->mdata['cargo_process_id']);
+		    	return $this->cargoProcess->mdata['left_packages'];
+	    	}else
+	    	{
+	    		return $this->cargoProcess->mdata['left_packages'];
+	    	}
+    	}else
+    	{
+    		return $this->shipment->pkg;
+    	}
+    }
+
+    public function getWeight()
+    {
+    	if(!empty($this->mdata['cargo_process_id']))
+    	{
+    		if(empty($this->cargoProcess))
+    		{
+		    	$this->cargoProcess = CargoProcess::model()->findByPk($this->mdata['cargo_process_id']);
+		    	return round($this->shipment->weight*$this->cargoProcess->mdata['left_packages']/$this->shipment->pkg,2);
+	    	}else
+	    	{
+	    		return round($this->shipment->weight*$this->cargoProcess->mdata['left_packages']/$this->shipment->pkg,2);
+	    	}
+    	}else
+    	{
+    		return $this->shipment->weight;
+    	}
+    }
+        /**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return GatepassShipment the static model class
+	 */
+	public static function model($className=__CLASS__)
+	{
+		return parent::model($className);
+	}
+}

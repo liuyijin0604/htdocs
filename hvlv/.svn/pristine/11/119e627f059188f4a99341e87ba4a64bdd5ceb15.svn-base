@@ -1,0 +1,222 @@
+<?php
+
+/**
+ * This is the model class for table "deconsolidation".
+ *
+ * The followings are the available columns in table 'deconsolidation':
+ * @property integer $id
+ * @property integer $shipment_id
+ * @property integer $cargo_process_id
+ * @property integer $status
+ * @property integer $depot
+ * @property string $create_time
+ * @property string $op_complete_time
+ * @property string $warehouse_complete_time
+ * @property string $meta
+ * @property integer $has_problem
+ * @property integer $assigned_user
+ */
+class Deconsolidation extends MetaModel
+{
+	public $hbn;
+	/**
+	 * Constant declearation
+	 */
+	const STATUS_NEW = 1;
+	const STATUS_WAREHOUSE_PROCESSING = 2;
+	const STATUS_WAITING_ERROR_CHECK = 3;
+	const STATUS_COMPLETE = 99;
+
+	public static $state = [
+		self::STATUS_NEW => 'New',
+		self::STATUS_WAREHOUSE_PROCESSING => 'Warehouse Processing',
+		self::STATUS_WAITING_ERROR_CHECK => 'Waiting Error Check',
+		self::STATUS_COMPLETE => 'Complete',
+	];
+
+	public static $warehouse = [
+		106 => 'Sydney',
+		218 => 'Melbourne',
+		530 => 'Brisbane',
+		811 => 'Perth'
+	];
+
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName()
+	{
+		return 'deconsolidation';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('create_time', 'required'),
+			array('shipment_id, cargo_process_id, status, depot, has_problem, assigned_user', 'numerical', 'integerOnly' => true),
+			array('op_complete_time, warehouse_complete_time, meta', 'safe'),
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, shipment_id, cargo_process_id, status, depot, create_time, op_complete_time, warehouse_complete_time, meta, has_problem, assigned_user, hbn', 'safe', 'on' => 'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+			'shipment' => [self::BELONGS_TO, 'ImParcel', 'shipment_id'],
+			'cargo_process' => [self::BELONGS_TO, 'CargoProcess', 'cargo_process_id'],
+			'user' => [self::BELONGS_TO, 'User', 'assigned_user'],
+		);
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return array(
+			'id' => 'ID',
+			'shipment_id' => 'Shipment',
+			'cargo_process_id' => 'Cargo Process',
+			'status' => 'Status',
+			'depot' => 'Depot',
+			'create_time' => 'Create Time',
+			'op_complete_time' => 'Op Complete Time',
+			'warehouse_complete_time' => 'Warehouse Complete Time',
+			'meta' => 'Meta',
+			'has_problem' => 'Has Problem',
+			'assigned_user' => 'Assigned User',
+		);
+	}
+
+	public function getAvailableUsers()
+	{
+		$systemSetting = SystemSetting::model()->findByAttributes(array('key' => 'deconsolidationUser'));
+		$users = $systemSetting->mdata[$this->depot];
+		$availableUsers = [];
+		foreach ($users as $user => $isActive) {
+			if (empty($isActive)) {
+				continue;
+			}
+			$userId = explode(":", $user)[0];
+			$userName = explode(":", $user)[1];
+			$availableUsers[$userId] = $userName;
+		}
+		return $availableUsers;
+	}
+
+	public function getAssignedUser()
+	{
+		if (!empty($this->assigned_user)) {
+			$assignedUser = User::model()->findByPk($this->assigned_user);
+			if (!empty($assignedUser)) {
+				return $assignedUser->fname . " " . $assignedUser->lname;
+			}
+		}
+		return 'N/A';
+	}
+
+	public function getServiceType()
+	{
+		if (!empty($this->shipment->consol->service)) {
+			return Consol::$services[$this->shipment->consol->service];
+		} else {
+			return '';
+		}
+	}
+
+	public function getDueDate()
+	{
+		if (!empty($this->shipment->consol)) {
+			if ($this->shipment->consol->service == Consol::AIRCONSOL) {
+				return HolidayHelper::getDateByBusinessDays($this->shipment->consol->pod, $this->create_time, 2, true) . " " . date('H:i:s', strtotime($this->create_time));
+			} else {
+				return HolidayHelper::getDateByBusinessDays($this->shipment->consol->pod, $this->create_time, 3, true) . " " . date('H:i:s', strtotime($this->create_time));
+			}
+		}
+		return 'N/A';
+	}
+
+	public function getDueDateColor()
+	{
+		if (strtotime(date('Y-m-d H:i:s')) > strtotime($this->getDueDate())) {
+			return 'column_red_1';
+		}
+		return '';
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search($depot = 106, $status = 1)
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria = new CDbCriteria;
+		$with = array(
+			'shipment'
+		);
+		$criteria->compare('id', $this->id);
+		$criteria->compare('shipment_id', $this->shipment_id);
+		$criteria->compare('cargo_process_id', $this->cargo_process_id);
+		$criteria->compare('t.status', $status);
+		$criteria->compare('depot', $depot);
+		$criteria->compare('create_time', $this->create_time, true);
+		$criteria->compare('op_complete_time', $this->op_complete_time, true);
+		$criteria->compare('warehouse_complete_time', $this->warehouse_complete_time, true);
+		$criteria->compare('has_problem', $this->has_problem);
+		$criteria->compare('assigned_user', $this->assigned_user);
+
+		if (!empty($this->hbn)) {
+			echo $this->hbn;
+			echo 'Done';
+			Yii::app()->end();
+			$criteria->compare('shipment.hbn', $this->hbn);
+		}
+
+		
+		
+		$criteria->with = $with;
+		
+		//$criteria->addCondition('t.depot = ' . $depot);
+
+		return new CActiveDataProvider($this, array(
+			'criteria' => $criteria,
+			'pagination' => array(
+				'pageSize' => 20,
+			)
+		)
+		);
+	}
+
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return Deconsolidation the static model class
+	 */
+	public static function model($className = __CLASS__)
+	{
+		return parent::model($className);
+	}
+}

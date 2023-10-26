@@ -1,0 +1,715 @@
+<?php
+
+/**
+ * This is the model class for table "cargo_process_job".
+ *
+ * The followings are the available columns in table 'cargo_process_job':
+ * @property integer $id
+ * @property string $job_name
+ * @property string $description
+ * @property integer $status
+ * @property string $meta
+ * @property string $created
+ */
+class CargoProcessJob extends MetaModel
+{
+	const STATE_NEW = 10;
+	const STATE_WAITING_WAREHOUSE_PREPARATION = 30;
+	const STATE_WAITING_FOR_DELIVERY = 40;
+	const PROCESSDONE = 100;
+	const NORMAL_JOB = 1;
+	const PICKUP_JOB = 3;
+	const FBA_JOB = 2;
+	const B2B_JOB = 4;
+	const PALLET_JOB = 5;
+	const INTERSTATE_JOB = 6;
+	const DELETED = 101;
+	public $week,$interstate_type,$strdate,$enddate;
+	public $cargo_process = [];
+
+	/**
+	 * @return states of cargo
+	 */
+	public static $processTypes = [
+		10 => 'New',
+		30 => 'Waiting Warehouse preparation',
+		40 => 'Waiting For Delivery',
+		100 => 'Cargo Job Done',
+		101 => 'Deleted',
+	];
+
+	public static $cargoTypeList = [
+		1 => 'NORMAL JOB',
+		2 => 'FBA JOB',
+		4 => 'B2B JOB',
+		3 => 'PICKUP JOB',
+		5 => 'PALLET JOB',
+		6 => 'INTERSTATE JOB',
+	];
+
+	public static $cargoDirectionList = [
+		10 => 'north', 21 => 'northeast1', 22 => 'northeast2', 23 => 'northeast3', 24 => 'northeast4',
+		30 => 'east', 40 => 'southeast', 50 => 'south', 60 => 'southwest', 70 => 'west', 81 => 'northwest1',
+		82 => 'northwest2', 83 => 'northwest3', 20 => 'northeast', 80 => 'northwest', 31 => 'outereast'
+	];
+
+	public static $cargoTimes = [
+		10 => '8:00-13:00',
+		20 => '11:00-16:00',
+		30 => '14:00-19:00',
+	];
+
+	public static $cargoTimesMel = [
+		20 => '11:00-16:00',
+	];
+
+	//day+time+vehicle ps: 1   10   1 => $cargoDirectionList
+	public static $arrayDirectionSchedules = [
+		1101 => [82], 1102 => [22], 1103 => [10], 1201 => [81], 1202 => [30, 40, 50], 1203 => [23], 1301 => [21], 1302 => [83], 1303 => [70, 60],
+		2101 => [23], 2102 => [70, 60], 2103 => [24], 2201 => [21], 2202 => [83], 2203 => [22], 2301 => [81], 2302 => [82], 2303 => [10],
+		3101 => [10], 3102 => [81], 3103 => [30, 40, 50], 3201 => [24], 3202 => [82], 3203 => [21], 3301 => [22], 3302 => [83], 3303 => [70, 60], 4101 => [83],
+		4102 => [21], 4103 => [24], 4201 => [22], 4202 => [30, 40, 50], 4203 => [82], 4301 => [23], 4302 => [10], 4303 => [81],
+		5101 => [23], 5102 => [24], 5103 => [30, 40, 50], 5201 => [10], 5202 => [70, 60], 5203 => [22], 5301 => [21], 5302 => [83], 5303 => [81],
+	];
+
+	//Mel
+	public static $arrayDirectionSchedulesMel = [
+		1201 => [70, 10, 80], 3201 => [10, 30, 20], 4201 => [30, 40, 50],
+	];
+
+	public static $arrayVechicleSchedules = [
+		1 => [3], //Van Ken
+		2 => [28], //Track Micheal
+		3 => [5],
+	];
+
+	//Mel
+	public static $arrayVechicleSchedulesMel = [
+		1 => [34],
+		//2=>[37],
+	];
+
+	public static $arrayDriverSchedules = [
+		1101 => [2650], 1102 => [2622], 1103 => [2650], 1201 => [2650], 1202 => [2622], 1203 => [2650], 1301 => [2650], 1302 => [2622], 1303 => [2650],
+		2101 => [2650], 2102 => [2622], 2103 => [2650], 2201 => [2650], 2202 => [2622], 2203 => [2650], 2301 => [2650], 2302 => [2622], 2303 => [2650],
+		3101 => [2650], 3102 => [2622], 3103 => [2650], 3201 => [2650], 3202 => [2622], 3203 => [2650], 3301 => [2650], 3302 => [2622], 3303 => [2650],
+		4101 => [2650], 4102 => [2622], 4103 => [2650], 4201 => [2650], 4202 => [2622], 4203 => [2650], 4301 => [2650], 4302 => [2622], 4303 => [2650],
+		5101 => [2650], 5102 => [2622], 5103 => [2650], 5201 => [2650], 5202 => [2622], 5203 => [2650], 5301 => [2650], 5302 => [2622], 5303 => [2650],
+	];
+
+	//Mel
+	public static $arrayDriverSchedulesMel = [
+		1201 => [3991], 3201 => [3991], 4201 => [3991],
+	];
+
+	public static $arrayDirectionDistance = [
+		1101 => [9999], 1102 => [9999], 1103 => [9999], 1201 => [9999], 1202 => [9999], 1203 => [9999], 1301 => [9999], 1302 => [9999], 1303 => [9999],
+		2101 => [9999], 2102 => [9999], 2103 => [9999], 2201 => [9999], 2202 => [9999], 2203 => [9999], 2301 => [9999], 2302 => [9999], 2303 => [9999],
+		3101 => [9999], 3102 => [9999], 3103 => [9999], 3201 => [9999], 3202 => [9999], 3203 => [9999], 3301 => [9999], 3302 => [9999], 3303 => [9999],
+		4101 => [9999], 4102 => [9999], 4103 => [9999], 4201 => [9999], 4202 => [9999], 4203 => [9999], 4301 => [9999], 4302 => [9999], 4303 => [9999],
+		5101 => [9999], 5102 => [9999], 5103 => [9999], 5201 => [9999], 5202 => [9999], 5203 => [9999], 5301 => [9999], 5302 => [9999], 5303 => [9999],
+	];
+
+	//Mel
+	public static $arrayDirectionDistanceMel = [
+		1201 => [60], 3201 => [60], 4201 => [60],
+	];
+
+	public static $vehicleLimit = [
+		3 => 8,
+		28 => 12,
+		5 => 8,
+		34 => 8,
+		31 => 12,
+		4 => 8,
+	];
+
+	//for driver schedule
+	public static $arrDriverOrgId = [2584,2622,2827,4072,3533,3991,2815,4033];
+
+	/**
+	 * @return states for driver user 
+	 */
+	public static $processTypes_driver_user = [
+		30 => 'Waiting Warehouse preparation',
+		40 => 'Waiting For Delivery',
+		100 => 'Cargo Job Done',
+	];
+
+	public static $destination = [
+		106 => "SYD",
+		218 => "MEL",
+		530 => "BNE",
+	];
+
+	public function beforeSave()
+	{
+		return parent::beforeSave();
+	}
+
+	public function afterSave()
+	{
+		if(!empty($this->job_relations)){
+			foreach($this->job_relations as $relation){
+				if(!empty($relation->cargo_process->mdata['customer_confirmed']['surcharge_invoice'])){
+					$modelCargoProcess = $relation->cargo_process;
+					$strAppName = Yii::app()->name;
+					Yii::app()->name = 'TLA';
+					$objInvoice = Invoice::model()->findByPk($modelCargoProcess->mdata['customer_confirmed']['surcharge_invoice']);
+					Yii::app()->name = $strAppName;
+					if(!empty($objInvoice)){
+						if($objInvoice->status == 2){
+							$objInvoice->createCreditForMe();
+						}
+					}
+				}
+			}
+		}
+	}
+
+	public function afterFind()
+	{
+		if (empty($this->job_no)) {
+			$this->job_no = $this->genNo();
+			$this->update(['job_no']);
+		}
+		return parent::afterFind();
+	}
+
+	public function genNo()
+	{
+		$pfx = 'CJOB';
+		$n = $pfx . date('y', strtotime($this->created));
+		// $s = self::model()->count('job_no LIKE :n', [':n' => $n . '%']) + 1;
+		// return $n . sprintf('%02d', $s) . substr($this->dpt_id, 2);
+		return $n . $this->id;
+	}
+
+
+
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName()
+	{
+		return 'cargo_process_job';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('status,vehicle_id,created', 'required'),
+			array('status,vehicle_id', 'numerical', 'integerOnly' => true),
+			array('description', 'length', 'max' => 255),
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, job_name, description, status,vehicle_id,job_no, created,comp_date,strdate,enddate', 'safe', 'on' => 'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+			'driver' => [self::BELONGS_TO, 'Org', 'driver_id'],
+			'user' => [self::BELONGS_TO, 'User', 'user_id'],
+			'job_relations' => [self::HAS_MANY, 'CargoProcessJobRelations', 'job_id', 'on' => 'job_relations.active = 1'],
+			'job_all_relations' => [self::HAS_MANY, 'CargoProcessJobRelations', 'job_id'],
+			'vehicle' => [self::BELONGS_TO, 'CargoProcessVehicle', 'vehicle_id'],
+			'amazon_info' => [self::HAS_ONE, 'AmazonInfo', 'fid', 'on' => "amazon_info.model='" . get_called_class() . "'"],
+		);
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return array(
+			'id' => 'ID',
+			'job_name' => 'Job Name',
+			'job_no' => 'Job No',
+			'description' => 'Description',
+			'status' => 'Status',
+			'meta' => 'Meta',
+			'created' => 'Delivery Date',
+			'driver_id' => 'Driver',
+			'vehicle_id' => 'Vehicle',
+			'user_id' => 'Created By',
+			'time' => 'Time',
+			'comp_date' => 'Complate Date',
+		);
+	}
+
+	public function log($action)
+	{
+		$extra = ["action" => $action];
+		Log::add($this, $this->isNewRecord ? 3 : 4, array_merge(['status' => $this->getStatus()], $extra));
+	}
+
+	public function getStatus()
+	{
+		return isset(static::$processTypes[$this->status]) ? Yii::t(strtolower(__CLASS__), static::$processTypes[$this->status]) : $this->status;
+	}
+
+	public function getPickupAddress($type = false)
+	{
+		if (!empty($this->mdata['pickup_address'])) {
+			return $this->mdata['pickup_address'];
+		} else {
+			$warehouse = Org::model()->findByPk($this->dpt_id);
+
+			$address = "";
+			if ($type) {
+				$address = "&nbsp;";
+			}
+
+			if ($warehouse != null) {
+				if ($type) {
+					$address = $warehouse->address . ", <br>" . $warehouse->suburb . ", " . $warehouse->state . ", <br>" . $warehouse->country . ", " . $warehouse->postcode;
+				} else {
+					$address = $warehouse->address . ", " . $warehouse->suburb . ", " . $warehouse->state . ", " . $warehouse->country . ", " . $warehouse->postcode;
+				}
+			}
+			return $address;
+		}
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search($pgn = true, $ps = 50, $ec = false, $defaultOrder = true, $podId = 106, $jobType = null)
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+		$criteria = new CDbCriteria;
+		$criteria->compare('id', $this->id);
+		$criteria->compare('job_no', $this->job_no, true);
+		$criteria->compare('job_name', $this->job_name, true);
+		$criteria->compare('description', $this->description, true);
+		$criteria->compare('status', $this->status);
+		$criteria->compare('driver_id', $this->driver_id);
+		$criteria->compare('meta', $this->meta, true);
+
+		if(!empty($this->strdate)&&!empty($this->enddate)){
+			$criteria->addCondition('t.created >= "'.$this->strdate.'" and t.created <="'.$this->enddate.'"');
+		}elseif(!empty($this->strdate)&&empty($this->enddate)){
+			$criteria->addCondition('t.created >= "'.$this->strdate.'"');
+		}elseif(empty($this->strdate)&&!empty($this->enddate)){
+			$criteria->addCondition('t.created <= "'.$this->enddate.'"');
+		}else{
+			$criteria->compare('created', $this->created, true);
+		}
+		
+		$criteria->compare('vehicle_id', $this->vehicle_id, true);
+		$criteria->compare('comp_date', $this->comp_date, true);
+		if (!empty($jobType)) {
+			$criteria->compare('type', $jobType);
+		}
+
+		if(!empty($this->interstate_type == 2)){
+			$criteria->addCondition('json_value(meta,"$.destination") = ' .$podId);
+		}else{
+			if (!empty($podId)) {
+				$criteria->compare('dpt_id', $podId);
+			}
+		}
+		
+		if (!empty($this->mdata['time'])) {
+			$criteria->addCondition('json_value(meta,"$.time") = ' . $this->mdata['time']);
+		}
+
+		if (empty($this->status)) {
+			$criteria->addCondition('status <' . self::DELETED);
+			$criteria->addCondition('status <' . self::PROCESSDONE);
+		}
+
+		// if (is_int(intval($this->week))) {
+		// 	$dateStart = date('Y-m-d', (time() - ((date('w') == 0 ? 7 : date('w')) - 1) * 24 * 3600));
+		// 	$dataEnd = date('Y-m-d', (time() + (7 - (date('w') == 0 ? 7 : date('w'))) * 24 * 3600));
+		// 	$dateStart = date("Y-m-d",strtotime((intval($this->week) * 7)." day",strtotime($dateStart)));
+		// 	$dataEnd =  date("Y-m-d",strtotime((intval($this->week) * 7)." day",strtotime($dataEnd)));
+		// 	$criteria->addCondition('created >= "'.$dateStart.' 00:00:00" and created <= "'.$dataEnd.' 23:59:59"');
+		// }
+
+		$sort = new CSort();
+		if($this->status==self::PROCESSDONE){
+			$sort->defaultOrder = array('created' => CSort::SORT_DESC);
+		}else{
+			$sort->defaultOrder = array('created' => CSort::SORT_ASC);
+		}
+		
+
+		return new CActiveDataProvider($this, array(
+			'sort' => $sort,
+			'criteria' => $criteria,
+		));
+	}
+
+	public function updateStatus($status, $type = false)
+	{
+		$update = false;
+		if (key_exists($status, self::$processTypes)) {
+			$this->status = $status;
+			$update = true;
+		}
+
+		if ($update) {
+			$this->save();
+			$this->refresh();
+		}
+	}
+
+	public function getFullDescription()
+	{
+		$description = [$this->description];
+		$jres = CargoProcessJobRelations::model()->findAll(['condition' => 'job_id = :jobId and active = 1', 'params' => [":jobId" => $this->id], 'order' => 'sequence']);
+		foreach ($jres as $key => $jre) {
+			if (!empty($jre->cargo_process->shipment->note)) {
+				$description[] = $jre->cargo_process->shipment->ref . "::" . $jre->cargo_process->shipment->note;
+			}
+		}
+		return join('</br>', $description);
+	}
+
+	public function getCargoProcess()
+	{
+
+		$jres = CargoProcessJobRelations::model()->findAll(['condition' => 'job_id = :jobId and active = 1', 'params' => [":jobId" => $this->id], 'order' => 'sequence']);
+		foreach ($jres as $key => $jre) {
+			if (!empty($jre->cargo_process)) {
+				$this->cargo_process[] = $jre->cargo_process;
+			}
+		}
+		return $this->cargo_process;
+	}
+
+	public function getUser()
+	{
+		if (empty($this->user_id)) {
+			return 'System';
+		} else {
+			if (empty($this->user)) return 'System';
+			return $this->user->getFullName();
+		}
+	}
+
+	public function getTime()
+	{
+		return $this::$cargoTimes[$this->mdata['time']];
+	}
+
+	public function getTotalCBMOfJob()
+	{
+		$totalCBM = 0;
+		if($this->type ==6){
+			$objcargoProcessRelations = $this->job_all_relations;
+		}else{
+			$objcargoProcessRelations = $this->job_relations;
+		}
+		if (!empty($objcargoProcessRelations)) {
+			foreach ($objcargoProcessRelations as $objcargoProcessRelation) {
+				$objcargoProcess = CargoProcess::model()->findByPk($objcargoProcessRelation->cargo_process_id);
+				if (!empty($objcargoProcess)) {
+					$totalCBM += $objcargoProcess->getTotalCBM();
+				}
+			}
+		}
+		return $totalCBM;
+	}
+
+	public function getMaxCBMofVehicle()
+	{
+		$vehicleCBM = 0;
+		$vehicle = CargoProcessVehicle::model()->findByPk($this->vehicle_id);
+		if (!empty($vehicle)) {
+			$vehicleCBM = $vehicle->max_cbm;
+		}
+		return $vehicleCBM;
+	}
+
+	public function getAvailableCBMString()
+	{
+		$strResult = $this->getTotalCBMOfJob() . "/" . $this->getMaxCBMofVehicle();
+		if ($this->getTotalCBMOfJob() == 0 || $this->getMaxCBMofVehicle() == 0) {
+			$strResult .= " 0%";
+		} else {
+			$strResult .= " " . round($this->getTotalCBMOfJob() / $this->getMaxCBMofVehicle() * 100, 2) . "%";
+		}
+		return $strResult;
+	}
+
+	public function getAvailableCountString()
+	{
+		if($this->type ==6){
+			$objcargoProcessRelations = $this->job_all_relations;
+		}else{
+			$objcargoProcessRelations = $this->job_relations;
+		}
+		$countMaxCargoProcess = self::$vehicleLimit[$this->vehicle_id];
+		$countCargoProcess = empty(count($objcargoProcessRelations)) ? 0 : count($objcargoProcessRelations);
+		$result = "";
+		if ($countCargoProcess != 0 && $countMaxCargoProcess != 0) {
+			$result = $countCargoProcess . "/" . $countMaxCargoProcess;
+			$result .= " " . round($countCargoProcess / $countMaxCargoProcess * 100, 2) . "%";
+		} else {
+			$result = $countCargoProcess . "/" . $countMaxCargoProcess . " 0%";
+		}
+
+		return $result;
+	}
+
+	public function getTotalPltNo()
+	{
+		if(!empty($this->mdata['total_job_pallet_no'])){
+			return $this->mdata['total_job_pallet_no'];
+		}
+		$arr = [];
+		$num = 0;
+		if (!empty($this->job_relations)) {
+			foreach ($this->job_relations as $relation) {
+				if (!empty($relation->cargo_process->shipment->rack_record)) {
+					foreach ($relation->cargo_process->shipment->rack_record as $value) {
+						$arr[$value->location->name] = 1;
+					}
+				}else{
+					$numtemp = !empty($relation->cargo_process->mdata['job_pallet_no']) ? $relation->cargo_process->mdata['job_pallet_no']:0;
+					if(empty($numtemp)){
+						$numtemp = !empty($relation->cargo_process->shipment->mdata['amzon_pallet'])? $relation->cargo_process->shipment->mdata['amzon_pallet']:0;
+					}
+					$num += $numtemp;
+					
+				}
+			}
+		}
+		return (count($arr)+$num > 0) ? count($arr)+$num : 0;
+	}
+
+	public function getTotalPltsNotSkip(){
+		$numResult = 0;
+		if (!empty($this->job_relations)) {
+			foreach ($this->job_relations as $relation) {
+				if(!empty($relation->cargo_process)){
+					$numPlt = 0;
+					if(!empty($relation->cargo_process->shipment->mdata['amzon_pallet'])){
+						$numPlt = $relation->cargo_process->shipment->mdata['amzon_pallet'];
+					}else{
+						$numPlt = !empty($relation->cargo_process->shipment->getRackNumber()[1])?$relation->cargo_process->shipment->getRackNumber()[1]:0;
+					}
+					$numResult += !empty($relation->cargo_process->mdata['job_pallet_no'])? $relation->cargo_process->mdata['job_pallet_no']:$numPlt ;
+				}
+			}
+		}
+		return $numResult;
+	}
+
+	public function getThreeCjobDateFromNow()
+	{
+		$result = [];
+		$dataNow = date("Y-m-d");
+		//for($i=28;$i>=-2;$i--){
+		for ($i = 100; $i >= -3; $i--) {
+			$result[date("Y-m-d", strtotime("-" . $i . " day", strtotime($dataNow)))] = date("Y-m-d", strtotime("-" . $i . " day", strtotime($dataNow)));
+		}
+		return $result;
+	}
+
+	public function getCjobDateFromNowForTony()
+	{
+		$result = [];
+		$dataNow = date("Y-m-d");
+		//for($i=28;$i>=-2;$i--){
+		for ($i = 100; $i >= -5; $i--) {
+			$result[date("Y-m-d", strtotime("-" . $i . " day", strtotime($dataNow)))] = date("Y-m-d", strtotime("-" . $i . " day", strtotime($dataNow)));
+		}
+		return $result;
+	}
+
+	public function getAvailableJob($cargoID)
+	{
+
+		$ca = CargoProcess::model()->findByPk($cargoID);
+		$distance = $ca->shipment->getDeliveryDistance();
+		$weight = $ca->shipment->weight;
+		$numPkg = $ca->shipment->pkg;
+		$numCBM = $ca->getTotalCBM();
+		if ($numCBM == 0 || $numCBM == null) {
+			$numCBM = $weight / 250;
+		}
+		$dpt_id = $ca->dpt_id;
+		$packs = $ca->shipment->packs;
+		$type = $ca->type;
+
+		$cargoProcessDate = $ca->started;
+
+		if (date("w", strtotime($cargoProcessDate)) == 6) {
+			$actionDate = date("Y-m-d", strtotime("+2 day", strtotime($cargoProcessDate)));
+		} else if (date("w", strtotime($cargoProcessDate)) == 5) {
+			$actionDate = date("Y-m-d", strtotime("+3 day", strtotime($cargoProcessDate)));
+		} else {
+			$actionDate = date("Y-m-d", strtotime("+1 day", strtotime($cargoProcessDate)));
+		}
+
+		if($ca->status == CargoProcess::PREPROCESS){
+			$dateUnloadDate = $ca->shipment->mdata['ContainerUnloadDate'];
+			if(date("w", strtotime($dateUnloadDate)) == 6){
+				$dateDelivery = date("Y-m-d", strtotime("+2 day", strtotime($dateUnloadDate)));
+			}else if(date("w", strtotime($cargoProcessDate)) == 5){
+				$dateDelivery = date("Y-m-d", strtotime("+3 day", strtotime($dateUnloadDate)));
+			} else{
+				$dateDelivery = date("Y-m-d", strtotime("+1 day", strtotime($dateUnloadDate)));
+			}
+			if(strtotime($dateDelivery)>=strtotime($actionDate)){
+				$actionDate = $dateDelivery;
+			}
+		}
+
+		$region = $ca->getRegion();
+		$region = $region = strtolower(strtr($region, array(' ' => '')));
+
+		// $models = CargoProcessJob::model()->findAll('status = 30 and JSON_UNQUOTE(JSON_EXTRACT(meta, "$.'.$region.'"))=1 and JSON_UNQUOTE(JSON_EXTRACT(meta, "$.distance"))>:distance',array('distance'=>$distance));
+		$models = CargoProcessJob::model()->findAllBySql('select * from cargo_process_job where status = 30 and type = '.$type.' and dpt_id = ' . $dpt_id . ' and created > "' . $actionDate . '" and JSON_UNQUOTE(JSON_EXTRACT(meta, "$.' . $region . '"))=1 and JSON_UNQUOTE(JSON_EXTRACT(meta, "$.distance"))>' . $distance);
+
+		$result = [];
+		foreach ($models as $model) {
+			$totalCBM = 0;
+			$objcargoProcessRelations = $model->job_relations;
+			$limitPack = 0;
+			if (!empty($objcargoProcessRelations)) {
+				foreach ($objcargoProcessRelations as $objcargoProcessRelation) {
+					$objcargoProcess = CargoProcess::model()->findByPk($objcargoProcessRelation->cargo_process_id);
+					$totalCBM += $objcargoProcess->getTotalCBM();
+					$limitPack++;
+				}
+			}
+
+			if (empty(self::$vehicleLimit[$model->vehicle_id])) {
+				if ($limitPack >= 10) {
+					continue;
+				}
+			} else {
+				if ($limitPack >= self::$vehicleLimit[$model->vehicle_id]) {
+					continue;
+				}
+			}
+
+
+			$vehicle = CargoProcessVehicle::model()->findByPk($model->vehicle_id);
+			// 1CBM 200KG 40KB/per to truck Only
+			if ($vehicle->type == CargoProcessVehicle::enum_type_small_vehicle) {
+				if ($numCBM >= 2.5 || $weight >= 300 || ($weight / $numPkg) > 40) {
+					continue;
+				}
+
+				if (!empty($packs)) {
+					foreach ($packs as $pack) {
+						if ($pack['length'] > 120 || $pack['height'] > 120 || $pack['width'] > 120) {
+							continue 2;
+						}
+					}
+				}
+			}
+
+			$dicId2T = [
+				3 => '',
+				28 => '',
+			];
+
+			if (($totalCBM + $numCBM) <= $vehicle->max_cbm) {
+				if (sizeof($result) >= 2) { //Top 2
+					break;
+				}
+				$result[$model->id] = $this->funcParseDeliveryTime($model->created, $model->mdata['time'], $dicId2T[$model->vehicle_id]);
+			}
+		}
+		return $result;
+	}
+
+	public function funcParseDeliveryTime($strDate, $numTime, $strT)
+	{
+		return date("d-m-Y (l)", strtotime($strDate)) . " " . CargoProcessJob::$cargoTimes[$numTime] . ' ' . $strT;
+	}
+
+	public function getJobType()
+	{
+		return self::$cargoTypeList[$this->type];
+	}
+
+	public function isFBAJob()
+	{
+		if (empty($this->mdata['sig'])) {
+			if($this->type ==2 || $this->type ==4){
+				return true;
+			}else{
+				return false;
+			}
+			//return $this->type == 2 ? true : false;
+		}
+		return false;
+	}
+
+	public function getCJobByWeek()
+	{
+		$result = [];
+		for ($i = 5; $i >= -26; $i--) {
+			$result[$i] =  date("Y-m-d", strtotime(($i * 7) . " day", strtotime(date('Y-m-d', (time() - ((date('w') == 0 ? 7 : date('w')) - 1) * 24 * 3600))))) . " - " . date("Y-m-d", strtotime(($i * 7) . " day", strtotime(date('Y-m-d', (time() + (7 - (date('w') == 0 ? 7 : date('w'))) * 24 * 3600)))));
+		}
+		return $result;
+	}
+
+	public function getDriverList(){
+		$result = [];
+		$objCargoProcessJobDriver = CargoProcessJob::model()->findAll(array(
+			'condition'=>' driver_id !=0',
+			'group'=>'driver_id'
+		));
+		foreach($objCargoProcessJobDriver as $driver){
+			$objOrg = Org::model()->findByPk($driver->id);
+			if(!empty($objOrg)&&$objOrg->status){
+				$strTemp = $objOrg->name;
+				if(!empty($strTemp)){
+					$result[$driver->id] = $strTemp;
+				}
+			}
+		}
+		return $result;
+	}
+
+	public function getCourierThirdLabel(){
+		$arr = [];
+		foreach ($this->job_relations as $job_relation) {
+			$n = !empty($job_relation->cargo_process->mdata["third_part_label_no"])? $job_relation->cargo_process->mdata["third_part_label_no"]:"";
+			$n="<font>{$n}</font>";
+			$arr[] = $n;
+		}
+		return implode(', ', array_unique($arr));
+	}
+
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return CargoProcessJob the static model class
+	 */
+	public static function model($className = __CLASS__)
+	{
+		return parent::model($className);
+	}
+}

@@ -1,0 +1,318 @@
+<?php
+
+/**
+ * This is the model class for table "tranship".
+ *
+ * The followings are the available columns in table 'tranship':
+ * @property string $id
+ * @property string $pid
+ * @property string $org_id
+ * @property string $man_id
+ * @property string $connote
+ * @property string $time
+ * @property string $status
+ * @property string $type
+ * @property string $cost
+ */
+class Tranship extends CActiveRecord
+{
+	Const THIRD_PARTY_TYPE = 100;
+	public static $types = array(
+		10 => 'Pickup Courier',
+		30 => 'Air Cargo',
+		40 => 'International Courier',
+		80 => 'Delivery Courier',
+		90 => 'RTS Delivery Courier',
+		100 => 'Third Party Delivery Courier'
+	);
+	
+	public static $states = array(
+		10 => 'Prelodgement',
+		11 => 'Normal - Moving',
+		19 => 'Final - Moving',
+		91 => 'Normal - Done',
+		99 => 'Final - Done',
+		0 => 'Cancelled',
+	);
+
+	public $mdata = array();
+	public $infoLink = "";
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName(){
+		return 'tranship';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules(){
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('pid, org_id, man_id, connote, time, type, status', 'safe'),
+			array('pid, org_id, man_id', 'length', 'max'=>11),
+			array('connote', 'length', 'max'=>50),
+			array('cost', 'length', 'max'=>10),
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, pid, org_id, man_id, connote, time, type, cost,status', 'safe', 'on'=>'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations(){
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+			'shipment' => array(self::BELONGS_TO, 'Shipment', 'pid'),
+			'imparcel' => array(self::BELONGS_TO, 'ImParcel', 'pid'),
+			'mani' => array(self::BELONGS_TO, 'Manifest', 'man_id'),
+			'carrier' => array(self::BELONGS_TO, 'Org', 'org_id'),
+			'tracks' => array(self::HAS_MANY, 'Tracking', 'tid', 'order'=>'tracks.dt ASC'),
+		);
+	}
+	
+	public function infoLink($intracking = false){
+		if($intracking&&!empty($this->shipment->getCopyShipment()))
+		{
+			if(!empty($this->shipment->getCopyShipment()->trans[0]))
+			{
+				return $this->shipment->getCopyShipment()->trans[0]->infoLink($intracking);
+			}else
+			{
+				return "";
+			}
+		}
+
+		if(!empty($this->mdata['hiddenInfo']))
+		{
+			return "";
+		}
+
+		$t = $this->carrier->name.': ';
+		$t = str_replace(' For Top', '', $t);
+		$t = str_replace('Eiz', 'Toll', $t);
+		$t = str_replace('GV-', '', $t);
+		$t = str_replace('FREIGHT AND LOGISTICS PTY LTD (F&L)','Hunter Express',$t);
+		//Gero 2021-07-01 check if there are third party rate for carrier
+		if(!empty($this->shipment->mdata['org_rate_id']))
+		{
+			$rateId = $this->shipment->mdata['org_rate_id'];
+			$orgRate = OrgRate::model()->findByPk($rateId);
+			if(in_array($orgRate->code,ImportChargeCode::EIZ_TOLL_CODES)||in_array($orgRate->code, ImportChargeCode::UBI_TOLL_CODES)||in_array($orgRate->org_id, [Org::ORGID_COURIER_TOLL_IPEC])||in_array($orgRate->org_id, [Org::ORGID_COURIER_AUK]))
+			{
+				$t = 'TOLL:';
+				$t .= '<a href="https://online.toll.com.au/trackandtrace/showConnotes.do?system=PRIO&connote=' . $this->connote . '" target="_blank">' . $this->connote . '</a>';
+				return $t;
+			}elseif(preg_match('/allied/i', $orgRate->code))
+			{
+				$t = 'ALLIED:';
+				$t .= '<a href="http://www.alliedexpress.com.au" target="_blank">' . $this->connote . '</a>';
+				return $t;
+			}elseif(preg_match('/border/i', $orgRate->code))
+			{
+				$t = 'BORDER:';
+				$t .= '<a href="https://www.borderexpress.com.au/tracking/?cn=' . $this->connote . '" target="_blank">' . $this->connote . '</a>';
+				return $t;
+			}elseif(preg_match('/hunter/i', $orgRate->code))
+			{
+				$t = 'HUNTER:';
+				$t .= '<a href="https://portal.hunterexpress.com.au/Track/55010/'.$this->connote .'" target="_blank">' . $this->connote . '</a>';
+				return $t;
+			}
+
+		}
+		switch($this->org_id){
+			case 101:
+			case 1426:
+			case 3079:
+			case 3079:
+			case 3557:
+			case 3937:
+				$t = 'Australia Post: <a href="http://auspost.com.au/parcels-mail/track.html#/track?id='.$this->connote.'" target="_blank">'.$this->connote.'</a>';
+			break;
+			case 102:
+				$t .= '<a href="http://www.couriersplease.com.au/" target="_blank">Tracking Web</a> '.$this->connote;
+			break;
+			case 103:
+			case Org::ORGID_COURIER_STARTRACK:
+				// https://msto.startrack.com.au/track-trace/?id=7RFZ50000011
+				$t .= '<a href="https://msto.startrack.com.au/track-trace/?id=' . $this->connote . '" target="_blank">' . $this->connote . '</a>';
+			break;
+			case Org::ORGID_COURIER_TNT:
+				$t.='<a href="http://www.tntexpress.com.au/InterAction/ASPs/CnmHxAS.asp?' . $this->connote . '" target="_blank">' . $this->connote . '</a>';
+			break;
+			case Org::ORGID_COURIER_TNT_TOP:
+				$t.='<a href="http://www.tntexpress.com.au/InterAction/ASPs/CnmHxAS.asp?' . $this->connote . '" target="_blank">' . $this->connote . '</a>';
+			break;
+			case 128:
+				$t = 'EMS: <a href="http://www.kuaidi100.com/all/ems.shtml?mscomnu='.$this->connote.'" target="_blank">'.$this->connote.'</a>';
+			break;
+			case 382:
+				$t = 'YD: <a href="http://www.kuaidi100.com/all/yd.shtml?mscomnu='.$this->connote.'" target="_blank">'.$this->connote.'</a>';
+			break;
+			case 496:
+				$t = 'SF: <a href="http://www.kuaidi100.com/all/sf.shtml?mscomnu='.$this->connote.'" target="_blank">'.$this->connote.'</a>';
+			break;
+			case 495:
+				$t = 'YT: <a href="http://www.kuaidi100.com/all/yt.shtml?mscomnu='.$this->connote.'" target="_blank">'.$this->connote.'</a>';
+			break;
+			case 494:
+				$t = 'ST: <a href="http://www.kuaidi100.com/all/st.shtml?mscomnu='.$this->connote.'" target="_blank">'.$this->connote.'</a>';
+			break;
+			case 488:
+				$t = 'ZT: <a href="http://www.kuaidi100.com/all/zt.shtml?mscomnu='.$this->connote.'" target="_blank">'.$this->connote.'</a>';
+			break;
+			case 395:
+				$t = 'HT: <a href="http://www.kuaidi100.com/all/htky.shtml?mscomnu='.$this->connote.'" target="_blank">'.$this->connote.'</a>';
+			break;
+			case 114: // in case RTS items processed - by PCA Express own self
+				$t .= '<a href="http://www.pcaexpress.com.au/tracking/?c=' . $this->connote . '" target="_blank">' . $this->connote . '</a>';
+			break;
+			case Org::ORGID_COURIER_ALLIED:
+			case Org::ORGID_COURIER_TOLL:
+				$t .= '<a href="https://online.toll.com.au/trackandtrace/showConnotes.do?system=PRIO&connote=' . $this->connote . '" target="_blank">' . $this->connote . '</a>';
+			break;
+			case Org::ORGID_COURIER_FASTWAY:
+				$t .= '<a href="' . FastwayAPI::getDirectTrackingUrl($this->connote) . '" target="_blank">' . $this->connote . '</a>';
+			break;
+			case Org::ORGID_COURIER_DFE:
+				$t .= '<a href="https://www.directfreight.com.au/ConsignmentStatus.aspx?consignment_no='.$this->connote.'&lookuptype=0" target="_blank">' . $this->connote . '</a>';
+			break;
+			case Org::ORGID_COURIER_DFE_TOP:
+				$t .= '<a href="https://www.directfreight.com.au/ConsignmentStatus.aspx?consignment_no='.$this->connote.'&lookuptype=0" target="_blank">' . $this->connote . '</a>';
+			break;
+			case Org::ORGID_COURIER_SF:
+				$t .= '<a href="https://www.sf-express.com" target="_blank">' . $this->connote . '</a>';
+			break;
+			default:
+				$t .= $this->connote;
+			break;
+		}
+		return $t;
+	}
+
+	public function getCourierInfoId()
+	{
+		$t = null;
+		$contact = OrgContact::model()->find("org_id = :org_id and func&:func>0",[":org_id"=>$this->org_id,":func"=>OrgContact::ENQUIRYEMAIL]);
+		if($contact!=null)
+		{
+			$t = ["emailAddress"=>$contact->email,"id"=>$this->org_id];
+		}
+		return $t;
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels(){
+		return array(
+			'id' => 'ID',
+			'pid' => 'Pid',
+			'org_id' => 'Org',
+			'man_id' => 'Manifest',
+			'connote' => 'Connote',
+			'time' => 'Time',
+			'type' => 'Type',
+			'status' => 'Status',
+			'cost' => 'Cost'
+		);
+	}
+	
+	public function skipTrack(){
+		if(empty($this->shipment) || $this->shipment->status == 100) return true;
+		$sql = "SELECT MAX(dt) FROM tracking WHERE tid = ".$this->id;
+		Yii::app()->db->createCommand($sql)->queryScalar();
+		if(!empty($mdt) && strtotime($mdt) + 3600 > time()) return true;
+
+		if(empty($this->shipment->consol_id) || ($this->shipment->status < 60 && $this->shipment->status != 42)){
+			//direct_courier without lodgement events
+			if(($this->shipment->cbwf & 64) > 0 && Tracking::model()->count('tid = :tid AND activity REGEXP :a', [':tid' => $this->id, ':a' => '(been|information) approved']) == 0) return false;
+			return true;
+		}
+
+		return false;
+	}
+
+	public function getLastTrack(){
+		return empty($this->tracks)? false : $this->tracks[sizeof($this->tracks) - 1];
+	}
+
+	public function beforeSave(){
+		if(empty($this->man_id))
+		{
+			$this->man_id = 0;
+		}
+		if(!empty($this->mdata)) $this->meta = json_encode($this->mdata);
+		return true;
+	}
+	public function beforeValidate(){
+		 $this->cost=number_format($this->cost,2,'.','');
+			return parent::beforeValidate();
+	
+	}
+	public function afterFind(){
+		if(!empty($this->meta)) $this->mdata = json_decode($this->meta, true);
+		return true;
+	}
+
+	public static function saveOneTranship($orgId,$shipmentId,$shipmentRef)
+	{
+		$ts = new Tranship;
+		$ts->pid = $shipmentId;
+		$ts->org_id = $orgId;
+		$ts->type = 80;
+		$ts->status = 19;
+		$ts->connote = $shipmentRef;
+		$ts->time = date('Y-m-d H:i:s');
+		$ts->cost = 0;
+		return $ts->save();
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search(){
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('id',$this->id,true);
+		$criteria->compare('pid',$this->pid,true);
+		$criteria->compare('org_id',$this->org_id,true);
+		$criteria->compare('man_id',$this->man_id,true);
+		$criteria->compare('connote',$this->connote,true);
+		$criteria->compare('time',$this->time,true);
+		$criteria->compare('type',$this->type,true);
+		$criteria->compare('status',$this->status,true);
+		$criteria->compare('cost',$this->cost,true);
+
+		return new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+		));
+	}
+
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return Tranship the static model class
+	 */
+	public static function model($className=__CLASS__){
+		return parent::model($className);
+	}
+}

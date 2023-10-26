@@ -1,0 +1,400 @@
+<?php
+
+class ShipmentScanController extends Controller
+{
+	protected $nonAjax=['downloadScanReport'];
+
+	/**
+	 * Lists the report
+	 */
+	public function actionIndex()
+	{
+	    $start_date = !empty($_GET['start_date']) ? $_GET['start_date'] : null;
+	    $end_date = !empty($_GET['end_date']) ? $_GET['end_date'] : null;
+
+	    $providerAir = [];
+
+	    if (!empty($start_date) && !empty($end_date)) {
+	        $start_date_minus_1 = date('Y-m-d', strtotime($start_date . ' +1 day'));
+	        $end_date_minus_1 = date('Y-m-d', strtotime($end_date . ' +1 day'));
+
+            $criteria = new CDbCriteria();
+			$criteria->addBetweenCondition('create_time', $start_date_minus_1, $end_date_minus_1);
+			$criteria->addColumnCondition(['type' => 35]);
+			$criteria->select = ['meta'];
+
+			$meta_air = ReportCache::model()->findAll($criteria);
+
+	        foreach ($meta_air as $meta) {
+	            $providerAir = array_merge($providerAir, json_decode($meta['meta'], true));
+	        }
+
+	        $criteria = new CDbCriteria();
+			$criteria->addColumnCondition(['type' => 35]);
+			$criteria->order = 'create_time DESC';
+			$criteria->select = 'create_time';
+
+			$latest_create_time_air = ReportCache::model()->find($criteria);
+			$latest_create_time_air = $latest_create_time_air !== null ? $latest_create_time_air->create_time : $start_date;	        
+
+	        if ($end_date_minus_1 > $latest_create_time_air) {
+	            $warehouseProcessServiceAir = new WarehouseProcessService();
+	            $newProviderAir = $warehouseProcessServiceAir->getWhscanDetailReport($latest_create_time_air, $end_date, 0, false, Consol::AIRCONSOL, 0);
+	            $providerAir = array_merge($providerAir, $newProviderAir);
+	        }
+	    }
+
+	    $providerSea = [];
+
+	    if (!empty($start_date) && !empty($end_date)) {
+	        
+	        $criteria = new CDbCriteria();
+			$criteria->addBetweenCondition('create_time', $start_date_minus_1, $end_date_minus_1);
+			$criteria->addColumnCondition(['type' => 36]);
+			$criteria->select = ['meta'];
+
+			$meta_sea = ReportCache::model()->findAll($criteria);
+
+
+	        foreach ($meta_sea as $meta) {
+	            $providerSea = array_merge($providerSea, json_decode($meta['meta'], true));
+	        }
+
+	        $criteria = new CDbCriteria();
+			$criteria->addColumnCondition(['type' => 36]);
+			$criteria->order = 'create_time DESC';
+			$criteria->select = 'create_time';
+
+			$latest_create_time_sea = ReportCache::model()->find($criteria);
+			$latest_create_time_sea = $latest_create_time_sea !== null ? $latest_create_time_sea->create_time : $start_date;
+
+	        if ($end_date_minus_1 > $latest_create_time_sea) {
+	            $warehouseProcessServiceSea = new WarehouseProcessService();
+	            $newProviderSea = $warehouseProcessServiceSea->getWhscanDetailReport($latest_create_time_sea, $end_date, 0, false, Consol::SEACONSOL, 0);
+	            $providerSea = array_merge($providerSea, $newProviderSea);
+	        }
+	    }
+
+	    $filtersForm = new FiltersForm;
+	    $filtersForm1 = new FiltersForm1;
+	    if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters = $_GET['FiltersForm'];
+		}
+		if (isset($_GET['filtersForm1'])) {
+			$filtersForm1->filters = $_GET['filtersForm1'];
+		}
+
+	    $sort = new CSort();
+	    $sort->attributes = [
+		    'depot' => [
+		        'asc' => 'scan_date ASC, depot ASC',
+		        'desc' => 'scan_date DESC, depot DESC',
+		    ]
+		];
+
+
+	    $filteredDataAir = $filtersForm->filter($providerAir);
+	    $dataProviderAir = new CArrayDataProvider($filteredDataAir);
+	    $dataProviderAir->sort = $sort;
+	    $dataProviderAir->pagination = ['pageSize' => 9999];
+
+	    $filteredDataSea = $filtersForm1->filter($providerSea);
+	    $dataProviderSea = new CArrayDataProvider($filteredDataSea);
+	    $dataProviderSea->sort = $sort;
+	    $dataProviderSea->pagination = ['pageSize' => 9999];
+
+	    $isSearchRequested = !empty($_GET['start_date']) && !empty($_GET['end_date']);
+
+	    if ($isSearchRequested) {
+	        $this->render('_search1', [
+	            'dataProviderAir' => $dataProviderAir,
+	            'dataProviderSea' => $dataProviderSea,
+	            'filtersForm' => $filtersForm,
+	            'filtersForm1' => $filtersForm1,
+	        ]);
+	    } else {
+	        $this->render('index', [
+	            'dataProviderAir' => $dataProviderAir,
+	            'dataProviderSea' => $dataProviderSea,
+	            'filtersForm' => $filtersForm,
+	            'filtersForm1' => $filtersForm1,
+	        ]);
+	    }
+	}
+
+
+
+	public function actionExport()
+	{
+	    $depotMapping = Org::$warehouse_list;
+	    $provide = [];
+	    if (!empty($_GET['start_date']) && !empty($_GET['end_date'])) {
+	        
+	        $start_time = $_GET['start_date'];
+			$end_time = $_GET['end_date'];
+			$criteria = new CDbCriteria;
+			$criteria->addCondition('t.type IN (0, 5)');
+			$criteria->addCondition('scan_time > :start');
+			$criteria->addCondition('scan_time < :end');
+			$criteria->addCondition('pid NOT IN (
+			    SELECT shipment_id 
+			    FROM import_bag_tag 
+			    WHERE shipment_id IN (
+			        SELECT pid 
+			        FROM shipment_scan 
+			        WHERE scan_time > :substart
+			        AND scan_time < :subend
+			        AND t.type = 0
+			    )
+			)');
+            
+			$criteria->params = [
+			    ':start' => $start_time. ' 00:00:00',
+			    ':end' => $end_time. ' 23:59:59',
+			    ':substart' => $start_time. ' 00:00:00',
+			    ':subend' => $end_time. ' 23:59:59',
+			];
+			$rs = ShipmentScan::model()->with('shipment')->together('user')->findAll($criteria);
+			//
+	        $scan_data = [];
+            
+            $importBagTagArr = [];
+		    $importBagTags = ImportBagTag::model()->with(["imParcel"])->findAll([
+		    'condition' => 'import_bag_id IN (
+		        SELECT pid FROM shipment_scan WHERE scan_time > :start AND scan_time < :end AND type = 5 )',
+		    'params' => [
+		        ':start' => $start_time . ' 00:00:00',
+                ':end' => $end_time . ' 23:59:59'
+			    ],
+			]);
+
+			foreach ($importBagTags as $importBagTag) {
+			    $shipment = $importBagTag->imParcel;
+			    if (!empty($shipment))
+			    {
+			        $importBagTagArr[$importBagTag->import_bag_id][] = $shipment;
+			    }
+			}
+             
+            $consolNoArr = [];
+            $sql = "SELECT c.no,c.service,ss.pid from shipment_scan ss join shipment s on ss.pid=s.id join consol c on c.id = s.consol_id where ss.type = 0 AND ss.scan_time > '".$start_time . " 00:00:00'"." AND ss.scan_time < '".$end_time . " 23:59:59'";
+			$consolNos = Yii::app()->db->createCommand($sql)->queryAll();
+            foreach ($consolNos as $consolNo) {
+			    if (!empty($consolNo)) {
+			        $consolNoArr[$consolNo['pid']] = [$consolNo['no'],$consolNo['service']];
+			    }
+			}
+	        foreach ($rs as $r) {
+	            $uid = $r->user_id;
+	            $scan_date = date('Y-m-d', strtotime($r->scan_time));
+	            $consol_no = "";
+	            $service = 0;
+	            if ($r->type == 0) {
+	                 if(!empty($consolNoArr[$r->pid])){
+	                 	$consol_no= $consolNoArr[$r->pid][0];
+	                 	$service = $consolNoArr[$r->pid][1];
+	                 }
+	            } else if ($r->type == 5) {
+	                $importBagTags = ImportBagTag::model()->with('imParcel')->findAll('import_bag_id = :pid', [':pid' => $r->pid]);
+
+	                foreach ($importBagTags as $importBagTag) {
+	                    $shipment = $importBagTag->imParcel;
+	                    if (!empty($shipment)&&!empty($consolNoArr[$shipment->id])) {
+	                        $consol_no = $consolNoArr[$shipment->id][0];
+	                        $service = $consolNoArr[$shipment->id][1];
+	                        break;
+	                    }
+	                }
+	            }
+
+	            if (!isset($scan_data[$uid][$scan_date][$consol_no])&&$uid!==0) {
+	                $scan_data[$uid][$scan_date][$consol_no] = [
+	                    'user' => empty($r->user) ? '' : $r->user->getFullName(),
+	                    'dp_packs'=>0,
+	                    'dp_weight'=>0,
+	                    'depot' => $r->warehouse,
+	                    'consol_no'=>$consol_no,
+	                    'service'=>@Consol::$services[$service],
+	                    'pcs_packs' => 0,
+	                    'pcs_weight' => 0,
+	                    'carton_packs' => 0,
+	                    'carton_weight' => 0
+	                ];
+	                //$start = $r->scan_time;
+	            }
+
+	            // if (abs(strtotime($start) - strtotime($r->scan_time)) < $gap) {
+	            //     $scan_data[$uid][$scan_date][$consol_no]['time'] += abs(strtotime($start) - strtotime($r->scan_time));
+	            // } else {
+	            //     $scan_data[$uid][$scan_date][$consol_no]['time'] += 1;
+	            // }
+	            // $start = $r->scan_time;
+
+	            if ($r->type == 0) {
+	                   $scan_data[$uid][$scan_date][$consol_no]['pcs_packs'] += $r->pkg;
+	                   $scan_data[$uid][$scan_date][$consol_no]['pcs_weight'] += $r->weight;
+	                   if(!empty($r->shipment)){
+	                     if($r->shipment->agent_id==org::ORGID_CLIENT_DAIPOST)
+		                  {
+			               	 $scan_data[$uid][$scan_date][$consol_no]['dp_packs'] += $r->pkg;
+			               	 $scan_data[$uid][$scan_date][$consol_no]['dp_weight'] += $r->weight;
+		                  }
+                  }
+	            } else if ($r->type == 5) {
+	                $scan_data[$uid][$scan_date][$consol_no]['carton_packs'] += 1;
+	                if(!empty($importBagTagArr[$r->pid]))
+	                {
+		                foreach ($importBagTagArr[$r->pid] as $key => $shipment)
+		                {
+		                	$scan_data[$uid][$scan_date][$consol_no]['carton_weight'] += $shipment->weight;
+		                }
+	            	}
+	            }
+	        }
+	        
+	        foreach ($scan_data as $uid => $scan_dates) {
+	            foreach ($scan_dates as $scan_date => $consolData) {
+	                foreach ($consolData as $consol_no => $data) {
+	                    //$hrs = number_format($data['time'] / 3600, 2);
+	                    $dp_packs=$data['dp_packs'];
+		                $pcs_packs=$data['pcs_packs'];
+		                $carton_packs=$data['carton_packs'];
+		                $dp_weight=$data['dp_weight'];
+		                $pcs_weight=$data['pcs_weight'];
+		                $carton_weight=$data['carton_weight'];
+		                $provide[] = [
+		                	'id'=>$uid,
+		                    'user' => $data['user'],
+		                    'depot' => isset($depotMapping[$data['depot']]) ? $depotMapping[$data['depot']] : '',
+		                    'consol_no'=>$consol_no,
+		                    'service'=>$data['service'],
+		                    'dp_packs'=>$dp_packs,
+		                    'dp_weight'=>number_format($dp_weight*10,2),
+		                    'pcs_packs' => ($pcs_packs-$dp_packs),
+		                    'pcs_weight' => number_format(($pcs_weight-$dp_weight),2),
+		                    'carton_packs' => $carton_packs,
+		                    'carton_weight' => number_format($carton_weight,2),
+		                    'scan_date' => $scan_date,
+		                    //'time' => $hrs,
+		                    'total_packs' => ($pcs_packs + $carton_packs),
+		                    'total_weight' =>number_format(($dp_weight*10 +$pcs_weight-$dp_weight+$carton_weight),2),
+		                ];
+	                }
+	            }
+	        }
+
+	        $exportData = $provide;
+	        $xls = new oExcel;
+	        $i = 1;
+	        $xls->addRow($i++, ['User', 'Scan Date', 'Depot', 'Consol No','Service','DP Scan','DP Weight', 'PCS Scan', 'PCS Weight', 'Carton Scan', 'Carton Weight', 'Total Scan', 'Total Weight']);
+	        foreach ($exportData as $record) {
+	            $xls->addRow($i++, [
+	                $record['user'],
+	                $record['scan_date'],
+	                $record['depot'],
+	                $record['consol_no'],
+	                $record['service'],
+	                $record['dp_packs'],
+	                $record['dp_weight'],
+	                $record['pcs_packs'],
+	                $record['pcs_weight'],
+	                $record['carton_packs'],
+	                $record['carton_weight'],
+	                $record['total_packs'],
+	                $record['total_weight'],
+	            ]);
+	        }
+	        $filename = Yii::app()->basePath . DIRECTORY_SEPARATOR . 'runtime' . DIRECTORY_SEPARATOR . 'ScanReport.xlsx';
+	        $xls->output($filename, null, false);
+
+	        echo $this->createUrl('shipmentScan/downloadScanReport');
+	    }
+	}
+
+
+
+	public function actionDownloadScanReport()
+	{
+		$xls = new oExcel;
+		$mfn = 'ScanReport';
+		$tempfile = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR.'ScanReport.xlsx';
+		$xls->load($tempfile);
+		$xls->output($mfn.'.xlsx');
+	}
+
+
+
+
+
+	public function actionWorkTimeChange()
+	{
+		$date = $_POST['date'];
+		$workTime = $_POST['workTime'];
+		SystemSetting::setDateWorkTime($date,$workTime);
+		echo "done";
+	}
+
+
+	public function actionGetCheckinDash()
+	{
+		$depot = empty($_GET['depot'])?"SYD":$_GET['depot'];
+		$warehouseProcessService = new WarehouseProcessService();
+		$checkInDashboardReport = $warehouseProcessService->getCheckinDashboardReport($depot,Org::TLA_DEPARTMENT_SYDNEY);
+		$this->render('checkin_dash',['provide'=>$checkInDashboardReport]);
+	}
+
+	public function actionGetCheckinDashDetail()
+	{
+		$depot = $_GET['depot'];
+		$warehouseProcessService = new WarehouseProcessService();
+		$checkInDashboardReport = $warehouseProcessService->getCheckinDashboardReportDetail($depot);
+		$this->render('checkin_dash_detail',['provide'=>$checkInDashboardReport,'depot'=>Org::$warehouse_list[$depot]]);
+	}
+
+
+	/*$this function used to combine the pack rate the average weight of packs.
+	* @params $x pack rage   $y weight/pack
+	* @return  figures ( normal 1);
+	*/
+	private function getfigure($x, $y)
+	{
+		$z = sprintf("%.2f", ($x * exp($y / 8.199)) / 750);
+		if ($z>100&&$z<200) {
+			$z=0.3*$z+70;
+		} elseif ($z>200) {
+			$z=130+round($z/1000, 2);
+		}
+		return $z;
+	}
+
+	/**
+	 * Returns the data model based on the primary key given in the GET variable.
+	 * If the data model is not found, an HTTP exception will be raised.
+	 * @param integer $id the ID of the model to be loaded
+	 * @return ShipmentScan the loaded model
+	 * @throws CHttpException
+	 */
+	public function loadModel($id)
+	{
+		$model=ShipmentScan::model()->findByPk($id);
+		if ($model===null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		return $model;
+	}
+
+	/**
+	 * Performs the AJAX validation.
+	 * @param ShipmentScan $model the model to be validated
+	 */
+	protected function performAjaxValidation($model)
+	{
+		if (isset($_POST['ajax']) && $_POST['ajax']==='shipment-scan-form') {
+			echo CActiveForm::validate($model);
+			Yii::app()->end();
+		}
+	}
+}
+
+
+

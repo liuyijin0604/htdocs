@@ -1,0 +1,61 @@
+<h1>Update Shipment</h1>
+<div class="form">
+    <?php $form = $this->beginWidget('CActiveForm', array(
+        'id' => 'update-shipment-form',
+        'enableAjaxValidation' => false,
+    )); ?>
+    <div class="row" style="display:none;">
+        <label for="chargecode">Chargecode</label>
+        <input type="text" id="chargecode" name="chargecode" />
+    </div>
+    <div class="row" style="display:none;">
+        <label for="currency">currency</label> <select class="form-control" name="currency" id="currency">
+            <option value="AUD" selected="selected">AUD</option>
+            <option value="USD">USD</option>
+        </select>
+    </div>
+    <div class="row">
+        <label for="manifest">Update - <small>.csv/.xls/.xlsx File</small></label>
+        <input type="file" name="manifest" id="manifest" />
+    </div>
+    <div class="row buttons">
+        <?php echo CHtml::submitButton($this->t('Upload')); ?>
+    </div>
+    <?php $this->endWidget(); ?>
+</div> <!-- form -->
+
+<div id="response" style="height: 100px;">
+
+</div>
+
+<script type="text/javascript">
+    $(function() {
+        $('form#update-shipment-form').submit(function(e) {
+
+            e.preventDefault();
+            var formData = new FormData(this);
+            formData.append('action', 'update');
+            $('#response').empty();
+
+            $.ajax({
+                url: '<?= $this->createUrl('ims/tools/manifest') ?>',
+                type: 'POST',
+                data: formData,
+                success: function(res) {
+                    /* let r = jQuery.parseJSON(res);
+                    if (r.success) {
+                        $('#response').append('<p>Success</p>');
+                    } else {
+                        for (let i = 0; i < r.errors.length; i++) {
+                            $('#response').append(r.errors[i]);
+                        }
+                    } */
+                    $('#response').append(res);
+                },
+                cache: false,
+                contentType: false,
+                processData: false
+            });
+        });
+    });
+</script>

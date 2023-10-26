@@ -1,0 +1,1 @@
+<h1>Help <?php echo $_GET["tabid"]; ?></h1>

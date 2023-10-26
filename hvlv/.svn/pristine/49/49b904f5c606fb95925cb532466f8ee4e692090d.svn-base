@@ -1,0 +1,185 @@
+<?php
+class ConsolProcessService extends Service
+{
+    public function getSumConsolProcessCreateToday($dptId)
+    {
+        $result = [];
+        $totalCountNew = $airCountNew = $seaCountNew = 0;
+        $totalCbmNew = $airCbmNew = $seaCbmNew = 0;
+        $totalWeightNew = $airWeightNew = $seaWeightNew = 0;
+        
+        $today = date("Y-m-d");
+        $yesterday = date("Y-m-d", strtotime("-1 day"));
+        // models = all new created consol process at the given dptId from yesterday 17:00 to today 16:59
+        $models = ConsolProcess::model()->findAllBySql('SELECT * FROM consol_process WHERE fid IN (SELECT id FROM consol WHERE dpt_id = ' .$dptId. ') AND started >= "' . $yesterday . ' 17:00:00" AND started <= "' . $today . ' 16:59:59"');
+
+        if(!empty($models))
+        {
+            /**
+             * Calculate air and sea consol's count, CBM, and weight.
+             * Total = air + sea
+             */
+            foreach($models as $model) 
+            {
+                if($model->main_type == 1)
+                {
+                    $airCountNew++;
+                    $airCbmNew += number_format($model->consol->totCBM(), 3, '.', '');
+                    $airWeightNew += number_format($model->consol->totWeight(), 3, '.', '');
+                }
+                if($model->main_type == 2)
+                {
+                    $seaCountNew++;
+                    $seaCbmNew += number_format($model->consol->totCBM(), 3, '.', '');
+                    $seaWeightNew += number_format($model->consol->totWeight(), 3, '.', '');
+                }
+            }
+            $totalCountNew = $airCountNew + $seaCountNew;
+            $totalCbmNew = $airCbmNew + $seaCbmNew;
+            $totalWeightNew = $airWeightNew + $seaWeightNew;
+        }
+
+        $result['totalCount'] = $totalCountNew;
+        $result['totalCBM'] = $totalCbmNew;
+        $result['totalWeight'] = number_format($totalWeightNew, 3, '.', '');
+
+        $result['airCount'] = $airCountNew;
+        $result['airCBM'] = $airCbmNew;
+        $result['airWeight'] = number_format($airWeightNew, 3, '.', '');
+
+        $result['seaCount'] = $seaCountNew;
+        $result['seaCBM'] = $seaCbmNew;
+        $result['seaWeight'] = number_format($seaWeightNew, 3, '.', '');
+
+        return $result;
+    }
+
+    /**
+     * Find all consol processes which have been done (status becomes 80).
+     * Use date instead of started.
+     * All the rest is the same as new
+     */
+    public function getSumConsolProcessDoneToday($dptId)
+    {
+        $result = [];
+        $totalCountDone = $airCountDone = $seaCountDone = 0;
+        $totalCbmDone = $airCbmDone = $seaCbmDone = 0;
+        $totalWeightDone = $airWeightDone = $seaWeightDone = 0;
+        $today = date("Y-m-d");
+        $yesterday = date("Y-m-d", strtotime("-1 day"));
+        $models = ConsolProcess::model()->findAllBySql('SELECT * FROM consol_process WHERE fid IN (SELECT id FROM consol WHERE dpt_id = '.$dptId.') AND date >="'.$yesterday.' 17:00:00" AND date <= "' . $today . ' 16:59:59" AND status = 80');
+
+        if(!empty($models))
+        {
+            foreach($models as $model)
+            {
+                if($model->main_type == 1)
+                {
+                    $airCountDone++;
+                    $airCbmDone += $model->consol->totCBM();
+                    $airWeightDone += $model->consol->totWeight();
+                }
+                if($model->main_type == 2)
+                {
+                    $seaCountDone++;
+                    $seaCbmDone += $model->consol->totCBM();
+                    $seaWeightDone += $model->consol->totWeight();
+                }
+            }
+            $totalCountDone = $airCountDone + $seaCountDone;
+            $totalCbmDone = $airCbmDone + $seaCbmDone;
+            $totalWeightDone = $airWeightDone + $seaWeightDone;
+        }
+        $result['totalCount'] = $totalCountDone;
+        $result['totalCBM'] = number_format($totalCbmDone, 3, '.', '');
+        $result['totalWeight'] = number_format($totalWeightDone, 3, '.', '');
+
+        $result['airCount'] = $airCountDone;
+        $result['airCBM'] = number_format($airCbmDone, 3, '.', '');
+        $result['airWeight'] = number_format($airWeightDone, 3, '.', '');
+
+        $result['seaCount'] = $seaCountDone;
+        $result['seaCBM'] = number_format($seaCbmDone, 3, '.', '');
+        $result['seaWeight'] = number_format($seaWeightDone, 3, '.', '');
+
+        return $result;
+    }
+
+    /**
+     * Find all consol processes which havn't been done (status != 80)
+     */
+    public function getSumConsolProcessLeftToday($dptId)
+    {
+        $result = [];
+        $totalCountLeft = $airCountLeft = $seaCountLeft = 0;
+        $totalCbmLeft = $airCbmLeft = $seaCbmLeft = 0;
+        $totalWeightLeft = $airWeightLeft = $seaWeightLeft = 0;
+        $today = date("Y-m-d");
+        $yesterday = date("Y-m-d", strtotime("-1 day"));
+        $models = ConsolProcess::model()->findAllBySql('SELECT cp.* FROM consol_process cp left outer join consol c on cp.fid = c.id WHERE c.dpt_id = '.$dptId.' AND cp.status != 80 AND c.status !=100');
+        if(!empty($models))
+        {
+            foreach($models as $model)
+            {
+                if($model->main_type == 1)
+                {
+                    $airCountLeft++;
+                    $airCbmLeft += $model->consol->totCBM();
+                    $airWeightLeft += $model->consol->totWeight();
+                }
+                if($model->main_type == 2)
+                {
+                    $seaCountLeft++;
+                    $seaCbmLeft += $model->consol->totCBM();
+                    $seaWeightLeft += $model->consol->totWeight();
+                }
+            }
+            $totalCountLeft = $airCountLeft + $seaCountLeft;
+            $totalCbmLeft = $airCbmLeft + $seaCbmLeft;
+            $totalWeightLeft = $airWeightLeft + $seaWeightLeft;
+        }
+        $result['totalCount'] = $totalCountLeft;
+        $result['totalCBM'] = number_format($totalCbmLeft, 3, '.', '');
+        $result['totalWeight'] = number_format($totalWeightLeft, 3, '.', '');
+
+        $result['airCount'] = $airCountLeft;
+        $result['airCBM'] = number_format($airCbmLeft, 3, '.', '');
+        $result['airWeight'] = number_format($airWeightLeft, 3, '.', '');
+
+        $result['seaCount'] = $seaCountLeft;
+        $result['seaCBM'] = number_format($seaCbmLeft, 3, '.', '');
+        $result['seaWeight'] = number_format($seaWeightLeft, 3, '.', '');
+
+        return $result;
+    }
+
+    public function getConsolProcessDailyReport($dptId)
+    {
+        $result = [];
+        $todayNew = $this->getSumConsolProcessCreateToday($dptId);
+        $todayDone = $this->getSumConsolProcessDoneToday($dptId);
+        $todayLeft = $this->getSumConsolProcessLeftToday($dptId);
+        $result['todayNew'] = $todayNew;
+        $result['todayDone'] = $todayDone;
+        $result['todayLeft'] = $todayLeft;
+
+        return $result;
+    }
+
+    public static function getConsolProcessRecord($dptId, $reportCacheType)
+	{
+		$consolProcessService = new ConsolProcessService;
+		$arrSydReport = $consolProcessService->getConsolProcessDailyReport($dptId);
+		$temp = json_encode($arrSydReport);
+		$modelReportCacheSYD = new ReportCache();
+		$modelReportCacheSYD->type = $reportCacheType;
+		$modelReportCacheSYD->status = ReportCache::Active;
+		$modelReportCacheSYD->meta = $temp;
+		$modelReportCacheSYD->create_time = date('Y-m-d');
+		$modelReportCacheSYD->creater = 1;
+		$modelReportCacheSYD->modify_time = date('Y-m-d');
+		$modelReportCacheSYD->modifyer = 1;
+		$modelReportCacheSYD->save();
+	}
+}
+

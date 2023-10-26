@@ -1,0 +1,151 @@
+<?php
+/* @var $this CargoBookingController */
+/* @var $model CargoBooking */
+/* @var $form CActiveForm */
+?>
+<style>
+	#new_confirmed_date_container {
+		display: none;
+	}
+
+	.hidden-container {
+		display: block;
+	}
+
+	#cnee_name,
+	#cnee_company {
+		width: 368px;
+	}
+</style>
+<div class="form">
+
+	<?php $form = $this->beginWidget('CActiveForm', array(
+		'id' => 'cargo-booking-form',
+		// Please note: When you enable ajax validation, make sure the corresponding
+		// controller action is handling ajax validation correctly.
+		// There is a call to performAjaxValidation() commented in generated controller code.
+		// See class documentation of CActiveForm for details on this.
+		'enableAjaxValidation' => false,
+	)); ?>
+
+	<p class="note">Fields with <span class="required">*</span> are required.</p>
+
+	<?php echo $form->errorSummary($model); ?>
+
+	<div class="row">
+		<?php echo $form->labelEx($model, 'confirmed_date'); ?>
+		<?php
+		echo CHtml::radioButton('confirmed_date', 0, ['value' => $model->booking_date_1, 'id' => 'date_1']), $model->booking_date_1 . '&nbsp;';
+		echo CHtml::radioButton('confirmed_date', 0, ['value' => $model->booking_date_2, 'id' => 'date_2']), $model->booking_date_2 . '&nbsp;';
+		?>
+		<button type="button" id="new_delivery_date">New Delivery Date</button>
+	</div>
+
+	<div class="row" id="new_confirmed_date_container">
+		<?php echo $form->labelEx($model, 'confirmed_date'); ?>
+		<?php echo $form->dateField($model, 'confirmed_date'); ?>
+	</div>
+
+	<div class="row">
+		<?php echo $form->labelEx($model, 'delivery_period'); ?>
+		<?php echo $form->textField($model, 'delivery_period', array('size' => 45, 'maxlength' => 45)); ?>
+		<?php echo $form->error($model, 'delivery_period'); ?>
+	</div>
+
+	<div class="row">
+		<?php echo $form->labelEx($model, 'unloading'); ?>
+		<?php
+		$needUnloading = false;
+		if ($model->mdata['need_unloading'] == 'Yes') {
+			$needUnloading = true;
+		}
+		echo CHtml::radioButton('unloading', $needUnloading, ['value' => true]), 'Customer has folklift&nbsp;';
+		echo CHtml::radioButton('unloading', !$needUnloading, ['value' => false]), 'Customer needs unloading service';
+		?>
+	</div>
+
+	<div class="row">
+		<?php echo $form->labelEx($model, 'fee'); ?>
+		<?php echo $form->textField($model, 'fee', array('size' => 9, 'maxlength' => 9)) . '&nbsp;&nbsp;'; ?>
+		<?php echo $form->error($model, 'fee'); ?>
+		<label for="base_price">Base Price</label>
+		<?php echo CHtml::textField('base_price', $model->mdata['base_price'], ['id' => 'base_price']); ?>
+		<label for="oversize_fee">Oversize Fee</label>
+		<?php echo CHtml::textField('oversize_fee', $model->mdata['oversize_fee'], ['id' => 'oversize_fee']); ?>
+		<label for="time_deliver_fee">Specific Delivery Time Fee</label>
+		<?php echo CHtml::textField('time_deliver_fee', $model->mdata['time_deliver_fee'], ['id' => 'time_deliver_fee']); ?>
+		<label for="unloading_fee">Unloading Fee</label>
+		<?php echo CHtml::textField('unloading_fee', $model->mdata['unloading_fee'], ['id' => 'unloading_fee']); ?>
+	</div>
+
+	<br />
+	<div class="cnee-container">
+		<h3>Receiver Information</h3>
+		<label for="cnee_name">Name</label>
+		<input type="text" id="cnee_name" name="cnee_name" value="<?= $cnee->name; ?>">
+		<label for="cnee_company">Company</label>
+		<input type="text" id="cnee_company" name="cnee_company" value="<?= $cnee->company; ?>">
+		<label for="cnee_address">Address</label>
+		<input type="text" id="cnee_address" name="cnee_address" value="<?= $cnee->address; ?>">
+		<label for="cnee_suburb">Suburb</label>
+		<input type="text" id="cnee_suburb" name="cnee_suburb" value="<?= $cnee->suburb; ?>">
+		<label for="cnee_city">City</label>
+		<input type="text" id="cnee_city" name="cnee_city" value="<?= $cnee->city; ?>">
+		<label for="cnee_state">State</label>
+		<input type="text" id="cnee_state" name="cnee_state" value="<?= $cnee->state; ?>">
+		<label for="cnee_postcode">Postcode</label>
+		<input type="text" id="cnee_postcode" name="cnee_postcode" value="<?= $cnee->postcode; ?>">
+		<label for="cnee_tel">Telephone</label>
+		<input type="text" id="cnee_tel" name="cnee_tel" value="<?= $cnee->tel; ?>">
+		<label for="cnee_email">Email</label>
+		<input type="text" id="cnee_email" name="cnee_email" value="<?= $cnee->email; ?>">
+	</div>
+
+	<div class="row">
+		<?php echo $form->labelEx($model, 'comment'); ?>
+		<?php echo $form->textArea($model, 'comment', array('style'=>'height:202px; width:444px')); ?>
+		<?php echo $form->error($model, 'comment'); ?>
+	</div>
+	<div class="row buttons">
+		<button type="button" style="background-color: red; width:80px;" id="reject_btn">Reject</button>
+		<br />
+		<br />
+		<?php echo CHtml::submitButton($model->isNewRecord ? 'Create' : 'Save'); ?>
+	</div>
+
+	<?php $this->endWidget(); ?>
+
+</div><!-- form -->
+
+<script>
+	$(function() {
+		$('#new_delivery_date').click(function() {
+			$('#new_confirmed_date_container').show();
+		});
+
+		$('#base_price').change(function() {
+			var base = Number($('#base_price').val());
+			var oversize = Number($('#oversize_fee').val());
+			var timeFee = Number($('#time_deliver_fee').val());
+			var unloading = Number($('#unloading_fee').val());
+			var total = (base + oversize + timeFee + unloading) * 1.10;
+			console.log(total.toFixed(2));
+			$('#CargoBooking_fee').val(total.toFixed(2));
+		});
+
+		$('#reject_btn').click(function() {
+			if($('#CargoBooking_comment').val() == '') {
+				alert('Please write reasons for rejection in comment area.');
+			} else {
+				var comment = $('#CargoBooking_comment').val();
+				$.ajax({
+					type: 'POST',
+					url: "<?= $this->createUrl('cargoBooking/reject') ?>",
+					data: {reject: true, id: "<?= $model->id; ?>", comments: comment},
+				}).done(function(msg){
+					alert(msg + " Rejected.");
+				})
+			}
+		});
+	});
+</script>

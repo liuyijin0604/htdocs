@@ -1,0 +1,91 @@
+<?php
+
+class ItController extends Controller
+{
+	protected $nonAjax = ['checkApplicationLog'];
+	/**
+	 * Displays a particular model.
+	 * @param integer $id the ID of the model to be displayed
+	 */
+	public function actionView($id)
+	{
+		$this->render('view', [
+			'model'=>$this->loadModel($id),
+		]);
+	}
+
+	/**
+	 * Creates a new model.
+	 * If creation is successful, the browser will be redirected to the 'view' page.
+	 */
+	public function actionCheckApplicationLog()
+	{
+		$data = file_get_contents(Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR . 'application.log');
+		$this->render('check_application_log', [
+			'data'=>$data,
+		]);
+	}
+
+	public function actionCheckApiLog()
+	{
+		$data = '';
+		if (!empty($_POST)) {
+			$date = date('Y-m-d', strtotime($_POST['date']));
+			switch($_POST['api']) {
+				case 'auspost':
+					$data = file_get_contents(Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR.'auspost'.DIRECTORY_SEPARATOR.'auspost_api_'.$date.'.log');
+					break;
+				case 'mytoll':
+					$data = file_get_contents(Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR.'mytoll'.DIRECTORY_SEPARATOR.'mytoll_api_Elabel' . $date . '.log');
+					break;
+				case 'toll':
+					$data = file_get_contents(Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR. 'tollapi' . DIRECTORY_SEPARATOR.'toll_api_' . $date . '.log');
+					break;
+				case 'tnt':
+					$data = file_get_contents(Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR  . 'tntapi' . DIRECTORY_SEPARATOR.'tnt_api.log');
+					break;
+				case 'allied':
+					$data = file_get_contents(Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR . 'allied' . DIRECTORY_SEPARATOR . 'allied_api_ELabel'. $date . '.log');
+					break;
+				case 'xero':
+					$data = file_get_contents(Yii::app()->basePath . DIRECTORY_SEPARATOR . 'runtime' . DIRECTORY_SEPARATOR . 'xero' . DIRECTORY_SEPARATOR . 'xero_api_' . $date . '.log');
+					break;
+				case 'hunter':
+					$data = file_get_contents(Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR  . 'hunter' . DIRECTORY_SEPARATOR . 'hunter_' . $date . '.log');
+					break;
+				case 'shipment':
+					$data = file_get_contents(Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR.'shipmentapi'.DIRECTORY_SEPARATOR.'shipment_api_' . $date . '.log');
+					break;
+				case 'ubi':
+					$data = file_get_contents(Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR . 'UBI' . DIRECTORY_SEPARATOR . 'ubi_api_ELabel' . $date . '.log');
+					break;
+				case 'etower':
+					$data = file_get_contents(Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR . 'ETOWER' . DIRECTORY_SEPARATOR . 'etower_api_ELabel'. $date . '.log');
+					break;
+				case 'border':
+					$data = file_get_contents(Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR . 'MYBORDER' . DIRECTORY_SEPARATOR . 'MYBORDER_api_ELabel' . $date . '.log');
+					break;
+			}
+			echo $data;
+		} else {
+			$this->render('check_api_log', ['data' => $data]);
+		}
+		
+	}
+											
+	/**
+	 * Returns the data model based on the primary key given in the GET variable.
+	 * If the data model is not found, an HTTP exception will be raised.
+	 * @param integer the ID of the model to be loaded
+	 */
+	public function loadModel($id)
+	{
+		$model=ImParcel::model()->findByPk($id);
+		if ($model===null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		return $model;
+	}
+}
+
+

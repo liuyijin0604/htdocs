@@ -1,0 +1,221 @@
+<h1><?=$this->t('Receivables Report');?></h1>
+
+<div class="form">
+<?php $form=$this->beginWidget('CActiveForm', array(
+	'id' => 'filter-shipment-form',
+	'enableAjaxValidation' => false,
+	'action' => $this->createUrl('invoice/report', ['type' => 'rcvb']),
+	'htmlOptions' => ['target' => '_blank', 'class' => 'ifrm-form'],
+)); ?>
+	<div class="row rowcol rowleft">
+	<?php echo CHtml::label('Depot:','dt'); ?>
+	<?php echo CHtml::dropDownList('wid', '', Org::dptList(), array('empty' => 'ALL', 'class' => 'required')); ?>
+	</div>
+	
+	<div class="row rowcol">
+		<label>Agent:</label>
+		<?php echo CHtml::hiddenField('agent_id');
+			$acname1 = empty($_GET["tabid"])? 'agent_ac' : $_GET["tabid"].'_agent_ac';
+			$this->widget('zii.widgets.jui.CJuiAutoComplete', array(
+				'name' => $acname1,
+				'sourceUrl' => array('org/ownerSuggest'),
+				'value' => '',
+				'options' => array(
+						'showAnim' => 'fold',
+						'minLength' => 2,
+						'delay' => 200,
+						'select' => 'js:function(event, ui){ $(this).val(ui.item["label"]); $(this).prevAll("input[type=hidden]").val(ui.item["value"]).data("ov",ui.item["value"]); return false; }',
+						'change' => 'js:function(event, ui){ if(ui.item == null) $(this).prevAll("input[type=hidden]").val($(this).prevAll("input[type=hidden]").data("ov")); return false; }',
+				),
+				'htmlOptions' => array(
+					'size' => '22',
+				),
+		));
+		?>
+	</div>
+	
+	<div class="row rowcol">
+		<label>Sub Agent:</label>
+		<?php echo CHtml::hiddenField('suborg_id');
+			$acname1 = empty($_GET["tabid"])? 'suborg_ac' : $_GET["tabid"].'_suborg_ac';
+			$this->widget('zii.widgets.jui.CJuiAutoComplete', array(
+				'name' => $acname1,
+				'sourceUrl' => array('org/ownerSuggest'),
+				'value' => '',
+				'options' => array(
+						'showAnim' => 'fold',
+						'minLength' => 2,
+						'delay' => 200,
+						'select' => 'js:function(event, ui){ $(this).val(ui.item["label"]); $(this).prevAll("input[type=hidden]").val(ui.item["value"]).data("ov",ui.item["value"]); return false; }',
+						'change' => 'js:function(event, ui){ if(ui.item == null) $(this).prevAll("input[type=hidden]").val($(this).prevAll("input[type=hidden]").data("ov")); return false; }',
+				),
+				'htmlOptions' => array(
+					'size' => '22',
+				),
+		));
+		?>
+	</div>
+	
+	<div class="row rowcol">
+		<label>Exclude Sub Agent:</label>
+		<?php echo CHtml::hiddenField('ex_suborg_id');
+			$acname1 = empty($_GET["tabid"])? 'ex_suborg_ac' : $_GET["tabid"].'_ex_suborg_ac';
+			$this->widget('zii.widgets.jui.CJuiAutoComplete', array(
+				'name' => $acname1,
+				'sourceUrl' => array('org/ownerSuggest'),
+				'value' => '',
+				'options' => array(
+						'showAnim' => 'fold',
+						'minLength' => 2,
+						'delay' => 200,
+						'select' => 'js:function(event, ui){ $(this).val(ui.item["label"]); $(this).prevAll("input[type=hidden]").val(ui.item["value"]).data("ov",ui.item["value"]); return false; }',
+						'change' => 'js:function(event, ui){ if(ui.item == null) $(this).prevAll("input[type=hidden]").val($(this).prevAll("input[type=hidden]").data("ov")); return false; }',
+				),
+				'htmlOptions' => array(
+					'size' => '22',
+				),
+		));
+		?>
+	</div>
+
+    <div class="row rowcol">
+        <?php echo CHtml::label('From Date:','rcvb'); ?>
+        <?php echo CHtml::textField('fromdate','', ['size' => '12', 'class' => 'date_input']); ?>
+    </div>
+
+    <div class="row rowcol">
+        <?php echo CHtml::label('To Date:','rcvb'); ?>
+        <?php echo CHtml::textField('postdate','', ['size' => '12', 'class' => 'date_input']); ?>
+    </div>
+
+	<div class="row rowcol rowleft">
+        <?php echo CHtml::label('Report Type:','rpt_type'); ?>
+		<select name="rptyp">
+			<option value="detail">Detailed Report</option>
+			<option value="aging">Debtor Aging Report Old</option>
+			<!-- <option value="pdf">Agent PDF statements</option> -->
+			<!-- <option value="xls">Agent Excel statements</option> -->
+			<option value="pdfnew">Agent PDF statements</option>
+			<option value="pdfall">Agent PDF All Invs</option>
+			<option value="xlsnew">Agent Excel statements</option>
+			<option value="xlsall">Agent Excel All Invs</option>
+			<option value="invsum">Invoice Summary</option>
+			<option value="agingnew">Debtor Aging Report</option>
+			<option value="agingnewmonthly">Debtor Aging Report Monthly</option>
+			<option value="agingsale">Debtor Aging Sales</option>
+			<option value="receiptjournal">Receipt Journal</option>
+			<option value="heshengyuanxls1">合生元副账单 v1</option>
+			<option value="heshengyuanxls2">合生元副账单 v2</option>
+		</select>
+	</div>
+
+	<div class="row rowcol">
+		<?php
+		echo CHtml::label('Job Create By', 'op_id');
+		echo CHtml::hiddenField('op_id', '');
+		$this->widget('zii.widgets.jui.CJuiAutoComplete', array(
+			'name' => $_GET['tabid'] . '_op_name',
+			'sourceUrl' => array('user/suggest'),
+			'value' => '',
+			'options' => array(
+				'showAnim' => 'fold',
+				'minLength' => 2,
+				'delay' => 100,
+				'select' => 'js:function(event, ui){ $(this).val(ui.item["label"]); $(this).prevAll("input[type=hidden]").val(ui.item["value"]).data("ov",ui.item["value"]); return false; }',
+				'change' => 'js:function(event, ui){ if(ui.item == null) $(this).prevAll("input[type=hidden]").val($(this).prevAll("input[type=hidden]").data("ov")); return false; }',
+			),
+			'htmlOptions' => array(
+				'size' => '20',
+			),
+		));
+		?>
+	</div>
+
+	<div class="row rowcol rowleft">
+		<label><input type="checkbox" name="wcredit" value="1" /> Prepayment</label>
+		<label><input type="checkbox" name="wcredit" value="2" /> Credit Note</label>
+		<label><input type="checkbox" name="wcredit" value="3" /> Credit Note + FastWay</label>
+		<label><input type="checkbox" name="wcredit" value="99" /> Prepayment + Credit Note + FastWay</label>
+	</div>
+
+	<div class="row rowcol">
+		<label><input type="checkbox" name="incpending" value="1" /> Include Pending Invoice</label>
+		<label><input type="checkbox" name="onbehalf" value="1" /> On Behalf PDF Statement</label>
+		<label><input type="checkbox" name="excludedetails" value="1" /> Exclude Details</label>
+		<label><input type="checkbox" name="orderbydate" value="1" /> Order By Date(Default By Due)</label>
+	</div>
+
+	<div class="row buttons">
+		<?php echo CHtml::submitButton($this->t('Report')); ?>
+
+		<?php echo CHtml::button($this->t('Edit And Send Statement Email'),["id"=>'editEmail']); ?>
+		<?php
+			echo '<a id="jumpEditEmail" class="jqm_link" data-win-class="XL" href="top/invoice/editStatementEmail.app" style="display:none"><div style="background-position:-16px 0" class="icon"></div>' . $this->t('Edit And Send Statement Email') . '</a>';
+		?>
+	</div>
+
+
+<?php $this->endWidget(); ?>
+
+</div><!-- form -->
+
+<script type="text/javascript">
+$(function(){
+	var win = $('#jqmw_<?=$_GET["tabid"];?>');
+	$('#editEmail',win).on('click',function(){
+		if($('#agent_id',win).val()=='')
+		{
+			alert('Need to select agent!!');
+			return false;
+		}
+				href = $('#jumpEditEmail',win).attr('href');
+				href = "top/invoice/editStatementEmail.app?agent_id="+$('#agent_id',win).val();
+				if($('#wid',win).val()!="")
+				{
+					href += "&&wid="+$('#wid',win).val();
+				}
+				if($('#suborg_id',win).val()!="")
+				{
+					href += "&&suborg_id="+$('#suborg_id',win).val();
+				}
+				if($('#ex_suborg_id',win).val()!="")
+				{
+					href += "&&ex_suborg_id="+$('#ex_suborg_id',win).val();
+				}
+				if($('#fromdate',win).val()!="")
+				{
+					href += "&&fromdate="+$('#fromdate',win).val();
+				}
+				if($('#postdate',win).val()!="")
+				{
+					href += "&&postdate="+$('#postdate',win).val();
+				}
+				if($('#op_id',win).val()!="")
+				{
+					href += "&&op_id="+$('#op_id',win).val();
+				}
+
+				$('input[name="wcredit"]:checked').each(function(){
+					href += "&&wcredit="+$(this).val();
+				});
+
+				$('input[name="incpending"]:checked').each(function(){
+					href += "&&incpending="+$(this).val();
+				});
+				$('input[name="onbehalf"]:checked').each(function(){
+					href += "&&onbehalf="+$(this).val();
+				});
+				$('input[name="excludedetails"]:checked').each(function(){
+					href += "&&excludedetails="+$(this).val();
+				});
+				$('input[name="orderbydate"]:checked').each(function(){
+					href += "&&orderbydate="+$(this).val();
+				});
+
+
+				$('#jumpEditEmail',win).attr('href',href);
+				$('#jumpEditEmail',win).click();
+				return false;
+	});
+});
+</script>

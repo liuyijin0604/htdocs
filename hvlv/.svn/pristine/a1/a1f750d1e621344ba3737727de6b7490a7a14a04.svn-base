@@ -1,0 +1,50 @@
+<?php
+
+if(!empty($model->consol_id) && Acl::hasAccess('B:Import/ChangeAfterConsol')){
+	echo '<div style="float:right">&nbsp;Consol:  <a  class="tab_link" href="'.$this->createUrl(@$model->consol->type == 70? 'dmawbConsol/update' : 'imcoConsol/update', array('id' => $model->consol_id)).'" title="'.@$model->consol->no.'">'.@$model->consol->no.'</a></div>';
+}
+
+$transhipImparcel = $model->getTranshipImparcel();
+if(!empty($transhipImparcel))
+{
+	echo '<div style="float:right">&nbsp;Tranship from: <a title="'.@$transhipImparcel[0].'" class="tab_link" href="'.Yii::app()->createURL("imParcel/update", array("id" => $transhipImparcel[2])).'">'.@$transhipImparcel[0].'</a>&nbsp; ref:'.@$transhipImparcel[1].'</div>';
+}
+
+$rtsShipment = Shipment::model()->find('hbn = :hbn', [':hbn' => $model->getRTSTranshipNo()]);
+if(!empty($rtsShipment))
+{
+	echo '<div style="float:right">&nbsp;Tranship to: <a title="'.@$rtsShipment->hbn.'" class="tab_link" href="'.Yii::app()->createURL("imParcel/update", array("id" => $rtsShipment->id)).'">'.@$rtsShipment->hbn.'</a>&nbsp; ref:'.@$rtsShipment->ref.'</div>';
+}
+
+?>
+<h1><?=$this->t('Update '.($model->ot_id==0?'Import':'WMS').' Shipment');?> <?php echo $model->hbn; ?> - <i><?=$model->getStatus();?></i></h1>
+<div id="parcel-tabs">
+  <ul>
+ <?php
+ $tabs = array(
+	array('overview', $this->t('Overview'), true),
+	array('tracking', $this->t('Tracking'), $model->type < 20),
+	array('log', $this->t('Logs'), true),
+	array('scan_log', $this->t('Scan Logs'), true),
+        array('files', $this->t('Files'), true),
+        array('gatepass',$this->t('Gatepass'),true),
+        array('billing',$this->t('Billing'),true),
+        array('crm', $this->t('CRM'))
+ );
+ foreach($tabs as $tab){
+	if(Acl::hasAccess($this->CaName.'/'.$tab[0]) && $tab[1]){
+		$href = strpos($tab[0], '/') === false? $this->createUrl('imParcel/update',array('id'=>$model->id, 'tab'=>$tab[0], "tabid" => $_GET["tabid"])) : $tab[0];
+		echo '<li><a href="'.$href.'">'.$tab[1].'</a></li>';
+	}
+ }
+ ?>
+  </ul>
+</div>
+<script type="text/javascript">
+$(function(){
+	var tab = $('#<?=$_GET["tabid"];?>');
+	$('#parcel-tabs', tab.data('panel')).tabs({active: <?php echo empty($_GET['actab'])? 0 : $_GET['actab']; ?>, load: function(event,ui){
+		myApp.ajaxifyForm(this);
+	}});
+});
+</script>

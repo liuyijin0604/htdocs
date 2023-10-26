@@ -1,0 +1,566 @@
+<div style="position: absolute; right: 20px;">
+<?php if(!$model->isWDT() || Acl::hasAccess('B:ImcoConsol/ScanAll')): ?>
+<a class="scan_search ajax_link" href="#" id="scan_all">Scan All</a>
+<?php endif;?>
+<a href="#" data-dropdown="#<?=$_GET["tabid"];?>-aout-dropdown"><div style="background-position:-48px -688px" class="icon"></div> Export</a>
+<div id="<?=$_GET["tabid"];?>-aout-dropdown" class="dropdown dropdown-tip dropdown-relative dropdown-anchor-right">
+	<ul class="dropdown-menu">
+		<li><a href="<?=$this->createUrl('imcoConsol/exportAout', ['id' => $model->id]);?>" target="_blank">Outturn Report</a></li>
+		<li><a href="<?=$this->createUrl('imcoConsol/exportApLodge', ['id' => $model->id]);?>" target="_blank">Lodgement Manifest</a></li>
+		<li><a href="<?=$this->createUrl('imcoConsol/exportTollApLodge', ['id' => $model->id]);?>" target="_blank">Toll Lodgement Manifest</a></li>
+		<li><a href="<?=$this->createUrl('imcoConsol/exportStartrackApLodge', ['id' => $model->id]);?>" target="_blank">StarTrack Lodgement Manifest</a></li>
+		<li><a href="<?=$this->createUrl('imcoConsol/exportStartrackMelApLodge', ['id' => $model->id]);?>" target="_blank">StarTrack Mel Lodgement Manifest</a></li>
+		<li><a href="<?=$this->createUrl('imcoConsol/printAllLabels', ['id' => $model->id]);?>" target="_blank">Print Labels</a></li>
+		<li><a href="<?=$this->createUrl('imcoConsol/printBagTags', ['id' => $model->id]);?>" target="_blank">Print Bag Tags</a></li>
+		<li><a href="<?=$this->createUrl('imcoConsol/exportDFEShipment', ['id' => $model->id]);?>" target="_blank">Export DFE Shipments</a></li>
+		<li><a href="<?=$this->createUrl('imcoConsol/citoDeliveryMethod', ['id' => $model->id]);?>" target="_blank">Export Cito Delivery Method</a></li>
+		<li><a class="jqm_link" href="<?=$this->createUrl('imcoConsol/printAllPalletLabels', ['id' => $model->id]);?>" target="_blank">Print Pallet Label With HBL</a></li>
+		<li><a class="jqm_link" href="<?=$this->createUrl('imcoConsol/printBlankPalletLabels', ['id' => $model->id]);?>" target="_blank">Print Pallet Blank Label </a></li>
+	</ul>
+</div>
+<?php echo CHtml::button('update Scan', ['class' => 'update_scan_btn','style'=> 'margin-left:20px;']);?>
+</div>
+<div style="padding-bottom: 5px;">
+<?php
+$s = $model->courierSummary();
+$col = [];
+foreach ($s as $oid => $data) {
+	$ctt = $data[0].': '.$data[1];
+	if (!empty($data[2])) {
+		$ls = [];
+		foreach ($data[2] as $ltype => $ld) {
+			$ls[] = preg_replace('/ Letters| up to|\d{3}g-/', '', ImParcel::$letter_types[$ltype]).': '.$ld;
+		}
+		$ctt .= ' &nbsp; ('.implode(', ', $ls).')';
+	}
+	$col[] = $ctt;
+}
+echo implode(' &nbsp; &nbsp; ', $col);
+?>
+</div>
+<?php
+
+$this->renderPartial('unpacking_outturn',['model'=>$model]);
+
+echo CHtml::button('All Manifest', ['class' => 'mani_btn','style'=> 'margin-left:20px;']);
+
+if (empty($model->mdata['aupostsent'])) {
+	echo CHtml::button('Send AuPost', ['class' => 'aupost_btn','style'=> 'margin-left:20px;']);
+} else {
+	echo CHtml::button('Resend AuPost', ['class' => 'aupost_btn','style'=> 'margin-left:20px;']);
+}
+
+if (empty($model->mdata['fastwaysent'])) {
+	echo CHtml::button('Send Fastway', ['class' => 'fastway_btn','style'=> 'margin-left:20px;']);
+} else {
+	echo CHtml::button('Resend Fastway', ['class' => 'fastway_btn','style'=> 'margin-left:20px;']);
+}
+
+// if (empty($model->mdata['tollsent'])) {
+// 	echo CHtml::button('Send Toll', ['class' => 'toll_btn','style'=> 'margin-left:20px;']);
+// } else {
+// 	echo CHtml::button('Resend Toll', ['class' => 'toll_btn','style'=> 'margin-left:20px;']);
+// }
+
+if (empty($model->mdata['startracksent'])) {
+	echo CHtml::button('Send StarTrack', ['class' => 'startrack_btn','style'=> 'margin-left:20px;']);
+} else {
+	echo CHtml::button('Resend StarTrack', ['class' => 'startrack_btn','style'=> 'margin-left:20px;']);
+}
+
+if (empty($model->mdata['ausLettersent'])) {
+	echo CHtml::button('Send Letter', ['class' => 'letter_btn','style'=> 'margin-left:20px;']);
+} else {
+	echo CHtml::button('Resend Letter', ['class' => 'letter_btn','style'=> 'margin-left:20px;']);
+}
+
+if (empty($model->mdata['tntsent'])) {
+	echo CHtml::button('Send TNT', ['class' => 'tnt_btn','style'=> 'margin-left:20px;']);
+} else {
+	echo CHtml::button('Resend TNT', ['class' => 'tnt_btn','style'=> 'margin-left:20px;']);
+}
+
+if (empty($model->mdata['huntersent'])) {
+	echo CHtml::button('Send Hunter', ['class' => 'hunter_btn', 'style' => 'margin-left: 20px']);
+} else {
+	echo CHtml::button('Resend Hunter', ['class' => 'hunter_btn', 'style' => 'margin-left: 20px']);
+}
+
+if (empty($model->mdata['flhuntersent'])) {
+	echo CHtml::button('Send FLHunter', ['class' => 'flhunter_btn', 'style' => 'margin-left: 20px']);
+} else {
+	echo CHtml::button('Resend FLHunter', ['class' => 'flhunter_btn', 'style' => 'margin-left: 20px']);
+}
+
+// if (empty($model->mdata['d2zsent'])) {
+// 	echo CHtml::button('Send D2z', ['class' => 'd2z_btn', 'style' => 'margin-left: 20px']);
+// } else {
+// 	echo CHtml::button('Resend D2z', ['class' => 'd2z_btn', 'style' => 'margin-left: 20px']);
+// }
+
+// if (empty($model->mdata['ubisent'])) {
+// 	echo CHtml::button('Send Ubi', ['class' => 'ubi_btn', 'style' => 'margin-left: 20px']);
+// } else {
+// 	echo CHtml::button('Resend Ubi', ['class' => 'ubi_btn', 'style' => 'margin-left: 20px']);
+// }
+
+// if (empty($model->mdata['dfesent'])) {
+// 	echo CHtml::button('Send Dfe', ['class' => 'dfe_btn', 'style' => 'margin-left: 20px']);
+// } else {
+// 	echo CHtml::button('Resend Dfe', ['class' => 'dfe_btn', 'style' => 'margin-left: 20px']);
+// }
+
+// if (empty($model->mdata['chukou1sent'])) {
+// 	echo CHtml::button('Send Chukou1', ['class' => 'chukou1_btn', 'style' => 'margin-left: 20px']);
+// } else {
+// 	echo CHtml::button('Resend Chukou1', ['class' => 'chukou1_btn', 'style' => 'margin-left: 20px']);
+// }
+
+if (empty($model->mdata['sfsent'])) {
+	echo CHtml::button('Send SF', ['class' => 'sf_btn', 'style' => 'margin-left: 20px']);
+} else {
+	echo CHtml::button('Resend SF', ['class' => 'sf_btn', 'style' => 'margin-left: 20px']);
+}
+
+if (empty($model->mdata['eiztollsent'])) {
+	echo CHtml::button('Send Eiz Toll/Allied', ['class' => 'eiz_toll_btn', 'style' => 'margin-left: 20px']);
+} else {
+	echo CHtml::button('Resend Eiz Toll/Allied', ['class' => 'eiz_toll_btn', 'style' => 'margin-left: 20px']);
+}
+
+if (empty($model->mdata['bordersent'])) {
+	echo CHtml::button('Send Border', ['class' => 'border_btn', 'style' => 'margin-left: 20px']);
+} else {
+	echo CHtml::button('Resend Border', ['class' => 'border_btn', 'style' => 'margin-left: 20px']);
+}
+
+echo CHtml::button('Generate Pallet Request', array('class' => 'pallet_request_btn', 'style' => 'margin-left: 20px'));
+?>
+<?php
+
+$p = new ImParcel('search');
+if (!empty($_GET['ImParcel'])) {
+	$p->setAttributes($_GET['ImParcel']);
+}
+$p->pbn = $pbn;
+$p->consol_id = $model->id;
+$p->ot_id = null;
+if(!empty($_GET['sort'])&&($_GET['sort']=='sctime'||$_GET['sort']=='sctime.desc'))
+{
+	$p->withSctime = true;
+}?>
+
+</br>
+</br>
+</br>
+<div id="<?=$_GET['tabid']?>search-form">
+
+<?php $form=$this->beginWidget('CActiveForm', array(
+	'action'=>Yii::app()->createUrl($this->route),
+	'method'=>'get',
+)); ?>
+
+
+	<div class="row rowcol rowleft">
+		<?php echo $form->label($p,'pbn'); ?>
+		<?php echo $form->textField($p,'pbn'); ?>
+	</div>
+
+	<div class="row buttons">
+		<?php echo CHtml::submitButton($this->t('Search')); ?>
+	</div>
+
+<?php $this->endWidget(); ?>
+
+</div><!-- search-form -->
+
+
+
+
+
+<?php
+$this->widget('zii.widgets.grid.CGridView', [
+	'id'=>'aout-grid_'.$_GET["tabid"],
+	'cssFile' => false,
+	'dataProvider'=>$p->search(),
+	'filter'=>$p,
+	'columns'=>[
+		['name'=>'hbn','type'=>'raw','value'=>'(!empty("'.$pbn.'")&&"'.$pbn.'"!=$data->hbn&&"'.$pbn.'"!=$data->ref)?"<font style=\"background-color:yellow\" >".$data->hbn."</font>":$data->hbn'],
+		'ref',
+		'can',
+		['header'=>'Agent','name'=>'agent_name','value'=>'@$data->agent->name'],
+		['name' => 'status', 'value' => '$data->getStatus()',
+			'filter'=>CHtml::dropDownList('ImParcel[status]', $p->status, $this->t(ImParcel::$states), ['prompt'=>$this->t('All')]),],
+		['name' => 'cnee_name', 'value' => 'empty($data->cnee)? "" : $data->cnee->name',],
+		'postcode',
+		'weight',
+		'pkg',
+		['name' => 'bag_tag', 'value' => '@$data->bag_tag->bag_tag','filter'=>CHtml::textField('ImParcel[bagTag]', $p->bagTag)],
+		['name' => 'rack','type'=>'raw','value' => '$data->getRackName(false,true)'],
+		['name'=>'scan_no','header'=>'unScan','value'=>'$data->pkg - $data->getOutPkg()'],
+		['header' => 'Scanned', 'value' => '$data->getOutPkg()', ],
+		["header"=>"pallet",'type' => 'raw',"value"=>'CHtml::textfield("pallet".$data->id, @$data->mdata["amzon_pallet"], ["class"=>"pallet_no","style"=>"width:40px;"])',"filter"=>false],
+		["header"=>"pallet type",'type' => 'raw',"value"=>'CHtml::dropDownList("pallet_type".$data->id, @$data->mdata["amzon_pallet_type"], ImParcel::$amzonPalletTypes, ["prompt"=>"SELECT","class"=>"pallet_type","style"=>"width:40px;"])',"filter"=>false],
+		['name' => 'sctime','header'=>'time', 'value' => '$data->getScanTime()', ],
+		['header'=>'ChargeCode','value'=>'$data->getChargecode()'],
+		['header'=>'Marks&Number','value'=>'@$data->mdata["sea_mark_number"]'],
+		[
+			'class'=>'oButtonColumn',
+			'template'=>'{Scanall} {view} {update}',
+			'buttons'=>[
+				'view' => [
+					'imageUrl'=>false,
+					'url'=>'Yii::app()->createUrl("imParcel/otScanned", ["id" => $data->id])',
+					'options' => ['class' => 'jqm_link grid_view_btn', 'target' => '_blank'],
+				],
+				'Scanall' => [
+					'imageUrl' => false,
+					'url' => 'Yii::app()->createURL("imParcel/scanAll", ["id" => $data->id])',
+					'visible' => '$data->scan_no > 0',
+					'options' => ['class' => 'ajax_link grid_edit_btn ship_scan_all', 'label'=>$this->t('Scan All'), 'title' => '$data->hbn'],
+				],
+				'update' => [
+					'imageUrl' => false,
+					'url' => 'Yii::app()->createURL("imParcel/update", ["id" => $data->id])',
+					'visible' => 'true',
+					'options' => ['class' => 'tab_link grid_edit_btn', 'label'=>$this->t('Update'), 'title' => '$data->hbn', 'data-id' => '$data->id'],
+				],
+			],
+		],
+	],
+]);
+?>
+<script type="text/javascript">
+$(function(){
+	var tab = $('#<?=$_GET["tabid"];?>');
+	var panel = tab.data('panel');
+
+	const maniResult = function(r){
+		if(r == 'done'){
+			myApp.notice('Done', 5000);
+		}else{
+			myApp.alert(r, false);
+		}
+		var t = $('#imco-consol-tabs', panel);
+		t.tabs('load', t.tabs('option','active'));
+	};
+
+	$('#<?=$_GET['tabid']?>search-form form', panel).on('submit', function(){
+		$('#aout-grid_<?=$_GET["tabid"]?>', panel).yiiGridView('update', {data: $('.filters input, .filters select', panel).serialize() + '&' + $(this).serialize()});
+		return false;
+	})
+
+
+	$(panel).off('change', '.pallet_no, .pallet_type').on('change', '.pallet_no, .pallet_type', function(){
+		const tr = $(this).parents('tr');
+		$.ajax({
+			url: '<?=$this->createUrl("imParcel/palletChange")?>',
+			type: "post",
+			data: {"pallet":$('.pallet_no', tr).val(),"pallet_type":$('.pallet_type', tr).val(),"id":$('.grid_edit_btn', tr).data('id')},
+			success: function(r) {
+				if(r=='done')
+				 {
+					myApp.notice('Done', 5000);
+				 }else
+				 {
+					myApp.alert(r, false);   
+				 }
+			 },
+			error: function(e) {
+				console.log(e);
+			}
+		});
+	});
+
+	$('.mani_btn', panel).click(function(){
+		if(confirm('Are you sure to send All Manifest?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/allManifest", ["id" => $model->id]);?>', maniResult);
+		}
+		return false;
+	});
+
+	$('.airout_btn', panel).click(function(){
+		if(confirm('Are you sure to send Outturn report to ICS?')){
+			$(this).hide();
+			var time = '';
+			if($('#ctn_comp_time_<?=$_GET["tabid"];?>', panel).length>0)
+			{
+				time = $('#ctn_comp_time_<?=$_GET["tabid"];?>', panel).val();
+			}
+			$.get('<?=$this->createUrl("imcoConsol/airout", ["id" => $model->id]);?>' + '?to_cus=' + $('#to_cus', panel).prop('checked') + '&time='+time , maniResult);
+		}
+		return false;
+	});
+
+	$('.scan_all_and_send_outturn', panel).click(function(){
+		if(confirm('Are you sure to scan all and sent outturn to customer?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/scanAllAndSendOutturn", ["id" => $model->id]);?>' , maniResult);
+		}
+		return false;
+	});
+
+	
+
+		
+
+	$('.send_outturn_only', panel).click(function(){
+		if(confirm('Are you sure to only sent outturn to customer?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/sendOutturnOnly", ["id" => $model->id]);?>' , maniResult);
+		}
+		return false;
+	});
+
+
+	$('.seaout_btn', panel).click(function(){
+		if(confirm('Are you sure to send Outturn report to ICS?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/seaoutReceipt", ["id" => $model->id]);?>' + '?time=' + $('#ctn_receipt_time_<?=$_GET["tabid"];?>', panel).val(), maniResult);
+		}
+		return false;
+	});
+
+	$('.airout_receipt_btn', panel).click(function(){
+		if(confirm('Are you sure to send Air Outturn Receipt to ICS?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/airoutReceipt", ["id" => $model->id]);?>' + '?time=' + $('#ctn_receipt_time_<?=$_GET["tabid"];?>', panel).val(), maniResult);
+		}
+		return false;
+	});
+
+	$('.airout_pass_btn', panel).click(function(){
+		if(confirm('Are you sure to pass the Air Outturn Receipt?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/airoutReceipt", ["id" => $model->id,"pass"=>1]);?>' + '?time=' + $('#ctn_receipt_time_<?=$_GET["tabid"];?>', panel).val(), maniResult);
+		}
+		return false;
+	});
+
+	$('.seaout_pass_btn', panel).click(function(){
+		if(confirm('Are you sure to send Outturn report to ICS?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/seaoutReceipt", ["id" => $model->id,"pass"=>1]);?>' + '&&time=' + $('#ctn_receipt_time_<?=$_GET["tabid"];?>', panel).val(), maniResult);
+		}
+		return false;
+	});
+
+	$('.aupost_btn', panel).click(function(){
+		if(confirm('Are you sure to send AuPost lodgement?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/aupost", ["id" => $model->id]);?>', maniResult);
+		}
+		return false;
+	});
+
+	$('.fastway_btn', panel).click(function(){
+		if(confirm('Are you sure to send Fastway lodgement?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/fastway", ["id" => $model->id]);?>', maniResult);
+		}
+		return false;
+	});
+
+	$('.send_scan_btn', panel).click(function(){
+		if(confirm('Are you sure to send for scan?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/sendScan", ["id" => $model->id]);?>', maniResult);
+		}
+		return false;
+	});
+
+	$('.toll_btn', panel).click(function(){
+		if(confirm('Are you sure to send Toll lodgement?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/tollpost", ["id" => $model->id]);?>', maniResult);
+		}
+		return false;
+	});
+
+	panel.off('click', '.ship_scan_all').on('click', '.ship_scan_all', function(){
+		return window.confirm('Scan all?');
+	});
+	
+	  $('.d2z_send_btn', panel).click(function(){
+		if(confirm('Are you sure to send D2Z lodgement?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/d2zPost", ["id" => $model->id]);?>', maniResult);
+		}
+		return false;
+	});
+		$('.d2z_country_send_btn', panel).click(function(){
+		if(confirm('Are you sure to send D2Z Country lodgement?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/d2zCountryManifest", ["id" => $model->id]);?>', maniResult);
+		}
+		return false;
+	});
+		$('.lma_send_btn', panel).click(function(){
+		if(confirm('Are you sure to send LMA lodgement?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/lmaManifest", ["id" => $model->id]);?>', maniResult);
+		}
+		return false;
+	});
+
+		$('.tnt_btn', panel).click(function(){
+		if(confirm('Are you sure to send TNT lodgement?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/tntManifest", ["id" => $model->id]);?>', maniResult);
+		}
+		return false;
+	});
+	$('.startrack_btn', panel).click(function(){
+		if(confirm('Are you sure to send StarTrack lodgement?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/startrack", ["id" => $model->id]);?>', maniResult);
+		}
+		return false;
+	});
+	$('.letter_btn', panel).click(function(){
+		if(confirm('Are you sure to send Letter lodgement?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/emps", ["id" => $model->id]);?>', maniResult);
+		}
+		return false;
+	});
+	  $('.update_scan_btn', panel).click(function(){
+		if(confirm('Are you sure to update the scan')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/updateScan", ["id" => $model->id]);?>', maniResult);
+		}
+		return false;
+	});
+
+	$('.hunter_btn', panel).click(function() {
+		if (confirm('Are you sure to send Hunter lodgement?')) {
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/hunterManifest", ["id" => $model->id]);?>', maniResult);
+		}
+		return false;
+	});
+
+	$('.flhunter_btn', panel).click(function() {
+		if (confirm('Are you sure to send FLHunter lodgement?')) {
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/fLHunterManifest", ["id" => $model->id]);?>', maniResult);
+		}
+		return false;
+	});
+
+	$('.d2z_btn', panel).click(function() {
+		if (confirm('Are you sure to send D2z lodgement?')) {
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/d2zManifest", ["id" => $model->id]);?>', maniResult);
+		}
+		return false;
+	});
+
+	// $('.ubi_btn', panel).click(function() {
+	// 	if (confirm('Are you sure to send Ubi lodgement?')) {
+	// 		$(this).hide();
+	// 		$.get('<?=$this->createUrl("imcoConsol/ubiManifest", ["id" => $model->id]);?>', maniResult);
+	// 	}
+	// 	return false;
+	// });
+
+	// $('.dfe_btn', panel).click(function() {
+	// 	if (confirm('Are you sure to send Dfe lodgement?')) {
+	// 		$(this).hide();
+	// 		$.get('<?=$this->createUrl("imcoConsol/dfeManifest", ["id" => $model->id]);?>', maniResult);
+	// 	}
+	// 	return false;
+	// });
+
+	// $('.chukou1_btn', panel).click(function() {
+	// 	if (confirm('Are you sure to send Chukou1 lodgement?')) {
+	// 		$(this).hide();
+	// 		$.get('<?=$this->createUrl("imcoConsol/chukou1Manifest", ["id" => $model->id]);?>', maniResult);
+	// 	}
+	// 	return false;
+	// });
+
+	$('.sf_btn', panel).click(function() {
+		if (confirm('Are you sure to send SF lodgement?')) {
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/sFManifest", ["id" => $model->id]);?>', maniResult);
+		}
+		return false;
+	});
+
+	$('.eiz_toll_btn', panel).click(function() {
+		if (confirm('Are you sure to send Eiz Toll lodgement?')) {
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/eizTollManifest", ["id" => $model->id]);?>', maniResult);
+		}
+		return false;
+	});
+
+	$('.border_btn', panel).click(function() {
+		if (confirm('Are you sure to send Border lodgement?')) {
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/borderManifest", ["id" => $model->id]);?>', maniResult);
+		}
+		return false;
+	});
+
+	$('.ctn_btn', panel).click(function(){
+		if(confirm('Are you sure to save complete time?')){
+			$(this).hide();
+			var time = '';
+			var sctime = '';
+			if($('#ctn_comp_time2_<?=$_GET["tabid"];?>', panel).length>0)
+			{
+				time = $('#ctn_comp_time2_<?=$_GET["tabid"];?>', panel).val();
+			}
+
+			if($('#ctn_scstart_time2_<?=$_GET["tabid"];?>', panel).length>0)
+			{
+				sctime = $('#ctn_scstart_time2_<?=$_GET["tabid"];?>', panel).val();
+			}
+			$.get('<?=$this->createUrl("imcoConsol/saveCompleteTime", ["id" => $model->id]);?>' + '?time=' + time+'&&sctime='+sctime, maniResult);
+		}
+		return false;
+	});
+
+	$('.pallet_request_btn', panel).click(function() {
+		if (confirm('Are you shure to generate pallet request?')) {
+			$(this).hide();
+			$.get('<?=$this->createUrl("imcoConsol/generatePalletRequest", array("id" => $model->id));?>', maniResult);
+		}
+		return false;
+	});
+
+	tab.bind('onOpen', function(){
+		$('#aout-grid', panel).yiiGridView('update');
+	});
+
+	$('a.scan_search', panel).on('click', function(event) {
+    event.preventDefault(); // 阻止默认的链接行为
+    var confirmed = window.confirm('Are you sure you want to scan all?');
+    if (confirmed) {
+        var q = $('.filters input, .filters select', panel).serialize();
+        var url = '<?=$this->createUrl('imcoConsol/aoutScanAll', ['id' => $model->id]);?>';
+        $.ajax({
+            url: url,
+            data: q,
+            success: function(response) {
+                
+                tab.trigger('onOpen');
+
+                $('#aout-grid_<?php echo $_GET["tabid"]; ?>').trigger('reloadGrid');
+
+            },
+            error: function(xhr, status, error) {
+                
+                console.error(error);
+            }
+        });
+    }
+});
+
+
+
+});
+</script>

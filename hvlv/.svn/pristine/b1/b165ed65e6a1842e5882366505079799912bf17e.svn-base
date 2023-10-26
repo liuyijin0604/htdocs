@@ -1,0 +1,3422 @@
+<?php
+
+class ShipmentController extends Controller
+{
+	/**
+	 * Declares class-based actions.
+	 */
+	protected $nonAjax = ['list','exportAout','exportLocationList'];
+	protected $skipAcl = ['connote','changeLabelApi'];
+
+	protected $org;
+	protected $type;
+
+	private function setLoginTime()
+	{
+		$dataArr = [date('Y-m-d H:i:s')];
+		Service::setCacheData("loginTime".date("Ymd").User::currentUserID(),$dataArr,3800);
+		// print_r(Service::getCacheData("loginTime".date("Ymd").User::currentUserID()));		
+	}
+	
+	public function beforeAction($action)
+	{
+		if (!Yii::app()->user->isGuest) {
+			$this->org = Org::model()->findByPk(Yii::app()->user->org);
+			$this->type = 'sc';
+		}
+
+		$date = Service::getCacheData("loginTime".date("Ymd").User::currentUserID());
+		if(!empty($date)){
+			// print_r($date[0]);
+			$cacheTime = strtotime($date[0]);
+			$nowTime = strtotime("-1 hour",strtotime(date('Y-m-d H:i:s')));
+			// echo $cacheTime."|".$nowTime;
+			// Yii::app()->end();
+			if($cacheTime>=$nowTime){
+				// echo "The difference is within 1 hour";
+				$this->setLoginTime();
+			} else {
+			    // echo "The difference is not within 1 hour";
+			    Yii::app()->user->logout();
+				$this->redirect('../');
+			}
+		}
+		else{
+			$this->setLoginTime();
+		}
+
+
+
+		return parent::beforeAction($action);
+	}
+	
+	public function actionCheckin()
+	{
+		$model = ConsolScan::model()->findAll('status = 0');
+		$this->render('list', ['consoles' => $model]);
+	}
+
+	/**
+	 * show all awb related console scan statistic information
+	 */
+	public function actionProfile()
+	{
+	}
+
+	/**
+	 * process scan check in
+ */
+	public function actionScan()
+	{
+		// $model = Consol::model()->findByPk();
+
+		if (!empty($_POST)) {
+			// get scan result
+			if (isset($_POST['barcode'])) {
+
+				$groupSound = function() use(&$r, &$p){
+					$ss = [];
+					foreach(['blueLabel','sound', 'amazon', 'area', 'label','dg','cfire', 'sorting','special'] as $k){
+						if(!empty($r->{$k})){
+							$ss[] = $r->{$k};
+						}
+						unset($r->{$k});
+					}
+					
+					if(!empty($_POST['unpacking']))
+					{
+						if(!empty($p->ref) && preg_match('/.+(\d{4})[^\d]*$/', $p->ref, $m)){
+							$ss = array_merge($ss, str_split($m[1]));
+						}
+						$r->sounds = $ss;
+
+						if(!empty($r->pkg))
+						{
+							$r->sounds[] = "p";
+							$r->sounds[] = $r->pkg;
+						}
+					}else
+					{
+						$r->sounds = $ss;
+					}
+				};
+				$courier_id = 0;
+				$sn = 0;
+				$isHbn = false;
+				$changedShipment = null;
+				$changed_label = false;
+				$scaned = false;
+				$r = new StdClass;
+				$r->color = 'red';
+				$r->sound = 'not_found';
+				$r->amazon = '';
+				$r->blueLabel = '';
+				$r->dg = '';
+				$r->area = 'sydney';
+				$r->stop = 0;
+				$r->msg = 'NOT FOUND';
+				$r->status = 'UNKNOWN';
+				$r->nosound = 0;
+				$r->found = 0;
+				$r->id = 0;
+				$r->label = '';
+				$r->print = 0;
+				$r->pkg = 0;
+				$r->cfire = '';
+				$r->log = "";
+
+				$status_suffix = '';
+
+				$barcode = $_POST['barcode'];
+				$obarcode = $_POST['barcode'];
+				if(empty($barcode))
+				{
+					$r->color = 'red';
+					$r->sound = 'not_found';
+					$r->stop = 0;
+					$r->msg = 'NOT FOUND';
+					$r->status = 'UNKNOWN';
+					$r->nosound = 0;
+					$r->found = 0;
+					$groupSound();
+					echo json_encode($r);
+					Yii::app()->end();
+				}
+				
+				$containerNo = empty($_POST['search_container_no'])?"":$_POST['search_container_no'];
+
+				// if(empty($containerNo)&&$_GET['op']=='checkin')// when there is no container no and the operation is checkin
+				// {
+				// 	if (!empty($_POST['sound'])) {
+				// 		$r->sound.='_'.$_POST['sound'];
+				// 	}
+				// 	$r->area='';
+				// 	$r->msg = "Empty ContainerNo/AWB";
+				// 	//Log::log2file($barcode, "scan", "test");
+				// 	$groupSound();
+				// 	echo json_encode($r);
+				// 	Yii::app()->end();
+				// }
+				$r->msg = 'Not Found ' . $barcode;
+
+				// if(empty($containerNo))
+				// {
+				// 	$r->color = 'red';
+				// 	$r->sound = 'not_found';
+				// 	$r->stop = 0;
+				// 	$r->msg = 'Require input Container No./AWB';
+				// 	$r->status = 'UNKNOWN';
+				// 	$r->nosound = 0;
+				// 	$r->found = 0;
+				// 	$groupSound();
+				// 	echo json_encode($r);
+				// 	Yii::app()->end();
+				// }
+				$p = ShipmentScan::getShipmentByBarcode($barcode, $sn, $courier_id, false, 0, $changed_label,$containerNo);
+
+				if($_GET['op']=='status'&&!empty($_POST['checkConsolBag']))
+				{
+					$this->consolCheck($barcode,$r,$groupSound);
+				}
+
+				//for bag
+				if(is_array($p))//this is a bag
+				{
+					$this->bagScan($p,$barcode,$r,$groupSound);
+					if(!empty($_POST['backend_commend_MQbag']))
+					{
+						return;
+					}
+				}
+
+				//for check status in rego
+				if (in_array($_GET['op'], ['status'])) {
+					$this->checkRegoStatus($obarcode,$r);
+				}
+
+				if(empty($p)&&!empty($_POST['palletScan'])) {
+					$this->palletScan($barcode,$r,$groupSound);
+				}
+
+				if(empty($p)) {
+
+					if (preg_match('/-\d+$/', $barcode)) {
+						list($hbn, $sn) = explode('-', $barcode);
+					} else {
+						$hbn = $barcode;
+						$sn = 0;
+					}
+					$p = ImParcel::fromBarcode($hbn, $isHbn,false,$containerNo);
+				}
+
+				// 赛诚特殊
+				if (!empty($p)&&$p->agent_id == 1918) {
+					$courier_id = 134;
+				}
+
+				//tnt
+				if($courier_id == Org::ORGID_COURIER_TNT){
+					$r->label = 'tnt';
+					$status_suffix = ' TNT';
+				}
+
+				//aupost
+				if($courier_id == Org::ORGID_COURIER_AUPOST){
+					if (in_array(substr($p->ref, 0, -7), ImParcel::$bri_milds)) {//Brisbane;
+						$r->area='brisbane';
+					} elseif (in_array(substr($p->ref, 0, -7), ImParcel::$mel_milds)) {//vic
+						$r->area='melbourne';
+					}
+				}
+
+				//fastway
+				if($courier_id == Org::ORGID_COURIER_FASTWAY){
+					if(isset($p->trans[0]->mdata['fw_toRf'])){
+						$fw_sort = FastwayAPI::rf2sort($p->trans[0]->mdata['fw_toRf'], $p->trans[0]->mdata['fw_origin']);
+						$fw_sort_map = ['METRO' => 1, 'NSW' => 2, 'VIC' => 3, 'QLD' => 4, 'SA/WA' =>5, 'TAS' => 6];
+						$r->sorting = 'box_' . $fw_sort_map[$fw_sort];
+						$status_suffix = ' Sorting:'.$fw_sort.(isset($fw_sort_map[$fw_sort])? ' ('.$fw_sort_map[$fw_sort].')' : '');
+					}
+				}
+
+				if (!empty($p) && $sn > 0) {
+					$isHbn=false;
+				}
+
+				if (empty($p)) {
+					//$user=User::model()->findByPk(Yii::app()->user->id);
+					if (!empty($_POST['sound'])) {
+						$r->sound.='_'.$_POST['sound'];
+					}
+					$r->area='';
+					//Log::log2file($barcode, "scan", "test");
+					$groupSound();
+					$this->funcCourierCheck($_POST,$barcode,$r);
+					echo json_encode($r);
+					Yii::app()->end();
+				}elseif (empty($p->consol_id)&&$p->status!=ImParcel::STATE_LOCAL_ARRIVAL) {
+					//$user=User::model()->findByPk(Yii::app()->user->id);
+					if (!empty($_POST['sound'])) {
+						$r->sound.='_'.$_POST['sound'];
+					}
+					$r->area='';
+					$r->msg = $barcode." Not Found In Consol";
+					$r->id = $p->id;
+					//Log::log2file($barcode, "scan", "test");
+					$groupSound();
+					$this->funcCourierCheck($_POST,$barcode,$r);
+					echo json_encode($r);
+					$p->log('Shipment does not have consol');
+					Yii::app()->end();
+				} else {
+
+					//tnt
+					if(!empty($p->mdata['is_dg'])){
+						$r->dg='dg';
+					}
+				
+					// this is used to change label
+					if ($_GET['op']=='change') {
+						$r->id=0;
+						$smaping=ChangeShipmentLabel::model()->find('pref=:pref OR phbn = :pref or pref = :prefsn', [':pref'=>$p->ref,':prefsn'=>$p->ref."-".$sn]);//sperateshipment will be like xxxxxxxx-1
+						if(!empty($smaping))
+						{
+							$checkArr = explode("-", $smaping->newref);
+							$thisNewRef = $checkArr[0];
+							$sn = empty($checkArr[1])?"":$checkArr[1];
+							$p= $smaping->shipment;
+							if (!empty($p)) {
+								$r->id=$p->id;
+								$r->print=1;
+								$r->sn = $sn;
+								$changedShipment = $p;
+
+								if($changedShipment->status != ImParcel::STATE_LOCAL_ARRIVAL)
+								{
+									$r->color = 'red';
+									$r->sound = 'not_found';
+									$r->stop = 0;
+									$r->msg = 'NOT FOUND';
+									$r->status = $changedShipment->ref.' NOT LOCAL ARRIVAL ';
+									$r->nosound = 0;
+									$r->found = 0;
+									$groupSound();
+									$this->funcCourierCheck($_POST,$barcode,$r);
+									echo json_encode($r);
+									Yii::app()->end();
+								}
+							}
+						}
+
+						if ($r->id == 0) {
+							$r->color = 'red';
+							$r->sound = 'not_found';
+							$r->stop = 0;
+							$r->msg = 'NOT FOUND';
+							$r->status = 'UNKNOWN';
+							$r->nosound = 0;
+							$r->found = 0;
+							$groupSound();
+							$this->funcCourierCheck($_POST,$barcode,$r);
+							echo json_encode($r);
+							Yii::app()->end();
+						}
+
+					}
+
+					if (in_array($_GET['op'], ['checkin', 'resort', 'status', 'change'])) {
+						if ($_GET['op']=='checkin') {
+							$type=0;
+						} elseif ($_GET['op']=='resort') {
+							$type=1;
+						} elseif ($_GET['op']=='status') {
+							$type=2;
+						} else {
+							$type=3;
+						}
+
+						// for checking warehouse
+						$tempWareHouse = $this->getWareHouse();
+						if (($p->getDepot()!=Org::TLA_DEPARTMENT_FREMANTLE&&$p->getDepot()!=$tempWareHouse)||($p->getDepot()==Org::TLA_DEPARTMENT_FREMANTLE&&$tempWareHouse!=Org::TLA_DEPARTMENT_PERTH)) {
+							$r->color = 'red';
+							$r->sound = 'not_belong';
+							$r->stop = 0;
+							$r->msg = 'This Good is not belong to Our warehouse';
+							$r->status = 'NOT BELONG';
+							$r->nosound = 0;
+							$r->found = 0;
+							$groupSound();
+							$this->funcCourierCheck($_POST,$barcode,$r);
+							echo json_encode($r);
+							$p->log('This shipment does not belong to warehouse ' . $tempWareHouse);
+							Yii::app()->end();
+						}
+						//for checking Courier
+						if(preg_match("/^".str_replace('/', '\/', $p->ref)."-\d{1,3}$/", $barcode)&&!empty($courier_id)&&$courier_id!=Org::ORGID_COURIER_TLA&&$courier_id!=Org::ORGID_COURIER_ALLIED_TOP)
+						{
+							$r->id = $p->id;
+							$r->print = 1;
+							$r->sn = $sn;
+							$r->color = 'red';
+							$r->sound = 'not_found';
+							$r->stop = 0;
+							$r->msg = '';
+							$r->status = 'Change label and scan again. Error Label of '.$barcode." ".Org::model()->findByPk($courier_id)->name;
+							$r->nosound = 0;
+							$r->found = 1;
+							$groupSound();
+							$this->funcCourierCheck($_POST,$barcode,$r);
+							echo json_encode($r);
+							$p->log('Error label of' . $barcode . ' ' . Org::model()->findByPk($courier_id)->name);
+							Yii::app()->end();
+						}
+
+						if(in_array($_GET['op'],['status','resort']))
+						{
+							$n = ShipmentScan::model()->count('pid =:pid and pno = :pno and type = 0',[":pid"=>$p->id,":pno"=>$sn]);
+							$thisBarcode = $barcode;
+							$sallBarcode = $p->hbn.'-'.$sn;
+							$rallBarcode = $p->ref.'-'.$sn;
+							if(preg_match('/^(808808).*-[\d]+$/', $barcode))
+							{
+								$ts = explode('-', $barcode);
+								$thisBarcode = $ts[0].'-'.(int)$ts[1];
+							}
+							if(empty($p->scan_data[50])||(empty($p->scan_data[50][strtoupper($barcode)])&&empty($p->scan_data[50][strtoupper($thisBarcode)])&&empty($p->scan_data[50][strtoupper($sallBarcode)])&&empty($p->scan_data[50][strtoupper($rallBarcode)])&&!isset($p->scan_data[50]['SCAN_ALL'])&&$n==0))
+							{
+								if (preg_match('/-\d{1,5}/i', $barcode)||(!preg_match('/-\d{1,5}/i', $barcode)&&empty($p->scan_data[50]))) {
+									$r->color = 'red';
+									$r->sound = 'without_checkin';
+									$r->stop = 0;
+									$r->msg = 'need checkin first,'.$barcode;
+									$r->status = 'WITHOUT CHECKIN';
+									$r->nosound = 0;
+									$r->found = 0;
+									$groupSound();
+									$this->funcCourierCheck($_POST,$barcode,$r);
+									echo json_encode($r);
+									Yii::app()->end();
+								}
+							}
+
+							if($_GET['op']=='resort')
+							{
+								$mms = ManiMap::model()->with('manifest')->findAll('fid = :fid and type =50', [':fid' => $p->id]);
+							    if(empty($mms)&&empty($p->cargo_process))
+							    {
+							    	$r->color = 'red';
+									$r->sound = 'resorting_error';
+									$r->stop = 0;
+									$r->msg = 'without gatepass record '.$barcode;
+									$r->status = 'WITHOUT GATEPASS';
+									$r->nosound = 0;
+									$r->found = 0;
+									$groupSound();
+									$this->funcCourierCheck($_POST,$barcode,$r);
+									echo json_encode($r);
+									Yii::app()->end();
+							    }
+							}
+						}
+					}
+
+					
+					// get base64 pdf label return for printing
+					$status = $p->getStatus();
+					
+					//override fw change label error to held
+					if(!empty($p->mdata['fw_cl_err'])){
+						$status = 'Held';
+					}
+					$r->found = 1;
+					$r->status = strtoupper($status).', ' . $p->ref . ',' . $sn.$status_suffix;
+					$r->msg = '';
+					$r->log = "";
+					$r->gatepass='';
+					$r->hold='';
+					$r->sound = preg_replace('/\s/i', '_', preg_replace('/(\[.*\])+/', '', strtolower($status)));
+					$r->sn = $sn; 
+					// if(preg_match('/^clear/i', $status)) $r->sound='cleared';
+					// if(preg_match('/^courier/i', $status)&&!preg_match('/Courier Before Report/i', $status)) $r->sound='courier';
+					// if(preg_match('/Courier Before Report/i', $status)) $r->sound='courier_before_report';
+					if (preg_match('/Held/i', $status)) {
+						$r->sound='held';
+					}
+					if (preg_match('/RTS DISCARDED/i', $status)) {
+						$r->sound='discard';
+					}
+					if (preg_match('/clear wait/i', $status)) {
+						// $r->sound='wait';
+						$r->sound='held';
+					}
+					if (preg_match('/conclear/i', $status)) {
+						$r->sound='held';
+					}
+
+					if ($r->sound!='discard'&&$r->sound!='held'&&$p->status<ImParcel::STATE_CLEAR&&!in_array($p->status,[ImParcel::STATE_CLEAR,ImParcel::STATE_LOCAL_ARRIVAL])) {
+						$r->sound='held';
+					}
+
+					if ($_GET['op']=='checkin') 
+					{
+						//dg chinyun
+						if($p->agent_id==Org::ORGID_CHINYUN&&!empty($p->mdata['is_dg']))
+						{
+							if(preg_match('/cleared/i', $status))
+							{
+								$r->cfire='change_1';
+							}
+							else if(preg_match('/held/i', $status))
+							{
+								$p->mdata['sort_cfire'] = 1;
+							}
+						}
+					}elseif ($_GET['op']=='resort') 
+					{
+						if(!empty($p->mdata['sort_cfire'])&&$p->mdata['sort_cfire'] == 1)
+						{
+							$r->cfire='change_1-change_1-change_1';
+						}
+					}
+
+					// if (preg_match('/33MBQ/i', $p->ref) && $r->sound == 'cleared') {
+					// 	$r->sound .= '_separate';
+					// }
+
+
+					//amq
+					// if($courier_id == Org::ORGID_COURIER_AUPOST && preg_match('/^AMQ/i', $p->ref)){
+					// 	$r->label = 'amq';
+					// }
+					// if(preg_match('/Air Arrival/i',$status)) $r->sound='air_arrival';
+					$r->id = $p->id;
+
+					// based on status change color
+					if ($p->status == 55) { // HELD
+						$r->color = 'red';
+						$r->print=1;
+						if (!empty($p->note)) {
+							$r->hold='Hold Reason:'.trim(preg_replace('/AMQ\d{18}/i', '', $p->note));
+						}
+					// } elseif (in_array($p->status, [40, 42, 60])) { // Cleared air arrival
+					} elseif (in_array($p->status, [42, 60])) { // Cleared air arrival
+						$r->color = 'green';
+						$r->print = 1;
+					} elseif ($p->status>60&&$p->status!=ImParcel::STATE_ACCOUNT_HELD) {
+						$r->color = 'blue';
+						// $r->print=1;
+					}
+
+					if($changed_label === true){
+						$r->id = $p->id;
+						$r->print = 1;
+						$r->sn = $sn;
+						$r->msg = 'Need change label, printing now';
+					}
+
+					if(!empty($p->mdata['manual_change'])){
+						$r->msg .= ' Need change label, printing now ';
+					}
+
+					// use this field to save how many shipments has been scanned ( received by ourself)
+					// for the letter, if ecn number ,we need to record the scann
+					if (preg_match('/LET\d{7}/i', $p->ref)) {
+						$isHbn=false;
+						// for the letter we need to add a tracking record that received the letter.
+						$tracking=Tracking::model()->find('pid = :pid and type=:type', [':pid'=>$p->id,':type'=>15]);
+						if (empty($tracking)) {
+							$p->addTracking(15, 'Received at depot', empty($this->odepot)? '' : $this->odepot->suburb);
+						}
+					}
+
+					// save scan data
+					if($_GET['op']=='resort') {
+						$r->hold='';
+						$p->mdata['whscan_out'] = date('Y-m-d H:i:s');
+						if (!empty($p->mdata['gpscan_time'])&&!is_array($p->mdata['gpscan_time'])) {
+							unset($p->mdata['gpscan_time']);
+						}
+						$p->mdata['gpscan_time'][$sn]=$sn.':'. date('Y-m-d H:i:s');
+						if (!empty($p->mdata['gpscan_time'])&&is_array($p->mdata['gpscan_time'])) {
+							asort($p->mdata['gpscan_time']);
+						}
+						$mani=ManiMap::model()->find("fid=:fid", [":fid"=>$p->id]);   // check if gatepass Create.
+						if (empty($mani)) {
+							if ($_GET['op']!='status') {
+								$r->color='red';
+								$r->print=0;
+								$r->msg='';
+								$r->gatepass='GatePass not found!';
+							}
+						} else {
+							if (!empty($mani->manifest)) {
+								$r->gatepass='GatePassNo: '.$mani->manifest->id.'--Created at :'.$mani->manifest->created;
+							}
+						}
+					}elseif($_GET['op']=='change'&&!empty($changedShipment))
+					{
+						$changedShipment->mdata['scan_time'] = date('Y-m-d H:i:s');
+						$changedShipment->scan_data[50][strtoupper($smaping->newref)] = date('Y-m-d H:i:s');
+						$changedShipment->scan_no = $changedShipment->pkg - $changedShipment->scanCount();
+						$r->status.=' (new ref:'.$smaping->newref.')';
+						$changedShipment->save();
+						if($scaned){
+							$r->status.=" Scaned！！！ Please double check！！";
+						}
+					}
+				
+					// save scanned check in data
+					// $p->mdata['scan_time'] = date('Y-m-d H:i:s');
+
+					//Author:Nero Date:2021/6/15 Gero Date:2022/02/18 Description: new address sounds
+					$addressService = new AddressService();
+					if ($addressService->isShipmentAmazon($p)&&$p->checkIsKPWithRef()) {
+						if (strtoupper($p->cnee->suburb)=="TULLAMARINE" && $p->postcode=="3043"){
+							$r->amazon = 'newamazon';
+						}else if(strtoupper($p->cnee->suburb)=="RAVENHALL" && $p->postcode=="3023"){
+							$r->amazon = 'melfive';
+						}
+						else{
+							$r->amazon = 'amazon';
+						}
+						//Author:Nero Date:2021/6/11 Description: Suburb & Postcode display.
+						$r->status .= ' AMAZON'." ".$p->cnee->suburb." ".$p->postcode;
+					}
+
+					// $blue = $p->getBlueLabel($sn);
+					// if(!empty($blue))
+					// {
+					// 	$r->blueLabel = $blue;
+					// 	$r->status .= '|'.$blue;
+					// }
+
+					/*if ($p->hasChangeLabel()) {
+						$r->label = 'please_change_label';
+					}*/
+					$save_p = false;
+					$isSaved = false;
+					
+					if ($_GET['op']!='status'&&$_GET['op']!='change') {
+						$save_p = true;
+					}
+
+					if ($_GET['op']=='status'||$_GET['op']!='change') {
+						if ($r->print==1) {
+							$r->msg='Need change label,printing now';
+						}
+					}
+
+					if ($_GET['op']=='checkin') {
+						if (!$p->checkWaitingForScan()) {
+							$r->sound='not_ready_for_scan';
+							$r->status='Not Ready For Scan';
+							$r->msg='Not Ready For Scan';
+							$r->color = 'red';
+							$r->amazon='';
+							$r->area='';
+							$r->found = 0;
+							// add a scan log to shipment, added by Alex 2023-04-17
+							$p->log('Consol not ready for scan');
+						} else {
+							if(!empty($p->mdata["carrier_injection_point"]))
+							{
+								if($p->mdata["carrier_code"]=='FASTWAY'||$p->mdata["carrier_code"]=='RMX')
+								{
+									$r->msg.=" Fastway:  ".$p->mdata["carrier_injection_point"];
+									$r->label="Fast Way-".$p->mdata["carrier_injection_point"];
+								}elseif($p->mdata["carrier_code"]=='AP')
+								{
+									$r->msg.=" :AuPost";
+									$r->label="AuPost";
+								}elseif($p->mdata["carrier_code"]=='CPL')
+								{
+									$r->msg.=" :CourierPlease";
+									$r->label="courierplease";
+								}elseif($p->mdata["carrier_code"]=='Asendia')
+								{
+									$courier_id = Org::ORGID_COURIER_AUPOST;
+									$r->msg.=" :AuPost";
+									$r->label="AuPost";
+								}else
+								{
+									$r->msg.=" :Daipost";
+									$r->label="daipost";
+								}
+								
+								if($courier_id==Org::ORGID_COURIER_AUPOST)
+								{
+									$r->msg.=" :AuPost";
+									$r->label="AuPost";
+								}
+
+								if($r->label=="AuPost"&&$p->mdata["carrier_injection_point"]=="ADL")
+								{
+									$r->label.="-".$p->mdata["carrier_injection_point"];
+								}
+							}
+
+							if (!$isHbn || $p->pkg == 1) {
+								$p->scan_data[50][strtoupper($barcode)] = date('Y-m-d H:i:s');
+							}
+							$p->scan_no = $p->pkg - $p->scanCount();
+							$p->mdata['scan_time'] = date('Y-m-d H:i:s');
+							$save_p = true;
+							$isSaved = true;
+							if(!empty($p->consol_id) && !empty($_GET['cache'])){
+								$r->cache = $this->consolCache($p->consol_id);
+							}
+							$p->log('Check in');
+						}
+					}
+
+					$pb = PickupBooking::model()->find("booking_number=:barcode",[":barcode"=>$barcode]);
+					if (empty($pb)&&(($_GET['op']=='status'||$_GET['op']=='checkin')&&$p->checkIsCargoProcessWithRef())&&!$p->isParcelPickup())
+					{
+						$r->msg.='</br>Region: '.$p->getTLDRegion();
+						$r->msg.='</br>Job: '.$p->getCargoProcessJobNo();
+						$r->msg.='</br>Job Pallet Number: '.$p->getCargoProcessJobPalletNo();
+					}
+
+					if ($_GET['op']=='status')
+					{
+						if(!empty($p->cargo_process))
+						{
+							$pb = PickupBooking::model()->find("booking_number=:barcode",[":barcode"=>$obarcode]);
+						}
+
+						if(!empty($pb)&&$pb->status==PickupBooking::PAID)
+						{
+							$r->msg .= "</br><a href='https://os.toplogistics.com.au/gapsig/gatePass/index.app?direct=TP&&dptId={$tempWareHouse}&&pickup_booking_number={$pb->booking_number}' style='color:blue'>Sign This Parcel?</a>";
+						}
+
+						$r->msg.='</br>HBN: '.$p->hbn;
+						$r->msg .= "</br>Packages:".$p->pkg;
+						$r->msg .= "</br>CBM:".number_format($p->getTotalCBM(),4,'.','');
+						$r->msg .= "</br>Weight:".$p->weight;
+						$r->msg .= "</br>Pallet:".@$p->mdata["amzon_pallet"]." ".(empty($p->mdata["amzon_pallet_type"])?"":@ImParcel::$amzonPalletTypes[$p->mdata["amzon_pallet_type"]]);
+						if(!empty($p->consol))
+						{
+							$r->msg .= "</br>ETA:".$p->consol->eta;
+						}
+
+						if(!empty($p->cargo_process))
+						{
+							$storageFee = $p->cargo_process->getStorageFee(0);
+							if(!empty($pb))
+							{
+								$r->msg .= "</br>Booking Number:".$obarcode;
+								$r->msg .= "</br>Pickup Booking Time:".@$p->mdata['pickup_booking_time'];
+								$r->msg .= "</br>Rego:".$pb->rego;
+								$r->msg .= "</br>Booking Status:".$pb->getStatus(true);
+								$r->msg .= "</br>Storage Fee:".$storageFee;
+								if($storageFee>0)
+								{
+									$r->msg .= "</br>Storage Days:".$p->cargo_process->getStorageFee(1);
+									$r->msg .= "</br>Storage Start Date:".($p->checkStorageInvoiceStatus(true)==0?$p->cargo_process->getStorageFee(2,true):"");
+									$r->msg .= "</br>Storage Paid Status:".$p->checkStorageInvoiceStatus();
+								}
+
+							}else
+							{
+								$r->msg .= "</br>Storage Fee:".$storageFee;
+								$r->msg .= "</br>Delivery Booking Time:".$p->cargo_process->getDeliveryBookingTime();
+							}
+						}
+
+						$r->msg .= "</br>Locations:".implode('</br>',$p->funcGetRackNameList(false,true));
+
+						if(empty($pb))
+						{
+							$r->msg .= "</br><a href='".$this->createUrl("shipment/held")."?op=checkin&&barcode=".$barcode."'>Change Location?</a>";
+						}
+
+						$logs = ParcelScanService::getImPacelScanLog($p);
+						if(!empty($logs))
+						{
+							$r->log .="<table style='font-size:0.5em;'><tr><th><center>Barcode</center></th><th><center>No.</center></th><th><center>OP</center></th><th><center>Time</center></th><th><center>User</center></th></tr>";
+							foreach ($logs as $key => $log) {
+								$r->log .="<tr><td>";
+								$r->log .= join("</td><td><center>",$log);
+								$r->log .="</center></td></tr>";
+							}
+							$r->log .="</table>";
+						}
+						$r->log .=ParcelScanService::getGatepassSign($p);
+					}
+
+
+				}
+				if(preg_match('/^(69732|69804)(\d+)-(\d{1,})$/i', $barcode))
+				{
+					$r->color = 'red';
+					$r->status.='; Wrong label, please check label';
+				}
+
+				//$user=User::model()->findByPk(Yii::app()->user->id);
+				if (!empty($_POST['sound'])) {
+					$r->sound.='_'.$_POST['sound'];
+					if (!empty($r->amazon)) {
+						$r->amazon.="_".$_POST['sound'];
+					}
+					if (!empty($r->area)) {
+						$r->area.="_".$_POST['sound'];
+					}
+					if (!empty($r->label)) {
+						$r->label.="_".$_POST['sound'];
+					}
+				}
+				$r->pkg = $p->pkg;
+				if (!empty(Org::model()->findByPk(114)->extra['import_scan_area_sound'])) {
+					$r->area='';
+				}
+				$groupSound();
+				$this->funcCourierCheck($_POST,$barcode,$r);
+				echo json_encode($r);
+				if(function_exists('fastcgi_finish_request')){
+					ignore_user_abort(true);
+					fastcgi_finish_request();
+				}
+
+				if($save_p) $p->save();
+
+				if ($_GET['op']=='checkin') {
+			
+					if($type==0&&!empty($_POST['location']))
+					{
+						ImParcelService::saveShipmentIntoLocation($_POST['location'],$p,$sn,$barcode,$tempWareHouse);
+					}
+					$p->pushToHeldProcess(true);
+				}
+				// this to add other process flag to  the shipment.
+				if($_GET['op']=='change' && !empty($changedShipment))
+				{
+					ShipmentScan::genShipmentScan($changedShipment, $type, $sn, $tempWareHouse, 3600,$barcode);
+				}else
+				{
+					ShipmentScan::genShipmentScan($p, $type, $sn, $tempWareHouse, 3600,$barcode);
+				}
+				if (in_array($_GET['op'], ['checkin','resort','change','status'])) {
+					if (empty($courier_id)) {
+						$courier_id=$p->getCourierId();
+					}
+					if($_GET['op']=='change' && !empty($changedShipment))
+					{
+						$scaned = GatepassShipment::gatepassScan($changedShipment, $courier_id, $sn, $tempWareHouse);
+					}else
+					{
+						$scaned = GatepassShipment::gatepassScan($p, $courier_id, $sn, $tempWareHouse);
+					}
+				}
+
+				if(in_array($_GET['op'], ['resort'])) {
+					ImParcelService::shipmentMarkScanned($p,$tempWareHouse,true);
+					$warehouseProcessService = new WarehouseProcessService();
+					$warehouseProcessService->prepareDoneShipment($p->id);
+				}
+
+				//new process
+				if (in_array($_GET['op'],['checkin','resort']))
+				{
+					//try to save a record into Java
+					$hvlvJavaAPI = new HvlvJavaAPI();
+					$hvlvJavaAPI->scanShipment($obarcode,User::currentUserID(),$type,$tempWareHouse);
+				}
+
+				Yii::app()->end();
+			}
+		}
+
+		$op = isset($_GET['op']) ? $_GET['op'] : '';
+		$barcode =  isset($_GET['barcode']) ? $_GET['barcode'] : '';
+		$this->render(empty($_GET['cache'])? 'scan' : 'scan2', ['op' => $op,'barcode'=>$barcode]);
+	}
+	
+
+	public function actionBatchScan(){
+		if(empty($_POST['bcs'])) throw new CHttpException(404, 'Page not found!');
+		$bcs = json_decode($_POST['bcs'], true);
+		$data = [];
+		$transaction=Yii::app()->db->beginTransaction();
+		$tempWareHouse=106;
+		if (!empty(Yii::app()->session['scan_warehouse']) && Yii::app()->session['scan_warehouse']=='melbourne') {
+			$tempWareHouse=218;
+		}else if (!empty(Yii::app()->session['scan_warehouse']) && Yii::app()->session['scan_warehouse']=='brisbane') 
+		{
+			$tempWareHouse=530;
+		}else if (!empty(Yii::app()->session['scan_warehouse']) && Yii::app()->session['scan_warehouse']=='perth') 
+		{
+			$tempWareHouse=811;
+		}
+		try {
+			foreach($bcs as $bc){
+				$isHbn = $sn = 0;
+				$courier_id = 0;
+				$p = ShipmentScan::getShipmentByBarcode($bc, $sn, $courier_id);
+				if(empty($p)) {
+					if (preg_match('/-\d+$/', $bc)) {
+						list($hbn, $sn) = explode('-', $bc);
+					} else {
+						$hbn = $bc;
+						$sn = 0;
+					}
+					$p = ImParcel::fromBarcode($hbn, $isHbn);
+				}
+				if(empty($p)) continue;
+				$data[] = $p->id.'.'.$sn;
+				if (empty($courier_id)) {
+					$courier_id=$p->getCourierId();
+				}
+
+				if ($_GET['op']=='checkin') {
+					$type = 0;
+					ShipmentScan::genShipmentScan($p, $type, $sn, $tempWareHouse, 3600,$bc);
+					GatepassShipment::gatepassScan($p, $courier_id, $sn, $tempWareHouse);
+
+					//add letter tracking point
+					if (preg_match('/LET\d{7}/i', $p->ref)) {
+						$isHbn=false;
+						// for the letter we need to add a tracking record that received the letter.
+						$tracking=Tracking::model()->find('pid = :pid and type=:type', [':pid'=>$p->id,':type'=>15]);
+						if (empty($tracking)) {
+							$p->addTracking(15, 'Received at depot', empty($this->odepot)? '' : $this->odepot->suburb);
+						}
+					}
+					if (!$isHbn || $p->pkg == 1) {
+						$p->scan_data[50][strtoupper($bc)] = date('Y-m-d H:i:s');
+					}
+					$p->scan_no = $p->pkg - $p->scanCount();
+					$p->mdata['scan_time'] = date('Y-m-d H:i:s');
+					$p->pushToHeldProcess(true);
+					$p->update(['scan_no', 'scan', 'meta', 'bwf']);
+					$p->updateDeconsolidationTime();
+				}
+			}
+			$transaction->commit();
+		} catch (Exception $ex) {
+			$transaction->rollback();
+			throw new CHttpException(500, 'Failed save to DB!');
+		}
+
+		echo json_encode($data);
+	}
+
+	public function actionCacheData(){
+		if(!empty($_GET['sid'])){
+			$p = Shipment::model()->findByPk($_GET['sid']);
+			$cid = $p->consol_id;
+		}elseif(!empty($_GET['cid'])){
+			$cid = $_GET['cid'];
+		}
+
+		echo empty($cid)? '[]' : json_encode($this->consolCache($cid));
+	}
+
+	protected function consolCache($cid){
+		$sql = 'SELECT id, hbn, ref, cref, status FROM shipment WHERE consol_id = :cid AND (scan_no > 0 OR status < 60)';
+		$rs = Yii::app()->db->createCommand($sql)->bindValues([':cid' => $cid])->queryAll();
+		$d = [];
+		foreach($rs as $r){
+			$d[$r['hbn']] = ['id' => $r['id'], 'r' => ($r['hbn'] == $r['ref']? $r['cref'] : $r['ref']), 's' => $r['status']];
+		}
+		return $d;
+	}
+
+	public function actionConnote()
+	{
+		$id = trim($_GET['id']);
+		$model = ImParcel::model()->findByPk($id);
+		if (empty($model)) {
+			throw new CHttpException(404, 'Page not found!');
+		}
+		if(!empty($_GET['helper'])){
+			$type = 'pdf';
+			if(!empty($model->trans)&&$model->trans[0]->org_id == 115){
+				$file_data = $this->renderPartial('//_pdf/_label_fastway_zpl2020', ['label' => $model], true);
+				$type = 'zpl';
+			}else{
+				if(ImParcelService::isOtherLabel($model))
+	            {
+					$imparcelService = new ImParcelService();
+					$pdf = $imparcelService->getImparcelLabel([$model],$_GET['sn'],3);
+					$file_data = base64_encode($pdf);
+				}else
+				{
+					$pdf = oPDF::renderPDF('label_A6', ['tpl' => '_label_1', 'empty' => false, 'rs' => [$model], 'sn' => empty($_GET['sn'])? 0 : $_GET['sn']], 0);
+					$file_data = base64_encode($pdf);
+				}
+			}
+
+			$files = [['printer' => 'label', 'type' => $type, 'file' => $file_data]];
+			echo json_encode(array("result" => true, "file" => json_encode($files)));
+			Yii::app()->end();
+
+		}
+		
+		if(ImParcelService::isOtherLabel($model))
+		{
+			$imparcelService = new ImParcelService();
+			$imparcelService->getImparcelLabel([$model],$_GET['sn']);
+			return;
+		}
+
+		oPDF::renderPDF('label_A6', ['tpl' => '_label_1', 'empty' => false, 'rs' => [$model], 'sn' => empty($_GET['sn'])? 0 : $_GET['sn']]);
+	}
+
+	public function actionGenerateTempLabel()
+	{
+		$tempId = trim($_GET['tempId']);
+		$v = @$_GET['v'];
+		$imparcelService = new ImParcelService();
+		$result = $imparcelService->genTempLabel($tempId,false,$v);
+		if(!empty($v))
+        {
+            echo $this->renderPartial('//_pdf/label_temp_zpl', ['label' => $result], true);
+            return;
+        }
+
+		return;
+	}
+
+
+
+	public function actionConnoteZpl()
+	{
+		$id = trim($_GET['id']);
+		$model = ImParcel::model()->findByPk($id);
+		if (empty($model)) {
+			throw new CHttpException(404, 'Page not found!');
+		}
+		if(!empty($_GET['helper'])){
+			$or = OrgRate::model()->findByPk($model->mdata['org_rate_id']);
+			$type = 'pdf';
+			if($or->org_id == 115){
+				$file_data = $this->renderPartial('//_pdf/_label_fastway_zpl2020', ['label' => $model], true);
+				$type = 'zpl';
+			}
+			else if($or->org_id==114){ 
+				$pkg_sn = $_GET['sn'];
+				$file_data = $this->renderPartial('//_pdf/label_tla_zpl', ['label' => $model,'pkg_sn'=>$pkg_sn], true);
+				$type = 'zpl';
+			}
+			else
+			{
+	            if(ImParcelService::isOtherLabel($model))
+	            {
+					// zpl toll
+					$orgRate=OrgRate::model()->findByPk($model->mdata['org_rate_id']);
+					if(!empty($model->mdata['eiz_id']) ){
+						if(preg_match('/TOLL/i',$orgRate->code)){
+							$file_data = $this->renderPartial('//_pdf/label_eiz_toll_zpl', ['model' => $model,'sn'=> $_GET['sn']], true);
+						}
+						else if(preg_match('/ALLIED/i',$orgRate->code)){
+							$file_data = $this->renderPartial('//_pdf/label_eiz_allied_zpl', ['model' => $model,'sn'=> $_GET['sn']], true);
+						}
+						$type = 'zpl';
+					}
+					// else if(preg_match('/UBI_TOLL/i',$orgRate->code)){
+					// 	$file_data = $this->renderPartial('//_pdf/label_ubi_toll_zpl', ['model' => $model,'sn'=> $_GET['sn']], true);
+					// 	$type = 'zpl';
+					// }
+					else{
+						$imparcelService = new ImParcelService();
+						$pdf = $imparcelService->getImparcelLabel([$model],$_GET['sn'],3);
+						$file_data = base64_encode($pdf);
+					}
+				}else
+				{
+					$pdf = oPDF::renderPDF('label_A6', ['tpl' => '_label_1', 'empty' => false, 'rs' => [$model], 'sn' => empty($_GET['sn'])? 0 : $_GET['sn']], 0);
+					$file_data = base64_encode($pdf);
+				}
+			}
+
+			$files = [['printer' => 'label', 'type' => $type, 'file' => $file_data]];
+			echo json_encode(array("result" => true, "file" => json_encode($files)));
+			Yii::app()->end();
+
+		}
+
+		if(ImParcelService::isOtherLabel($model))
+		{
+			$imparcelService = new ImParcelService();
+			$imparcelService->getImparcelLabel([$model],$_GET['sn']);
+			return; 
+		 }
+
+		if((preg_match('/WDT/', $model->consol->no)&&!empty($model->mdata['isWDTPallet'])))
+		{
+			oPDF::renderPDF('label_A6', ['tpl' => '_label_1', 'empty' => false, 'rs' => [$model], 'sn' => 0,'isWDTPallet'=>1]);
+		}else
+		{
+			oPDF::renderPDF('label_A6', ['tpl' => '_label_1', 'empty' => false, 'rs' => [$model], 'sn' => empty($_GET['sn'])? 0 : $_GET['sn']]);
+		}
+	}
+
+	public function actionSavePalletNumber()
+	{
+		$id = trim($_GET['id']);
+		$model = ImParcel::model()->findByPk($id);
+		$pallet= trim($_GET['pallet']);
+		$pkg= trim($_GET['pkg']);
+		if (empty($model)) {
+			throw new CHttpException(404, 'Page not found!');
+		}
+		if(!empty($pallet)){
+			$type = 'pdf';
+			$model->mdata['amzon_pallet'] = $pallet;
+			$model->mdata['isWDTPallet'] = 1;
+			$model->mdata['save_WDT_check_pkg'] = $pkg;
+			if($pkg==$model->pkg)
+			{
+				$imparcelService = new ImParcelService();
+				$imparcelService->shipmentScanAll($model);
+			}
+			$model->save();
+		}else
+		{
+			$model->mdata['amzon_pallet'] = 0;
+			$model->mdata['isWDTPallet'] = 0;
+			$model->mdata['save_WDT_check_pkg'] = $pkg;
+			$model->save();
+		}
+		echo "done";
+	}
+
+	public function actionFind()
+	{
+		if (empty($_POST)) {
+			$this->render('find');
+		} else {
+			if (empty($_POST['shipment'])) {
+				echo json_encode(['success' => false, 'msg' => 'shipment cannot be empty']);
+				Yii::app()->end();
+			}
+
+			$shipment = ShipmentScan::getShipmentByBarcode($_POST['shipment']);
+			if (empty($shipment)) {
+				echo json_encode(['success' => false, 'msg' => 'shipment is invalid']);
+				Yii::app()->end();
+			}
+
+			if (empty($shipment->mdata['location'])) {
+				echo json_encode(['success' => false, 'msg' => 'not found']);
+				Yii::app()->end();
+			} else {
+				echo json_encode(['success' => true, 'msg' => $shipment->mdata['location']]);
+				Yii::app()->end();
+			}
+		}
+	}
+
+	public function actionStatus()
+	{
+		if (empty($_POST['shipment'])) {
+			echo json_encode(['sound' => 'not_found']);
+			Yii::app()->end();
+		} else {
+			$sn = 1;
+			$shipment = ShipmentScan::getShipmentByBarcode($_POST['shipment'], $sn);
+			if (empty($shipment)) {
+				echo json_encode(['sound' => 'not_found']);
+				Yii::app()->end();
+			}
+
+			switch ($shipment->status) {
+				case 80: {
+					if (preg_match('/^T(\d{6,7})$/i', $shipment->cref, $matches)) {
+						$this->check3PL($matches[1], $shipment);
+					} else {
+						echo json_encode(['success'=>true,'msg' => $shipment->ref.' rts_received ','sound' => 'rts_received']);
+					}
+				}
+				break;
+				case 85: {
+					echo json_encode(['success'=>true,'msg' => $shipment->ref.' rts_done ','sound' => 'rts_done']);
+				}
+				break;
+				case 86: {
+					echo json_encode(['success'=>true,'msg' => $shipment->ref.' discard ','sound' => 'discard']);
+				}
+				break;
+				default: {
+					if (!empty($_POST['putaway'])) {
+						if($shipment->status==55)
+						{
+							echo json_encode(['sound' => 'not_found']);
+							Yii::app()->end();
+						}
+						$shipment->status = 80;
+						$shipment->mdata['rts_scan_date'] = date('Y-m-d');
+						$shipment->cbwf = $shipment->cbwf|256;
+						$shipment->mdata['rts_warehouse'] = Yii::app()->session['scan_warehouse'];
+						$shipment->update('status', 'meta', 'cbwf');
+						ShipmentScan::genShipmentScan($shipment, 4, $sn, 106,$_POST['shipment']);
+						if (preg_match('/^T(\d{6,7})$/i', $shipment->cref, $matches)) {
+							$this->check3PL($matches[1], $shipment);
+						} else {
+							echo json_encode(['success'=>true,'msg' => $shipment->ref.' rts_received ','sound' => 'rts_received']);
+						}
+					} else {
+						echo json_encode(['success'=>false,'msg' => 'not_found','sound' => 'not_found']);
+					}
+				}
+			}
+			Yii::app()->end();
+		}
+	}
+
+	public function actionPutaway()
+	{
+		if (empty($_POST)) {
+			$this->render('putaway');
+		} else {
+			if (empty($_POST['shipment'])) {
+				echo json_encode(['success' => false, 'msg' => 'shipment cannot be empty']);
+				Yii::app()->end();
+			} else if (empty($_POST['location'])) {
+				echo json_encode(['success' => false, 'msg' => 'location cannot be empty']);
+				Yii::app()->end();
+			}
+			// wait actionStatus finish update shipment
+			for ($i = 0; $i < 5; $i++) {
+				$shipment = ShipmentScan::getShipmentByBarcode($_POST['shipment']);
+				if (!empty($shipment)&&$shipment->status == 80) break;
+				sleep(1);
+			}
+			if (empty($shipment)) {
+				echo json_encode(['success' => false, 'msg' => 'shipment is invalid']);
+				Yii::app()->end();
+			}
+			$location = WmsLocation::model()->find('name = :code OR code = :code', [':code' => $_POST['location']]);
+			if (empty($location)) {
+				echo json_encode(['success' => false, 'msg' => 'location is invalid']);
+				Yii::app()->end();
+			}
+
+			$wrs = WmsRackShipment::model()->find('shipment_id = :sid AND sno = :sn', [':sid' => $shipment->id, ':sn' => $sn]);
+			if(!empty($wrs)){
+				$wrs->status=WmsRackShipment::REMOVED;
+				$wrs->save();
+			}
+			
+			$wrs = new WmsRackShipment('create');
+			$wrs->shipment_id = $shipment->id;
+			$wrs->sno = $sn;
+			$wrs->barcode = $_POST['shipment'];
+			// $wrs->sno = 0;
+			$wrs->rack_id = $location->id;
+			$wrs->save();
+
+
+			if (empty($shipment->mdata['location'])) {
+				$shipment->mdata['location'] = $_POST['location'];
+				unset($shipment->mdata['used_location']);
+				$shipment->update('meta');
+
+				//record log
+				Log::add($shipment,4,['Plt NO.'=> $location->name,'Ground Label'=>$location->extra['ground_label']]);
+
+				echo json_encode(['success' => true, 'msg' => 'Put away ' . $_POST['shipment'] . ' in ' . $_POST['location'] . ' success']);
+				Yii::app()->end();
+			} else {
+				$shipment->mdata['was_location'] = $shipment->mdata['location'];
+				$shipment->mdata['location'] = $_POST['location'];
+				unset($shipment->mdata['used_location']);
+				$shipment->update('meta');
+
+				//record log
+				Log::add($shipment,4,['Plt NO.'=> $location->name,'Ground Label'=>$location->extra['ground_label']]);
+
+				echo json_encode(['success' => true, 'msg' => 'Put away ' . $_POST['shipment'] . ' in ' . $_POST['location'] . ' success']);
+				Yii::app()->end();
+			}
+		}
+	}
+
+	public function actionHeld(){
+
+		$r = new StdClass();
+		$r->success = true;
+		$r->msg = "";
+		$r->sounds = "not_found";
+		if (empty($_POST)) {
+			$recourd = ReportService::getPutAwayReminder(Yii::app()->user->dpt_id);
+			if(!empty($recourd)){
+				$strTodayCount = empty($recourd[0])?0:$recourd[0];
+				$strLeftCount = empty($recourd[1])?0:$recourd[1];
+			}
+			$this->render('held',["todaycount"=>$strTodayCount,'leftcount'=>$strLeftCount]);
+			//$this->render('held');
+		} else {
+			if (empty($_POST['shipment'])) {
+				$r->success = false;
+				$r->msg = "shipment cannot be empty";
+				echo json_encode($r);
+				return;
+			} else if (empty($_POST['location'])) {
+				$r->success = false;
+				$r->msg = "location cannot be empty";
+				echo json_encode($r);
+				return;
+			}
+			$containerNo = $_POST['search_container_no'];
+			// $sn = null;
+			$sn = 0;
+			$courierId = null;
+			$changed_label = null;
+			$barcode = $_POST['shipment'];
+			$shipment = ShipmentScan::getShipmentByBarcode($_POST['shipment'],$sn,$courierId,true,0,$changed_label,$containerNo);
+			if(empty($shipment)) {
+
+				if (preg_match('/-\d+$/', $barcode)) {
+					list($hbn, $sn) = explode('-', $barcode);
+				} else {
+					$hbn = $barcode;
+					$sn = 0;
+				}
+				$shipment = ImParcel::fromBarcode($hbn, $isHbn,false,$containerNo);
+			}
+
+			if (empty($shipment)) {
+				$importsUnknownShipment = ImportsUnknownShipment::model()->find("temp_barcode = :tempBarcode",[":tempBarcode"=>$barcode]);
+				if(!empty($importsUnknownShipment))
+				{
+					$importsUnknownShipment->ground_label = $_POST['location'];
+					$importsUnknownShipment->save();
+					$r->success = true;
+					$r->msg = 'Store ' . $_POST['shipment'] . ' in ' . $_POST['location'] . ' success';
+					echo json_encode($r);
+					return;
+				}
+
+				$r->success = false;
+				$r->msg = "shipment is invalid";
+				echo json_encode($r);
+				return;
+			}
+			$location = WmsLocation::model()->find('name = :code OR code = :code', [':code' => $_POST['location']]);
+			if (empty($location)) {
+				$r->success = false;
+				$r->msg = "location is invalid";
+				echo json_encode($r);
+				return;
+			}
+
+			$wrs = WmsRackShipment::model()->find('shipment_id = :sid AND sno = :sn', [':sid' => $shipment->id, ':sn' => $sn]);
+			if(!empty($wrs)){
+				$wrs->status=WmsRackShipment::REMOVED;
+				$wrs->save();
+			}
+
+			$wrs = new WmsRackShipment('create');
+			$wrs->shipment_id = $shipment->id;
+			$wrs->sno = $sn;
+			$wrs->barcode = $_POST['shipment'];
+			// $wrs->sno = 0;
+			$wrs->rack_id = $location->id;
+			$wrs->save();
+			
+			$location->extra['ground_label'] = '';
+			$location->save();
+			$area = 'sydney';
+			if(empty($shipment->ddpt_id))
+			{
+				if(!empty($shipment->consol))
+				{
+					$dptId = $shipment->consol->dpt_id;
+				}else
+				{
+					$dptId = Yii::app()->user->dpt_id;
+				}
+			}else
+			{
+				$dptId = $shipment->ddpt_id;
+			}
+			$warehouse = Org::model()->findByPk($dptId);
+			if(!empty($warehouse)&&!empty($warehouse->extra['shortName']))
+			{
+				$area = $warehouse->extra['shortName'];
+			}
+
+			//record log
+			Log::add($shipment,4,['Plt NO.'=> $location->name,'Ground Label'=>$location->extra['ground_label']]);
+
+			$r->success = true;
+			$r->msg = 'Store ' . $_POST['shipment'] . ' in ' . $_POST['location'] . ' success';
+			$r->sounds=$area;
+			echo json_encode($r);
+			return;
+		}
+	}
+
+	public function actionListNotSandP($type){
+		if ($type==1) {
+			$mhbns = "SORTHELD";
+			$model = new ImParcel('search');//mhbns
+			$model->unsetAttributes();
+			$model->ot_id = null;
+			$arrToday = ReportService::getSortHeldTodayReminder();
+			$temp =[];
+			if(!empty($arrToday)){
+				if(Yii::app()->user->dpt_id==Org::TLA_DEPARTMENT_SYDNEY){
+					$temp = $arrToday['SYD'];
+				}elseif(Yii::app()->user->dpt_id==Org::TLA_DEPARTMENT_MELBOURNE){
+					$temp = $arrToday['MEL'];
+				}elseif(Yii::app()->user->dpt_id==Org::TLA_DEPARTMENT_BRISBANE){
+					$temp = $arrToday['BNE'];
+				}
+				foreach($temp as $ref => $data){
+					$mhbns .=",".$ref;
+				}
+			}
+			$model->mhbns = rtrim($mhbns, ',');
+			$this->render('shipment_list',['model'=>$model]);
+		}else{
+			$mhbns = "SORTHELD";
+			$model = new ImParcel('search');//mhbns
+			$model->unsetAttributes();
+			$model->ot_id = null;
+			$arrToday = ReportService::getSortHeldReminder();
+			$temp =[];
+			if(!empty($arrToday)){
+				if(Yii::app()->user->dpt_id==Org::TLA_DEPARTMENT_SYDNEY){
+					$temp = $arrToday['SYD'];
+				}elseif(Yii::app()->user->dpt_id==Org::TLA_DEPARTMENT_MELBOURNE){
+					$temp = $arrToday['MEL'];
+				}elseif(Yii::app()->user->dpt_id==Org::TLA_DEPARTMENT_BRISBANE){
+					$temp = $arrToday['BNE'];
+				}
+				foreach($temp as $ref => $data){
+					$mhbns .= ",".$ref;
+				}
+			}
+			$model->mhbns = rtrim($mhbns, ',');
+			$this->render('shipment_list',['model'=>$model]);
+		}
+	}
+	
+	public function actionPutAwayPallet(){
+		$r = new StdClass();
+		$r->success = true;
+		$r->msg = "";
+		$r->sounds = "not_found";
+
+		if (empty($_POST)) {
+			// $recourd = ReportService::getPutAwayReminder(Yii::app()->user->dpt_id);
+			// if(!empty($recourd)){
+			// 	$strTodayCount = empty($recourd[0])?0:$recourd[0];
+			// 	$strLeftCount = empty($recourd[1])?0:$recourd[1];
+			// }
+			// $this->render('put_away_pallet',["todaycount"=>$strTodayCount,'leftcount'=>$strLeftCount]);
+			$this->render('put_away_pallet');
+		} else {
+			if (empty($_POST['pallet_label'])) {
+				echo json_encode(['success' => false, 'msg' => 'pallet label cannot be empty','sounds'=>'not_found']);
+				Yii::app()->end();
+			} else if (empty($_POST['ground_label'])) {
+				echo json_encode(['success' => false, 'msg' => 'ground label cannot be empty','sounds'=>'not_found']);
+				Yii::app()->end();
+			}
+			
+			$location = WmsLocation::model()->find('name = :code OR code = :code', [':code' => $_POST['pallet_label']]);
+			if (empty($location)) {
+				echo json_encode(['success' => false, 'msg' => 'pallet label is invalid','sounds'=>'not_found']);
+				Yii::app()->end();
+			}
+			if (empty($location->realRackShipments)) {
+				echo json_encode(['success' => false, 'msg' => 'pallet is empty','sounds'=>'not_found']);
+				Yii::app()->end();
+			}
+			
+			$wmsLocationGroundLabel = new WmsLocationGroundLabel();
+			$wmsLocationGroundLabel->location_id = $location->id;
+			$wmsLocationGroundLabel->ground_label = $_POST['ground_label'];
+			$wmsLocationGroundLabel->ground_label_in_time =  date('Y-m-d H:i:s');
+			$wmsLocationGroundLabel->user_id = User::currentUserID();
+			$wmsLocationGroundLabel->save();
+
+			$location->extra['ground_label'] = $_POST['ground_label'];
+			$location->extra['ground_label_in_time'] = date('Y-m-d H:i:s');
+			$location->save();
+
+			WarehouseProcessService::checkLocationUsage($location->id,$_POST['recommend'],$_POST['ground_label']);
+
+
+			$area = 'sydney';
+			$dptId = $location->wid;
+			$warehouse = Org::model()->findByPk($dptId);
+			if(!empty($warehouse)&&!empty($warehouse->extra['shortName']))
+			{
+				$area = $warehouse->extra['shortName'];
+			}
+
+			//Add ground label log into shipment
+			$arrShipmentId=[];
+			$modelsWmsRackShipment = WmsRackShipment::model()->findAll('rack_id=:location_id',[':location_id'=>$location->id]);
+			if(!empty($modelsWmsRackShipment)){
+				foreach($modelsWmsRackShipment as $modelWmsRackShipment){
+					$arrShipmentId[$modelWmsRackShipment->shipment_id] = $modelWmsRackShipment->shipment_id;
+				}
+				$strShipmentId = implode(',',$arrShipmentId);
+				$modelShipments = ImParcel::model()->findAllBySql('select * from shipment where id in ('.$strShipmentId.')');
+				if(!empty($modelShipments)){
+					foreach($modelShipments as $modelShipment){
+						Log::add($modelShipment,4,['Plt NO.'=> $location->name,'Ground Label'=>$location->extra['ground_label']]);
+					}
+				}
+			}
+
+			// $recourd = ReportService::getPutAwayReminder(Yii::app()->user->dpt_id);
+			// $strCount = $recourd[0];
+			// $strTime = $recourd[1];
+			//echo json_encode(['success' => true, 'msg' => 'put away ' . $_POST['pallet_label'] . ' in ' . $_POST['ground_label'] . ' successfully','count'=>$strCount,'time'=>$strTime]);
+			echo json_encode(['success' => true, 'msg' => 'put away ' . $_POST['pallet_label'] . ' in ' . $_POST['ground_label'] . ' success','sounds'=>$area]);
+			Yii::app()->end();
+		}
+	}
+
+	public function actionPalletMovement(){
+		if (empty($_POST)) {
+			$this->render('pallet_movement');
+		} else {
+			if (empty($_POST['from_pallet_label'])) {
+				echo json_encode(['success' => false, 'msg' => 'From pallet label cannot be empty']);
+				Yii::app()->end();
+			} else if (empty($_POST['to_pallet_label'])) {
+				echo json_encode(['success' => false, 'msg' => 'To pallet label cannot be empty']);
+				Yii::app()->end();
+			}
+			
+			$location1 = WmsLocation::model()->find('name = :code OR code = :code', [':code' => $_POST['pallet_label']]);
+			if (empty($location)) {
+				echo json_encode(['success' => false, 'msg' => 'From pallet label is invalid']);
+				Yii::app()->end();
+			}
+
+			$location2 = WmsLocation::model()->find('name = :code OR code = :code', [':code' => $_POST['pallet_label']]);
+			if (empty($location2)) {
+				echo json_encode(['success' => false, 'msg' => 'To pallet label is invalid']);
+				Yii::app()->end();
+			}
+			
+			ImParcelService::moveShipmentBetweenLocations($location1->code,$location2->code,$this->getWareHouse());
+
+			//Add ground label log into shipment
+			$arrShipmentId=[];
+			$modelsWmsRackShipment = WmsRackShipment::model()->findAll('rack_id=:location_id',[':location_id'=>$location2->id]);
+			if(!empty($modelsWmsRackShipment)){
+				foreach($modelsWmsRackShipment as $modelWmsRackShipment){
+					$arrShipmentId[$modelWmsRackShipment->shipment_id] = $modelWmsRackShipment->shipment_id;
+				}
+				$strShipmentId = implode(',',$arrShipmentId);
+				$modelShipments = ImParcel::model()->findAllBySql('select * from shipment where id in ('.$strShipmentId.')');
+				if(!empty($modelShipments)){
+					foreach($modelShipments as $modelShipment){
+						Log::add($modelShipment,4,['Plt NO.'=> $location2->name,'Ground Label'=>$location2->extra['ground_label']]);
+					}
+				}
+			}
+			
+			
+			echo json_encode(['success' => true, 'msg' => 'move ' . $_POST['from_pallet_label'] . ' to ' . $_POST['to_pallet_label'] . ' success']);
+			Yii::app()->end();
+		}
+	}
+	
+
+	public function actionReship()
+	{
+		if (empty($_POST)) {
+			$this->render('reship');
+		} else {
+			if (empty($_POST['shipment'])) {
+				echo json_encode(['success' => false, 'msg' => 'shipment cannot be empty']);
+				Yii::app()->end();
+			}
+			$shipment = ShipmentScan::getShipmentByBarcode($_POST['shipment']);
+			if (empty($shipment)) {
+				echo json_encode(['success' => false, 'msg' => 'shipment is invalid']);
+				Yii::app()->end();
+			}
+
+			if (!empty($shipment->mdata['location'])) {
+				$shipment->mdata['used_location'] = $shipment->mdata['location'];
+				unset($shipment->mdata['location']);
+				$shipment->update('meta');
+
+				echo json_encode(['success' => true, 'msg' => 'Reship ' . $_POST['shipment'] . ' from ' . $shipment->mdata['used_location'] . ' success']);
+				Yii::app()->end();
+			} else {
+				echo json_encode(['success' => true, 'msg' => 'Reship ' . $_POST['shipment'] . ' success']);
+				Yii::app()->end();
+			}
+		}
+	}
+
+	public function actionDiscard()
+	{
+		if (empty($_POST)) {
+			$this->render('discard');
+		} else {
+			if (empty($_POST['shipment'])) {
+				echo json_encode(['success' => false, 'msg' => 'shipment cannot be empty']);
+				Yii::app()->end();
+			}
+			$shipment = ShipmentScan::getShipmentByBarcode($_POST['shipment']);
+			if (empty($shipment) || !in_array($shipment->status, [80,81,82,83,84,85])) {
+				echo json_encode(['success' => false, 'msg' => 'shipment is invalid']);
+				Yii::app()->end();
+			}
+
+			if (!empty($shipment->mdata['location'])) {
+				$shipment->mdata['used_location'] = $shipment->mdata['location'];
+				unset($shipment->mdata['location']);
+				$shipment->status = 86;
+				$shipment->update('meta', 'status');
+
+				echo json_encode(['success' => true, 'msg' => 'Discard ' . $_POST['shipment'] . ' from ' . $shipment->mdata['used_location'] . ' success']);
+				Yii::app()->end();
+			} else {
+				$shipment->status = 86;
+				$shipment->update('status');
+
+				echo json_encode(['success' => true, 'msg' => 'Discard ' . $_POST['shipment'] . ' success']);
+				Yii::app()->end();
+			}
+		}
+	}
+
+	private function check3PL($taskid, $shipment)
+	{
+		$task = WmsTask::model()->findByPk($taskid);
+		if (!empty($task) && $task->job->org_id == $shipment->agent_id) {
+			if (!empty($task->deliveryTask->mdata['shipment_id']) && in_array($shipment->id, $task->deliveryTask->mdata['shipment_id'])) {
+				// mark rts detect
+				if (($task->bwf & 128) == 0) $task->bwf |= 128;
+				// mark arrive warehouse
+				if (empty($task->mdata['return_status']) || $task->mdata['return_status'] < WmsTask::WMS_TASK_RETURN_STATUS_ARRIVE_WAREHOUSE) $task->mdata['return_status'] = WmsTask::WMS_TASK_RETURN_STATUS_ARRIVE_WAREHOUSE;
+				$task->update('bwf', 'meta');
+				echo json_encode(['sound' => '3pl_rts_received']);
+			} else if (!empty($task->deliveryTask->mdata['return_shipment_id']) && in_array($shipment->id, $task->deliveryTask->mdata['return_shipment_id'])) {
+				// mark rts detect
+				if (($task->bwf & 128) == 0) $task->bwf |= 128;
+				// mark arrive warehouse
+				if ($task->status < WmsTask::WMS_TASK_RETURN_STATUS_ARRIVE_WAREHOUSE) $task->status = WmsTask::WMS_TASK_RETURN_STATUS_ARRIVE_WAREHOUSE;
+				$task->update('bwf', 'status');
+				echo json_encode(['sound' => '3pl_rts_received']);
+			} else {
+				echo json_encode(['sound' => 'rts_received']);
+			}
+		} else {
+			echo json_encode(['sound' => 'rts_received']);
+		}
+	}
+
+	private function BagParcelScanCoreFunction(&$p,$save_p)
+	{
+		$fixScanTime = @$_POST['fix_scan_time'];
+		$fixUserId = @$_POST['fix_user_id'];
+		$shipmentScanTime = empty($fixScanTime)?date('Y-m-d H:i:s'):$fixScanTime;
+		$randomTime = date("Y-m-d H:i:s",strtotime('+'.rand(1,600).' second',strtotime($shipmentScanTime)));
+		if (in_array($_GET['op'], ['checkin']))
+		{
+			$type=0;
+			$courier_id=$p->getCourierId();
+			$tempWareHouse=$this->getWareHouse();
+
+			if ($_GET['op']=='checkin') {
+				$p->pushToHeldProcess(true);
+			}
+			for ($sn=1; $sn <= $p->pkg; $sn++) { 
+				ShipmentScan::genShipmentScan($p, $type, $sn, $tempWareHouse, 3600,$p->hbn,$shipmentScanTime);
+				$scaned = GatepassShipment::gatepassScan($p, $courier_id, $sn, $tempWareHouse,null,false,false,$shipmentScanTime);
+				if(preg_match('/SYD|MEL|ADL|BNE/', $p->ref))//For handling the parcel with SYD.....
+				{
+					$thisBarcode = $p->hbn."-".$sn;
+				}else
+				{
+					$thisBarcode = $p->ref."-".$sn;
+				}
+				$p->scan_data[50][$thisBarcode] = $randomTime;
+			}
+			
+			$p->scan_no = $p->pkg - $p->scanCount();
+			$p->mdata['scan_time'] = $randomTime;
+			if($save_p)
+			{
+				if(!empty($fixUserId))
+				{
+					$p->fixUserId = $fixUserId;
+					$p->fixTime = $shipmentScanTime;
+				}
+				$p->save();
+			}
+		}
+	}
+	
+	private function funcCourierCheck($post,$barcode,&$r){
+		if(isset($post['checkCourier'])){
+			require_once 'ModelReportShipment.php';
+			$objModelDeliveryType = new ModelDeliveryType ;
+			$strCourier = $objModelDeliveryType->funcLabelNumber2CourierName($barcode);
+			if($strCourier != null){
+				$r->msg .= ' ['.$strCourier.'] ';
+				$r->sounds[] = $strCourier;
+			}
+		}
+	}
+
+	private function bagScan(&$p,$barcode,&$r,$groupSound)
+	{
+		if(empty($p))
+		{
+			$r->color = 'red';
+			$r->sound = 'not_found';
+			$r->stop = 0;
+			$r->msg = 'Bag: '.$barcode." not found ";
+			$r->status = 'not_found';
+			$r->nosound = 0;
+			$r->found = 0;
+			$groupSound();
+			echo json_encode($r);
+			Yii::app()->end();
+		}
+		$msg = "";
+		$bagTag = ImportBag::model()->find("bag_tag = :bag_tag",[":bag_tag"=>$barcode]);
+		if(!empty($_POST['checkBagScan'])&&$_GET['op']=='status')
+		{
+			$shipmentScans = ShipmentScan::model()->findAll('pid = :pid and type = 5',[":pid"=>$bagTag->id]);
+			if(!empty($shipmentScans))
+			{
+				$msg.="</br><h2>Scan Record:</h2>";
+				foreach ($shipmentScans as $key => $shipmentScan) {
+					$msg.="</br>".$shipmentScan->user->name.":".$shipmentScan->scan_time;
+				}
+			}
+			if($msg == "")
+			{
+				$msg = "Not Scan Record";
+			}
+		}
+
+
+		if ($_GET['op']=='checkin'||$_GET['op']=='status') 
+		{
+			if(!empty($_POST['tempWarehouse']))
+			{
+				$tempWareHouse = $_POST['tempWarehouse'];
+			}else
+			{
+				$tempWareHouse=106;
+				if (!empty(Yii::app()->session['scan_warehouse']) && Yii::app()->session['scan_warehouse']=='melbourne') {
+					$tempWareHouse=218;
+				}else if (!empty(Yii::app()->session['scan_warehouse']) && Yii::app()->session['scan_warehouse']=='brisbane') 
+				{
+					$tempWareHouse=530;
+							
+				}else if (!empty(Yii::app()->session['scan_warehouse']) && Yii::app()->session['scan_warehouse']=='perth') 
+				{
+					$tempWareHouse=811;
+				}
+			}
+			ShipmentScan::genBagScan($barcode,$tempWareHouse);
+		}   
+
+		$check1 = false;
+		$check2 = false;
+		$check3 = false;
+		$check4 = false;
+		$check5 = false;
+		$heldRef = [];
+		$notReady = [];
+		$notBelong = [];
+		$notInConsol = [];
+		$notCheckin = [];
+		$special = [];
+		$noScan = [];
+		foreach ($p as $key => $value) {
+			if($value->status !=ImParcel::STATE_CLEAR && $value->status !=ImParcel::STATE_LOCAL_ARRIVAL)
+			{
+				if (preg_match('/held/i', $value->getStatus())) {
+					array_unshift($heldRef , $value->ref.":".$value->getStatus());
+				}
+				else{
+					$heldRef[] = $value->ref.":".$value->getStatus();
+				}				
+				$check1 = true;
+				$noScan[] = $value->id;
+			}
+			if(!$value->checkWaitingForScan() && $_GET['op']=='checkin')
+			{
+				$notReady[] = $value->ref;
+				$check2 = true;
+				$noScan[] = $value->id;
+			}
+
+			if ($value->getDepot()!=$tempWareHouse) 
+			{
+				$notBelong[] =  $value->ref;
+				$check3 = true;
+				$noScan[] = $value->id;
+			}
+
+			if (empty($value->consol_id)&&$value->status!=ImParcel::STATE_LOCAL_ARRIVAL) 
+			{
+				$notInConsol[] =  $value->ref;
+				$check4 = true;
+				$noScan[] = $value->id;
+			}
+
+			if($_GET['op']!='checkin' && (empty($value->scan_data[50])||(empty($value->scan_data[50][strtoupper($barcode)])&&empty($value->scan_data[50][strtoupper($thisBarcode)])&&empty($value->scan_data[50][strtoupper($sallBarcode)])&&empty($value->scan_data[50][strtoupper($rallBarcode)])&&!isset($value->scan_data[50]['SCAN_ALL'])&&$n==0)))
+			{
+				if (preg_match('/-\d{1,5}/i', $barcode)||(!preg_match('/-\d{1,5}/i', $barcode)&&empty($value->scan_data[50]))) {
+					$notCheckin[] =  $value->ref;
+					$check5 = true;
+					$noScan[] = $value->id;
+				}
+			}
+
+			// if(preg_match('/33G78/i', $value->ref))
+			// {
+			// 	$special[] = $value->ref;
+			// 	$noScan[] = $value->id;
+			// }
+		}
+		if($check1||$check2||$check3||$check4||$check5||!empty($special))
+		{
+			$r->color = 'red';
+			$r->sound = '';
+			$r->stop = 0;
+			$r->msg = 'Abnormal Shipment ';
+			$r->status = '';
+		}
+
+		$soundArr = [];
+		$msgArr = [];
+		$statusArr = [];
+
+		if($check1)
+		{
+			$soundArr[]='held';
+			$msgArr[]='Abnormal Shipment '.join('</br>',$heldRef).' In Bag';
+			$statusArr[]='held held held';
+		}
+		if($check2)
+		{
+			$soundArr[]='not_ready_for_scan';
+			$msgArr[]='Not Ready: Shipment '.join('</br>',$notReady).' In Bag';
+			$statusArr[]='Not Ready For Scan';
+		}
+
+		if($check3)
+		{
+			$soundArr[]='not_belong';
+			$msgArr[]='Not Belong: Shipment '.join('</br>',$notBelong).' In Bag';
+			$statusArr[]='Not Belong';
+		}
+
+		if($check4)
+		{
+			$soundArr[]='not_found';
+			$msgArr[]='Not Found In Consol '.join('</br>',$notInConsol).' In Bag';
+			$statusArr[]='Not In Consol';
+		}
+
+		if($check5)
+		{
+			$soundArr[]='without_checkin';
+			$msgArr[]='Without Check in '.join('</br>',$notCheckin).' In Bag';
+			$statusArr[]='Without Checkin';
+		}
+
+		if(!empty($special))
+		{
+			$r->special = 'warning';
+			$msgArr[]='4PX 33G78: Shipment '.join('</br>',$special).' In Bag';
+		}
+		
+		$letter='';
+		if(!empty($bagTag->mdata['is_manual_letter']))
+		{
+			$soundArr[]='letter';
+			$letter='Letter</br>';
+		}
+		$msgArr[] = $msg;
+
+		if($check1||$check2||$check3||$check4||$check5||!empty($special))
+		{
+			$r->sound = join('-',$soundArr);
+			$r->found = join('-',$statusArr);
+			$r->msg=join('</br></br>',$msgArr);
+			$r->status=$letter.join('</br>',$statusArr);
+			$groupSound();
+			echo json_encode($r);
+
+			if(function_exists('fastcgi_finish_request')){
+				ignore_user_abort(true);
+				fastcgi_finish_request();
+			}
+			if ($_GET['op']=='checkin') 
+			{
+				$save_p=true;
+				$trans = Yii::app()->db->beginTransaction();
+				try{
+					foreach ($p as $key => $shipment) 
+					{
+						if(!in_array($shipment->id, $noScan))
+						{
+							$this->BagParcelScanCoreFunction($shipment,$save_p);
+						}
+					}
+					$trans->commit();
+				} catch (Exception $ex) {
+					$trans->rollback();
+					throw $ex;
+				}
+			}
+
+			if(empty($_POST['backend_commend_MQbag']))
+			{
+				Yii::app()->end();
+			}
+		}
+		else
+		{
+			$soundArr[] = 'bag-cleared';
+			$r->color = 'green';
+			$r->sound = join('-',$soundArr);
+			$r->stop = 0;
+			$r->msg = 'Bag '.$barcode.$msg;
+			$r->status = $letter.'Cleared';
+			$r->nosound = 0;
+			$r->found = 0;
+			$groupSound();
+			echo json_encode($r);
+			if(function_exists('fastcgi_finish_request')){
+				ignore_user_abort(true);
+				fastcgi_finish_request();
+			}
+
+			if ($_GET['op']=='checkin') 
+			{
+				$save_p=true;
+				$trans = Yii::app()->db->beginTransaction();
+				try{
+					foreach ($p as $key => $shipment) 
+					{
+						$this->BagParcelScanCoreFunction($shipment,$save_p);
+					}
+					$trans->commit();
+				} catch (Exception $ex) {
+					$trans->rollback();
+					throw $ex;
+				}
+			}
+
+			if(empty($_POST['backend_commend_MQbag']))
+			{
+				Yii::app()->end();
+			}
+		}
+	}
+	private function consolCheck(&$barcode,&$r,$groupSound)
+	{
+		$consolNum = $barcode;
+		$msg = "";
+		$msgArr= [];
+		$consol = ImcoConsol::model()->find("no = :no",[":no"=>$consolNum]);
+		if(empty($consol))
+		{
+			$consol = DmawbConsol::model()->find("no = :no",[":no"=>$consolNum]);
+		}
+
+		if(empty($consol))
+		{
+			$r->color = 'red';
+			$r->sound = 'not_found';
+			$r->stop = 0;
+			$r->msg = 'Consol: '.$barcode." not found ";
+			$r->status = 'not_found';
+			$r->nosound = 0;
+			$r->found = 0;
+			$groupSound();
+			echo json_encode($r);
+			Yii::app()->end();
+		}
+
+		foreach ($consol->shipments as $key => $p) 
+		{
+			if(!empty($p->bag_tag))
+			{
+				$shipmentScans = ShipmentScan::model()->findAll('pid = :pid and type = 5',[":pid"=>$p->bag_tag->import_bag_id]);
+				if(empty($shipmentScans))
+				{
+					if(!in_array($p->bag_tag->bag_tag, $msgArr))
+					{
+						$msg .="</br>Bag ".$p->bag_tag->bag_tag." haven't scan record";
+						$msgArr[] = $p->bag_tag->bag_tag;
+					}
+
+				}
+			}
+			// }else
+			// {
+			// 	$r->color = 'red';
+			// 	$r->sound = 'not_found';
+			// 	$r->stop = 0;
+			// 	$r->msg = 'Consol: '.$barcode." shipment ".$p->ref." not in bag";
+			// 	$r->status = 'not_found';
+			// 	$r->nosound = 0;
+			// 	$r->found = 0;
+			// 	$groupSound();
+			// 	echo json_encode($r);
+			// 	Yii::app()->end();
+			// }
+		}
+
+		if($msg=="")
+		{
+			$r->color = 'green';
+			$r->sound = 'all_scan';
+			$r->stop = 0;
+			$r->msg = 'Consol: '.$barcode." all scan ";
+			$r->status = 'all_scan';
+			$r->nosound = 0;
+			$r->found = 0;
+			$groupSound();
+			echo json_encode($r);
+			Yii::app()->end();
+		}else
+		{
+			$r->color = 'red';
+			$r->sound = 'bag_miss_scan';
+			$r->stop = 0;
+			$r->msg = 'Consol: '.$barcode.$msg;
+			$r->status = 'bag_miss_scan';
+			$r->nosound = 0;
+			$r->found = 0;
+			$groupSound();
+			echo json_encode($r);
+			Yii::app()->end();
+		}
+	}
+
+	public function actionExportAout()
+	{
+		$containerNo = $_GET['containerNo'];
+		$model = ImcoConsol::model()->find('json_value(t.meta,"$.container_no") = :container_no or awb = :container_no',[":container_no"=>$containerNo]);
+		if(empty($model)){echo "empty consol";return;}
+		$csv = [];
+		$csv[]='MAWB:,'.(empty($model->awb)?$model->no:$model->awb);
+		$csv[]='ETD:,'.$model->etd.',ETA:,'.$model->eta;
+		$csv[]='WEIGHT:,'.(empty($model->mdata['awb_wt'])?'':$model->mdata['awb_wt']).',CHARGEABLE WEIGHT:,'.(empty($model->mdata['cgb_wt'])?'':$model->mdata['cgb_wt']);
+		$csv[]='Airline:,'.$model->airline.',Flight No:,'.$model->flight;
+		$csv[]='POL:,'.$model->pol.',POD:,'.$model->pod;
+		$csv[]='Container No:,'.$containerNo;
+		$csv[]='';
+		$csv[] = 'ConsignmentRef,Tracking,Status,ScannedDateTime,Count,Manifested';
+		foreach ($model->shipments as $s) {
+			//Check multiple packs
+			if ($s->status==100) {
+				continue;
+			}
+			$csv[] = '="'.$s->hbn.'",="'.$s->ref.'",'.($s->status<=55? 'Held' : 'Clear').','.(empty($s->getScanTime())?'':date('Y-m-d', strtotime($s->getScanTime()))).','.$s->getOutPkg().','.$s->pkg;
+		}
+		header("Cache-Control: maxage=1");
+		header("Content-type: text/csv");
+		header("Content-Disposition: attachment; filename=outturn_".date('YmdHis').".csv");
+
+		echo implode("\n", $csv);
+	}
+
+
+	public function actionExportLocationList()
+	{
+		$containerNo = $_GET['containerNo'];
+		$model = ImcoConsol::model()->find('json_value(t.meta,"$.container_no") = :container_no or awb = :container_no',[":container_no"=>$containerNo]);
+		if(empty($model)){echo "empty consol";return;}
+		$csv = [];
+		$csv[]='MAWB:,'.(empty($model->awb)?$model->no:$model->awb);
+		$csv[]='Container No:,'.$containerNo;
+		$csv[]='';
+		$csv[] = 'Hbn,Ref,Status,Barcode,Location,Scan Time';
+		foreach ($model->shipments as $s) {
+			//Check multiple packs
+			if ($s->status==100) {
+				continue;
+			}
+			$wmsRacks = WmsRackShipment::model()->findAll("shipment_id=:pid",[":pid"=>$s->id]);
+			if(empty($wmsRacks))
+			{
+				$csv[] = '="'.$s->hbn.'",="'.$s->ref.'",'.($s->status<=55? 'Held' : 'Clear').',,';
+				continue;
+			}
+			foreach ($wmsRacks as $key => $rack) {
+				$csv[] = '="'.$s->hbn.'",="'.$s->ref.'",'.($s->status<=55? 'Held' : 'Clear').','.$rack->barcode.','.$rack->location->code.','.$rack->created;
+			}
+		}
+		header("Cache-Control: maxage=1");
+		header("Content-type: text/csv");
+		header("Content-Disposition: attachment; filename=outturn_".date('YmdHis').".csv");
+
+		echo implode("\n", $csv);
+	}
+
+
+	/**
+	 * process scan check in
+	 */
+	public function actionImpChangeLabel()
+	{
+		// $model = Consol::model()->findByPk();
+
+		if (!empty($_POST)) {
+			// get scan result
+			if (isset($_POST['barcode'])) {
+
+				$groupSound = function() use(&$r, &$p){
+					$ss = [];
+					foreach(['sound', 'amazon', 'area', 'label','dg','cfire', 'sorting'] as $k){
+						if(!empty($r->{$k})){
+							$ss[] = $r->{$k};
+						}
+						unset($r->{$k});
+					}
+					
+					if(!empty($_POST['unpacking']))
+					{
+						if(!empty($p->ref) && preg_match('/.+(\d{4})[^\d]*$/', $p->ref, $m)){
+							$ss = array_merge($ss, str_split($m[1]));
+						}
+						$r->sounds = $ss;
+
+						if(!empty($r->pkg))
+						{
+							$r->sounds[] = "p";
+							$r->sounds[] = $r->pkg;
+						}
+					}else
+					{
+						$r->sounds = $ss;
+					}
+				};
+				$courier_id = 0;
+				$sn = 0;
+				$isHbn = false;
+				$changedShipment = null;
+				$changed_label = false;
+				$scaned = false;
+				$r = new StdClass;
+				$r->color = 'red';
+				$r->sound = 'not_found';
+				$r->amazon = '';
+				$r->dg = '';
+				$r->area = 'sydney';
+				$r->stop = 0;
+				$r->msg = 'NOT FOUND';
+				$r->status = 'UNKNOWN';
+				$r->nosound = 0;
+				$r->found = 0;
+				$r->id = 0;
+				$r->label = '';
+				$r->print = 0;
+				$r->pkg = 0;
+				$r->cfire = '';
+
+				$status_suffix = '';
+
+				$barcode = $_POST['barcode'];
+				$r->msg = 'Not Found ' . $barcode;
+				$p = ShipmentScan::getImpShipmentByBarcode($barcode, $sn, $courier_id, false, 0, $changed_label);
+
+				if(!in_array($courier_id,[Org::ORGID_COURIER_TLA,Org::ORGID_COURIER_TOLL_IPEC,Org::ORGID_COURIER_TNT_TOP,Org::ORGID_COURIER_TNT,Org::ORGID_COURIER_UBI_TOLL])||empty($p)){
+					$r->color = 'red';
+					$r->sound = 'not_found';
+					$r->stop = 0;
+					$r->msg = 'NOT FOUND';
+					$r->status = 'UNKNOWN';
+					$r->nosound = 0;
+					$r->found = 0;
+					$groupSound();
+					echo json_encode($r);
+					Yii::app()->end();
+				}
+
+				if(empty($p->packs)){
+					$r->color = 'red';
+					$r->sound = 'not_found';
+					$r->stop = 0;
+					$r->msg = 'Haven\'t packages information';
+					$r->status = 'UNKNOWN';
+					$r->nosound = 0;
+					$r->found = 0;
+					$groupSound();
+					echo json_encode($r);
+					Yii::app()->end();
+				}
+
+
+				if (!empty($p) && $sn > 0) {
+					$isHbn=false;
+				}
+
+				if(!empty($p))
+				{
+					// get base64 pdf label return for printing
+					$status = $p->getStatus();
+					
+					//override fw change label error to held
+					if(!empty($p->mdata['fw_cl_err'])){
+						$status = 'Held';
+					}
+					$r->found = 1;
+					$r->id = $p->id;
+					$r->status = strtoupper($status).', ' . $p->ref . ',' . $sn.$status_suffix;
+					$r->msg = '';
+					$r->gatepass='';
+					$r->hold='';
+					$r->sound = preg_replace('/\s/i', '_', preg_replace('/(\[.*\])+/', '', strtolower($status)));
+					$r->sn = $sn; 
+					// if(preg_match('/^clear/i', $status)) $r->sound='cleared';
+					// if(preg_match('/^courier/i', $status)&&!preg_match('/Courier Before Report/i', $status)) $r->sound='courier';
+					// if(preg_match('/Courier Before Report/i', $status)) $r->sound='courier_before_report';
+					if (preg_match('/Held/i', $status)) {
+						$r->color = 'red';
+						$r->sound='held';
+					}
+					if (preg_match('/clear wait/i', $status)) {
+						// $r->sound='wait';
+						$r->color = 'red';
+						$r->sound='held';
+					}
+					if (preg_match('/conclear/i', $status)) {
+						$r->color = 'red';
+						$r->sound='held';
+					}
+
+					// if(!isset($p->mdata['is_b2b']))
+					// {
+					// 	$r->color = 'red';
+					// 	$r->msg = 'This shipment isn\'t be set with isB2B';
+					// 	$groupSound();
+					// 	echo json_encode($r);
+					// 	Yii::app()->end();
+					// }
+
+
+					if($p->status==ImParcel::STATE_CLEAR||$p->status==ImParcel::STATE_LOCAL_ARRIVAL||$changed_label)
+					{
+						$r->color = 'green';
+						$r->msg = 'Need change label, printing now';
+						$r->print = 1;
+
+						if($changed_label != true)
+						{
+							$l = new ChangeShipmentLabel;
+							$l->pid = $p->id;
+							$l->pref = $p->ref;
+							$l->phbn = $p->hbn;
+							
+							$courierArr = [];
+							$truckId = 0;
+							$tntId = 0;
+							$eizTollId = 0;
+							$checkDistance = 0;
+
+							if(Yii::app()->session['scan_warehouse']=='sydney')
+							{
+								$truckId = ImportChargeCode::TRUCK_SYD_ID;
+								$tntId = ImportChargeCode::TNT_SYDNEY_ID_TOP;
+								$tollId =952;//ImportChargeCode::MYTOLL_SYD_ID;
+							}elseif(Yii::app()->session['scan_warehouse']=='melbourne')
+							{
+								$truckId = ImportChargeCode::TRUCK_MEL_ID;
+								$tntId = ImportChargeCode::TNT_MELBOURNE_ID_TOP;
+								$tollId = 955;//ImportChargeCode::MYTOLL_MEL_ID;
+							}
+							// }elseif(Yii::app()->session['scan_warehouse']=='brisbane')
+							// {
+							// 	$truckId = ImportChargeCode::TRUCK_BNE_ID;
+							// 	$tollId = ImportChargeCode::MYTOLL_BNE_ID;
+							// }
+
+							// $p->mdata['is_b2b'] = 0;//force the change label into toll
+							$chargeWeight = $p->chargeWeight();
+							// if($chargeWeight>=70&&ZoneMapService::checkOrgRateHasDeliveryArea($p,$truckId))
+							// {
+							// 	$courierArr[$truckId] = 1;
+							// 	if($p->agent_id==3321)
+							// 	{
+							// 		$p->mdata['chargecode']='7049';
+							// 	}
+							// }else
+							// {
+							if((!empty($p->mdata['is_b2b'])&&$p->mdata['is_b2b'] ==1)||TntAPI::isMatchAmazon($p->cnee->postcode,$p->cnee->suburb,$p->cnee->address))
+							{
+								$p->mdata['is_b2b'] =1;
+								$courierArr[$tntId] = 1;
+								if($p->agent_id==3321)
+								{
+									$p->mdata['chargecode']='7049';
+								}
+							}else
+							{
+								if(EtowerAPI::canDeliver($p,$tollId))
+								{
+									$courierArr[$tollId] = 1;
+									if($p->agent_id==3321)
+									{
+										$p->mdata['chargecode']='6096';
+									}
+								}
+							}
+							// }
+							if(empty($courierArr))
+							{
+								$r->color = 'red';
+								$r->sound = 'not_found';
+								$r->msg = 'couriers can\'t deliver, contact Michelle!!!';
+								$r->print = 0;
+								$groupSound();
+								echo json_encode($r);
+								Yii::app()->end();
+							}
+							$p->ref = '';
+							$courier = 999;
+							$temp = 9999;
+							$result = false;
+							foreach ($courierArr as $key => $c) {
+								if($c<$temp)
+								{
+									$courier = $key;
+									$temp = $c;
+								}
+							}
+							if($courier!=999)
+							{
+								Tranship::model()->deleteAll('pid = :pid', [':pid' => $p->id]);
+							}
+							$courier = OrgRate::model()->findByPk($courier);
+							$result = $p->createCourierLabel($courier);
+							if($result)
+							{
+								$transaction=Yii::app()->db->beginTransaction();
+								try 
+								{
+									$p->can = $l->pref;
+									$p->update('can');
+									$l->newref = $p->ref;
+									$l->save();
+									$gatepassShipments = GatepassShipment::model()->findAll("fid = :fid",[":fid"=>$p->id]);
+									foreach ($gatepassShipments as $key => $gatepassShipment) {
+										$gatepassShipment->connote_no = $p->ref;
+										$gatepassShipment->courier_id = $courier->org_id;
+										$gatepassShipment->save();
+									}
+									$transaction->commit();
+								} catch (Exception $ex) {
+									$transaction->rollback();
+									throw $ex;
+								}
+							}else
+							{
+								$r->color = 'red';
+								$r->sound = 'not_found';
+								$r->msg = 'Create'.$courier->id.' Label Failed, contact Michelle!!!';
+								$r->print = 0;
+								$groupSound();
+								echo json_encode($r);
+								Yii::app()->end();
+							}
+						}else
+						{
+							$l = ChangeShipmentLabel::model()->find('pid = :pid', [':pid'=>$p->id]);
+						}
+
+						$p->scan_data[50][strtoupper($p->hbn)."-".$sn] = date('Y-m-d H:i:s');
+						$p->scan_no = $p->pkg - $p->scanCount();
+						$p->mdata['scan_time'] = date('Y-m-d H:i:s');
+						$p->save();
+						$dfeChangeLabel = new DfeChangeLabel();
+						$dfeChangeLabel->dfe_ref = $l->pref;
+						$dfeChangeLabel->sn = $sn;
+						$dfeChangeLabel->allied_ref = $l->newref;
+						$dfeChangeLabel->pid = $l->pid;
+						$dfeChangeLabel->create = date('Y-m-d H:i:s');
+						$dfeChangeLabel->user_id = User::currentUserID();
+						$dfeChangeLabel->save();
+					}
+				}
+
+				$groupSound();
+				echo json_encode($r);
+				Yii::app()->end();
+			}
+		}
+
+		$this->render('imp_change_label');
+	}
+
+	public function actionImpChangeLabelApi(){
+		//if(!isset($_GET['api_key']) || $_GET['api_key']!="0435b8b5-f887-4f75-8a88-1dfa58d7e5af" ){
+		if(!isset($_GET['api_key']) || $_GET['api_key']!="0546c9c6-g998-5g86-9b99-2egb69e8f6bg" ){
+			throw new CHttpException(403, 'Forbidden');
+		}
+
+		$strRefAll = trim($_GET['ref']);
+		//$list = explode("-",$strRefAll);
+		//$strRef = $list[0];
+		$sn = 0;
+
+		$courier_id = 0;
+		$changed_label = false;
+		$p = ShipmentScan::getImpShipmentByBarcode( $strRefAll, $sn, $courier_id, false, 0, $changed_label);
+
+		if(!in_array($courier_id,[Org::ORGID_COURIER_TLA,Org::ORGID_COURIER_TOLL_IPEC,Org::ORGID_COURIER_TNT_TOP,Org::ORGID_COURIER_TNT,Org::ORGID_COURIER_UBI_TOLL])||empty($p))
+		{
+			echo json_encode(["isSuccess" => false, "strMessage" => $strRefAll.' NOT FOUND']);
+			return ;
+		}
+
+		if(empty($p->packs)){
+			echo json_encode(["isSuccess" => false, "strMessage" => $strRefAll.' Haven\'t packages information']);
+			return ;
+		}
+
+		if (!empty($p) && $sn > 0) {
+			$isHbn=false;
+		}
+
+		if(!empty($p)){
+			// // get base64 pdf label return for printing
+			// $status = $p->getStatus();
+					
+			// //override fw change label error to held
+			// if(!empty($p->mdata['fw_cl_err'])){
+			// 	$status = 'Held';
+			// }
+
+			if($p->status==ImParcel::STATE_CLEAR||$p->status==ImParcel::STATE_LOCAL_ARRIVAL||$changed_label){
+				if($changed_label != true){
+					$l = new ChangeShipmentLabel;
+					$l->pid = $p->id;
+					$l->pref = $p->ref;
+					$l->phbn = $p->hbn;
+					
+					$courierArr = [];
+					$truckId = 0;
+					$tntId = 0;
+					$eizTollId = 0;
+					$checkDistance = 0;
+					if(Yii::app()->session['scan_warehouse']=='sydney')
+					{
+						$truckId = ImportChargeCode::TRUCK_SYD_ID;
+						$tntId = ImportChargeCode::TNT_SYDNEY_ID_TOP;
+						$tollId =952;//ImportChargeCode::MYTOLL_SYD_ID;
+					}elseif(Yii::app()->session['scan_warehouse']=='melbourne')
+					{
+						$truckId = ImportChargeCode::TRUCK_MEL_ID;
+						$tntId = ImportChargeCode::TNT_MELBOURNE_ID_TOP;
+						$tollId = 955;//ImportChargeCode::MYTOLL_MEL_ID;
+					}else{
+						$truckId = ImportChargeCode::TRUCK_SYD_ID;
+						$tntId = ImportChargeCode::TNT_SYDNEY_ID_TOP;
+						$tollId =952;//ImportChargeCode::MYTOLL_SYD_ID;
+					}	
+					$chargeWeight = $p->chargeWeight();	
+					if((!empty($p->mdata['is_b2b'])&&$p->mdata['is_b2b'] ==1)||TntAPI::isMatchAmazon($p->cnee->postcode,$p->cnee->suburb,$p->cnee->address))
+					{
+						$p->mdata['is_b2b'] =1;
+						$courierArr[$tntId] = 1;
+						if($p->agent_id==3321)
+						{
+							$p->mdata['chargecode']='7049';
+						}
+					}else
+					{
+						if(EtowerAPI::canDeliver($p,$tollId))
+						{
+							$courierArr[$tollId] = 1;
+							if($p->agent_id==3321)
+							{
+								$p->mdata['chargecode']='6096';
+							}
+						}
+					}
+					// }
+					if(empty($courierArr))
+					{
+						echo json_encode(["isSuccess" => false, "strMessage" => 'couriers can\'t deliver, contact Michelle!!!']);
+						return ;
+					}
+					$p->ref = '';
+					$courier = 999;
+					$temp = 9999;
+					$result = false;
+					foreach ($courierArr as $key => $c) {
+						if($c<$temp)
+						{
+							$courier = $key;
+							$temp = $c;
+						}
+					}
+					if($courier!=999)
+					{
+						Tranship::model()->deleteAll('pid = :pid', [':pid' => $p->id]);
+					}
+					$courier = OrgRate::model()->findByPk($courier);
+					$result = $p->createCourierLabel($courier);
+					if($result)
+					{
+						$transaction=Yii::app()->db->beginTransaction();
+						try 
+						{
+							$p->can = $l->pref;
+							$p->update('can');
+							$l->newref = $p->ref;
+							$l->save();
+							$gatepassShipments = GatepassShipment::model()->findAll("fid = :fid",[":fid"=>$p->id]);
+							foreach ($gatepassShipments as $key => $gatepassShipment) {
+								$gatepassShipment->connote_no = $p->ref;
+								$gatepassShipment->courier_id = $courier->org_id;
+								$gatepassShipment->save();
+							}
+							$transaction->commit();
+						} catch (Exception $ex) {
+							$transaction->rollback();
+							throw $ex;
+						}
+					}else
+					{
+						echo json_encode(["isSuccess" => false, "strMessage" => 'Create'.$courier->id.' Label Failed, contact Michelle!!!']);
+						return ;
+					}						
+				}else{
+					$l = ChangeShipmentLabel::model()->find('pid = :pid', [':pid'=>$p->id]);
+				}
+
+				$p->scan_data[50][strtoupper($p->hbn)."-".$sn] = date('Y-m-d H:i:s');
+				$p->scan_no = $p->pkg - $p->scanCount();
+				$p->mdata['scan_time'] = date('Y-m-d H:i:s');
+				$p->save();
+				$dfeChangeLabel = new DfeChangeLabel();
+				$dfeChangeLabel->dfe_ref = $l->pref;
+				$dfeChangeLabel->sn = $sn;
+				$dfeChangeLabel->allied_ref = $l->newref;
+				$dfeChangeLabel->pid = $l->pid;
+				$dfeChangeLabel->create = date('Y-m-d H:i:s');
+				$dfeChangeLabel->user_id = User::currentUserID();
+				$dfeChangeLabel->save();
+			}
+		}
+		$or = OrgRate::model()->findByPk($p->mdata['org_rate_id']);
+			if($or->org_id == 115){
+				$file_data = $this->renderPartial('//_pdf/_label_fastway_zpl2020', ['label' => $p], true);
+			}
+			else if($or->org_id==114){ 
+				$file_data = $this->renderPartial('//_pdf/label_tla_zpl', ['label' => $p,'pkg_sn'=>$sn], true);
+			}
+			else if($or->org_id==101){
+				$file_data = $this->renderPartial('//_pdf/label_aupost_zpl', ['label' =>$p,'pkg_sn'=> $sn], true);
+			}
+			else{
+				$orgRate=OrgRate::model()->findByPk($p->mdata['org_rate_id']);
+				if(!empty($p->mdata['eiz']))
+				{
+					// zpl toll
+					if(!empty($p->mdata['eiz_id']) ){
+						if(preg_match('/TOLL/i',$orgRate->code)){
+							$file_data = $this->renderPartial('//_pdf/label_eiz_toll_zpl', ['model' => $p,'sn'=>$sn], true);
+						}
+						else if(preg_match('/ALLIED/i',$orgRate->code)){
+							$file_data = $this->renderPartial('//_pdf/label_eiz_allied_zpl', ['model' => $p,'sn'=> $sn], true);
+						}
+					}
+				}
+			}
+
+			echo json_encode([
+				"isSuccess" => true,
+				"strMessage"=>"success", 
+				"numCheckCount"=>$sn,
+				"strZpl" =>  $file_data
+			]);
+			Yii::app()->end();
+	}
+
+	/**
+	 * process scan check in
+	 */
+	public function actionDfeChangeLabel()
+	{
+		// $model = Consol::model()->findByPk();
+
+		if (!empty($_POST)) {
+			// get scan result
+			if (isset($_POST['barcode'])) {
+
+				$groupSound = function() use(&$r, &$p){
+					$ss = [];
+					foreach(['sound', 'amazon', 'area', 'label','dg','cfire', 'sorting'] as $k){
+						if(!empty($r->{$k})){
+							$ss[] = $r->{$k};
+						}
+						unset($r->{$k});
+					}
+					
+					if(!empty($_POST['unpacking']))
+					{
+						if(!empty($p->ref) && preg_match('/.+(\d{4})[^\d]*$/', $p->ref, $m)){
+							$ss = array_merge($ss, str_split($m[1]));
+						}
+						$r->sounds = $ss;
+
+						if(!empty($r->pkg))
+						{
+							$r->sounds[] = "p";
+							$r->sounds[] = $r->pkg;
+						}
+					}else
+					{
+						$r->sounds = $ss;
+					}
+				};
+				$courier_id = 0;
+				$sn = 0;
+				$isHbn = false;
+				$changedShipment = null;
+				$changed_label = false;
+				$scaned = false;
+				$r = new StdClass;
+				$r->color = 'red';
+				$r->sound = 'not_found';
+				$r->amazon = '';
+				$r->dg = '';
+				$r->area = 'sydney';
+				$r->stop = 0;
+				$r->msg = 'NOT FOUND';
+				$r->status = 'UNKNOWN';
+				$r->nosound = 0;
+				$r->found = 0;
+				$r->id = 0;
+				$r->label = '';
+				$r->print = 0;
+				$r->pkg = 0;
+				$r->cfire = '';
+
+				$status_suffix = '';
+
+				$barcode = $_POST['barcode'];
+				$r->msg = 'Not Found ' . $barcode;
+				$p = ShipmentScan::getDFEShipmentByBarcode($barcode, $sn, $courier_id, false, 0, $changed_label);
+
+				if((!in_array($courier_id,[Org::ORGID_COURIER_DFE_TOP,Org::ORGID_COURIER_DFE])&&!$changed_label)&&empty($p->mdata['allied_id'])||empty($p)){
+					$r->color = 'red';
+					$r->sound = 'not_found';
+					$r->stop = 0;
+					$r->msg = 'NOT FOUND';
+					$r->status = 'UNKNOWN';
+					$r->nosound = 0;
+					$r->found = 0;
+					$groupSound();
+					echo json_encode($r);
+					Yii::app()->end();
+				}
+
+
+				if (!empty($p) && $sn > 0) {
+					$isHbn=false;
+				}
+
+				if(!empty($p))
+				{
+					// get base64 pdf label return for printing
+					$status = $p->getStatus();
+					
+					//override fw change label error to held
+					if(!empty($p->mdata['fw_cl_err'])){
+						$status = 'Held';
+					}
+					$r->found = 1;
+					$r->id = $p->id;
+					$r->status = strtoupper($status).', ' . $p->ref . ',' . $sn.$status_suffix;
+					$r->msg = '';
+					$r->gatepass='';
+					$r->hold='';
+					$r->sound = preg_replace('/\s/i', '_', preg_replace('/(\[.*\])+/', '', strtolower($status)));
+					$r->sn = $sn; 
+					// if(preg_match('/^clear/i', $status)) $r->sound='cleared';
+					// if(preg_match('/^courier/i', $status)&&!preg_match('/Courier Before Report/i', $status)) $r->sound='courier';
+					// if(preg_match('/Courier Before Report/i', $status)) $r->sound='courier_before_report';
+					if (preg_match('/Held/i', $status)) {
+						$r->color = 'red';
+						$r->sound='held';
+					}
+					if (preg_match('/clear wait/i', $status)) {
+						// $r->sound='wait';
+						$r->color = 'red';
+						$r->sound='held';
+					}
+					if (preg_match('/conclear/i', $status)) {
+						$r->color = 'red';
+						$r->sound='held';
+					}
+
+					// if(!isset($p->mdata['is_b2b']))
+					// {
+					// 	$r->color = 'red';
+					// 	$r->msg = 'This shipment isn\'t be set with isB2B';
+					// 	$groupSound();
+					// 	echo json_encode($r);
+					// 	Yii::app()->end();
+					// }
+
+
+					if($p->status==ImParcel::STATE_CLEAR||$p->status==ImParcel::STATE_LOCAL_ARRIVAL||$changed_label)
+					{
+						$r->color = 'green';
+						$r->msg = 'Need change label, printing now';
+						$r->print = 1;
+
+						if($changed_label != true)
+						{
+							$l = new ChangeShipmentLabel;
+							$l->pid = $p->id;
+							$l->pref = $p->ref;
+							$l->phbn = $p->hbn;
+							
+							$courierArr = [];
+							$truckId = 0;
+							$tntId = 0;
+							$eizTollId = 0;
+							$checkDistance = 0;
+
+							if(Yii::app()->session['scan_warehouse']=='sydney')
+							{
+								$truckId = ImportChargeCode::TRUCK_SYD_ID;
+								$tntId = ImportChargeCode::TNT_SYDNEY_ID_TOP;
+								$eizTollId =ImportChargeCode::EIZ_TOLL_ID;
+								$distance = GoogleMapAPI::getDistance($p,Org::PCAE_DEPARTMENT_SYDNEY);
+								$eizAPI = new EizAPI('syd');
+								$tntAPI = TntAPI::getTntInterface('syd_top');
+								$checkDistance = 150;
+							}elseif(Yii::app()->session['scan_warehouse']=='melbourne')
+							{
+								$truckId = ImportChargeCode::TRUCK_MEL_ID;
+								$tntId = ImportChargeCode::TNT_MELBOURNE_ID_TOP;
+								$eizTollId = ImportChargeCode::EIZ_TOLL_MEL_ID;
+								$distance = GoogleMapAPI::getDistance($p,Org::PCAE_DEPARTMENT_MELBOURNE);
+								$eizAPI = new EizAPI('mel');
+								$tntAPI = TntAPI::getTntInterface('mel_top');
+								$checkDistance = 90;
+							}elseif(Yii::app()->session['scan_warehouse']=='brisbane')
+							{
+								$truckId = ImportChargeCode::TRUCK_BNE_ID;
+								$tntId = ImportChargeCode::TNT_BRISBANE_ID_TOP;
+								$eizTollId = ImportChargeCode::EIZ_TOLL_BNE_ID;
+								$distance = GoogleMapAPI::getDistance($p,Org::PCAE_DEPARTMENT_BRISBANE);
+								$eizAPI = new EizAPI('bne');
+								$tntAPI = TntAPI::getTntInterface('bne_top');
+								$checkDistance = -100;
+							}
+
+							$p->mdata['is_b2b'] = 0;//force the change label into toll
+
+							if($distance<=$checkDistance)
+							{
+								$truckResult = Shipment::getCourierCostByShipment($p->ref,ImportChargeCode::AUSTWAY_TRUCK_DELIVERY,$p->myChargeCBM());
+								if(!empty($truckResult)&&!empty($truckResult['price']))
+								{
+									$courierArr[$truckId] = $truckResult['price'];
+								}
+								if($p->mdata['is_b2b']==1)
+								{
+									$tntCost = $tntAPI->getTntCost($p,$tntId);
+									if(!empty($tntCost))
+									{
+										$courierArr[$tntId] = $tntCost;
+									}
+								}else if($p->mdata['is_b2b']==0)
+								{
+									$tollCost = $eizAPI->getQuoteTollPrice($p);
+									if(!empty($tollCost))
+									{
+										$courierArr[$eizTollId] = $tollCost;
+									}
+								}
+							}else
+							{
+								if($p->mdata['is_b2b']==1)
+								{
+									$tntCost = $tntAPI->getTntCost($p,$tntId);
+									if(!empty($tntCost))
+									{
+										$courierArr[$tntId] = $tntCost;
+									}
+								}else if($p->mdata['is_b2b']==0)
+								{
+									$tollCost = $eizAPI->getQuoteTollPrice($p);
+									if(!empty($tollCost))
+									{
+									$courierArr[$eizTollId] = $tollCost;
+									}
+								}
+							}
+							if(empty($courierArr))
+							{
+								$r->color = 'red';
+								$r->sound = 'not_found';
+								$r->msg = 'couriers can\'t deliver, contact Michelle!!!';
+								$r->print = 0;
+								$groupSound();
+								echo json_encode($r);
+								Yii::app()->end();
+							}
+							$p->ref = '';
+							$courier = 999;
+							$temp = 9999;
+							$result = false;
+							foreach ($courierArr as $key => $c) {
+								if($c<$temp)
+								{
+									$courier = $key;
+									$temp = $c;
+								}
+							}
+							if($courier!=999)
+							{
+								Tranship::model()->deleteAll('pid = :pid', [':pid' => $p->id]);
+							}
+							$courier = OrgRate::model()->findByPk($courier);
+							$result = $p->createCourierLabel($courier);
+							if($result)
+							{
+								$transaction=Yii::app()->db->beginTransaction();
+								try 
+								{
+									$p->can = $l->pref;
+									$p->update('can');
+									$l->newref = $p->ref;
+									$l->save();
+									$gatepassShipments = GatepassShipment::model()->findAll("fid = :fid",[":fid"=>$p->id]);
+									foreach ($gatepassShipments as $key => $gatepassShipment) {
+										$gatepassShipment->connote_no = $p->ref;
+										$gatepassShipment->courier_id = $courier->org_id;
+										$gatepassShipment->save();
+									}
+									$transaction->commit();
+								} catch (Exception $ex) {
+									$transaction->rollback();
+									throw $ex;
+								}
+							}else
+							{
+								$r->color = 'red';
+								$r->sound = 'not_found';
+								$r->msg = 'Create'.$courier->id.' Label Failed, contact Michelle!!!';
+								$r->print = 0;
+								$groupSound();
+								echo json_encode($r);
+								Yii::app()->end();
+							}
+						}else
+						{
+							$l = ChangeShipmentLabel::model()->find('pid = :pid', [':pid'=>$p->id]);
+						}
+
+						$dfeChangeLabel = new DfeChangeLabel();
+						$dfeChangeLabel->dfe_ref = $l->pref;
+						$dfeChangeLabel->sn = $sn;
+						$dfeChangeLabel->allied_ref = $l->newref;
+						$dfeChangeLabel->pid = $l->pid;
+						$dfeChangeLabel->create = date('Y-m-d H:i:s');
+						$dfeChangeLabel->user_id = User::currentUserID();
+						$dfeChangeLabel->save();
+					}
+				}
+
+				$groupSound();
+				echo json_encode($r);
+				Yii::app()->end();
+			}
+		}
+
+		$this->render('dfe_change_label');
+	}
+
+	/**
+	 * change label
+	 */
+	public function actionChangeLabel()
+	{
+		if (!empty($_POST)) {
+			// get scan result
+			if (isset($_POST['barcode'])) {
+
+				$groupSound = function() use(&$r, &$p){
+					$ss = [];
+					foreach(['sound', 'amazon', 'area', 'label','dg','cfire', 'sorting'] as $k){
+						if(!empty($r->{$k})){
+							$ss[] = $r->{$k};
+						}
+						unset($r->{$k});
+					}
+					
+					if(!empty($_POST['unpacking']))
+					{
+						if(!empty($p->ref) && preg_match('/.+(\d{4})[^\d]*$/', $p->ref, $m)){
+							$ss = array_merge($ss, str_split($m[1]));
+						}
+						$r->sounds = $ss;
+
+						if(!empty($r->pkg))
+						{
+							$r->sounds[] = "p";
+							$r->sounds[] = $r->pkg;
+						}
+					}else
+					{
+						$r->sounds = $ss;
+					}
+				};
+				$courier_id = 0;
+				$sn = 0;
+				$isHbn = false;
+				$changedShipment = null;
+				$changed_label = false;
+				$scaned = false;
+				$r = new StdClass;
+				$r->color = 'red';
+				$r->sound = 'not_found';
+				$r->amazon = '';
+				$r->dg = '';
+				$r->area = 'sydney';
+				$r->stop = 0;
+				$r->msg = 'NOT FOUND';
+				$r->status = 'UNKNOWN';
+				$r->nosound = 0;
+				$r->found = 0;
+				$r->id = 0;
+				$r->label = '';
+				$r->print = 0;
+				$r->pkg = 0;
+				$r->cfire = '';
+
+				$status_suffix = '';
+
+				$barcode = $_POST['barcode'];
+				$r->msg = 'Not Found ' . $barcode;
+				$p = ShipmentScan::getChangeLabelShipmentByBarcode($barcode, $sn, $courier_id, false, 0, $changed_label);
+
+
+				if (!empty($p) && $sn > 0) {
+					$isHbn=false;
+				}
+
+				if(!empty($p))
+				{
+					if($p->status!=ImParcel::DELIVERED&&Yii::app()->session['scan_warehouse']!='melbourne')
+					{
+						$r->color = 'red';
+						$r->sound='held';
+						$r->stop = 0;
+						$r->msg = $barcode.' Not Delivered';
+						$r->status = 'UNKNOWN';
+						$r->nosound = 0;
+						$r->found = 0;
+						$groupSound();
+						echo json_encode($r);
+						Yii::app()->end();
+					}
+
+					$subShipment = $p->getBlueLabelObj($sn);
+					if(empty($subShipment))
+					{
+						$r->color = 'red';
+						$r->sound='held';
+						$r->stop = 0;
+						$r->msg = $barcode.' has not changing records';
+						$r->status = 'UNKNOWN';
+						$r->nosound = 0;
+						$r->found = 0;
+						$groupSound();
+						echo json_encode($r);
+						Yii::app()->end();
+					}
+					$subSn = $p->getBlueLabelObjIndex($sn);
+					$subStatus = $subShipment->getStatus();
+					if(preg_match('/held/i', $subStatus))
+					{
+						$soundStatus = preg_replace('/\s/i', '_', preg_replace('/(\[.*\])+/', '', strtolower('HELD')));
+					}else
+					{
+						$soundStatus = preg_replace('/\s/i', '_', preg_replace('/(\[.*\])+/', '', strtolower($subShipment->getStatus())));
+					}
+					$r->found = 1;
+					$r->color = 'green';
+					$r->msg = 'Need change label, printing now, '.$subShipment->ref.', '.$subSn;
+					$r->print = 1;
+					$r->id = $subShipment->id;
+					$r->status = $subShipment->getStatus();
+					$r->gatepass = '';
+					$r->hold = '';
+					$r->sound = $soundStatus;
+					$r->sn = $subSn; 
+					$checkC = DfeChangeLabel::model()->count('dfe_ref = :oRef and sn=:sn and allied_ref = :newref and pid = :pid',[":oRef"=> $p->ref,":sn"=>$subSn,":newref"=> $subShipment->ref,":pid"=>$p->id]);
+					if($checkC>0)
+					{
+						$r->color = 'red';
+						$r->msg .= ' ;Label was scaned, please check';
+					}
+
+
+					$groupSound();
+					echo json_encode($r);
+					if(function_exists('fastcgi_finish_request')){
+						ignore_user_abort(true);
+						fastcgi_finish_request();
+					}
+
+					if(!empty($subShipment))
+					{
+						$subShipment->scan_data[50][strtoupper($subShipment->hbn.'-'.$subSn)] = date('Y-m-d H:i:s');
+						$subShipment->scan_no = $subShipment->pkg - $subShipment->scanCount();
+						$subShipment->mdata['scan_time'] = date('Y-m-d H:i:s');
+						$subShipment->save();
+						$tempWareHouse = $this->getWareHouse();
+						$thisSn = 0;
+						$thieCourierId = 0;
+						$thisBarcode = $subShipment->hbn;
+						ShipmentScan::getShipmentByBarcode($thisBarcode,$thisSn, $thisCourierId);
+
+						GatepassShipment::gatepassScan($subShipment, $thisCourierId, $subSn, $tempWareHouse);
+					}
+
+					$dfeChangeLabel = new DfeChangeLabel();
+					$dfeChangeLabel->dfe_ref = $p->ref;
+					$dfeChangeLabel->sn = $subSn;
+					$dfeChangeLabel->allied_ref = $subShipment->ref;
+					$dfeChangeLabel->pid = $p->id;
+					$dfeChangeLabel->create = date('Y-m-d H:i:s');
+					$dfeChangeLabel->user_id = User::currentUserID();
+					$dfeChangeLabel->save();
+					Yii::app()->end();
+				}
+
+				$groupSound();
+				echo json_encode($r);
+				Yii::app()->end();
+			}
+		}
+
+		$this->render('dfe_change_label');
+	}
+
+	public function actionChangeLabelApi()
+	{
+		// Api key
+		if(!isset($_GET['api_key']) || $_GET['api_key']!="0435b8b5-f887-4f75-8a88-1dfa58d7e5af" ){
+			throw new CHttpException(403, 'Forbidden');
+		}
+
+
+		$strRefAll = trim($_GET['ref']);
+		$list = explode("-",$strRefAll);
+		$strRef = $list[0];
+		$sn = $list[1];
+
+		// $objShipment = ImParcel::model()->find('ref=:ref',[':ref'=>$strRef]);
+		$courier_id = 0;
+		$changed_label = false;
+		$objShipment = ShipmentScan::getChangeLabelShipmentByBarcode( $strRefAll, $sn, $courier_id, false, 0, $changed_label);
+
+		if (empty($objShipment)) {
+			echo json_encode(["isSuccess" => false, "strMessage" => "cant find ref ".$strRefAll]);
+			return ;
+		}
+
+		if($objShipment->status!=ImParcel::DELIVERED&&Yii::app()->session['scan_warehouse']!='melbourne')
+		{
+			// $r->color = 'red';
+			// $r->sound='held';
+			// $r->stop = 0;
+			// $r->msg = $barcode.' Not Delivered';
+			// $r->status = 'UNKNOWN';
+			// $r->nosound = 0;
+			// $r->found = 0;
+			// $groupSound();
+			// echo json_encode($r);
+			// Yii::app()->end();
+			echo json_encode(["isSuccess" => false, "strMessage" => $strRefAll.' Not Delivered']);
+			return ;
+		}
+
+		$subShipment = $objShipment->getBlueLabelObj($sn);
+		if(empty($subShipment))
+		{
+			// $r->color = 'red';
+			// $r->sound='held';
+			// $r->stop = 0;
+			// $r->msg = $barcode.' has not changing records';
+			// $r->status = 'UNKNOWN';
+			// $r->nosound = 0;
+			// $r->found = 0;
+			// $groupSound();
+			// echo json_encode($r);
+			// Yii::app()->end();
+			echo json_encode(["isSuccess" => false, "strMessage" => $strRefAll.' has not changing records']);
+			return ;
+		}
+		$subSn = $objShipment->getBlueLabelObjIndex($sn);
+		// $r->found = 1;
+		// $r->color = 'green';
+		// $r->msg = 'Need change label, printing now, '.$subShipment->ref.', '.$subSn;
+		// $r->print = 1;
+		// $r->id = $subShipment->id;
+		// $r->status = $subShipment->getStatus();
+		// $r->gatepass = '';
+		// $r->hold = '';
+		// $r->sound = preg_replace('/\s/i', '_', preg_replace('/(\[.*\])+/', '', strtolower($subShipment->getStatus())));
+		// $r->sn = $subSn; 
+		$checkC = DfeChangeLabel::model()->count('dfe_ref = :oRef and sn=:sn and allied_ref = :newref and pid = :pid',[":oRef"=> $objShipment->ref,":sn"=>$subSn,":newref"=> $subShipment->ref,":pid"=>$objShipment->id]);
+		if($checkC>0)
+		{
+			// $r->color = 'red';
+			// $r->msg .= ' ;Label was scaned, please check';
+		}
+
+
+		// $groupSound();
+		// echo json_encode($r);
+		// if(function_exists('fastcgi_finish_request')){
+		// 	ignore_user_abort(true);
+		// 	fastcgi_finish_request();
+		// }
+
+		if(!empty($subShipment))
+		{
+			$subShipment->scan_data[50][strtoupper($subShipment->hbn.'-'.$subSn)] = date('Y-m-d H:i:s');
+			$subShipment->scan_no = $subShipment->pkg - $subShipment->scanCount();
+			$subShipment->mdata['scan_time'] = date('Y-m-d H:i:s');
+			$subShipment->save();
+
+			$tempWareHouse = $this->getWareHouse();
+			$thisSn = 0;
+			$thieCourierId = 0;
+			$thisBarcode = $subShipment->hbn;
+			ShipmentScan::getShipmentByBarcode($thisBarcode,$thisSn, $thisCourierId);
+			GatepassShipment::gatepassScan($subShipment, $thisCourierId, $subSn, $tempWareHouse);
+					
+		}
+
+		$dfeChangeLabel = new DfeChangeLabel();
+		$dfeChangeLabel->dfe_ref = $objShipment->ref;
+		$dfeChangeLabel->sn = $subSn;
+		$dfeChangeLabel->allied_ref = $subShipment->ref;
+		$dfeChangeLabel->pid = $objShipment->id;
+		$dfeChangeLabel->create = date('Y-m-d H:i:s');
+		$dfeChangeLabel->user_id = User::currentUserID();
+		$dfeChangeLabel->save();
+		// Yii::app()->end();
+
+
+		//////////////
+
+
+
+			$or = OrgRate::model()->findByPk($subShipment->mdata['org_rate_id']);
+			if($or->org_id == 115){
+				$file_data = $this->renderPartial('//_pdf/_label_fastway_zpl2020', ['label' => $subShipment], true);
+			}
+			else if($or->org_id==114){ 
+				$file_data = $this->renderPartial('//_pdf/label_tla_zpl', ['label' => $subShipment,'pkg_sn'=>$subSn], true);
+			}
+			else if($or->org_id==101){
+				$file_data = $this->renderPartial('//_pdf/label_aupost_zpl', ['label' => $subShipment,'pkg_sn'=> $subSn], true);
+			}
+			else{
+				$orgRate=OrgRate::model()->findByPk($subShipment->mdata['org_rate_id']);
+				if(!empty($subShipment->mdata['eiz']))
+				{
+					// zpl toll
+					if(!empty($subShipment->mdata['eiz_id']) ){
+						if(preg_match('/TOLL/i',$orgRate->code)){
+							$file_data = $this->renderPartial('//_pdf/label_eiz_toll_zpl', ['model' => $subShipment,'sn'=> $subSn], true);
+						}
+						else if(preg_match('/ALLIED/i',$orgRate->code)){
+							$file_data = $this->renderPartial('//_pdf/label_eiz_allied_zpl', ['model' => $subShipment,'sn'=> $subSn], true);
+						}
+					}
+				}
+				// else if(preg_match('/UBI_TOLL/i',$orgRate->code)){
+				// 	$file_data = $this->renderPartial('//_pdf/label_ubi_toll_zpl', ['model' => $subShipment,'sn'=> $_GET['sn']], true);
+				// }
+			}
+
+			echo json_encode([
+				"isSuccess" => true,
+				"strMessage"=>"success", 
+				"numCheckCount"=>$checkC,
+				"strZpl" =>  $file_data
+			]);
+			Yii::app()->end();
+	}
+
+	private function getWareHouse()
+	{
+		if(!empty($_POST['tempWarehouse']))
+			{
+				$tempWareHouse = $_POST['tempWarehouse'];
+			}else
+			{
+				$tempWareHouse=106;
+				if (!empty(Yii::app()->session['scan_warehouse']) && Yii::app()->session['scan_warehouse']=='melbourne') {
+					$tempWareHouse=218;
+				}else if (!empty(Yii::app()->session['scan_warehouse']) && Yii::app()->session['scan_warehouse']=='brisbane')
+				{
+					$tempWareHouse=530;
+				}
+				else if (!empty(Yii::app()->session['scan_warehouse']) && Yii::app()->session['scan_warehouse']=='perth') 
+				{
+					$tempWareHouse=811;
+				}
+			}
+
+		return $tempWareHouse;
+	}
+	private function palletScan($barcode,&$r,$groupSound)
+	{
+		$warehouseProcessService = new WarehouseProcessService();
+		$msg = "";
+		if(!empty($_POST['palletScan'])&&in_array($_GET['op'],['resort','checkin','status']))
+		{
+			$tempWareHouse = $this->getWareHouse();
+			$results = ImParcelService::getShipmentFromLocation($barcode,$tempWareHouse);
+			if(!empty($results))
+			{
+				$msg.="</br><h2>Location Record:</h2>";
+				foreach ($results as $key => $re) {
+					$msg.="</br>".$re['shipment']->ref."-".$re['sno']."";
+				}
+			}
+			if($msg == "")
+			{
+				$msg = "Not Scan Record";
+				$r->color = 'red';
+				$r->sound = 'not_found';
+				$r->stop = 0;
+				$r->msg = 'Empty Pallet '.$barcode;
+				$r->status = 'not_found';
+				$groupSound();
+				echo json_encode($r);
+				Yii::app()->end();
+			}
+		} 
+
+		$check1 = false;
+		$check2 = false;
+		$check3 = false;
+		$heldRef = [];
+		$notGP = [];
+		$notBelong = [];
+		foreach ($results as $key => $value) {
+			$p = $value['shipment'];
+			if($p->status !=ImParcel::STATE_CLEAR && $p->status !=ImParcel::STATE_LOCAL_ARRIVAL&& $p->status !=ImParcel::STATE_COURIER)
+			{
+				$heldRef[] = $value['shipment']->ref.":".$value['shipment']->getStatus();
+				$check1 = true;
+			}
+
+			if($_GET['op']=='resort')
+			{
+				$mms = ManiMap::model()->with('manifest')->findAll('fid = :fid and type =50', [':fid' => $p->id]);
+				if(empty($mms)&&empty($p->cargo_process))
+				{
+				$notGP[] = $value['shipment']->ref.":without gatepass record";
+				$check2 = true;
+				}
+			}
+		}
+
+		if($check1||$check2)
+		{
+			$r->color = 'red';
+			$r->sound = '';
+			$r->stop = 0;
+			$r->msg = 'Abnormal Shipment ';
+			$r->status = '';
+		}
+
+		$soundArr = [];
+		$msgArr = [];
+		$statusArr = [];
+		$save_p = false;
+
+		if($check1)
+		{
+			$soundArr[]='held';
+			$msgArr[]='Abnormal Shipment '.join('</br>',$heldRef).' In Pallet';
+			$statusArr[]='held';
+		}
+
+		if($check2)
+		{
+			$soundArr[]='held';
+			$msgArr[]='Abnormal Shipment '.join('</br>',$notGP).' In Pallet';
+			$statusArr[]='held';
+		}
+
+		$msgArr[] = $msg;
+
+		if($check1||$check2)
+		{
+			$r->sound = join('-',$soundArr);
+			$r->found = join('-',$statusArr);
+			$r->msg=join('</br></br>',$msgArr);
+			$r->status=join('</br>',$statusArr);
+			$groupSound();
+			echo json_encode($r);
+			Yii::app()->end();
+		}
+		else
+		{
+			$save_p = true;
+			$soundArr[] = 'pallet-cleared';
+			$r->color = 'green';
+			$r->sound = join('-',$soundArr);
+			$r->stop = 0;
+			$r->msg = 'Pallet '.$barcode.$msg;
+			$r->status = 'Cleared';
+			$r->nosound = 0;
+			$r->found = 0;
+			$groupSound();
+			echo json_encode($r);
+			if(function_exists('fastcgi_finish_request')){
+				ignore_user_abort(true);
+				fastcgi_finish_request();
+			}
+
+			if ($_GET['op']=='resort'&&$save_p) 
+			{
+				$scanout = [];
+				$ss = [];
+				$trans = Yii::app()->db->beginTransaction();
+				try{
+					foreach ($results as $key => $value) 
+					{
+						$p = $value['shipment'];
+						$sn = $value['sno'];
+						if(empty($scanout[$p->id]))
+						{
+							$scanout[$p->id] = [$sn];
+							$ss[$p->id] = $p;
+						}else
+						{
+							$scanout[$p->id][] = $sn;
+						}
+						$courier_id=$p->getCourierId();
+						ShipmentScan::genShipmentScan($p, ShipmentScan::PALLET_TYPE, $sn, $tempWareHouse, 3600,$p->hbn);
+						$scaned = GatepassShipment::gatepassScan($p, $courier_id, $sn, $tempWareHouse);
+						$warehouseProcessService->prepareDoneShipment($p->id);
+					}
+					ImParcelService::locationMarkScanned($barcode,$tempWareHouse,true);
+
+					foreach ($scanout as $key => $sns) 
+					{
+						$p = $ss[$key];
+						$p->mdata['whscan_out'] = date('Y-m-d H:i:s');
+						if (!empty($p->mdata['gpscan_time'])&&!is_array($p->mdata['gpscan_time'])) {
+							unset($p->mdata['gpscan_time']);
+						}
+						foreach ($sns as $k => $sn) {
+							$p->mdata['gpscan_time'][$sn]=$sn.':'. date('Y-m-d H:i:s');
+						}
+						if (!empty($p->mdata['gpscan_time'])&&is_array($p->mdata['gpscan_time'])) {
+							asort($p->mdata['gpscan_time']);
+						}
+						$p->save();
+					}
+
+
+					$trans->commit();
+				} catch (Exception $ex) {
+					$trans->rollback();
+					throw $ex;
+				}
+
+			}else if($_GET['op']=='checkin'&&$save_p)
+			{
+				$trans = Yii::app()->db->beginTransaction();
+				try{
+					foreach ($results as $key => $value) 
+					{
+						$p = $value['shipment'];
+						$sn = $value['sno'];
+						$courier_id=$p->getCourierId();
+						ShipmentScan::genShipmentScan($p, ShipmentScan::CHECKIN, $sn, $tempWareHouse, 3600,$p->hbn);
+					}
+					ImParcelService::locationMarkScanned($barcode,$tempWareHouse,false);
+					$trans->commit();
+				} catch (Exception $ex) {
+					$trans->rollback();
+					throw $ex;
+				}
+			}
+			Yii::app()->end();
+		}
+	}
+
+	private function checkRegoStatus($barcode,$r)
+	{
+		$bookings = PickupBooking::model()->findAll("status = :status and rego = :rego",[":status"=>PickupBooking::SCHEDULED,":rego"=>$barcode]);
+		if(!empty($bookings))
+		{
+
+			$groupSound = function() use(&$r, &$p){
+				$ss = [];
+				foreach(['blueLabel','sound', 'amazon', 'area', 'label','dg','cfire', 'sorting','special'] as $k){
+					if(!empty($r->{$k})){
+						$ss[] = $r->{$k};
+					}
+					unset($r->{$k});
+				}
+				
+				if(!empty($_POST['unpacking']))
+				{
+					if(!empty($p->ref) && preg_match('/.+(\d{4})[^\d]*$/', $p->ref, $m)){
+						$ss = array_merge($ss, str_split($m[1]));
+					}
+					$r->sounds = $ss;
+
+					if(!empty($r->pkg))
+					{
+						$r->sounds[] = "p";
+						$r->sounds[] = $r->pkg;
+					}
+				}else
+				{
+					$r->sounds = $ss;
+				}
+			};
+
+
+			$r->color = 'green';
+			$r->sound = 'found';
+			$r->stop = 0;
+			$r->msg = '';
+			$r->status = 'found';
+			$r->nosound = 0;
+			$r->found = 0;
+			foreach ($bookings as $key => $booking) {
+				$r->msg .= "</br>Booking".($key+1).": <a href='#' onclick='return showMoreAboutBooking(\"".$booking->booking_number."\");'>".$booking->booking_number." ".$booking->booking_time."</a>";
+			}
+			$r->msg .="</br><div id ='bookingDetail'></div>";
+
+
+			$groupSound();
+			echo json_encode($r);
+			Yii::app()->end();
+		}
+	}
+
+
+}

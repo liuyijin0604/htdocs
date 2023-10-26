@@ -1,0 +1,221 @@
+<?php
+
+	class ImsService extends Service
+	{
+		public $orgId = null;
+		public $chargecode = null;
+		public $currency = null;
+		function __construct($orgId,$chargecode,$currency="AUD")
+		{
+			$this->orgId = $orgId;
+			$this->chargecode = $chargecode;
+			$this->currency = $currency;
+		}
+
+		public function prepareData($d,$packagesInfo=[],$checkShipment=false)
+		{
+			$o=new stdClass();
+			$o->status=1;
+			$o->msg='';
+			$o->shipmentData='';
+
+
+			$shipmentData = new stdClass();
+			$shipmentData->no = empty($d[2]) ? '' : trim($d[2]);
+			$shipmentData->cust_ref = empty($d[1]) ? '' : trim($d[1]);
+
+
+
+			$check = ImParcel::model()->count(['condition'=>'(cref = :cref or hbn =:cref) and status !=100','params'=>[':cref'=>$shipmentData->cust_ref],'order'=>'id desc']);
+            if($check>0&&$checkShipment)
+            {
+            	$o->status = 0;
+                $o->msg = '[90003] - '.$shipmentData->cust_ref."  is existed";
+				return $o;
+            }
+
+
+
+
+
+			$shipmentData->type = 10;
+			$shipmentData->weight = empty($d[3]) ? 0 : floatval($d[3]);
+			$shipmentData->packs = empty($d[12]) ? 1 : intval($d[12]);
+			if(preg_match('/[;,]+/', $d[17])){
+				$dim = preg_split('/[;,\s]+/', $d[17]);
+				$shipmentData->dim = ['w' => 0, 'h' => 0, 'd' => 0];
+				$i = 0;
+				foreach($shipmentData->dim as $k => $v){
+					$shipmentData->dim[$k] = empty($dim[$i])? 0 : $dim[$i];
+					$i++;
+				}
+				$shipmentData->cbm = number_format(array_product($shipmentData->dim) / 1000000, 6);
+			}else{
+				$shipmentData->cbm = number_format((empty($d[17])?0:$d[17]), 6);
+			}
+			// $shipmentData->cbm = empty($d[17]) ? 0 : floatval($d[17]);
+			$shipmentData->currency = 'AUD';
+			$shipmentData->insurance = floatval(empty($d[25]) ? 0 : $d[25]);
+			$shipmentData->shipper = (object) [
+				'name' => empty($d[18]) ? '' : $d[18],
+				'address' => empty($d[19]) ? '' : $d[19],
+				'state' => empty($d[21]) ? '' : $d[21],
+				'city' => empty($d[20]) ? '' : $d[20],
+				'postcode' => empty($d[22]) ? '' : $d[22],
+				'country' => empty($d[23]) ? 'CHINA' : $d[23],
+				'phone' => empty($d[24]) ? '' : $d[24],
+			];
+			$shipmentData->consignee = (object) [
+				'name' => empty($d[4]) ? '' : $d[4],
+				'company' => empty($d[5]) ? '' : $d[5],
+				'address' => empty($d[7]) ? '' : $d[7],
+				'state' => strtoupper(empty($d[9]) ? '' : $d[9]),
+				'city' => empty($d[8]) ? '' : $d[8],
+				'suburb' => empty($d[8]) ? '' : $d[8],
+				'postcode' => empty($d[10]) ? '' : $d[10],
+				'country' => empty($d[11]) ? 'Australia' : $d[11],
+				'phone' => empty($d[6]) ? '' : $d[6],
+				'email' => empty($d[43]) ? '' : $d[43],
+			];
+			if (!empty($d[26])) {
+				$shipmentData->receiver = (object) [
+					'name' => empty($d[26]) ? '':$d[26],
+					'phone' => empty($d[27])?'':$d[27],
+					'address' => empty($d[28])?'':$d[28],
+					'suburb' => empty($d[29])?'':$d[29],
+					'state' => empty($d[30])?'':$d[30],
+					'postcode' => empty($d[31])?'':$d[31],
+				];
+			}
+			if (!empty($d[32]))	$shipmentData->clear = trim($d[32]);
+			if (!empty($d[33]))	$shipmentData->amazon_po = trim($d[33]);
+			// if (!empty($d[34]))	$shipmentData->amazon_sid = trim($d[34]);
+			if (!empty($d[34])) $shipmentData->amazon_shipment_ids = trim($d[34]);
+			if (!empty($d[35]))	$shipmentData->cust_invoice_ref =  substr(trim($d[35]), 0, 20);
+			if (!empty($d[36]))	$shipmentData->importer_abn = trim($d[36]);
+			if (!empty($d[37]))	$shipmentData->vendor_id = trim($d[37]);
+			if (!empty($d[38]))	$shipmentData->consignor_tin = trim($d[38]);
+			if (!empty($d[39]))	$shipmentData->dg = trim($d[39]);
+			if (!empty($d[40]))	$shipmentData->direct = trim($d[40]);
+			if (!empty($d[42]))	$shipmentData->pe_number = trim($d[42]);
+			if (!empty($d[41]))	$packages = trim($d[41]);
+			if (!empty($d[44]))	$shipmentData->marks_and_numbers = trim($d[44]);
+			if (!empty($d[46])) $shipmentData->wooden_box = trim($d[46]);
+			if(!empty(trim($this->currency)))
+			{
+				$shipmentData->currency = trim($this->currency);
+			}
+
+
+			if(!empty(trim($d[45])))
+			{
+				$shipmentData->currency = trim($d[45]);
+			}
+
+			if(!empty($packages))
+			{
+				try
+				{
+					$packArr = [];
+					$pas = explode('_', $packages);
+					foreach ($pas as $pObjk => $pObj) {
+						$myWeight = explode('&', $pObj)[0];
+						$myDims = explode('&', $pObj)[1];
+						$myQty = empty(explode('*', $myDims)[1])?1: explode('*', $myDims)[1];
+						$myDims = explode('*', $myDims)[0];
+						$myDepth = explode(':', $myDims)[0];
+						$myWidth = explode(':', $myDims)[1];
+						$myHeight = explode(':', $myDims)[2];
+						for ($i=0; $i < $myQty; $i++) {
+							$packObj = new stdClass();
+							$packObj->weight = $myWeight;
+							$packObj->width = $myWidth;
+							$packObj->height = $myHeight;
+							$packObj->depth = $myDepth;
+							$packArr[] = $packObj;
+						}
+					}
+					$shipmentData->packages = $packArr;
+
+				}catch(Exception $ex)
+				{
+					$o->status = 0;
+					$o->msg = '[90003] - packages format-> weight&length:width:height*qty_weight:length&width:height_weight&length:width:height*qty';
+					return $o;
+				}
+			}
+
+			if(!empty($packagesInfo[$shipmentData->cust_ref]))
+			{
+				$shipmentData->packages = $packagesInfo[$shipmentData->cust_ref];
+			}
+
+			if(empty($shipmentData->packages))
+			{
+				$sp = ShipmentPackage::model()->find('cref =:cref',[":cref"=>$shipmentData->cust_ref]);
+				if(!empty($sp))
+				{
+					$thisPackages = json_decode($sp->packages);
+					$shipmentData->packages = $thisPackages;
+				}
+			}
+
+			$total=0;
+			if (!empty($shipmentData->amazon_po)) {
+				$amazonMsg = '[90005] - Number of amazon po must equals the number of amazon shipment id';
+				if (!empty($shipmentData->amazon_shipment_ids)) {
+					$amazonPoSperateNumber = preg_match_all('/[.,;]/', trim($shipmentData->amazon_po));
+					$amazonIdsSperateNumber = preg_match_all('/[.,;]/', trim($shipmentData->amazon_shipment_ids));
+					$amazonPoArr = preg_split('/[.,;]/', trim($shipmentData->amazon_po));
+					$amazonShipmentIds = preg_split('/[.,;]/', trim($shipmentData->amazon_shipment_ids));
+					if(count($amazonPoArr)!=count($amazonShipmentIds))
+					{
+						$o->status = 0;
+						$o->msg = $amazonMsg;
+						return $o;
+					}
+				}else
+				{
+					$o->status = 0;
+					$o->msg = $amazonMsg;
+					return $o;
+				}
+			}else if(empty($shipmentData->amazon_po)&&!empty($shipmentData->amazon_shipment_ids))
+			{
+				$o->status = 0;
+				$o->msg = '[90005] - Number of amazon po must equals the number of amazon shipment id';
+				return $o;
+			}
+
+			if (!empty($d[13])) {
+				$names = explode(';', $d[13]);
+				$values = explode(';', $d[15]);
+				$qtys = explode(';', $d[14]);
+				if (sizeof($names) != sizeof($values) || sizeof($names) != sizeof($qtys)) {
+					$o->status = 0;
+					$o->msg = '[90003] - Shipment items(name,quantity,value) do not have the same numbers';
+					return $o;
+				}
+				$shipmentData->items=[];
+				foreach ($names as $k => $name) {
+					$shipmentData->items[$k] = (object) ['type' => 'O', 'name' => trim($name), 'qty' => trim($qtys[$k]), 'price' => trim($values[$k])];
+					$total+=floatval($values[$k])*floatval($qtys[$k]);
+				}
+				if (empty($d[16]) || floatval($d[16]) == 0) {
+					$o->status = 0;
+					$o->msg = '[90013] - Shipment should include total values';
+					return $o;
+				}
+				if ($total/ floatval($d[16])>1.1||$total/ floatval($d[16])<0.9) {
+					$o->status = 0;
+					$o->msg = '[90013] - Shipment items values not equal to total values';
+					return $o;
+				}
+			}
+			$shipmentData->agent_id= $this->orgId;
+			$shipmentData->chargecode = $this->chargecode;
+			$o->shipmentData=$shipmentData;
+			return  $o;
+		}
+	}
+?>

@@ -1,0 +1,162 @@
+<?php
+//opcache_invalidate(__FILE__);
+Yii::import('application.libs.tcpdf.tcpdf_barcodes_1d', true);
+Yii::import('application.libs.tcpdf.tcpdf_barcodes_2d', true);
+//$aid = $label->ref . sprintf('%02s', $pkg_sn) . '00060' . '02' . '0';
+//$aid .= AusPostAPI::aidChkDgt($aid);
+?>
+<div style="font-family: Helvetica, Verdana, Geneva, sans-serif; font-size: 20px;">
+    <table width="100%" border="0" cellspacing="0" cellpadding="0">
+        <tr>
+            <td>
+                <div style="text-align:left; padding: 1px;"><img src="<?= Yii::app()->request->hostInfo . Yii::app()->baseUrl; ?>/images/parcel-one-high-resolution-logo-color-on-transparent-background.png" width="136" height="80" /></div>
+            </td>
+            <td>
+                <div style="text-align:center; padding: 1px;background:black;color:white;height:100%"><span style="font-weight: 900; font-size:3em;">FHE</span><!-- <img src="<?= Yii::app()->request->hostInfo . Yii::app()->baseUrl; ?>/images/fast_horse.png" width="86" height="76" /> --></div>
+            </td>
+        </tr>
+    </table>
+
+    <table width="100%" border="0" cellspacing="0" cellpadding="0">
+        <tr>
+            <td valign="top" height="200">
+                <!-- <h3>Cnee Address</h3> -->
+                <table width="100%" border="0" cellspacing="0" cellpadding="0">
+                    <tr>
+                        <td width="200" style="padding:0"><b style="font-size:1.2em;">DELIVER TO</b></td>
+                        <td valign="top" style="font-size:1.1em;" style="padding:0"><b>PHONE:</b> <?= $label->cnee->tel; ?></td>
+                    </tr>
+                </table>
+                <p style="font-size:1.4em"><?= $label->cnee->name; ?><br />
+                    <?= $label->cnee->apAddress(); ?>
+                </p>
+            </td>
+            <td width="160" valign="top" align="center">
+                <?php
+                $packages = json_decode($label->packages);
+                $package = @$packages[$pkg_sn-1];
+                $qrcode = str_pad($label->ref, 22) . str_pad("B", 1) . str_pad($label->hbn, 20) . str_pad(date('ymd'), 6) . str_pad($label->weight, 6) . str_pad(' ', 2) . str_pad(sprintf("%04d", @$package->length), 4) . str_pad(sprintf("%04d", @$package->width), 4) . str_pad(sprintf("%04d", @$package->height), 4) . str_pad(sprintf("%05d", $label->cbm), 5) . str_pad(' ', 18) . str_pad('N', 1) . str_pad('N', 1) . str_pad(' ', 10) . str_pad('N', 1) . str_pad('N', 1) . str_pad(' ', 4) . str_pad(' ', 11) . str_pad('R', 1) . str_pad(' ', 9) . str_pad($label->cnee->name, 40) . str_pad($label->cnee->address, 30) . str_pad($label->cnee->suburb, 30) . str_pad($label->cnee->postcode, 10) . str_pad('AU', 2) . str_pad(' ', 14) . str_pad($label->cnee->tel, 10) . str_pad(' ', 18) . str_pad('TF2', 3);
+                $dm = new TCPDF2DBarcode($qrcode, 'QRCODE');
+                echo $dm->getBarcodeHTML(4, 4, 'black');
+                ?>
+            </td>
+        </tr>
+    </table>
+    <hr />
+    <table width="100%" border="0" cellspacing="0" cellpadding="0">
+        <tr>
+            <td valign="top" width="550" height="100"><b>SERVICE</b>
+            <div style="text-align:center; padding: 1px;background:black;color:white;width:50%;"><span style="font-weight: 900; font-size:2em;">FHE</span></div>
+                <!-- <p><small>FHE</small></p> -->
+                <!-- <h1><?= 1//$label->getCageNo(); ?></h1> -->
+            </td>
+            <td align="right" valign="top">
+                <?php
+                    $packages = json_decode($label->packages);
+                    $package = @$packages[$pkg_sn-1];
+                    echo '<b style="font-size:1.4em;">' . @$package->weight . '/' . $label->weight . 'kg</b>';
+                ?>
+                <p><?php echo $pkg_sn . " of " . $label->pkg; ?></p>
+            </td>
+        </tr>
+    </table>
+    <hr />
+    <hr />
+    <table width="100%" border="0" cellspacing="0" cellpadding="0">
+        <tr>
+            <td>
+                <p align="center" style="font-size:1.25em;">Ref: <?= $label->ref . ($label->pkg > 1 ? '-' . $pkg_sn : ''); ?></p>
+            </td>
+        </tr>
+        <tr>
+            <td><?php
+                        //$bc = new TCPDFBarcode(chr(241).'019931265099999891'.$aid, 'C128');
+                        //echo $bc->getBarcodeSVG(2, 130, 'black');
+                        ?><img height="125px" src="data:image/svg+xml;base64,<?php
+                                                                                $bc = new TCPDFBarcode($label->ref . ($label->pkg > 1 ? '-' . $pkg_sn : ''), 'C128');
+                                                                                echo base64_encode($bc->getBarcodeSVGcode(2, 100, 'black'));
+                                                                                ?>" width="95%" style="margin:0 15px;" />
+                <p align="center">Barcode</p>
+            </td>
+
+        </tr>
+        <tr>
+            <td>
+                <p align="center" style="font-size:1.25em;">Ref: <?= $label->ref . ($label->pkg > 1 ? '-' . $pkg_sn : ''); ?></p>
+            </td>
+        </tr>
+    </table>
+    <hr />
+
+    <table width="100%" border="0" cellspacing="0" cellpadding="0">
+        <tr>
+            <td width="240" height="240" rowspan="2" style="border-right: 1px solid; font-size: 0.95em;" valign="top"><b>SENDER</b><br />
+                <?php
+                $oc = OrgContact::model()->find('org_id = :id AND status = 1 AND func & 8 > 1', [':id' => $label->agent_id]);
+                $name=$default_rts? Org::COMPANY_NAME_SL : $label->cnor->name;
+                if (!empty($label->agent->extra['delivery_label_name'])) {
+                    $name=$label->agent->extra['delivery_label_name'];
+                }
+                if (empty($oc) || $default_rts) :
+                ?>
+                    <?php switch($label->ddpt_id) {
+                        case 106:
+                            echo $name . '<br />' . Org::IM_COMPANY_ADDRESS_TLA . '<br />' . Org::IM_COMPANY_CITY_TLA;
+                            break;
+                        case 218:
+                            echo $name . '<br />' . Org::WAREHOUSE_ADDRESS_MEL . '<br />' . Org::WAREHOUSE_CITY_MEL;
+                            break;
+                        case 530:
+                            echo $name . '<br />' . Org::WAREHOUSE_ADDRESS_BNE . '<br />' . Org::WAREHOUSE_CITY_BNE;
+                            break;
+                        case 811:
+                            echo $name . '<br />' . Org::WAREHOUSE_ADDRESS_PER . '<br />' . Org::WAREHOUSE_CITY_PER;
+                            break;
+                        default:
+                            echo $name . '<br />' . Org::IM_COMPANY_ADDRESS_TLA . '<br />' . Org::IM_COMPANY_CITY_TLA;
+                    } ?>
+                <?php else :
+                    echo $oc->name, '<br />',
+                    $oc->address, '<br />',
+                    $oc->suburb, ', ', $oc->state, ' ', $oc->postcode;
+                endif; ?>
+                <div style="text-align:center; padding: 1px;background:black;color:white;"><span style="font-weight: 900; font-size:2em;">FHE</span></div>
+                <?php
+                if(!empty($label->mdata['preDeliverWarehouseName'])) {
+                    echo '<div style="text-align:center; padding: 1px;background:black;color:white;"><span style="font-weight: 900; font-size:2em;">' . $label->mdata['preDeliverWarehouseName'] . '</span></div>';
+                }
+                ?>
+            </td>
+            <td valign="top" style="font-size: 16px;">
+                <b>Aviation Security and Dangerous Goods Declaration</b>
+                <p>The sender acknowledges that this article may be carried by
+                    air and will be subject to aviation security and clearing
+                    procedures; and the sender declares that the article does not
+                    contain any dangerous or prohibited goods, explosive or
+                    incendiary devices. A false declaration is a criminal offence.</p>
+            </td>
+        </tr>
+        <tr>
+            <td valign="top" style="border-top: 1px solid;">
+                <?= $label->hbn; ?><br />
+                Ref: <?= $label->cref; ?>
+                <?php if (in_array($label->agent_id, [650]) && !empty($label->cref)) {
+                    $bc = new TCPDFBarcode($label->cref, 'C128');
+                    echo '<p style="padding:5px 0">';
+                    //$bc->getBarcodeSVG(2, 30, 'black');
+                    echo '</p>';
+                }
+                echo '<p><br>Barcode</p>';
+                $bc = new TCPDFBarcode($label->ref . ($label->pkg > 1 ? '-' . $pkg_sn : ''), 'C128');
+                echo '<p style="padding:5px 0">', $bc->getBarcodeHTML(2, 40, 'black'), '</p>';
+                //}
+                ?>
+            </td>
+        </tr>
+        <tr>
+            <td>
+
+            </td>
+        </tr>
+    </table>
+</div>

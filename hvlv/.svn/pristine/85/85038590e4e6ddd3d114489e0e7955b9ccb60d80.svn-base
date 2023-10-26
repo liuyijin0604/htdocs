@@ -1,0 +1,363 @@
+<?php
+
+class FLHunterFTP
+{
+
+	private $link;
+	public $link_time;
+	private $err_code = 0;
+	public $mode = FTP_BINARY;
+	private $consignmentId;
+	private $host =  'ftp.transvirtual.com.au';
+	private $username = 'NTZLMT';
+	private $password = 'GT8BCS';
+
+	const RATE_TYPE = [
+		'F&L_HUNTER_SYD' => 106,
+		'F&L_HUNTER_MEL' => 218,
+		'F&L_HUNTER_BNE' => 530
+	];
+
+	public function __construct($type = 106)
+	{
+		switch ($type) {
+			case 106:
+				$this->consignmentId = "FLL";
+				break;
+			case 218:
+				$this->consignmentId = "FLL3";
+				break;
+			case 530:
+				$this->consignmentId = "FLL4";
+				break;
+		}
+	}
+
+	public function connect($port = '21', $pasv = false, $ssl = false, $timeout = 30)
+	{
+		$start = time();
+		if ($ssl) {
+			if (!$this->link = @ftp_ssl_connect($this->host, $port, $timeout)) {
+				$this->err_code = 1;
+				return false;
+			}
+		} else {
+			if (!$this->link = @ftp_connect($this->host, $port, $timeout)) {
+				$this->err_code = 1;
+				return false;
+			}
+		}
+		if (@ftp_login($this->link, $this->username, $this->password)) {
+			if ($pasv)
+				ftp_pasv($this->link, true);
+			$this->link_time = time() - $start;
+			return true;
+		} else {
+			$this->err_code = 1;
+			return false;
+		}
+		register_shutdown_function(array(&$this, 'close'));
+	}
+
+	public function put($remote, $local)
+	{
+		if (!$this->link) {
+			$this->err_code = 2;
+			return false;
+		}
+		$dirname = pathinfo($remote, PATHINFO_DIRNAME);
+		if (!$this->chdir($dirname)) {
+			$this->mkdir($dirname);
+		}
+		ftp_pasv($this->link, true);
+		if (ftp_put($this->link, $remote, $local, $this->mode)) {
+			return true;
+		} else {
+			$this->err_code = 7;
+			return false;
+		}
+	}
+
+	public function chdir($dirname)
+	{
+		if (!$this->link) {
+			$this->err_code = 2;
+			return false;
+		}
+		if (@ftp_chdir($this->link, $dirname)) {
+			return true;
+		} else {
+			$this->err_code = 6;
+			return false;
+		}
+	}
+
+	public function mkdir($dirname)
+	{
+		if (!$this->link) {
+			$this->err_code = 2;
+			return false;
+		}
+		$dirname = $this->ck_dirname($dirname);
+		$nowdir = '/';
+		foreach ($dirname as $v) {
+			if ($v && !$this->chdir($nowdir . $v)) {
+				if ($nowdir)
+					$this->chdir($nowdir);
+				@ftp_mkdir($this->link, $v);
+			}
+			if ($v)
+				$nowdir .= $v . '/';
+		}
+		return true;
+	}
+
+	private function ck_dirname($url)
+	{
+		$url = str_replace('', '/', $url);
+		$urls = explode('/', $url);
+		return $urls;
+	}
+
+	public function close()
+	{
+		return @ftp_close($this->link);
+	}
+
+	public function get_error()
+	{
+		if (!$this->err_code)
+			return false;
+		$err_msg = array(
+			'1' => 'Server can not connect',
+			'2' => 'Not connect to server',
+			'3' => 'Can not delete non-empty folder',
+			'4' => 'Can not delete file',
+			'5' => 'Can not get file list',
+			'6' => 'Can not change the current directory on the server',
+			'7' => 'Can not upload files'
+		);
+		return $err_msg[$this->err_code];
+	}
+
+	public function createShipment($p)
+	{
+		$myRef = $this->getConsignmentId();
+		$barcodes = [];
+		$numTotalPkgCount = $p->pkg;
+		$strPostcode = "";
+		if (!empty($p->postcode)) {
+			$strPostcode = $p->postcode;
+		} else {
+			if (!empty($p->cnee->postcode)) {
+				$strPostcode = $p->cnee->postcode;
+			}
+		}
+		for ($i = 1; $i <= $p->pkg; $i++) {
+			$barcodes[] = $myRef . str_pad($i, 3, "0", STR_PAD_LEFT) . str_pad($numTotalPkgCount, 3, "0", STR_PAD_LEFT) . str_pad($strPostcode, 4, "0", STR_PAD_LEFT);
+		}
+		return [$myRef, $barcodes];
+	}
+
+	private function getConsignmentId()
+	{
+		$consignemntNumber = ConnoteRange::newNumber('Org', 4282, $this->consignmentId);
+		return $consignemntNumber;
+	}
+
+	public static function getPackages($shipment)
+	{
+		$consignmentDataArr = [];
+		if (!empty($shipment->packs)) {
+			foreach ($shipment->packs as $key => $package) {
+				$consignmentData = new stdClass();
+				$consignmentData->qty = 1;
+				$consignmentData->weight = number_format($package['weight'], 2, '.', '');
+				$consignmentData->length = number_format($package['length'], 0, '.', '');
+				$consignmentData->width = number_format($package['width'], 0, '.', '');
+				$consignmentData->height = number_format($package['height'], 0, '.', '');
+				$consignmentDataArr[] = $consignmentData;
+			}
+		} else {
+			if (!empty($shipment->cbm)) {
+				$thisCBM = (($shipment->weight / $shipment->pkg) / rand(251, 280));
+				$cbm = $thisCBM * 1000000;
+				$x = pow($cbm / (3 * 3 * 4), 1 / 3);
+				for ($i = 0; $i < $shipment->pkg; $i++) {
+					$consignmentData = new stdClass();
+					$consignmentData->qty = 1;
+					$consignmentData->weight = number_format($shipment->weight / $shipment->pkg);
+					if (4 * $x >= 120) {
+						$x = pow($thisCBM / (3 * 3 * 3), 1 / 3);
+						$consignmentData->length = number_format(3 * $x, 0, '.', '');
+						$consignmentData->width = number_format(3 * $x, 0, '.', '');
+						$consignmentData->height = number_format(3 * $x, 0, '.', '');
+					} else {
+						$consignmentData->length = number_format(3 * $x, 0, '.', '');
+						$consignmentData->width = number_format(3 * $x, 0, '.', '');
+						$consignmentData->height = number_format(4 * $x, 0, '.', '');
+					}
+					$consignmentDataArr[] = $consignmentData;
+				}
+			}
+		}
+		return $consignmentDataArr;
+	}
+
+	public static function canDeliver($shipment,$orgRate)
+	{
+		$or = OrgRate::model()->findByPk($orgRate);
+		$o = new stdClass();
+		$o->code = 0;
+		$o->msg="";
+		$o->data = 0;
+
+		$price = 0;
+		$postcode = $shipment->cnee->postcode;
+		$suburb = $shipment->cnee->suburb;
+		$weight = $shipment->weight;
+
+		$zoneMap = ZoneMap::model()->find('org_id = :oid AND zone_id = :zoneid AND pc_lo <= :code AND pc_hi >= :code AND suburb=:suburb', [':oid' =>$or->org_id ,':zoneid' => $or->zone_id,':code' => $postcode,':suburb' => $suburb]);
+		$chargeCode = 'xxxxxxxxx';
+		if (!empty($zoneMap) && !empty($zoneMap['z1'])) {
+			$chargeCode = $zoneMap['z1'];
+		}
+		$zrs = ZoneRate::model()->findAll("zone = :s AND (weight_lo < :w AND weight_hi >= :w) AND rate_id = :rateid AND base+item+perkg > 0 ", [':s' => $chargeCode, ':w' => $weight, ':rateid' => $orgRate]);
+		if (!empty($zrs))
+		{
+			return true;
+		}else
+		{
+			return false;
+		}
+	}
+
+	public static function getCost($orgRate, $suburb, $postcode, $weight,$noRemote=false,$isNoFuel = false)
+	{
+		$or = OrgRate::model()->findByPk($orgRate);
+		$o = new stdClass();
+		$o->code = 0;
+		$o->msg="";
+		$o->data = 0;
+
+		$price = 0;
+		$postcode = intval($postcode)+0;
+		$zoneMap = ZoneMap::model()->find('org_id = :oid AND zone_id = :zoneid AND pc_lo <= :code AND pc_hi >= :code AND suburb=:suburb', [':oid' =>$or->org_id ,':zoneid' => $or->zone_id,':code' => $postcode,':suburb' => $suburb]);
+		$chargeCode = 'xxxxxxxxx';
+		if (!empty($zoneMap) && !empty($zoneMap['z1'])) {
+			$chargeCode = $zoneMap['z1'];
+		}
+		$zrs = ZoneRate::model()->findAll("zone = :s AND (weight_lo < :w AND weight_hi >= :w) AND rate_id = :rateid AND base+item+perkg > 0 ", [':s' => $chargeCode, ':w' => $weight, ':rateid' => $orgRate]);
+		if (!empty($zrs)) {
+			// get maximum one
+			foreach ($zrs as $zr) {
+				$temp = $zr['base'] + $zr['item'];
+				if ($zr['nkg'] > 0) {
+					$wl = $weight;
+					$temp += ceil($wl / $zr['nkg']) * $zr['perkg'];
+				} else {
+					$temp +=  $weight * $zr['perkg'];
+				}
+				if ($zr['minimum'] > 0 && $temp < $zr['minimum']) {
+					$temp = $zr['minimum'];
+				}
+				$price = max($price, $temp);
+			}
+
+			if(!$noRemote)
+			{
+				$remoteCostRate = RemoteChargeRate::model()->find("rate_id = :rateId and (postcode =:postcode or CONCAT('0',postcode)=:postcode) and upper(suburb) = :suburb and (perkg+base)>0",[":rateId"=>$or->id,":postcode"=>$postcode,":suburb"=>strtoupper($suburb)]);
+				if(!empty($remoteCostRate))
+				{
+					$remoteSurcharge = $weight*$remoteCostRate->perkg+$remoteCostRate->base;
+					$price+=$remoteSurcharge;
+				}
+			}
+
+			if(!empty($or->mdata["fuel"])&&$isNoFuel===false)
+			{
+				$price=$price+($price*$or->mdata["fuel"]);
+			}
+			
+		}else
+		{
+			$o->code = 1;
+			$o->msg="no rate for this serivce";
+			return $o;
+		}
+
+		$o->msg = "success";
+		$o->data = $price;
+		return $o;
+	}
+
+	public function manifest($ss)
+	{
+		$i = 1;
+		$xls = new oExcel('CSV');
+		$xls->setTitle("IMPORT FILE");
+		$xls->addRow($i++, ['ConsignmentNumber', 'ConsignmentDate', 'ServiceLevel', 'PickupRequired', 'ReferenceOther', 'ReferenceOther2', 'CustomerName', 'CustomerCode', 'SenderReference', 'SenderName', 'SenderName2', 'SenderAddress', 'SenderAddress2', 'SenderSuburb', 'SenderState', 'SenderPostcode', 'SenderContact', 'SenderPhone', 'SenderEmail', 'PickupSpecialInstructions', 'PickupBookingTime', 'PickupCloseTime', 'PickupBookingNotes', 'SenderisResidential', 'ReceiverReference', 'ReceiverName', 'ReceiverName2', 'ReceiverAddress', 'ReceiverAddress2', 'ReceiverSuburb', 'ReceiverState', 'ReceiverPostcode', 'ReceiverContact', 'ReceiverPhone', 'ReceiverEmail', 'DeliverySpecialInstructions', 'DeliveryBookingTime', 'DeliveryCloseTime', 'DeliveryBookingNotes', 'ReceiverisResidential ', 'ItemReference', 'ItemQuantity', 'ItemDescription', 'ItemFreightContents', 'ItemWeight', 'ItemLength', 'ItemWidth', 'ItemHeight', 'ItemCubicQuantity', 'ItemBarcode', 'ItemBarcodeAlternate', 'Additional Service', 'ItemDangerousGoodsUNNumber', 'ItemDangerousGoodsClass', 'ItemDangerousGoodsSubRisk', 'ItemDangerousGoodsPackingGroup', 'ItemDangerousGoodsNotes']);
+
+		foreach ($ss as $s) {
+			$strCompanyName = Org::model()->findByPk($s->agent_id)->extra['delivery_label_name'];
+			$objDepotOrg = Org::model()->findByPk($s->ddpt_id);
+
+			//$temp = $s->cnee->phone;
+			//$temp1 = $objDepotOrg->phone;
+
+			$dateTemp = date('Y-m-d') . ' 06:00:00';
+			$receive_email = !empty($s->cnee->email) ? $s->cnee->email : "imports@toplogistics.com.au";
+			$residential = !empty($s->cnee->company) ? 'N' : 'Y';
+			if (strtotime(date('Y-m-d H:i:s')) < strtotime($dateTemp)) {
+				$pickupBookingTime = date('Y-m-d') . ' 10:00:00';
+				$pickupCloseTime = date('Y-m-d') . ' 17:00:00';
+			} else {
+				$pickupBookingTime = date('Y-m-d', strtotime("1 day")) . ' 10:00:00';
+				$pickupCloseTime = date('Y-m-d', strtotime("1 day")) . ' 17:00:00';
+			}
+			$strAdditional = !empty($s->mdata['Tailgate_Pallet'])? "Tail-Lift Truck(Delivery)":"";
+			$sender_name = !empty($strCompanyName) ? $strCompanyName : $s->cnor->name;
+			$total_item_weight = 0;
+			$barcodes = explode(',', $s->mdata['barcode']);
+			$packages = self::getPackages($s);
+			$total_count = count($packages);
+			$mitems = json_encode($packages);
+			$mitems = json_decode($mitems);
+			foreach ($mitems as $key => $item) {
+				$item_weight = round($item->weight, 1);
+				$item_dim = $item->length / 100 . "x" . $item->width / 100 . "x" . $item->height / 100;
+				$total_item_weight += $item_weight;
+				$trackingNumber = $barcodes[$key];
+				$xls->addRow($i++, [$s->ref, date('Y-m-d'), 'ROAD EXPRESS', 'Y', '', '', 'FREIGHT & LOGISTICS', 'FLLPTL', '', $sender_name, '', $objDepotOrg->address, '', $objDepotOrg->suburb, $objDepotOrg->state, $objDepotOrg->postcode, $sender_name, $objDepotOrg->phone, $objDepotOrg->email, '', $pickupBookingTime, $pickupCloseTime, '', '', '', $s->cnee->name, '', $s->cnee->address, '', $s->cnee->suburb, $s->cnee->state, $s->cnee->postcode, $s->cnee->name, $s->cnee->tel, $receive_email, 'ATL', '', '', '', $residential, '', 1, 'CARTON', '', $item_weight, $item->length, $item->width, $item->height, '', $trackingNumber, '', $strAdditional, '', '', '', '', '']);
+				//$xls->addRow($i++, [$s->ref, date('Y-m-d'), 'ROAD EXPRESS', 'N', '', '', 'FREIGHT & LOGISTICS', 'APITEST', '', $sender_name, '', $objDepotOrg->address, '', $objDepotOrg->suburb, $objDepotOrg->state, $objDepotOrg->postcode, $sender_name, $objDepotOrg->phone, $objDepotOrg->email, '', $pickupBookingTime, $pickupCloseTime, '', '', '', $s->cnee->name, '', $s->cnee->address, '', $s->cnee->suburb, $s->cnee->state, $s->cnee->postcode, $s->cnee->name, $s->cnee->tel, $receive_email, '', '', '', '', $residential, '', 1, 'CARTON', '', $item_weight, $item->length, $item->width, $item->height, '', $trackingNumber, '', '', '', '', '', '', '']);
+			}
+		}
+		$tempfile ="";
+		if ($i > 1) {
+			$mfn = "FLLPTL".date('Y-m-dH-i-s');
+			$tempfile = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR."FLHunterManifest".DIRECTORY_SEPARATOR.$mfn.'.csv';
+			// if (!file_exists($tempfile)) {
+			// 	mkdir($tempfile);
+			// }
+			$xls->output($tempfile,"",false);
+
+			return $tempfile;
+		}
+		return $tempfile;
+	}
+
+	public function ftpManifest($filename){
+		require_once Yii::app()->basePath . '/vendor/autoload.php';
+
+		$sftp = new phpseclib\Net\SFTP($this->host,21);
+		if ($sftp->login($this->username, $this->password)) {
+			$sftp->chdir('/');
+			$mfn = 'FLLPTL'.date('Y-m-dH-i-s').'.csv';
+			//$data = file_get_contents($filename);
+			if($sftp->put($mfn, $filename,1)){
+				return "true";
+			}
+		}
+		return "false";
+	}
+}

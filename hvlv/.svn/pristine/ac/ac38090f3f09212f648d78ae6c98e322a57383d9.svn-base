@@ -1,0 +1,509 @@
+<div style="text-align:right;">
+<a class="jqm_link" href="<?=$this->createUrl('dmawbConsol/ubm', array('id'=>$model->id));?>"><div style="background-position:-16px -432px" class="icon"></div> <?=$this->t('Underbond Move');?></a>
+<a href="#" data-dropdown="#<?=$_GET["tabid"];?>-dropdown-1"><div style="background-position:-48px -688px" class="icon"></div> Export Manifests</a>
+<a class="jqm_link" href="<?=$this->createUrl('imcoConsol/copyRef', array('id' => $model->id))?>"><div style="background-position:-176px -544px" class="icon"></div> Copy Ref</a>
+
+<?php if (Acl::hasAccess("B:imcoConsol/localArrival")) { ?>
+<a class="jqm_link" href="<?=$this->createUrl('imcoConsol/localArrival', array('id' => $model->id))?>"><div style="background-position:-176px -544px" class="icon"></div> Local Arrival</a>
+<?php } ?>
+
+<a class="jqm_link" href="<?=$this->createUrl('imcoConsol/allPickup', array('id' => $model->id))?>"><div style="background-position:-176px -544px" class="icon"></div> All Pickup</a>
+
+<a class="jqm_link" href="<?=$this->createUrl('imcoConsol/allTruckDelivery', array('id' => $model->id))?>"><div style="background-position:-176px -544px" class="icon"></div> All Truck Delivery</a>
+
+</div>
+<div id="<?=$_GET["tabid"];?>-dropdown-1" class="dropdown dropdown-tip dropdown-relative dropdown-anchor-right">
+	<ul class="dropdown-menu">
+        <li><a class="export" href="<?=$this->createUrl('dmawbConsol/export', array('id'=>$model->id));?>" target="_blank"><?=$this->t('Shipments');?></a></li>
+<?php if($model->service == 20):?>
+        <li><a class="export" href="<?=$this->createUrl('dmawbConsol/seaManifest', array('id'=>$model->id));?>" target="_blank"><?=$this->t('Sea Freight Manifest');?></a></li>
+        <li><a class="export" href="<?=$this->createUrl('dmawbConsol/shipmentsDo', array('id'=>$model->id));?>" target="_blank"><?=$this->t('Shipments D/O');?></a></li>
+        <li><a class="jqm_link" href="<?=$this->createUrl('imcoConsol/SeaOutturnPage', array('id'=>$model->id,'type'=>'cover'));?>" target="_blank"><?=$this->t('Sea Outturn Together');?></a></li>
+<li><a class="jqm_link" href="<?=$this->createUrl('imcoConsol/SeaDOPage', array('id'=>$model->id,'type'=>'cover'));?>" target="_blank"><?=$this->t('Sea Delivery Order Together');?></a></li>
+<?php endif; ?>
+        <li><a class="export" href="<?=$this->createUrl('dmawbConsol/seaOrder', array('id'=>$model->id));?>" target="_blank"><?=$this->t('Sea Order');?></a></li>
+        <li><a class="export" href="<?=$this->createUrl('dmawbConsol/cargoReceipt', array('id'=>$model->id));?>" target="_blank"><?=$this->t('Cargo Receipt');?></a></li>
+         <li><a class="export" href="<?=$this->createUrl('imcoConsol/dgDocument', array('id'=>$model->id));?>" target="_blank"><?=$this->t('DG Document');?></a></li>
+	</ul>
+</div>
+<?php if($model->service == 20):?>
+<div style="width:55%;position: absolute; right: 0;">
+  <?php echo $this->renderPartial('sea_operation_tab', array('model'=>$model));?>  
+</div>
+<?php endif;?>
+<div class="form">
+
+<?php $form=$this->beginWidget('CActiveForm', array(
+	'id'=>'dmawb_ov_consol-form',
+	'enableAjaxValidation'=>false,
+));
+?>
+	<?php echo $form->errorSummary($model); ?>
+       <div class="row rowcol">
+		<?php echo $form->labelEx($model,'dpt_id'); ?>
+		<?php echo $form->dropDownList($model,'dpt_id',Org::dptList()); ?>
+		<?php echo $form->error($model,'dpt_id'); ?>
+	</div>
+	<div class="row rowcol">
+	<label class="required" for="Dmawb_Consol_owner_id" aria-required="true">Customer <span class="required" aria-required="true">*</span></label>
+		<?php echo $form->hiddenField($model,'owner_id');
+			$acname1 = empty($_GET["tabid"])? 'owner_ac' : $_GET["tabid"].'_owner_ac';
+			$this->widget('zii.widgets.jui.CJuiAutoComplete', array(
+				'name' => $acname1,
+				'sourceUrl' => array('org/clientSuggest'),
+				'value' => empty($model->owner->name)? '' : $model->owner->name,
+				'options' => array(
+						'showAnim' => 'fold',
+						'minLength' => 2,
+						'delay' => 200,
+						'select' => 'js:function(event, ui){ $(this).val(ui.item["label"]); $(this).prevAll("input[type=hidden]").val(ui.item["value"]).data("ov",ui.item["value"]); return false; }',
+						'change' => 'js:function(event, ui){ if(ui.item == null) $(this).prevAll("input[type=hidden]").val($(this).prevAll("input[type=hidden]").data("ov")); return false; }',
+				),
+				'htmlOptions' => array(
+					'size' => '30',
+				),
+		));
+		?>
+	</div>
+    
+    <div class="row rowcol">
+		<?php echo $form->labelEx($model,'status'); ?>
+		<?php echo $form->dropDownList($model, 'status', DmawbConsol::$states, array('disabled' => 'disabled')); ?>
+		 <div style="background-position:-240px -416px" class="icon"></div>
+		<?php echo $form->error($model,'status'); ?>
+	</div>
+        <div style="position: fixed; right: 10em; top:20em;">
+            <a class="jqm_link" href="<?=Yii::app()->createAbsoluteUrl("ImParcel/updateClearReason/" . $model->linkShipment()->id); ?>"> <h1 style="font-size: 3em;" id="the_warning">  <?= $model->linkShipment()->getWarnings(true,true)?>&nbsp;#</h1></a>
+        </div>
+        <div style="position: fixed; right: 10em; top:30em;">
+          <h1 style="font-size: 3em;"> <?= $model->getConsolDGWarnings()?>&nbsp;#</h1>
+        </div>
+
+  <div class="row rowcol rowleft">
+    <?php echo $form->labelEx($model,'service'); ?>
+    <?php echo $form->dropDownList($model, 'service', ImcoConsol::$services); ?>
+  </div>
+	<div class="row rowcol">
+		<?php echo $form->labelEx($model,'awb'); ?>
+		<?php echo $form->textField($model,'awb',array('size'=>15,'maxlength'=>50)); ?>
+	</div>
+     <div class="row rowcol sea-input-fileds" >
+        <?php echo CHtml::label('House Billing<span class="required">*</span>','for_houseBill'); ?>
+        <?php echo CHtml::textField('mdata[house_bill]', @$model->mdata['house_bill'], array('size'=>15)); ?>
+    </div>
+
+	<div class="row rowcol">
+		<?php echo $form->labelEx($model,'airline'); ?>
+		<?php echo $form->textField($model,'airline',array('size'=>15,'maxlength'=>50)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo $form->labelEx($model,'flight'); ?>
+		<?php echo $form->textField($model,'flight',array('size'=>15,'maxlength'=>50)); ?>
+	</div>
+
+	<div class="row rowcol rowleft">
+		<?php echo $form->labelEx($model,'pol'); ?>
+		<?php $list = AppHelper::setting2List('pols'); ksort($list); ?>
+		<?php echo $form->dropDownList($model,'pol', $list); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo $form->labelEx($model,'pod'); ?>
+		<?php $list = AppHelper::setting2List('pods'); ksort($list); ?>
+		<?php echo $form->dropDownList($model,'pod', $list); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo $form->labelEx($model,'etd <span class="required">*</span>'); ?>
+		<?php echo $form->textField($model,'etd', array('size' => 12, 'id' => 'etd_'.$_GET["tabid"],'class' => 'date_input')); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo $form->labelEx($model,'eta <span class="required">*</span>'); ?>
+		<?php echo $form->textField($model,'eta', array('size' => 12, 'id' => 'eta_'.$_GET["tabid"],'class' => 'date_input')); ?>
+	</div>
+
+    <div class="row rowcol rowleft">
+        <?php echo CHtml::label('AWB Weight<span class="required">*</span>','awb_wt');?>
+        <?php echo CHtml::textField('mdata[awb_wt]', @$model->mdata['awb_wt'], array('size'=>5)); ?>Kg
+    </div>
+
+    <div class="row rowcol">
+        <?php echo CHtml::label('Chargable Wt.','cgb_wt');?>
+        <?php echo CHtml::textField('mdata[cgb_wt]', @$model->mdata['cgb_wt'], array('size'=>5)); ?>Kg
+    </div>
+      <div class="row rowcol">
+        <?php echo CHtml::label('CBM.<span class="required">*</span>','cbm');?>
+        <?php echo CHtml::textField('mdata[cbm]', @$model->mdata['cbm'], array('size'=>5)); ?>M<sup>3</sup>
+    </div>
+
+    <div class="row rowcol">
+        <?php echo CHtml::label('Pcs<span class="required">*</span>','for_shipments'); ?>
+        <?php echo CHtml::textField('mdata[shipments]', @$model->mdata['shipments'], array('size'=>5)); ?>
+    </div>
+  <div class="row rowcol">
+    <?php echo CHtml::label('&nbsp;', 'blockacr'); ?>
+    <label class="radio_label"><?php echo CHtml::checkBox('mdata[blockacr]', @$model->mdata['blockacr']); ?> 3rd Party Lodge ACR/SCR</label>
+  </div>
+      <div class="row rowcol">
+    <?php echo CHtml::label('cargo_receipt_pieces', 'cargo_receipt_pieces'); ?>
+    <?php echo CHtml::numberField('mdata[cargo_receipt_pieces]', @$model->mdata['cargo_receipt_pieces'], array('size' => 5)); ?>
+  </div>
+  <div class="row rowcol">
+    <?php echo CHtml::label('cargo_receipt_pallets', 'cargo_receipt_pallets'); ?>
+    <?php echo CHtml::numberField('mdata[cargo_receipt_pallets]', @$model->mdata['cargo_receipt_pallets'], array('size' => 5)); ?>
+  </div>
+      <div class="row air_type" >
+                <?php echo CHtml::label('Air Type','air_type');?>
+        <?php  echo CHtml::radioButtonList('mdata[air_type]' ,@$model->mdata['air_type'], ImcoConsol::$air_types, array('labelOptions' => array('class' => 'radio_label'), 'separator' => '&nbsp;&nbsp')); ?>
+      <span> &nbsp;&nbsp; <?php echo CHtml::checkBox('gen_air_type_inv'); ?> Create Loose Invoice </span>
+      </div>
+
+    <div class="row rowcol rowleft">
+        <?php echo CHtml::label('Report Value(USD)','for_dvalue'); ?>
+        <?php echo CHtml::textField('mdata[dvalue]', @$model->mdata['dvalue'], array('size'=>5)); ?>
+    </div>
+
+    <div class="row">
+        <?php echo CHtml::label('Item<span class="required">*</span>','for_item'); ?>
+        <?php echo CHtml::textField('mdata[item]', @$model->mdata['item'], array('size'=>100)); ?>
+    </div>
+    <h3>Amazon Information</h3>
+    <div class="row rowcol rowleft">
+		<?php echo CHtml::label('Amazon PO#(,;)','amazon_po'); ?>
+		<?php echo CHtml::textField("mdata[amazon_po]",@$model->mdata['amazon_po'], array('size' => 20)); ?>
+	</div>
+        <div class="row rowcol">
+		<?php echo CHtml::label('Amazon Shipment Id(,;)','amazon_shipment_ids'); ?>
+		<?php echo CHtml::textField("mdata[amazon_shipment_ids]",@$model->mdata['amazon_shipment_ids'], array('size' => 20)); ?>
+	</div>
+        <div class="row rowcol" >
+		<?php echo CHtml::label('Pallets','amazon_pallet'); ?>
+		<?php echo CHtml::numberField('mdata[amzon_pallet]',@$model->mdata['amzon_pallet'], array('size' => 5)); ?>
+	</div>
+        <div class="row rowcol" >
+		<?php echo CHtml::label('Unit Qty','amazon_uqty'); ?>
+		<?php echo CHtml::numberField('mdata[amazon_uqty]',@$model->mdata['amazon_uqty'], array('size' => 5)); ?>
+	</div>
+       <div class="row rowcol rowleft" >
+		<?php echo CHtml::label('Amazon Booking Time','amazon_booking_time'); ?>
+		<?php echo CHtml::textField('AmazonInfo[amazon_booking_time]', @$model->amazon_info->amazon_booking_time, array('size' => 20,'class'=>"datetime_input",'id'=>'amazon_book_time'.$_GET['tabid'])); ?>
+	</div>
+         <div class="row rowcol">
+		<?php echo CHtml::label("AmazonBooking Info", 'booking_ref'); ?>
+		<?php echo CHtml::textField('AmazonInfo[booking_ref]', @$model->amazon_info->booking_ref); ?>
+	</div>
+        <div class="row rowcol">
+		<?php echo CHtml::label("Choose Address", 'delivery_address'); ?>
+		<?php echo CHtml::dropDownList('mdata[delivery_address]', @$model->mdata['delivery_address'], DmawbConsol::$cargo_receip_address,array('prompt'=>'SELECT','style'=>"width:120px;")); ?>
+	</div>
+        <div class="row rowcol">
+		<?php echo CHtml::label("Delivery Address", 'cargo_receipt_addr'); ?>
+		<?php echo CHtml::textField('mdata[cargo_receipt_addr]', @$model->mdata['cargo_receipt_addr'],array('size'=>50)); ?>
+	</div>
+
+    <div class="row">
+          <div class="row rowcol rowcol-left">
+            <?php echo CHtml::label('Available Date', 'cbm'); ?>
+            <?php echo CHtml::textField('mdata[available_date]', @$model->mdata['available_date'], array('id' => 'available_date_'.$_GET["tabid"],'class' => 'date_input')); ?>
+          </div>
+          <div class="row rowcol rowcol-left">
+            <?php echo CHtml::label('Storage Date', 'Storage Date'); ?>
+            <?php echo CHtml::textField('mdata[input_storage_date]', @$model->mdata['input_storage_date'], array('id' => 'input_storage_date_'.$_GET["tabid"],'class' => 'date_input')); ?>
+          </div>
+           <div class="row rowcol">
+            <?php echo CHtml::label("Choose Address", 'goods_available_address'); ?>
+            <?php echo CHtml::dropDownList('mdata[goods_available_address]', @$model->mdata['goods_available_address'], DmawbConsol::$available_address,  array('prompt'=>'SELECT','style'=>"width:120px;")); ?>
+          </div>
+          <div class="row rowcol">
+            <?php echo CHtml::label('Goods Available At (Address)', 'arrival_cfs'); ?>
+            <?php echo CHtml::textField('mdata[arrival_cfs]', @$model->mdata['arrival_cfs'], array('size' => 50)); ?>
+          </div>
+    </div>
+
+   <div class="air-input-fileds">
+    <div class="row">
+        <div class="row rowcol">
+        <?php echo CHtml::label('Customs Declaration (AUD)','for_item'); ?>
+        <?php echo CHtml::textField('mdata[inv_item_cd]', isset($model->mdata['inv_item_cd']) ? $model->mdata['inv_item_cd'] : '85', array('size'=>20)); ?>
+        </div> 
+       <div class="row rowcol">
+        <?php echo CHtml::label('Custom Lines','for_item');?>
+        <?php echo CHtml::textField('mdata[inv_item_custom_lines]',isset($model->mdata['inv_item_custom_lines'])?$model->mdata['inv_item_custom_lines']:'',array('size'=>20));?>
+        </div>
+        <div class="row rowcol" id="document">
+            <?php echo CHtml::label('Airline Document Fee (AUD)','for_item'); ?>
+            <?php echo CHtml::textField('mdata[inv_item_ad]', isset($model->mdata['inv_item_ad']) ? $model->mdata['inv_item_ad'] : '50', array('size'=>20)); ?>
+        </div>
+        <div class="row rowcol">
+            <?php echo CHtml::label('CMR Fee (AUD)','for_item'); ?>
+            <?php echo CHtml::textField('mdata[inv_item_cmr]',isset($model->mdata['inv_item_cmr']) ? $model->mdata['inv_item_cmr'] : '15', array('size'=>20)); ?>
+        </div>
+        <div class="row rowcol">
+            <?php echo CHtml::label('Airline Terminal Fee (AUD)','for_item'); ?>
+            <?php echo CHtml::textField('mdata[inv_item_at]', isset($model->mdata['inv_item_at']) ? $model->mdata['inv_item_at'] : '0.50', array('size'=>20)); ?> /kg
+        </div>
+    </div>
+    <div class="row">
+
+        <div class="rowcol">
+            <?php echo CHtml::label('Airline Breakbulk Fee (AUD)','for_item'); ?>
+            <?php echo CHtml::textField('mdata[inv_item_ab]', isset($model->mdata['inv_item_ab']) ? $model->mdata['inv_item_ab'] : '0.10', array('size'=>20)); ?> /kg
+        </div>
+        <div class="rowcol">
+            <?php echo CHtml::label('Delivery Fee (AUD)','for_item'); ?>
+            <?php echo CHtml::textField('mdata[inv_item_dlv]', isset($model->mdata['inv_item_dlv']) ? $model->mdata['inv_item_dlv'] : '0.20', array('size'=>20)); ?> /kg
+        </div>
+        <div class="rowcol">
+            <?php echo CHtml::label('Customs Duties & Fees (AUD)','for_item'); ?>
+            <?php echo CHtml::textField('mdata[inv_item_cdty]', @$model->mdata['inv_item_cdty'], array('size'=>20)); ?>
+        </div>
+    </div>
+   </div>
+    <div class="sea-input-fileds" >
+        <div class="row">
+            <fieldset style="width:80%;position:relative;">
+                <div style="position:absolute;right: 20px;"><label>CFS Address:</label>
+                    <textarea name="mdata[cfs_address]" rows="8" cols="30"><?=@$model->mdata['cfs_address'];?></textarea>
+                </div>
+                 <div class="row">
+                  <?php echo CHtml::label('Container Type<span class="required">*</span>', 'for_item'); ?>
+                  <?php echo CHtml::radioButtonList('mdata[sea_type]', isset($model->mdata['sea_type']) ? $model->mdata['sea_type'] : 1, DmawbConsol::$containerTypes, array('labelOptions' => array('class' => 'radio_label'), 'separator' => '&nbsp;&nbsp')); ?>    
+               </div>
+              <div class="row">
+                <div class="row rowcol rowcol-left">
+                    <?php echo CHtml::label('cargo Type<span class="required">*</span>', 'for_cargo_type'); ?>
+                    <?php echo CHtml::radioButtonList('mdata[cargo_type]', isset($model->mdata['cargo_type']) ? $model->mdata['cargo_type'] : 'LCL', array('LCL' => 'LCL', "FCL" => 'FCL'), array('labelOptions' => array('class' => 'radio_label'), 'class' => 'sea_type', 'separator' => '&nbsp;&nbsp')); ?>    
+                </div>
+                <div class="row rowcol">
+                    <?php echo CHtml::label('Container No<span class="required">*</span>', 'for_container_no'); ?>
+                    <?php echo CHtml::textField('mdata[container_no]', @$model->mdata['container_no'], array('size' => 20)); ?>
+                </div>
+                <div class="row rowcol">
+                    <?php echo CHtml::label('Seal', 'sea_seal'); ?>
+                    <?php echo CHtml::textField('mdata[sea_seal]', @$model->mdata['sea_seal'], array('size' => 20)); ?>
+                </div>
+                 <div class="row rowcol">
+                    <?php echo CHtml::label('Vessel Name', 'sea_vessel'); ?>
+                    <?php echo CHtml::textField('mdata[sea_vessel]', @$model->mdata['sea_vessel'], array('size' => 20)); ?>
+                </div>
+              </div>
+            <div class="row">
+                <div class="row rowcol">
+                    <?php echo CHtml::label('Load Port', 'sea_load_port'); ?>
+                    <?php echo CHtml::textField('mdata[sea_load_port]', @$model->mdata['sea_load_port'], array('size' => 20)); ?>
+                </div>
+                    <div class="row rowcol">
+                    <?php echo CHtml::label('Carrier', 'sea_carrier'); ?>
+                    <?php echo CHtml::textField('mdata[sea_carrier]', @$model->mdata['sea_carrier'], array('size' => 20)); ?>
+                </div>
+            </div> 
+            <div class="row">
+                <div class="row rowcol">
+                    <?php echo CHtml::label('Release Type', 'sea_relase_type'); ?>
+                    <?php echo CHtml::textField('mdata[sea_relase_type]', @$model->mdata['sea_relase_type'], array('size' => 20)); ?>
+                </div>
+                 <div class="row rowcol">
+                    <?php echo CHtml::label('Marks And Numbers', 'sea_mark_number'); ?>
+                    <?php echo CHtml::textField('mdata[sea_mark_number]', @$model->mdata['sea_mark_number'], array('size' => 30)); ?>
+                </div>
+                 <div class="row rowcol">
+                    <?php echo CHtml::label('Handling Instruction', 'sea_instruction'); ?>
+                    <?php echo CHtml::textField('mdata[sea_instruction]', @$model->mdata['sea_instruction'], array('size' => 40)); ?>
+                </div>
+            </div>
+        </fieldset>
+        </div>
+<!--        <div class="row">
+           <div class="row rowcol rowcol-left">
+         <?php echo CHtml::label('Container Type','for_item'); ?>
+         <?php echo CHtml::radioButtonList('mdata[sea_type]',isset($model->mdata['sea_type'])?$model->mdata['sea_type']:1, DmawbConsol::$containerTypes,array('labelOptions' => array('class' => 'radio_label'),'separator' => '&nbsp;&nbsp'));?>    
+         </div>
+        </div>
+        <div class="row">
+         <div class="row rowcol rowcol-left">
+         <?php echo CHtml::label('cargo Type','for_cargo_type'); ?>
+         <?php echo CHtml::radioButtonList('mdata[cargo_type]',isset($model->mdata['cargo_type'])?$model->mdata['cargo_type']:'LCL',array('LCL'=>'LCL',"FCL"=>'FCL'),array('labelOptions' => array('class' => 'radio_label'),'class'=>'sea_type','separator' => '&nbsp;&nbsp'));?>    
+         </div>
+         <div class="row rowcol">
+        <?php echo CHtml::label('Container No','for_container_no'); ?>
+        <?php echo CHtml::textField('mdata[container_no]',@$model->mdata['container_no'], array('size'=>20)); ?>
+        </div>
+        </div>-->
+  
+    <!-- <div class="row">
+        <div class="row rowcol">
+        <?php echo CHtml::label('Customs Declaration (AUD)','for_item'); ?>
+        <?php echo CHtml::textField('mdata[inv_item_cd_sea]', isset($model->mdata['inv_item_cd_sea']) ? $model->mdata['inv_item_cd_sea'] : '85', array('size'=>20)); ?>
+        </div>
+         <div class="row rowcol">    
+        <?php echo CHtml::label('Custom Lines','for_item');?>
+        <?php echo CHtml::textField('mdata[inv_item_custom_lines_sea]',isset($model->mdata['inv_item_custom_lines_sea'])?$model->mdata['inv_item_custom_lines_sea']:'',array('size'=>20));?>
+        </div>
+        <div class="row rowcol" id="document">
+            <?php echo CHtml::label('Sea Document Fee (AUD)','for_item'); ?>
+            <?php echo CHtml::textField('mdata[inv_item_ad_sea]', isset($model->mdata['inv_item_ad_sea']) ? $model->mdata['inv_item_ad_sea'] : '65', array('size'=>20)); ?>
+        </div>
+        <div class="row rowcol">
+            <?php echo CHtml::label('CMR Fee (AUD)','for_item'); ?>
+            <?php echo CHtml::textField('mdata[inv_item_cmr_sea]',isset($model->mdata['inv_item_cmr_sea']) ? $model->mdata['inv_item_cmr_sea'] : '25', array('size'=>20)); ?>
+        </div>
+        <div class="row rowcol">
+            <?php echo CHtml::label('SCA(AUD)','for_item'); ?>
+            <?php echo CHtml::textField('mdata[inv_item_sca]', isset($model->mdata['inv_item_sca']) ? $model->mdata['inv_item_sca'] : '25', array('size'=>20)); ?>
+        </div>
+    </div>
+
+     <div class="row">
+        <div class="rowcol">
+            <?php echo CHtml::label('Sea Port Fee (AUD)','for_item'); ?>
+            <?php echo CHtml::textField('mdata[inv_item_pf]', isset($model->mdata['inv_item_pf']) ? $model->mdata['inv_item_pf'] : '500', array('size'=>20)); ?><span class="lcl_type" <?=$model->mdata['cargo_type']=="LCL"?"":"style ='display:none;'"?>>/cbm</span>
+        </div>
+        <div class="rowcol">
+            <?php echo CHtml::label('Time Slot (AUD)','for_item'); ?>
+            <?php echo CHtml::textField('mdata[inv_item_tsl]', isset($model->mdata['inv_item_tsl']) ? $model->mdata['inv_item_tsl'] : '60', array('size'=>20)); ?>
+        </div>
+        <div class="rowcol">
+            <?php echo CHtml::label('Delivery Fee(AUD)','for_item'); ?>
+            <?php echo CHtml::textField('mdata[inv_item_dlv_sea]', isset($model->mdata['inv_item_dlv_sea'])?$model->mdata['inv_item_dlv_sea']:650, array('size'=>20)); ?><span class="lcl_type" <?=$model->mdata['cargo_type']=="LCL"?"":"style ='display:none;'"?>>/cbm</span>
+        </div>
+        <div class="rowcol">
+            <?php echo CHtml::label('Fuel Surcharge(AUD)','for_item'); ?>
+            <?php echo CHtml::textField('mdata[inv_item_fls]', isset($model->mdata['inv_item_fls'])?$model->mdata['inv_item_fls']:'13' , array('size'=>20)); ?>%
+        </div>
+    </div>
+
+      <div class="row">
+          <div class="rowcol">
+          <?php echo CHtml::label('Customs Duties & Fees (AUD)','for_item'); ?>
+          <?php echo CHtml::textField('mdata[inv_item_cdty_sea]', @$model->mdata['inv_item_cdty_sea'], array('size'=>20)); ?>
+        </div>
+      </div>
+   </div> -->
+    <div class="row">
+      <div class="rowcol rowleft">
+            <?php
+
+                  echo '<a class="jqm_link" data-win-class="XL" href="org/orgFlexibleRateForConsol/' . $model->id . '.app"><div style="background-position:-16px 0" class="icon"></div>' . $this->t('Org Flexible Rate') . '</a>';
+                    
+            ?>
+          <div class="rowcol rowright">
+            <label class="radio_label">  <?php echo CHtml::checkBox('mdata[not_apply_org_flexible_rate]',@$model->mdata['not_apply_org_flexible_rate']); ?> Don't Apply Org Flexible Rate  </label>
+          </div>
+      </div>
+  </div>
+
+    <div class="row rowcol rowleft">
+        <span><?php echo CHtml::checkBox('gen_inv'); ?> Create Invoice</span>
+    </div>
+
+    <div class="row buttons">
+		<?php echo CHtml::submitButton('Save'); ?>
+	</div>
+
+
+<?php $this->endWidget(); ?>
+</div><!-- form -->
+
+
+<script type="text/javascript">
+$(function(){
+	var tab = $('#<?=$_GET["tabid"];?>');
+	var panel = tab.data('panel');
+      var changeToSea=function(){
+       $("label[for='DmawbConsol_awb']",panel).html('Ocean Bill<span class="required">*</span>');
+       $("label[for='DmawbConsol_flight']",panel).html('Voyage<span class="required">*</span>');
+       $("label[for='DmawbConsol_airline']",panel).html('Vessel id(IMO)<span class="required">*</span>');
+       //House Billing Of Landing
+     }
+         $(".air_type",panel).hide();
+        var awb="<?=$model->awb?>";
+        if(awb.match(/\d{3}\-\d{8}/i)&&$("#ImcoConsol_service",panel).val()!=20){
+          $(".air_type",panel).show();
+         }
+         $("#DmawbConsol_service",panel).off('change').on('change',function(){
+             let awb=$(this).val();
+             if(awb.match(/\d{3}\-\d{8}/i)&&$("#ImcoConsol_service",panel).val()!=20){
+                  $(".air_type",panel).show();
+             }else{
+                 $(".air_type",panel).hide(); 
+             }
+         });
+     
+     var changeToAir=function(){
+             $("label[for='DmawbConsol_awb']",panel).html('AWB No.');
+             $("label[for='DmawbConsol_flight']",panel).html('Flight No.');
+             $("label[for='DmawbConsol_airline']",panel).html('Airline');
+    }
+	$('form#dmawb_ov_consol-form', panel).on('success', function(e, r){
+		tab.load();
+	});
+          $('.sea-input-fileds',panel).hide();
+        <?php if(@$model->service==20):?>
+            $('.sea-input-fileds',panel).show();
+             $('.air-input-fileds',panel).hide();
+             changeToSea();
+        <?php endif;?>
+       $('#DmawbConsol_service',panel).on('change',function(e,r){
+          if($(this).val()==10){
+              $('.sea-input-fileds',panel).hide();
+              $('.air-input-fileds',panel).show();
+              changeToAir();
+          }else{
+              $('.sea-input-fileds',panel).show();
+              $('.air-input-fileds',panel).hide();
+              changeToSea();
+           }
+        });
+          $(".lcl_type",panel).hide();
+        <?php if(@$model->mdata['cargo_type']=="LCL"):?>
+             $(".lcl_type",panel).show(); 
+        <?php endif;?>
+          $('.sea_type',panel).on('change',function(){
+              if($(this).val()=='LCL'){
+                $(".lcl_type",panel).show();
+             }else{
+                $(".lcl_type",panel).hide();
+             }
+          }
+      );
+      
+      	$('#DmawbConsol_status', panel).next().on('dblclick', function(){
+		if(window.confirm('Are you sure to override status?')){
+			$(this).prev().attr('disabled', false);
+		}
+	});
+        var addr=<?=json_encode(DmawbConsol::$cargo_receip_address)?>;
+        $('#mdata_delivery_address',panel).on('change',function(){
+           var address=addr[$(this).val()];
+           if(address){
+               $('#mdata_cargo_receipt_addr',panel).val(address);
+           }
+
+        });
+    
+       $(".sea_type").on('change',function(){
+          if($(this).val()=="LCL")
+          {
+            $(".lcl_type").show();
+          }else if($(this).val()=="FCL")
+          {
+             $(".lcl_type").hide();
+          }
+       });
+      
+       var addr=<?=json_encode(DmawbConsol::$available_address)?>;
+        $('#mdata_goods_available_address',panel).on('change',function(){
+           var address=addr[$(this).val()];
+           if(address){
+             var theAddress = address.split('| ')[1];
+             $('#mdata_arrival_cfs',panel).val(theAddress);
+           }else
+           {
+              $('#mdata_arrival_cfs',panel).val("");
+           }
+        }); 
+         
+});
+</script>

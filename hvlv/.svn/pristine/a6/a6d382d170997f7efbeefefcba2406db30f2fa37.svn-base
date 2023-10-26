@@ -1,0 +1,66 @@
+<?php
+Yii::app()->clientScript->registerScript('search', "
+$('.search-button').click(function(){
+	$('.search-form').toggle();
+	return false;
+});
+$('.search-form form').submit(function(){
+	$('#word-replace-grid').yiiGridView('update', {
+		data: $(this).serialize()
+	});
+	return false;
+});
+");
+?>
+
+<div  class="pane">
+    <div style="right: 20px;position: absolute;">
+<a class="jqm_link" href="<?=$this->createUrl('wordReplace/create');?>" title="New Replacement"><div class="icon" style="background-position:-16px 0"></div> New Word</a> &nbsp; 
+<a href="<?=$this->createUrl('wordReplace/export');?>" class="export_search" target="_blank"><div style="background-position:-48px -688px" class="icon"></div> Export</a>
+<a class="jqm_link" href="<?=$this->createUrl('wordReplace/import');?>" title="Import"><div class="icon" style="background-position:-16px 0"></div> Import</a> &nbsp; 
+</div>
+<h1>Manage Word Replaces</h1>
+
+<p>
+You may optionally enter a comparison operator (<b>&lt;</b>, <b>&lt;=</b>, <b>&gt;</b>, <b>&gt;=</b>, <b>&lt;&gt;</b>
+or <b>=</b>) at the beginning of each of your search values to specify how the comparison should be done.
+</p>
+
+<?php echo CHtml::link('Advanced Search','#',array('class'=>'search-button')); ?>
+<div class="search-form" style="display:none">
+<?php $this->renderPartial('_search',array(
+	'model'=>$model,
+)); ?>
+</div><!-- search-form -->
+<div style="width:70%">
+<?php $this->widget('zii.widgets.grid.CGridView', array(
+	'id'=>'word-replace-grid',
+	'dataProvider'=>$model->search(),
+	'filter'=>$model,
+	'columns'=>array(
+		'id',
+		'pre_word',
+		'replace_word',
+                array('name'=>'type','value'=>'$data->getType()','filter'=>CHtml::dropDownList('WordReplace[type]',$model->type, WordReplace::$types,array('prompt'=>'All'))),
+		array('name'=>'status','value'=>'$data->status==0?"Disable":"Enable"', 'filter'=>CHtml::dropDownList('WordReplace[status]',$model->status,array(1=>'Enable',0=>'Disable'),array('prompt'=>'All'))),
+		array(
+			'class'=>'oButtonColumn',
+                        'template'=>'{update}{log}',
+                        'buttons'=>array(
+                            'update'=>array(
+                                'imageUrl'=>false,
+                                'visible'=>'true',
+                                'options'=>array('class' => 'jqm_link grid_view_btn'),
+                            ),
+                            'log'=>array(
+                                  'imageUrl'=>false,
+			          'url'=>'Yii::app()->createUrl("wordReplace/log", ["id" => $data->id])',
+				   'options' => array('class' => 'jqm_link grid_view_btn'),
+                            ),
+                        ),
+                    
+		),
+	),
+)); ?>
+</div>
+</div>

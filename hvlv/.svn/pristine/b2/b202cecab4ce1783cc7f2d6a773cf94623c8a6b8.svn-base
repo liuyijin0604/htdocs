@@ -1,0 +1,634 @@
+<?php
+class Dash
+{
+	public function __construct()
+	{
+	
+	}
+
+	public function getWarehouseData()
+	{
+		$cacheKey = "getWarehouseData";
+		$provide = Yii::app()->cache->get($cacheKey);
+		if(!empty($provide))
+		{
+			return json_decode($provide,true);
+		}
+
+		$provide = [];
+		$lastWorkingDay = HolidayHelper::getLastWeekday(date("Y-m-d"),'AUSYD');
+		$lastMonthWorkingDay = HolidayHelper::getLastWeekday(date("Y-m-d",strtotime('+1 day',strtotime("-1 month",strtotime(date("Y-m-d"))))),'AUSYD');
+		$today = date("Y-m-d");
+		$inStr = "Wating for WH scan";
+		$outStr= "Waiting for AirOut/Manifest";
+		$temp = array($lastWorkingDay=>['id'=>0,'date'=>'Last Working Day','in_pkg'=>0,'in_weight'=>0,'out_pkg'=>0,'out_weight'=>0],$today=>['id'=>1,'date'=>'Today till Now','in_pkg'=>0,'in_weight'=>0,'out_pkg'=>0,'out_weight'=>0],$lastMonthWorkingDay=>['id'=>2,'date'=>'Last Month Same Day','in_pkg'=>0,'in_weight'=>0,'out_pkg'=>0,'out_weight'=>0],);
+
+		$data = $this->getData($inStr,$lastWorkingDay,$lastMonthWorkingDay);
+		$outData = $this->getDataOut($lastWorkingDay,$lastMonthWorkingDay);
+
+		foreach ($data as $key => $value) {
+			$dateName = date('Y-m-d',strtotime($value['date']));
+			$temp[$dateName]['in_pkg'] = $value['pkg'];
+			$temp[$dateName]['in_weight'] = $value['weight'];
+		}
+
+		foreach ($outData as $key => $value) {
+			$dateName = date('Y-m-d',strtotime($value['date']));
+			$temp[$dateName]['out_pkg'] = $value['pkg'];
+			$temp[$dateName]['out_weight'] = $value['weight'];
+		}
+
+		$temp["Today vs Last Working Day"] = ['id'=>4,'date'=>'Today vs Last Working Day',
+			'in_pkg'=>round($temp[$today]['in_pkg']*100000/($temp[$lastWorkingDay]['in_pkg']*1000+1),0)."%",
+			'in_weight'=>round($temp[$today]['in_weight']*100000/($temp[$lastWorkingDay]['in_weight']*1000+1),0)."%",
+			'out_pkg'=>round($temp[$today]['out_pkg']*100000/($temp[$lastWorkingDay]['out_pkg']*1000+1),0)."%",
+			'out_weight'=>round($temp[$today]['out_weight']*100000/($temp[$lastWorkingDay]['out_weight']*1000+1),0)."%"];
+
+		$temp["Today vs Last Month Same Day"] = ['id'=>4,'date'=>'Today vs Last Month Same Day',
+			'in_pkg'=>round($temp[$today]['in_pkg']*100000/($temp[$lastMonthWorkingDay]['in_pkg']*1000+1),0)."%",
+			'in_weight'=>round($temp[$today]['in_weight']*100000/($temp[$lastMonthWorkingDay]['in_weight']*1000+1),0)."%",
+			'out_pkg'=>round($temp[$today]['out_pkg']*100000/($temp[$lastMonthWorkingDay]['out_pkg']*1000+1),0)."%",
+			'out_weight'=>round($temp[$today]['out_weight']*100000/($temp[$lastMonthWorkingDay]['out_weight']*1000+1),0)."%"];
+
+
+		foreach ($temp as $key => $value) {
+			if(!in_array($key,["Today vs Last Working Day","Today vs Last Month Same Day"]))
+			{
+				$temp[$key]['in_pkg'] = number_format($value['in_pkg'],0,'.',',')."pcs";
+				$temp[$key]['out_pkg'] = number_format($value['out_pkg'],0,'.',',')."pcs";
+				$temp[$key]['in_weight'] = number_format($value['in_weight'],0,'.',',')."kg";
+				$temp[$key]['out_weight'] = number_format($value['out_weight'],0,'.',',')."kg";
+			}
+		}
+
+
+		$provide = [];
+		foreach ($temp as $key => $value) {
+			$provide[] = $value;
+		}
+		Yii::app()->cache->set($cacheKey,json_encode($provide),300);
+		return $provide;
+	}
+
+	public function getWarehouseDataMonth()
+	{
+		$cacheKey = "getWarehouseDataMonth";
+		$provide = Yii::app()->cache->get($cacheKey);
+		if(!empty($provide))
+		{
+			return json_decode($provide,true);
+		}
+
+		$provide = [];
+		$lastMonth = date("Y-m", strtotime("-1 month",strtotime(date("Y-m-d"))));
+		$lastMonthWorkingDay = date("Y-m-d",strtotime("-1 month",strtotime(date("Y-m-d"))));
+		$thisMonth = date("Y-m");
+		
+		$temp = array(
+			$lastMonth=>['id'=>0,'date'=>'Last Month till Today','in_pkg'=>0,'in_weight'=>0,'out_pkg'=>0,'out_weight'=>0],
+			$thisMonth=>['id'=>1,'date'=>'This Month till Today','in_pkg'=>0,'in_weight'=>0,'out_pkg'=>0,'out_weight'=>0],);
+		$inStr = "Wating for WH scan";
+		$outStr= "Waiting for AirOut/Manifest";
+
+		$data = $this->getMonthData($inStr,$lastMonth,$thisMonth,$lastMonthWorkingDay);
+		$outData = $this->getMonthData($outStr,$lastMonth,$thisMonth,$lastMonthWorkingDay);
+
+		foreach ($data as $key => $value) {
+			$dateName = date('Y-m',strtotime($value['date']));
+			$temp[$dateName]['in_pkg'] = $value['pkg'];
+			$temp[$dateName]['in_weight'] = $value['weight'];
+		}
+
+		foreach ($outData as $key => $value) {
+			$dateName = date('Y-m',strtotime($value['date']));
+			$temp[$dateName]['out_pkg'] = $value['pkg'];
+			$temp[$dateName]['out_weight'] = $value['weight'];
+		}
+
+		$temp["This Month vs Last Month"] = ['id'=>3,'date'=>'This Month vs Last Month',
+			'in_pkg'=>round($temp[$thisMonth]['in_pkg']*100000/($temp[$lastMonth]['in_pkg']*1000+1),0)."%",
+			'in_weight'=>round($temp[$thisMonth]['in_weight']*100000/($temp[$lastMonth]['in_weight']*1000+1),0)."%",
+			'out_pkg'=>round($temp[$thisMonth]['out_pkg']*100000/($temp[$lastMonth]['out_pkg']*1000+1),0)."%",
+			'out_weight'=>round($temp[$thisMonth]['out_weight']*100000/($temp[$lastMonth]['out_weight']*1000+1),0)."%"];
+		
+		foreach ($temp as $key => $value) {
+			if($key!="This Month vs Last Month")
+			{
+				$temp[$key]['in_pkg'] = number_format($value['in_pkg'],0,'.',',')."pcs";
+				$temp[$key]['out_pkg'] = number_format($value['out_pkg'],0,'.',',')."pcs";
+				$temp[$key]['in_weight'] = number_format($value['in_weight'],0,'.',',')."kg";
+				$temp[$key]['out_weight'] = number_format($value['out_weight'],0,'.',',')."kg";
+			}
+		}
+
+		$provide = [];
+		foreach ($temp as $key => $value) {
+			$provide[] = $value;
+		}
+
+		Yii::app()->cache->set($cacheKey,json_encode($provide),300);
+		return $provide;
+	}
+
+	public function getAllGpDataMonth()
+	{
+		$cacheKey = "getAllGpDataMonth";
+		$provide = Yii::app()->cache->get($cacheKey);
+		if(!empty($provide))
+		{
+			return json_decode($provide,true);
+		}
+
+		$provide = [];
+		$lastMonth = date("Y-m", strtotime("-1 month",strtotime(date("Y-m-d"))));
+		$lastMonthWorkingDay = date("Y-m-d",strtotime("-1 month",strtotime(date("Y-m-d"))));
+		$thisMonth = date("Y-m");
+
+		$thisMonthData = $this->getGpMonthData($thisMonth."-01",date("Y-m-d"));
+		$lastMonthData = $this->getGpMonthData($lastMonth."-01",$lastMonthWorkingDay);
+		$provide[] = ["id"=>0,"date"=>"Last Month till Today","gp"=>$lastMonthData["gp"],"revenue"=>$lastMonthData["revenue"],"totalShipment"=>$lastMonthData["totalShipment"],"totalWeight"=>$lastMonthData["totalWeight"]];
+		$provide[] = ["id"=>1,"date"=>"This Month till Today","gp"=>$thisMonthData["gp"],"revenue"=>$thisMonthData["revenue"],"totalShipment"=>$thisMonthData["totalShipment"],"totalWeight"=>$thisMonthData["totalWeight"]];
+
+		$provide[] = ["id"=>2,"date"=>"This Month vs Last Month","gp"=>round($thisMonthData["gp"]*100000/($lastMonthData["gp"]*1000+1),0)."%","revenue"=>round($thisMonthData["revenue"]*100000/($lastMonthData["revenue"]*1000+1),0)."%","totalShipment"=>round($thisMonthData["totalShipment"]*100000/($lastMonthData["totalShipment"]*1000+1),0)."%","totalWeight"=>round($thisMonthData["totalWeight"]*100000/($lastMonthData["totalWeight"]*1000+1),0)."%"];
+		
+		foreach ($provide as $key => $value) {
+			if($value['date']!="This Month vs Last Month")
+			{
+				$provide[$key]['gp'] = "$".number_format($value['gp'],0,'.',',');
+				$provide[$key]['revenue'] = "$".number_format($value['revenue'],0,'.',',');
+				$provide[$key]['totalShipment'] = number_format($value['totalShipment'],0,'.',',')."pcs";
+				$provide[$key]['totalWeight'] = number_format($value['totalWeight'],0,'.',',')."kg";
+			}
+		}
+
+		Yii::app()->cache->set($cacheKey,json_encode($provide),3000);
+
+		return $provide;
+		
+	}
+
+	public static function getValue($value){
+		if(!empty($value)){
+			return number_format($value,0, '.', ',');
+		}else{
+			return 0;
+		}
+	}
+
+	public static function getDivValue($Divisor,$Dividend){
+		if($Dividend!=0){
+			return number_format($Divisor/$Dividend,0)+1;
+		}else{
+			return "n/a";
+		}
+
+	}
+
+	public function getAvgCargoProcessCloseByMonth($reportType){
+		$totalCloseMonth = 0;
+		$totalB2CCloseMonth = 0;
+		$countDays=0;
+		$result =[];
+		$beginDate = date('Y-m-01',strtotime(date("Y-m-d")));
+		$endDate = date('Y-m-d',strtotime("$beginDate +1 month -1 day"));
+		$models = ReportCache::model()->findAllBySql('select * from report_cache where status=1 and type='.$reportType.' and create_time >="'.$beginDate.'" and create_time <="'.$endDate.'"');
+		if(!empty($models)){
+			foreach($models as $model){
+				$totalCloseMonth+=$model->mdata['todayClose']['weighttotals'];
+				$totalB2CCloseMonth +=$model->mdata['todayClose']['norweighttotals'];
+				$countDays++;
+			}
+			$result['totalCloseMonth'] = number_format($totalCloseMonth/$countDays,0,'.','');
+			$result['totalB2CCloseMonth'] = number_format($totalB2CCloseMonth/$countDays,0,'.','');
+		}
+
+		$modelLeft = ReportCache::model()->findBySql('select * from report_cache where status = 1 and type = '.$reportType.' order by id desc limit 1');
+		if(!empty($modelLeft)){
+			$result['totalLeft'] = number_format($modelLeft->mdata['todayLeft']['weighttotals'],0,'.','');
+			$result['totalNorLeft'] = number_format($modelLeft->mdata['todayLeft']['norweighttotals'],0,'.','');
+			$result['totalClose'] = number_format($modelLeft->mdata['todayClose']['weighttotals'],0,'.','');
+			$result['totalNorClose'] = number_format($modelLeft->mdata['todayClose']['norweighttotals'],0,'.','');
+			$result['esttotal'] = self::getDivValue(number_format($modelLeft->mdata['todayLeft']['weighttotals'],0,'.',''),number_format($modelLeft->mdata['todayClose']['weighttotals'],0,'.',''));
+			$result['estnor'] = self::getDivValue(number_format($modelLeft->mdata['todayLeft']['norweighttotals'],0,'.',''),number_format($modelLeft->mdata['todayClose']['norweighttotals'],0,'.',''));
+			$result['esttotalavg'] =  self::getDivValue(number_format($modelLeft->mdata['todayLeft']['weighttotals'],0,'.',''),$result['totalCloseMonth']);
+			$result['estnoravg'] =  self::getDivValue(number_format($modelLeft->mdata['todayLeft']['norweighttotals'],0,'.',''),$result['totalB2CCloseMonth']);
+		}
+		return $result;
+	}
+
+	public function getEffectiveDiff($reportType){
+		$result = [0,0];
+		$model = ReportCache::model()->findBySql('select * from report_cache where status = 1 and type = '.$reportType.' order by id desc limit 1');
+		if(!empty($model)){
+			$effective = $model->mdata['effective'];
+			if(!empty($effective)){
+				$diffb2ctotal = $effective['diffb2ctotal'];
+				$diffb2ceffecttotal = $effective['diffb2ceffecttotal'];
+				$result[0]=$diffb2ceffecttotal;
+				$result[1]=$diffb2ctotal;
+				// if($diffb2ceffecttotal!=0){
+				// 	$result = $diffb2ceffecttotal."/".$diffb2ctotal." ".(round(($diffb2ceffecttotal) / $diffb2ctotal, 4) * 100)."%"; 
+				// }
+			}
+		}
+		return $result;
+	}
+
+	public function getCargoProcessReport($reportType)
+	{
+		$cacheKey = "getCargoProcessReport".$reportType;
+		// $provide = Yii::app()->cache->get($cacheKey);
+		// if(!empty($provide))
+		// {
+		// 	return json_decode($provide,true);
+		// }
+
+		$provide = [];
+		
+		$model = ReportCache::model()->findBySql('select * from report_cache where status = 1 and type = '.$reportType.' order by id desc limit 1');
+		$toDay = date("Y-m-d");
+		if(!empty($model)){
+			$yesterdayLeft = $model->mdata['yesterdayLeft'];
+			$todayNew = $model->mdata['todayNew'];
+			$todayClose = $model->mdata['todayClose'];
+        	$todayLeft = $model->mdata['todayLeft'];
+		}else
+		{
+			return $provide;
+		}
+
+		$provide[] = ["id"=>0,$toDay=>"Total",'col'=>'Count',
+						//"totaly"=>self::getValue($yesterdayLeft["total"]),"fbay"=>self::getValue($yesterdayLeft["fbapkgtotals"]),"btby"=>self::getValue($yesterdayLeft["btbpkgtotals"]),"nory"=>self::getValue($yesterdayLeft["norpkgtotals"]),
+						"totaln"=>self::getValue($todayNew["total"]),"fban"=>self::getValue($todayNew["fbatotal"]),"btbn"=>self::getValue($todayNew["btbtotal"]),"norn"=>self::getValue($todayNew["nortotal"]),
+						"totalc"=>self::getValue($todayClose["total"]),"fbac"=>self::getValue($todayClose["fbatotal"]),"btbc"=>self::getValue($todayClose["btbtotal"]),"norc"=>self::getValue($todayClose["nortotal"]),
+						"totall"=>self::getValue($todayLeft["total"]),"fbal"=>self::getValue($todayLeft["fbatotal"]),"btbl"=>self::getValue($todayLeft["btbtotal"]),"norl"=>self::getValue($todayLeft["nortotal"])
+					];
+		$provide[] = ["id"=>1,$toDay=>"CBM",'col'=>'CBM',
+						//"totaly"=>self::getValue($yesterdayLeft["cbmtotals"]),"fbay"=>self::getValue($yesterdayLeft["fbacbmtotals"]),"btby"=>self::getValue($yesterdayLeft["btbcbmtotals"]),"nory"=>self::getValue($yesterdayLeft["norcbmtotals"]),
+						"totaln"=>self::getValue($todayNew["cbmtotals"]),"fban"=>self::getValue($todayNew["fbacbmtotals"]),"btbn"=>self::getValue($todayNew["btbcbmtotals"]),"norn"=>self::getValue($todayNew["norcbmtotals"]),
+						"totalc"=>self::getValue($todayClose["cbmtotals"]),"fbac"=>self::getValue($todayClose["fbacbmtotals"]),"btbc"=>self::getValue($todayClose["btbcbmtotals"]),"norc"=>self::getValue($todayClose["norcbmtotals"]),
+						"totall"=>self::getValue($todayLeft["cbmtotals"]),"fbal"=>self::getValue($todayLeft["fbacbmtotals"]),"btbl"=>self::getValue($todayLeft["btbcbmtotals"]),"norl"=>self::getValue($todayLeft["norcbmtotals"])
+					];
+		$provide[] = ["id"=>2,$toDay=>"WEIGHT",'col'=>'Weight',
+						//"totaly"=>self::getValue($yesterdayLeft["weighttotals"]),"fbay"=>self::getValue($yesterdayLeft["fbaweighttotals"]),"btby"=>self::getValue($yesterdayLeft["btbweighttotals"]),"nory"=>self::getValue($yesterdayLeft["norweighttotals"]),
+						"totaln"=>self::getValue($todayNew["weighttotals"]),"fban"=>self::getValue($todayNew["fbaweighttotals"]),"btbn"=>self::getValue($todayNew["btbweighttotals"]),"norn"=>self::getValue($todayNew["norweighttotals"]),
+						"totalc"=>self::getValue($todayClose["weighttotals"]),"fbac"=>self::getValue($todayClose["fbaweighttotals"]),"btbc"=>self::getValue($todayClose["btbweighttotals"]),"norc"=>self::getValue($todayClose["norweighttotals"]),
+						"totall"=>self::getValue($todayLeft["weighttotals"]),"fbal"=>self::getValue($todayLeft["fbaweighttotals"]),"btbl"=>self::getValue($todayLeft["btbweighttotals"]),"norl"=>self::getValue($todayLeft["norweighttotals"])
+					];
+		
+		
+		foreach ($provide as $key => $value) {
+			if($key==0){
+				$provide[$key]['col'] = $value['col'];
+				// $provide[$key]['totaly'] = $value['totaly'];
+				// $provide[$key]['fbay'] = $value['fbay'];
+				// $provide[$key]['btby'] = $value['btby'];
+				// $provide[$key]['nory'] = $value['nory'];
+				$provide[$key]['totaln'] = intval($value['totaln']);
+				$provide[$key]['fban'] = intval($value['fban']);
+				$provide[$key]['btbn'] = intval($value['btbn']);
+				$provide[$key]['norn'] = intval($value['norn']);
+				$provide[$key]['totalc'] = intval($value['totalc']);
+				$provide[$key]['fbac'] = intval($value['fbac']);
+				$provide[$key]['btbc'] = intval($value['btbc']);
+				$provide[$key]['norc'] = intval($value['norc']);
+				$provide[$key]['totall'] = intval($value['totall']);
+				$provide[$key]['fbal'] = intval($value['fbal']);
+				$provide[$key]['btbl'] = intval($value['btbl']);
+				$provide[$key]['norl'] = intval($value['norl']);
+			}elseif($key==1){
+				$provide[$key]['col'] = $value['col'];
+				// $provide[$key]['totaly'] = $value['totaly']."M³";
+				// $provide[$key]['fbay'] = $value['fbay']."M³";
+				// $provide[$key]['btby'] = $value['btby']."M³";
+				// $provide[$key]['nory'] = $value['nory']."M³";
+				$provide[$key]['totaln'] = $value['totaln']."M³";
+				$provide[$key]['fban'] = $value['fban']."M³";
+				$provide[$key]['btbn'] = $value['btbn']."M³";
+				$provide[$key]['norn'] = $value['norn']."M³";
+				$provide[$key]['totalc'] = $value['totalc']."M³";
+				$provide[$key]['fbac'] = $value['fbac']."M³";
+				$provide[$key]['btbc'] = $value['btbc']."M³";
+				$provide[$key]['norc'] = $value['norc']."M³";
+				$provide[$key]['totall'] = $value['totall']."M³";
+				$provide[$key]['fbal'] = $value['fbal']."M³";
+				$provide[$key]['btbl'] = $value['btbl']."M³";
+				$provide[$key]['norl'] = $value['norl']."M³";
+			}elseif($key==2){
+				$provide[$key]['col'] = $value['col'];
+				// $provide[$key]['totaly'] = $value['totaly']."Kg";
+				// $provide[$key]['fbay'] = $value['fbay']."Kg";
+				// $provide[$key]['btby'] = $value['btby']."Kg";
+				// $provide[$key]['nory'] = $value['nory']."Kg";
+				$provide[$key]['totaln'] = $value['totaln']."Kg";
+				$provide[$key]['fban'] = $value['fban']."Kg";
+				$provide[$key]['btbn'] = $value['btbn']."Kg";
+				$provide[$key]['norn'] = $value['norn']."Kg";
+				$provide[$key]['totalc'] = $value['totalc']."Kg";
+				$provide[$key]['fbac'] = $value['fbac']."Kg";
+				$provide[$key]['btbc'] = $value['btbc']."Kg";
+				$provide[$key]['norc'] = $value['norc']."Kg";
+				$provide[$key]['totall'] = $value['totall']."Kg";
+				$provide[$key]['fbal'] = $value['fbal']."Kg";
+				$provide[$key]['btbl'] = $value['btbl']."Kg";
+				$provide[$key]['norl'] = $value['norl']."Kg";
+			}
+			
+		}
+		//Yii::app()->cache->set($cacheKey,json_encode($provide),3000);
+		return $provide;
+		
+	}
+
+	public function getCustomsProcessSummary()
+	{
+		$cacheKey = "getCustomsProcessSummary";
+		$provide = Yii::app()->cache->get($cacheKey);
+		if(!empty($provide))
+		{
+			return json_decode($provide,true);
+		}
+
+		
+
+		Yii::app()->cache->set($cacheKey,json_encode($provide),3000);
+
+		return $provide;
+		
+	}
+
+	private function getGpMonthData($startDate,$endDate)
+	{
+		$criteria=new CDbCriteria;
+
+		$criteria->addCondition("t.eta >= '" .$startDate."'");
+		$criteria->addCondition("t.eta <= '".$endDate ."'");
+		$criteria->addCondition("t.status < 100");
+		$criteria->addCondition("t.owner_id != 114"); // remove pca express owner which is for WMS 3PL local dilivery
+		$criteria->addInCondition('type', [15,70,80]);
+		$consols = Consol::model()->findAll($criteria);
+		$totRevenue = 0;
+		$totCost = 0;
+		$totalShipment = 0;
+		$totalWeight = 0;
+		foreach ($consols as $consol) {
+			$totalShipment += $consol->totShipments();
+			$totalWeight += $consol->totWeight();
+			$totRevenue += $consol->getTotalInvoice();
+			$totCost += $consol->totCost();
+		}
+		if ($totRevenue > 0) {
+			$totalProfitRate = round(($totRevenue - $totCost) / $totRevenue * 10000) / 10000;
+		} else {
+			$totalProfitRate = 0;
+		}
+		$totalData = [
+			'revenue' => $totRevenue,
+			'cost' => $totCost,
+			'gp' => $totRevenue - $totCost,
+			'profit' => $totalProfitRate,
+			'totalShipment'=> $totalShipment,
+			'totalWeight'=> $totalWeight,
+		];
+		return $totalData;
+	}
+
+	private function getData($checkStr,$lastWorkingDay,$lastMonthWorkingDay)
+	{
+		$sql = "SELECT `time` as date,sum(pkg) as pkg,sum(weight) as weight from (select s.*,t.time from shipment s join (SELECT l.time,c.id FROM `consol` c join consol_process cp on c.id = cp.fid join log l on cp.id = l.lid where  c.service=10 and json_value(l.meta,'$.status')='${checkStr}' and l.model ='ConsolProcess' and (to_days(l.time) = to_days(now()) or to_days(l.time) = to_days('{$lastWorkingDay}') or to_days(l.time) = to_days('{$lastMonthWorkingDay}')) group by c.id) t on s.consol_id = t.id) st group by to_days(`date`) order by `date`";
+		$data = Yii::app()->db->createCommand($sql)->queryAll();
+		return $data;
+	}
+
+	private function getDataOut($lastWorkingDay,$lastMonthWorkingDay)
+	{
+		$sql = "SELECT `time` as date,sum(pkg) as pkg,sum(weight) as weight from 
+		(select s.*,t.time from shipment s join 
+		 (SELECT l.time,c.id FROM `consol` c join consol_process cp on c.id = cp.fid join log l on cp.id = l.lid  
+		  where  c.service=10 and json_value(l.meta,'$.status')='Waiting for AirOut/Manifest' and l.model ='ConsolProcess' and (to_days(l.time) = to_days(now()) or to_days(l.time) = to_days('{$lastWorkingDay}') or to_days(l.time) = to_days('{$lastMonthWorkingDay}')) group by c.id) t on s.consol_id = t.id
+		JOIN
+		 (select s.id,t.time from shipment s join 
+		 (SELECT l.time,c.id FROM `consol` c join consol_process cp on c.id = cp.fid join log l on cp.id = l.lid
+		where  c.service=10  and json_value(l.meta,'$.status')='Wating for WH scan' and l.model ='ConsolProcess' and (to_days(l.time) = to_days(now()) or to_days(l.time) = to_days('{$lastWorkingDay}') or to_days(l.time) = to_days('{$lastMonthWorkingDay}')) group by c.id) t on s.consol_id =t.id) t2 on t2.id = s.id and to_days(t2.time) = to_days(t.time)
+
+		) st group by to_days(`date`) order by `date`";
+		$data = Yii::app()->db->createCommand($sql)->queryAll();
+		return $data;
+	}
+
+	private function getMonthData($checkStr,$lastMonth,$thisMonth,$lastMonthWorkingDay)
+	{
+		$sql = "SELECT `time` as date,sum(pkg) as pkg,sum(weight) as weight from (select s.*,t.time from shipment s join (SELECT l.time,c.id FROM `consol` c join consol_process cp on c.id = cp.fid join log l on cp.id = l.lid and json_value(l.meta,'$.status')='${checkStr}' and l.model ='ConsolProcess' where  c.service=10 and ((l.time >= '$lastMonth-01 01:00:00' and l.time <= '$lastMonthWorkingDay 23:00:00') or (l.time >= '$thisMonth-01 01:00:00' and l.time <= '$thisMonth-31 23:00:00')) group by c.id) t on s.consol_id = t.id) st group by DATE_FORMAT(`date`, '%Y-%m') order by DATE_FORMAT(`date`, '%Y-%m')";
+
+		$data = Yii::app()->db->createCommand($sql)->queryAll();
+		return $data;
+	}
+
+	public function getConsolProcessReport($reportType)
+	{
+		$cacheKey = "getConsolProcessReport".$reportType;
+		$provide = [];
+		$model = ReportCache::model()->findBySql('select * from report_cache where status = 1 and type = '.$reportType.' order by id desc limit 1');
+		$today = date("Y-m-d");
+		if(!empty($model)){
+			$todayNew = $model->mdata['todayNew'];
+			$todayDone = $model->mdata['todayDone'];
+        	$todayLeft = $model->mdata['todayLeft'];
+		}
+		if(empty($model)) return [];
+
+		$provide[] = ["id"=>0,$today=>"Total",'col'=>'Consol',
+						"totaln"=>self::getValue($todayNew["totalCount"]),"airn"=>self::getValue($todayNew["airCount"]),"sean"=>self::getValue($todayNew["seaCount"]),
+						"totalc"=>self::getValue($todayDone["totalCount"]),"airc"=>self::getValue($todayDone["airCount"]),"seac"=>self::getValue($todayDone["seaCount"]),
+						"totall"=>self::getValue($todayLeft["totalCount"]),"airl"=>self::getValue($todayLeft["airCount"]),"seal"=>self::getValue($todayLeft["seaCount"])
+					];
+		$provide[] = ["id"=>1,$today=>"CBM",'col'=>'CBM',
+						"totaln"=>self::getValue($todayNew["totalCBM"]),"airn"=>self::getValue($todayNew["airCBM"]),"sean"=>self::getValue($todayNew["seaCBM"]),
+						"totalc"=>self::getValue($todayDone["totalCBM"]),"airc"=>self::getValue($todayDone["airCBM"]),"seac"=>self::getValue($todayDone["seaCBM"]),
+						"totall"=>self::getValue($todayLeft["totalCBM"]),"airl"=>self::getValue($todayLeft["airCBM"]),"seal"=>self::getValue($todayLeft["seaCBM"])
+					];
+		$provide[] = ["id"=>2,$today=>"WEIGHT",'col'=>'Weight',
+						"totaln"=>self::getValue($todayNew["totalWeight"]),"airn"=>self::getValue($todayNew["airWeight"]),"sean"=>self::getValue($todayNew["seaWeight"]),
+						"totalc"=>self::getValue($todayDone["totalWeight"]),"airc"=>self::getValue($todayDone["airWeight"]),"seac"=>self::getValue($todayDone["seaWeight"]),
+						"totall"=>self::getValue($todayLeft["totalWeight"]),"airl"=>self::getValue($todayLeft["airWeight"]),"seal"=>self::getValue($todayLeft["seaWeight"])
+					];
+		
+		
+		foreach ($provide as $key => $value) {
+			if($key==0){
+				$provide[$key]['col'] = $value['col'];
+				$provide[$key]['totaln'] = intval($value['totaln']);
+				$provide[$key]['airn'] = intval($value['airn']);
+				$provide[$key]['sean'] = intval($value['sean']);
+				$provide[$key]['totalc'] = intval($value['totalc']);
+				$provide[$key]['airc'] = intval($value['airc']);
+				$provide[$key]['seac'] = intval($value['seac']);
+				$provide[$key]['totall'] = intval($value['totall']);
+				$provide[$key]['airl'] = intval($value['airl']);
+				$provide[$key]['seal'] = intval($value['seal']);
+			}elseif($key==1){
+				$provide[$key]['col'] = $value['col'];
+				$provide[$key]['totaln'] = $value['totaln']."M³";
+				$provide[$key]['airn'] = $value['airn']."M³";
+				$provide[$key]['sean'] = $value['sean']."M³";
+				$provide[$key]['totalc'] = $value['totalc']."M³";
+				$provide[$key]['airc'] = $value['airc']."M³";
+				$provide[$key]['seac'] = $value['seac']."M³";
+				$provide[$key]['totall'] = $value['totall']."M³";
+				$provide[$key]['airl'] = $value['airl']."M³";
+				$provide[$key]['seal'] = $value['seal']."M³";
+			}elseif($key==2){
+				$provide[$key]['col'] = $value['col'];
+				$provide[$key]['totaln'] = $value['totaln']."Kg";
+				$provide[$key]['airn'] = $value['airn']."Kg";
+				$provide[$key]['sean'] = $value['sean']."Kg";
+				$provide[$key]['totalc'] = $value['totalc']."Kg";
+				$provide[$key]['airc'] = $value['airc']."Kg";
+				$provide[$key]['seac'] = $value['seac']."Kg";
+				$provide[$key]['totall'] = $value['totall']."Kg";
+				$provide[$key]['airl'] = $value['airl']."Kg";
+				$provide[$key]['seal'] = $value['seal']."Kg";
+			}
+			
+		}
+		return $provide;
+	}
+
+	public function getPutAwayReporySyd(){
+		$cacheKey = "getPutAwayReporySyd";
+		$provide = [];
+		$models = ReportCache::model()->findBySql('select * from report_cache where status = 1 and type = 7 order by id desc limit 30');
+		$arrSyd=$arrMel=$arrBne=[];
+		if(!empty($models)){
+			foreach($models as $model){
+				$arrSyd[$model->create_time] = json_decode($model->mdata['SYD']);
+				$arrMel[$model->create_time] = json_decode($model->mdata['MEL']);
+				$arrBne[$model->create_time] = json_decode($model->mdata['BNE']);
+			}
+		}
+
+	}
+
+	public function getTPLDailySydReport(){
+		$cacheKey = "getTPLDailySydReport";
+		$provide = [];
+		$model = ReportCache::model()->findBySql('select * from report_cache where status = 1 and type = 9 order by id desc limit 1');
+		if(!empty($model)){
+			$todayNew = $model->mdata['todayNew']['totalcount'];
+			$todayInvoice = $model->mdata['todayNew']['totalinvcount'];
+			$todayCost = $model->mdata['todayNew']['totalcostcount'];
+			$todayLeft = $model->mdata['todayLeft']['totalcount'];
+			$todayDone = $model->mdata['todayDone']['totalcount'];
+		}else
+		{
+			return [];
+		}
+
+		$numTotalInv = $numTotalCost = $i = 0;
+		$modelMonth = ReportCache::model()->findAllBySql('select * from report_cache where status = 1 and type = 9 and create_time >="'.date('Y-m-01', strtotime(date("Y-m-d"))).'"');
+		if(!empty($modelMonth)){
+			foreach($modelMonth as $modelDay){
+				$numTotalInv += $modelDay->mdata['todayNew']['totalinvcount'];
+				$numTotalCost += $modelDay->mdata['todayNew']['totalcostcount'];
+				$i++;
+			}
+		}
+		$numAvgInv = number_format($numTotalInv,2);
+		$numAvgCost = number_format($numTotalCost,2);
+		$numGPM = number_format($numTotalInv-$numTotalCost,2);
+
+		if($todayNew+$todayLeft==0){
+			$preFinished = $todayDone."/".($todayNew+$todayLeft)." 0.00%";
+		}else{
+			$preFinished = $todayDone."/".($todayNew+$todayLeft)." ".round($todayDone/($todayNew+$todayLeft)*100,2)."%";
+		}
+
+		//return $provide = [$todayNew,$todayInvoice,$todayInvoice-$todayCost,$todayLeft,$numAvgInv,$numAvgCost,$todayDone,$preFinished];
+		$provide[] = ['id'=>0,'todaytask'=>$todayNew,'todayinvoice'=>$todayInvoice,'todaygp'=>$todayInvoice-$todayCost,'todayleft'=>$todayLeft,'monavginv'=>$numAvgInv,'monavgcost'=>$numGPM,'todaydone'=>$todayDone,'todayfinish'=>$preFinished];
+		foreach ($provide as $key => $value) {
+			$provide[$key]['todaytask'] = $value['todaytask'];
+			$provide[$key]['todayinvoice'] = "$".$value['todayinvoice'];
+			$provide[$key]['todaygp'] =  "$".$value['todaygp'];
+			$provide[$key]['todayleft'] = $value['todayleft'];
+			$provide[$key]['monavginv'] =  "$".$value['monavginv'];
+			$provide[$key]['monavgcost'] =  "$".$value['monavgcost'];
+			$provide[$key]['todaydone'] = $value['todaydone'];
+			$provide[$key]['todayfinish'] = $value['todayfinish'];
+		}
+		return $provide;
+	}
+
+	public function getTPLDailyMelReport(){
+		$cacheKey = "getTPLDailyMelReport";
+		$provide = [];
+		$model = ReportCache::model()->findBySql('select * from report_cache where status = 1 and type = 10 order by id desc limit 1');
+		if(!empty($model)){
+			$todayNew = $model->mdata['todayNew']['totalcount'];
+			$todayInvoice = $model->mdata['todayNew']['totalinvcount'];
+			$todayCost = $model->mdata['todayNew']['totalcostcount'];
+			$todayLeft = $model->mdata['todayLeft']['totalcount'];
+			$todayDone = $model->mdata['todayDone']['totalcount'];
+		}else
+		{
+			return [];
+		}
+
+		$numTotalInv = $numTotalCost = $i = 0;
+		$modelMonth = ReportCache::model()->findAllBySql('select * from report_cache where status = 1 and type = 10 and create_time >="'.date('Y-m-01', strtotime(date("Y-m-d"))).'"');
+		if(!empty($modelMonth)){
+			foreach($modelMonth as $modelDay){
+				$numTotalInv += $modelDay->mdata['todayNew']['totalinvcount'];
+				$numTotalCost += $modelDay->mdata['todayNew']['totalcostcount'];
+				$i++;
+			}
+		}
+		$numAvgInv = number_format($numTotalInv,2);
+		$numAvgCost = number_format($numTotalCost,2);
+		$numGPM = number_format($numTotalInv-$numTotalCost,2);
+
+		if($todayNew+$todayLeft==0){
+			$preFinished = $todayDone."/".($todayNew+$todayLeft)." 0.00%";
+		}else{
+			$preFinished = $todayDone."/".($todayNew+$todayLeft)." ".round($todayDone/($todayNew+$todayLeft)*100,2)."%";
+		}
+		
+
+		//return $provide = [$todayNew,$todayInvoice,$todayInvoice-$todayCost,$todayLeft,$numAvgInv,$numAvgCost,$todayDone,$preFinished];
+		$provide[] = ['id'=>0,'todaytask'=>$todayNew,'todayinvoice'=>$todayInvoice,'todaygp'=>$todayInvoice-$todayCost,'todayleft'=>$todayLeft,'monavginv'=>$numAvgInv,'monavgcost'=>$numGPM,'todaydone'=>$todayDone,'todayfinish'=>$preFinished];
+		foreach ($provide as $key => $value) {
+			$provide[$key]['todaytask'] = $value['todaytask'];
+			$provide[$key]['todayinvoice'] = "$".$value['todayinvoice'];
+			$provide[$key]['todaygp'] =  "$".$value['todaygp'];
+			$provide[$key]['todayleft'] = $value['todayleft'];
+			$provide[$key]['monavginv'] =  "$".$value['monavginv'];
+			$provide[$key]['monavgcost'] =  "$".$value['monavgcost'];
+			$provide[$key]['todaydone'] = $value['todaydone'];
+			$provide[$key]['todayfinish'] = $value['todayfinish'];
+		}
+		return $provide;
+	}
+
+	public function getWareHouseReminder($type=0){
+		$provide = [];
+		$recordPutAway['today'] = ReportService::getSortHeldTodayReminder($type);
+		$recordPutAway['left'] = ReportService::getSortHeldReminder($type);
+		$recordPutAway['all'] = ReportService::getSortHeldAll($type);
+		$numTotalLeft = $recordPutAway['left']['SYDcount']+$recordPutAway['left']['MELcount']+$recordPutAway['left']['BNEcount'];
+
+		$provide[] = ['id'=>0,'numTotalLeft'=>$numTotalLeft,'sydToday'=>$recordPutAway['today']['SYDcount'],'sydLeft'=>$recordPutAway['left']['SYDcount'],'sydAll'=>$recordPutAway['all']['SYDcount'],'melToday'=>$recordPutAway['today']['MELcount'],'melLeft'=>$recordPutAway['left']['MELcount'],'melAll'=>$recordPutAway['all']['MELcount'],'bneToday'=>$recordPutAway['today']['BNEcount'],'bneLeft'=>$recordPutAway['left']['BNEcount'],'bneAll'=>$recordPutAway['all']['BNEcount']];
+		foreach ($provide as $key => $value) {
+			$provide[$key]['numTotalLeft'] = $value['numTotalLeft'];
+			$provide[$key]['sydToday'] = $value['sydToday'];
+			$provide[$key]['sydLeft'] = $value['sydLeft'];
+			$provide[$key]['sydAll'] = $value['sydAll'];
+			$provide[$key]['melToday'] = $value['melToday'];
+			$provide[$key]['melLeft'] = $value['melLeft'];
+			$provide[$key]['melAll'] = $value['melAll'];
+			$provide[$key]['bneToday'] = $value['bneToday'];
+			$provide[$key]['bneLeft'] = $value['bneLeft'];
+			$provide[$key]['bneAll'] = $value['bneAll'];
+		}
+		return $provide;
+	}
+}
+?>

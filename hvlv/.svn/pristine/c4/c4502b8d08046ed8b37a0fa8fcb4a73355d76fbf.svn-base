@@ -1,0 +1,318 @@
+<?php
+
+/**
+ * This is the model class for table "sms".
+ *
+ * The followings are the available columns in table 'sms':
+ * @property string $id
+ * @property integer $type
+ * @property string $fid
+ * @property integer $status
+ * @property string $no
+ * @property string $msg
+ * @property string $ts
+ */
+class Sms extends CActiveRecord{
+	public $debug;
+
+	public static $states = array(
+		0 => 'Pending',
+		1 => 'Sent',
+		9 => 'Error',
+	);
+	
+	public static $types = array(
+		0 =>'Normal Message',
+		10 => 'Tracking Update',
+		20 => 'ID Upload Remider',
+		30 => 'Booking Notice',
+		40 => 'Local Arrival',
+	);
+	
+	const Status_Pending = 0;
+	const Status_Sent = 1;
+	const Status_Error = 9;
+	
+	const Type_Tracking_Update = 10;
+	const Type_ID_Upload_Remider = 20;
+	const Type_Booking_Notice = 30;
+	const Type_Local_Arrival = 40;
+	
+
+
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName(){
+		return 'sms';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules(){
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('type, fid, status, no, msg, ts', 'safe'),
+			array('type, status', 'numerical', 'integerOnly'=>true),
+			array('fid', 'length', 'max'=>11),
+			array('no', 'length', 'max'=>20),
+			array('msg', 'length', 'max'=>200),
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, type, fid, status, no, msg, ts', 'safe', 'on'=>'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations(){
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+		);
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels(){
+		return array(
+			'id' => 'ID',
+			'type' => 'Type',
+			'fid' => 'FID',
+			'status' => 'Status',
+			'no' => 'Mobile No',
+			'msg' => 'Message',
+			'ts' => 'Time',
+		);
+	}
+	
+	public function sendSmsNotice($phone,$message){
+		ModalSmsNotice::Create($phone,$message );
+	}
+	
+	public function receiveSmsNotice(){
+		//todo android手机端发短信的异步的，是否发成功会收到一个回执短信，会根据收到的回执是成功或失败设置$states，将sms_notice的记录移到sms表，type为local arrival ,保证短信都统一在sms表里
+		
+	}
+	
+
+	public static function smsUnicode($s){
+		$ucs2 = mb_convert_encoding($s, "UCS-2", "auto");
+		return bin2hex($ucs2);
+	}
+	
+	// public function send($sdr='PCAExpress', $unicode=false){
+	// 	$data = new stdClass;
+	// 	$data->messages = array();
+	// 	$msg = new stdClass;
+	// 	$msg->body = $this->msg;
+	// 	$msg->to = preg_replace('/^/+/', '', $this->no);
+	// 	$msg->from = 'TopLogistic';
+	// 	$data->messages [0] = $msg;
+	// 	$data = json_encode($data);
+	// 	$opts = array('http' => array(
+	// 		'method' => 'POST',
+	// 		'header'=>array(
+	// 					   "Content-type: application/json",
+    //                        "Authorization: Basic bHdqNTU1NTU6QkEyODRDM0MtOTlGRC0zRDE3LUY2NzMtRTNFQjZFQzY0RUEy",
+	// 					   'Content-Length: ' . strlen($data),
+	// 					   'Host: rest.clicksend.com',
+	// 					),
+	// 		'content' => $data));
+    //     $context = stream_context_create($opts);
+    //     $strResponse = file_get_contents('https://rest.clicksend.com/v3/sms/send', false, $context);
+	// 	$objResponse = json_decode($strResponse);
+	// 	if($objResponse->data->messages[0]->status =="SUCCESS"){
+	// 		$this->status = 1;
+	// 	}
+	// 	else{
+	// 		$this->status = 9;
+	// 	}
+	// 	$this->save();
+	// }
+	
+	public function send(){
+		$strMessage = $this->msg;
+		// $strPhone = preg_replace('/^/+/', '', $this->no);
+		$strPhone = $this->no;
+		$this-> sendSmsNotice($strPhone,$strMessage);
+		
+		
+		$this->status = self::Status_Sent;
+		$this->type = self::Type_Local_Arrival;
+		
+		$this->save();
+	}
+	
+	public function funcIsSuccessSend($from , $to , $message){
+		$data = new stdClass;
+		$data->messages = array();
+		$msg = new stdClass;
+		// $msg->body = $this->msg;
+		// $msg->to = preg_replace('/^/+/', '', $this->no);
+		// $msg->from = 'TopLogistic';
+		$msg->body = $message;
+		$msg->to = preg_replace('/^/+/', '', $to);
+		$msg->from = $from;
+		$data->messages [0] = $msg;
+		$data = json_encode($data);
+		$opts = array('http' => array(
+			'method' => 'POST',
+			'header'=>array(
+						   "Content-type: application/json",
+                           "Authorization: Basic bHdqNTU1NTU6QkEyODRDM0MtOTlGRC0zRDE3LUY2NzMtRTNFQjZFQzY0RUEy",
+						   'Content-Length: ' . strlen($data),
+						   'Host: rest.clicksend.com',
+						),
+			'content' => $data));
+        $context = stream_context_create($opts);
+        $strResponse = file_get_contents('https://rest.clicksend.com/v3/sms/send', false, $context);
+		$objResponse = json_decode($strResponse);
+		if($objResponse->data->messages[0]->status =="SUCCESS"){
+			$this->status = 1;
+			$isSuccess = true ;
+		}
+		else{
+			$this->status = 9;
+			$isSuccess = false ;
+		}
+		$this->save();
+		return $isSuccess;
+	}
+	
+	// public function sendLocal(){
+	// 	$c = new curl('http://wkg.pcaex.com:600/sendsms.php');
+	// 	$c->setopt(CURLOPT_FOLLOWLOCATION, true);
+	// 	$c->setopt(CURLOPT_POST, true);
+	// 	$o = ['t' => $this->no, 'm' => $this->msg];
+	// 	$c->setopt(CURLOPT_POSTFIELDS, $c->asPostString($o));
+	// 	$c->exec();
+	// 	if(!empty($c->result) && $c->result == 'Done'){
+	// 		$this->status = 99;
+	// 	}
+	// 	$this->save();
+	// }
+	
+	public function sendLocal(){
+		$strMessage = $this->msg;
+		$strPhone = $this->no;
+		$this-> sendSmsNotice($strPhone,$strMessage);
+		
+		
+		// $this->status = self::Status_Sent;
+		$this->type = self::Type_Local_Arrival;
+		
+		$this->status = 99;
+		$this->save();
+	}
+
+	public function send_yp($sig='PCA宇捷速递'){
+		$o = [];
+		$o['apikey'] ='c71e0c7d70bac9ffccc06c91ad90aa0a';
+		$o['mobile'] = $this->no;
+		$o['text'] = '【'.$sig.'】'.$this->msg;
+		$data_string = http_build_query($o);
+		if($this->debug) echo "Sent ".$data_string."\n";
+		$c = new curl('https://sms.yunpian.com/v2/sms/single_send.json');
+		$c->setopt(CURLOPT_FOLLOWLOCATION, true);
+		$c->setopt(CURLOPT_POST, true);
+		$c->setopt(CURLOPT_SSL_VERIFYPEER, false);
+		$postr = $c->asPostString($o);
+		$c->setopt(CURLOPT_POSTFIELDS, $postr);
+		$c->exec();
+		if($this->debug) echo 'Received: '.$c->result."\n";
+		if(!empty($c->result)){
+			$re=json_decode($c->result);
+			$this->status = empty($re->code)? 99 : $re->code;
+			$this->save();
+		}
+	}
+	
+	public function getStatus(){
+		return empty(self::$states[$this->status])? '' : self::$states[$this->status];
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search(){
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('id',$this->id,true);
+		$criteria->compare('type',$this->type);
+		$criteria->compare('fid',$this->fid,true);
+		$criteria->compare('status',$this->status);
+		$criteria->compare('no',$this->no,true);
+		$criteria->compare('msg',$this->msg,true);
+		$criteria->compare('ts',$this->ts,true);
+
+		return new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+		));
+	}
+	
+	public static function sendMessageLocal($no,$msg){
+		$sms=new Sms();
+		$sms->no=$no;
+		$sms->msg=$msg;
+		$sms->send();
+		if($sms->status==99) return true;
+		return false;
+	}
+
+	public static function sendCustomsMessageLocal($no,$msg){
+		$isSendCustomsMsg = SystemSetting::getCustomsMessageSetting();
+		if($isSendCustomsMsg)
+		{
+			$sms=new Sms();
+			$sms->no=$no;
+			$sms->msg=$msg;
+			$sms->send();
+			if($sms->status==99) return true;
+			return false;
+		}
+		return true;
+	}
+	 
+	 public static function SendMessageCn($no,$msg){
+		 $sms=new Sms();
+		 $sms->no=$no;
+		 $sms->msg=$msg;
+		 $sms->send_yp();
+		 if($sms->status==99) return true;
+		 return  false;
+	}
+	
+	public static function checkIdMsg($no,$hbn,$pid){
+	   $sql="SELECT t.id FROM `crm` t  INNER JOIN `crm_map` s ON t.id=s.crm_id WHERE t.main_type=20 AND t.type in (10) AND t.status<90 AND t.telephone=:tel";
+	   $c=Yii::app()->db->createCommand($sql)->bindValues([':tel'=>$no])->queryScalar();
+		if(!empty($c)){
+			return false;
+		}
+		return true;
+	}
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return Sms the static model class
+	 */
+	public static function model($className=__CLASS__){
+		return parent::model($className);
+	}
+}

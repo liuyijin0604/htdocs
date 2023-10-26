@@ -1,0 +1,646 @@
+<?php
+
+/**
+ * This is the model class for table "tracking".
+ *
+ * The followings are the available columns in table 'tracking':
+ * @property string $id
+ * @property string $pid
+ * @property string $tid
+ * @property string $srid
+ * @property string $dt
+ * @property string $type
+ * @property string $activity
+ * @property string $depot
+ * @property string $meta
+ */
+class Tracking extends CActiveRecord{
+	public $mdata = array();
+	const TYPE_DELIVERED = 90;
+	const TYPE_HELD = 55;
+	const TYPE_SORTED = 65;
+	const TYPE_HAND_OVER = 68;
+	const TYPE_DECONSOLIDATION = 61;
+	const TYPE_CLEARED = 60;
+	const TYPE_ARRIVAL = 40;
+	const TYPE_DISPATCHED = 38;
+	const TYPE_CREATE = 10;
+	public static $types = array(
+		10 => 'Create',
+		12 => 'Pickup',
+		14 => 'Received no info.',
+		15 => 'Receive',
+		16 => 'Send SMS',
+		17 => 'Customer Confirmed',
+		18 => 'Confirmed',
+		19 => 'Choosed Delivery DateTime',
+		20 => 'Consolidated',
+		25 => 'Consol. Confirm',
+		30 => 'Manifested',
+		35 => 'Export Clear',
+		38 => 'Dispatched',
+		40 => 'Air Arrival',
+		50 => 'Reported',
+		55 => 'Held',
+		60 => 'Cleared',
+		61 => 'Deconsolidation',
+		65 => 'Sorted',
+		68 => 'Hand Over',
+		70 => 'Courier Info',
+		72 => 'Waitting Assign Driver',
+		73 => 'Preparation Done',
+		75 => 'Courier Pickup',
+		76 => 'GatePass',
+		77 => 'Interstate GatePass',
+		80 => 'Courier Onboard',
+		85 => 'Courier Missed',
+		86 => 'Interstate Done',
+		87 => 'Delivery Delay',
+		90 => 'Delivered',
+		95 => 'Returned',
+		100 => 'Not Received Confirmation',
+		101 => 'Delivery Error',
+		102 => 'Not Sign Gatepass',
+		103 => 'Delay Notice',
+		104 => 'Failed Notice',
+		105 => 'Scaned and In Cjob',
+		106 => 'FLHunter Tracking',
+		0 => 'Canelled',
+	);
+
+	public static $status = array(
+		10 => 'Create',
+		15 => 'Receive',
+		30 => 'Manifested',
+		41 => 'Enroute',
+		55 => 'Held',
+		60 => 'Cleared',
+		61 => 'Deconsolidation',
+		68 => 'Hand Over',
+		69 => 'Ascan',
+		70 => 'Courier',
+		72 => 'Courier Problem',
+		90 => 'Delivered',
+		98 => 'RTS'
+	);
+
+	/**
+	0：在途，即货物处于运输过程中；
+	1：揽件，货物已由快递公司揽收并且产生了第一条跟踪信息；
+	2：疑难，货物寄送过程出了问题；
+	3：签收，收件人已签收；
+	4：退签，即货物由于用户拒签、超区等原因退回，而且发件人已经签收；
+	5：派件，即快递正在进行同城派件；
+	6：退回，货物正处于退回发件人的途中；
+	 */
+	public static $kd100_status = array(
+		//8 => 1, //'Pending',
+		//9 => 1, //'Printed',
+		//10 => 1, //'New',
+		12 => 1, //'Picked Up',
+		14 => 1, //'Rcvd. No Info',
+		15 => 1, //'Received',
+		18 => 1, //'Info Ready',
+		20 => 1, //'Consolidated',
+		25 => 1, //'Confirmed',
+		30 => 1, //'Reported',
+		35 => 1, //'Held',
+		40 => 1, //'Cleared',
+		60 => 0, //'Dispatched',
+		61 => 0, //'Deconsolidation',
+		70 => 0, //'Arrived',
+		80 => 0, //'Clearance',
+		90 => 0, //'Courier',
+		99 => 3, //'Delivered',
+		100 => 2, //'Cancelled',
+		101 => 2, //'Problem',
+		102 => 6, //'Returned',
+		103 => 2, //'Missing',
+	);
+
+	const CLEARED_TYPE = 60;
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName(){
+		return 'tracking';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules(){
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('pid, srid, dt, type, tid, activity, depot, meta', 'safe'),
+			array('pid, tid, srid', 'length', 'max'=>11),
+			array('depot', 'length', 'max'=>100),
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, pid, srid, dt, type, tid, activity, depot', 'safe', 'on'=>'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations(){
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+			'tranship' => array(self::BELONGS_TO, 'Tranship', 'tid'),
+			'shipment' => array(self::BELONGS_TO, 'Shipment', 'pid'),
+			'archiveShipment' => array(self::BELONGS_TO, 'ImParcelArchive', 'pid'),
+		);
+	}
+	
+	public function getInfo(){
+		if(!empty($this->mdata['signature'])){
+			return '<img src="data:image/png;base64,'.$this->mdata['signature'].'" width="100" />';
+		}
+		// get ICS returned held reasons if existing
+		if(!empty($this->mdata['held_reason'])){
+			return '<textarea rows="4" cols="50">' . $this->mdata['held_reason'] . '</textarea>';
+		}
+		return '';
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels(){
+		return array(
+			'id' => 'ID',
+			'pid' => 'Parcel',
+			'tid' => 'Tranship ID',
+			'srid' => 'Scanner ID',
+			'dt' => 'Time',
+			'type' => 'Type',
+			'activity' => 'Activity',
+			'depot' => 'Depot',
+			'meta' => 'meta',
+		);
+	}
+	
+	public function beforeSave(){
+		if(!empty($this->mdata)) $this->meta = json_encode($this->mdata);
+		return true;
+	}
+	
+	public function afterFind(){
+		if(!empty($this->meta)) $this->mdata = json_decode($this->meta, true);
+		return true;
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search(){
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('id',$this->id);
+		$criteria->compare('pid',$this->pid);
+		$criteria->compare('tid',$this->tid);
+		$criteria->compare('srid',$this->srid);
+		$criteria->compare('type',$this->type,true);
+		$criteria->compare('dt',$this->dt,true);
+		$criteria->compare('activity',$this->activity,true);
+		$criteria->compare('depot',$this->depot,true);
+
+	return new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+			'sort'=>array(
+				'defaultOrder'=>'dt DESC',
+			),
+			'pagination'=>array(
+				'pageSize'=>'30',
+			),
+		));
+	}
+		
+	public static function imTrack($ref){
+		$t= Tranship::model()->find('connote=:ref',array(":ref"=>$ref));
+		if(empty($t)) return;
+		include(Yii::app()->basePath.DIRECTORY_SEPARATOR.'commands/trackingCommand.php');
+		$tracking = new trackingCommand('ubm', null);
+		$tracking->_upImTrack($t);
+		return;
+	 }
+
+		/**
+	 * get fastway tracking events
+	 * @param string $tn
+	 * @return array
+	 */
+	public function fastway($tn=''){
+		$data = array();
+				$fastway = new FastwayAPI();
+		$scans = $fastway->getTracking($tn);
+		if ( !empty($scans) ) {
+			foreach ($scans as $scan) {
+				// data[0] -> scan date time
+				// data[1] -> scan status description
+				// data[2] -> scan shipment currently location
+				$datestr = str_replace('/', '-', $scan['date']);
+				$data[] = array(
+					date('Y-m-d H:i:s', strtotime($datestr)),
+					$scan['desc'],
+					$scan['where']
+				);
+
+			}
+		}
+		return $data;
+	}
+		public function auPost($tn='',$shipment = NULL ){
+		$data = array();
+				$status=0;
+				$aupost=new AusPostAPI('syd', FALSE);
+				$scans=$aupost->trackItems($tn);
+				$events=empty($scans->tracking_results[0]->trackable_items[0]->items[0]->events)?"":$scans->tracking_results[0]->trackable_items[0]->items[0]->events;          
+			   if(empty($events)){
+					return $data;
+				}else{
+					foreach(array_reverse($events) as $e){
+						$data[]=[
+							date('Y-m-d H:i:s', strtotime($e->date)),
+							$e->description,
+							empty($e->location)?'':$e->location,
+						];
+					}
+					if(!empty($scans->tracking_results[0]->trackable_items[0]->items[0]->status)){
+						$status=$scans->tracking_results[0]->trackable_items[0]->items[0]->status;
+					}
+				}
+
+		//if(!empty($this->args[1])) print_r($data);
+		return [$data,$status];
+	}
+		public function starTrack($tn=''){
+	   
+			  $url = "https://msto.startrack.com.au/track-trace/?id=" . $tn;
+			  $c = new curl($url);
+			  $data = [];
+			 if (!$c->exec())  return $data;
+				 $b = $c->result;
+				 preg_match_all('/<fieldset class="generalDetails".*>(.*)<\/fieldset>/Ums', $b, $m);
+				 preg_match('/<table class="gvTable" id="lvFreightItemGrid".*>.*<\/table>/Umsi', $b, $m4);
+				 preg_match('/<table class="gvTable" id="lvTrackingGrid".*>.*<\/table>/Umsi', $b, $m2);
+		//fetch the status at first                                
+			  if (isset($m[1]))   $m[1] = array_reverse($m[1]);
+			  if (isset($m[1][0])) {
+						  $status='';
+						  $status_scan='';
+						  $status_dpot='';
+							preg_match('/status.*<span id="__c1_lblStatus">(.*)<\/span>.*scan/Umsi', $m[1][0], $m1);
+							preg_match('/status.*<span id="__c1_lblScanDateTime">(.*)<\/span>/Umsi', $m[1][0], $m1_scan);
+							preg_match('/status.*<span id="__c1_lblScanDepot">(.*)<\/span>/Umsi', $m[1][0], $m1_dpot);
+					  if (isset($m1[1])) $status = $m1[1]; 
+					  if (isset($m1_scan[1])) $status_scan=trim($m1_scan[1]);
+					  if (isset($m1_dpot[1])) $status_dpot=$m1_dpot[1];
+			   }
+	 
+			 if (!isset($m2[0])) {
+				if(!isset($m4[0])){
+					   if(!empty($status)&&!empty($status_scan)){
+							$data[]=[date_format(date_create_from_format("d/m/Y H:i", trim($status_scan)), 'Y-m-d H:i:s'),
+										$status,
+										$status_dpot];
+							 return $data;
+						 }
+				 }else{
+					 preg_match('/<tr>(.*)<\/tr>/Umsi', $m4[0], $m41); 
+					  if (!isset($m41[1])) {
+								 if(!empty($status)&&!empty($status_scan)){
+							$data[]=[date_format(date_create_from_format("d/m/Y H:i", trim($status_scan)), 'Y-m-d H:i:s'),
+										$status,
+										$status_dpot
+									 ];
+							  return $data;
+						  }
+					  }else{ 
+					 if (preg_match_all('/<td>(.*)<\/td>/Umsi', $m41[1], $mt2)) {
+						 if(empty(trim($mt2[1][1]))||empty(trim($mt2[1][3]))){ 
+										 if(!empty($status)&&!empty($status_scan)){
+							$data[]=[date_format(date_create_from_format("d/m/Y H:i", trim($status_scan)), 'Y-m-d H:i:s'),
+										$status,
+										$status_dpot
+									];
+							return $data;
+						  }
+						}else{
+						   $data[] = array(
+						   date_format(date_create_from_format("d/m/Y H:i", trim($mt2[1][1])), 'Y-m-d H:i:s'),
+						   trim($mt2[1][3]),
+						   trim($mt2[1][2]),
+							);
+						 }
+					   }
+					  }
+					}
+			  }else{
+					  preg_match_all('/<tr>(.*)<\/tr>/Umsi', $m2[0], $m3);
+					  if (!isset($m3[1]))  return $data;
+					 foreach ($m3[1]as $i => $mt) {
+							if (preg_match_all('/<td>(.*)<\/td>/Umsi', $mt, $mt1)) {
+								 $data[] = array(
+								 date_format(date_create_from_format("d/m/Y H:i", trim($mt1[1][2])), 'Y-m-d H:i:s'),
+								 trim($mt1[1][4]),
+								 trim($mt1[1][3]),
+								 );
+							}
+						}
+				   }
+	
+		   $data= array_reverse($data);
+		return $data;
+	}
+	
+		public function tollTrack($tn=''){
+
+		$data = array();
+
+		$toll = new TollAPI();
+		$scans = $toll->getTracking($tn);
+		if ( !empty($scans) ) {
+			foreach ($scans as $scan) {
+				// data[0] -> scan date time
+				// data[1] -> scan status description
+				// data[2] -> scan shipment currently location
+				$datestr = str_replace('/', '-', $scan['date']);
+				$data[] = array(
+					date('Y-m-d H:i:s', strtotime($datestr)),
+					$scan['desc'],
+					$scan['where']
+				);
+
+			}
+		}
+		return $data;
+	}
+		/*
+		 * flight info
+		 */
+		
+		/**
+	 * @param string $fn
+	 * @param string $fd
+	 * @param bool $uld
+	 * @return array|bool
+	 */
+	public static function flight($fn='', $fd='', $uld = false, $byEta = false){
+		$fn = trim($fn);
+		$fd =date('Y-m-d', strtotime($fd));
+				$alcm = include(Yii::app()->basePath.DIRECTORY_SEPARATOR.'data'.DIRECTORY_SEPARATOR.'airline_codes.php');
+
+		$ac = strtoupper(substr($fn, 0, 2));
+		if(!isset($alcm[$ac])){ echo 'Airline code '.$ac." unknown.\n"; return false; }
+		
+		$ep = APILog::get('https://uk.flightaware.com/live/flight/'.$alcm[$ac].substr($fn, 2),[]);
+		if(empty($ep)) return false;
+
+		preg_match('/<script>var trackpollBootstrap = (.+);<\/script>/Ums', $ep, $m);
+		$ed = empty($m[1])? false : json_decode($m[1]);
+
+		if(empty($ed)){ return self::flightStat($fn, $fd); }
+		$getData = function($f) use ($fd){
+			$tft = $f->takeoffTimes->scheduled;
+			$ldt = $f->landingTimes->scheduled;
+			$status = 0; // on schedule
+			if(!empty($f->takeoffTimes->actual)){
+				$tft = $f->takeoffTimes->actual;
+				$status = 1; // on flying
+			}
+			if(!empty($f->landingTimes->actual)){
+				$ldt = $f->landingTimes->actual;
+				$status = 2; // arrived
+			}
+			$tft = new DateTime('@'.$tft);
+			$tft->setTimeZone(new DateTimeZone(substr($f->origin->TZ, 1)));
+
+			$ldt = new DateTime('@'.$ldt);
+			$ldt->setTimeZone(new DateTimeZone(substr($f->destination->TZ, 1)));
+			return [$fd, $f->aircraftType, $f->origin->friendlyLocation, $f->destination->friendlyLocation, $tft->format('Y-m-d H:i:s'), $ldt->format('Y-m-d H:i:s'), null, $status];
+		};
+		$data = [];
+		
+		foreach($ed->flights as $v => $k){
+			if(isset($k->activityLog)){
+				foreach($k->activityLog->flights as $f){
+					// in case some flight will show one day in advance
+					// so we need to avoid the day in advance
+					// for example: http://uk.flightaware.com/live/flight/SIA221
+					if ( $byEta ) { // check flight by ETA time
+						$etaGuess = new DateTime('@'.$f->landingTimes->scheduled);
+						$etaGuess->setTimeZone(new DateTimeZone(substr($f->destination->TZ, 1)));
+						$schedule = $etaGuess->format('Y-m-d');
+					} else {
+						$schedule = gmdate('Y-m-d', $f->takeoffTimes->scheduled);
+					}
+
+					$today = date('Y-m-d');
+					if ( $schedule <= $today &&  $schedule == $fd ) {
+						$data = $getData($f);
+						break;
+					}
+				}
+				break;
+			}
+		}
+
+		if(empty($data)){
+			if($uld && strtotime($fd) < time() - 172800){
+				$data = $getData($f);
+			}else{
+				return self::flightStat($fn, $fd);
+			}
+		}
+
+
+
+		//if($this->debug) print_r($data);
+//                                        print_r($data);
+		return $data;
+	}
+		
+		
+		public static function flightStat($fn='', $fd=''){
+		$fn = trim($fn);
+		$fd = date('Y-m-d', strtotime($fd));
+		$data = [];
+		$ac = strtoupper(substr($fn, 0, 2));
+
+		$c = new curl('http://www.flightstats.com/go/FlightTracker/flightTracker.do');
+		$c->setopt(CURLOPT_FOLLOWLOCATION, true);
+		$c->setopt(CURLOPT_REFERER, 'http://www.flightstats.com');
+		$c->setopt(CURLOPT_HTTPHEADER, array('User-Agent: Mozilla/5.0 (Windows NT 6.1; WOW64; rv:28.0) Gecko/20100101 Firefox/28.0', 'Cache-Control: no-cache', 'Content-Type: application/x-www-form-urlencoded; charset=utf-8', 'X-MicrosoftAjax: Delta=true', 'X-Requested-With: XMLHttpRequest'));
+		$c->setopt(CURLOPT_POST, true);
+		$postr = $c->asPostString(array(
+			'airline' => $ac,
+			'departureDate' => $fd,
+			'flightNumber' => substr($fn,2),
+		));
+		$c->setopt(CURLOPT_POSTFIELDS, $postr);
+		if(!$c->exec()) return $data;
+		$data[0] = $fd;
+
+		$doc = new DOMDocument();
+		libxml_use_internal_errors(true);
+		
+		$doc->loadHTML($c->result, LIBXML_NOWARNING);
+		libxml_clear_errors();
+		$c = $doc->getElementById('flightTable');
+
+		
+		if(empty($c)){ return false; }
+		
+
+		$cs = $c->getElementsByTagName('table');
+
+		foreach($cs as $c){
+			$tds = $c->getElementsByTagName('td');
+			$cc = 0;
+			foreach($tds as $i=>$td){
+				$d = trim($td->nodeValue);
+				if($d == 'Status:'){
+					if(strpos(trim($tds->item($i+1)->nodeValue), 'Scheduled') === 0){
+						return [];
+					}
+				}elseif($d == 'Departure:'){
+					$cc = 1;
+					$data[2] = trim($tds->item($i+1)->nodeValue);
+				}elseif($d == 'Arrival:'){
+					$cc = 2;
+					$data[3] = trim($tds->item($i+1)->nodeValue);
+				}elseif($d == 'Actual:'){
+					$di = $cc == 1? 4 : 5;
+					$data[$di] = date('Y-m-d H:i:s', strtotime($fd.' '.trim(str_replace('(Estimated)', '', $tds->item($i+1)->nodeValue))));
+				}
+			}
+		}
+
+		if(empty($data[4])){
+			$data[7] = 0;
+		}elseif(empty($data[5])){
+			$data[7] = 1;
+		}else{
+			if(strtotime($data[5]) < strtotime($data[4])){// +1 day
+				$data[5] = date('Y-m-d H:i:s', strtotime($data[5].' +1 day'));
+			}
+			$data[7] = 2;
+		}
+
+		ksort($data);
+
+		//if($this->debug) print_r($data);
+		
+		return $data;
+	}
+	
+	public function updateMeta()
+	{
+		$this->meta = json_encode($this->mdata);
+		$this->update(['meta']);
+	}
+
+	public function getTrackingStatus($lastStatus)
+	{
+		if(in_array($this->type,[10,15,30,35,55,60,61,68]))
+		{
+			return self::$status[$this->type];
+		}
+
+		if(in_array($this->type,[90,71]))
+		{
+			return self::$status[90];
+		}
+
+		if($lastStatus=='Hand Over')
+		{
+			if(preg_match("/(been delivered)|(successfully delivered)|(delivered)/i", $this->activity)&&!preg_match("/(will be)/i", $this->activity))
+			{
+				return self::$status[90];
+			}
+			
+			return self::$status[69];
+		}
+
+
+		if(in_array($this->type,[38,40,94]))
+		{
+			return self::$status[41];
+		}
+
+		if(in_array($this->type,[70,65]))
+		{
+			if(preg_match("/(been delivered)|(successfully delivered)|(delivered)/i", $this->activity)&&!preg_match("/(will be)/i", $this->activity))
+			{
+				return self::$status[90];
+			}
+
+			if(preg_match("/(returned to sender)|(return to sender)/i", $this->activity))
+			{
+				return self::$status[98];
+			}
+
+			$check = false;
+			if(preg_match("/(business no longer)|(undeliverable freight)|(unable to deliver)|(misdirected to the incorrect depot)|(Unfortunately there was an issue)|(awaiting your instruction for re-delivery)|(No one)|(haven't received any correspondence)|(Once we receive further delivery instructions)|(nobody was available)|(returned to)|(unable to locate)|(No such address)|(Receiver not known at address)|(No one in attendance)|(Unable to gain access)|(Attempted delivery - Check address)|(Incorrect address on item)|(Declined by Receiver at delivery)|(Incorrect address on item)|(Item not collected)|(Unable to be left in)/i", $this->activity))
+			{
+				$check = true;
+			}
+
+			if($check)
+			{
+				return self::$status[72];
+			}else
+			{
+				return self::$status[70];
+			}
+		}
+
+		return "";
+
+	}
+
+	public function getTransActivity()
+	{
+		if(empty($this->shipment))
+		{
+			if($this->archiveShipment->type == 10&&!$this->archiveShipment->is3PL()&&preg_match('/os.pcaex.com/', $this->activity))
+			{
+				$this->activity = str_replace('os.pcaex.com', 'os.toplogistics.com.au', $this->activity);
+			}
+			
+		}else
+		{
+			if($this->shipment->type == 10&&!$this->shipment->is3PL()&&preg_match('/os.pcaex.com/', $this->activity))
+			{
+				$this->activity = str_replace('os.pcaex.com', 'os.toplogistics.com.au', $this->activity);
+			}
+		}
+		return $this->activity;
+	}
+		
+		
+		 /**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return Tracking the static model class
+	 */
+	public static function model($className=__CLASS__){
+		return parent::model($className);
+	}
+}

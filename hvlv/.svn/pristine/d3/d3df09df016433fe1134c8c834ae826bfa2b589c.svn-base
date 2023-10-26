@@ -1,0 +1,176 @@
+<?php
+
+/**
+ * This is the model class for table "google_review".
+ *
+ * The followings are the available columns in table 'google_review':
+ * @property integer $id
+ * @property string $hbn
+ * @property string $ref
+ * @property string $time_start
+ * @property string $time_done
+ * @property string $cnee_name
+ * @property string $cnee_email
+ * @property string $cnee_tel
+ * @property string $cnor_city
+ * @property string $cnor_state
+ * @property string $pkg
+ * @property string $weight
+ * @property string $time_arrived
+ * @property integer $shipment_id
+ * @property integer $cargo_process_id
+ * @property integer $status
+ * @property string $time_created
+ * @property string $time_processed
+ * @property string $problem
+ * @property string $comment
+ */
+class GoogleReview extends CActiveRecord
+{
+	const DELIVERED = 10;
+	const FIRST_CALL = 11;
+	const SECOND_CALL = 12;
+	const CALLED_NO_ANSWER = 20;
+	const EMAIL_SENT = 30;
+	const REFUSED = 40;
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName()
+	{
+		return 'google_review';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('hbn, ref, time_start, cnee_name, cnee_tel, pkg, weight, shipment_id', 'required'),
+			array('shipment_id, cargo_process_id, status', 'numerical', 'integerOnly'=>true),
+			array('hbn, ref, cnee_tel', 'length', 'max'=>50),
+			array('cnee_name, cnee_email', 'length', 'max'=>200),
+			array('cnor_city, cnor_state', 'length', 'max'=>100),
+			array('pkg', 'length', 'max'=>11),
+			array('weight', 'length', 'max'=>10),
+			array('time_done, time_arrived, time_processed', 'safe'),
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, hbn, ref, time_start, time_done, cnee_name, cnee_email, cnee_tel, cnor_city, cnor_state, pkg, weight, time_arrived, shipment_id, cargo_process_id, status', 'safe', 'on'=>'search'),
+			array('hbn, time_done, time_processed, status, problem, comment', 'safe', 'on'=>'getHistoryRecords'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+			'shipment'=>array(self::BELONGS_TO, 'ImParcel', 'shipment_id'),
+		);
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return array(
+			'id' => 'ID',
+			'hbn' => 'Hbn',
+			'ref' => 'Ref',
+			'time_start' => 'Time Start',
+			'time_done' => 'Time Done',
+			'cnee_name' => 'Cnee Name',
+			'cnee_email' => 'Cnee Email',
+			'cnee_tel' => 'Cnee Tel',
+			'cnor_city' => 'Cnor City',
+			'cnor_state' => 'Cnor State',
+			'pkg' => 'Pkg',
+			'weight' => 'Weight',
+			'time_arrived' => 'Time Arrived',
+			'shipment_id' => 'Shipment',
+			'cargo_process_id' => 'Cargo Process',
+			'status' => 'Status',
+			'time_processed' => 'Time Processed',
+			'problem' => 'Problem',
+			'comment' => 'Comment',
+		);
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search()
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('id',$this->id);
+		$criteria->compare('hbn',$this->hbn,true);
+		$criteria->compare('ref',$this->ref,true);
+		$criteria->compare('time_start',$this->time_start,true);
+		$criteria->compare('time_done',$this->time_done,true);
+		$criteria->compare('cnee_name',$this->cnee_name,true);
+		$criteria->compare('cnee_email',$this->cnee_email,true);
+		$criteria->compare('cnee_tel',$this->cnee_tel,true);
+		$criteria->compare('cnor_city',$this->cnor_city,true);
+		$criteria->compare('cnor_state',$this->cnor_state,true);
+		$criteria->compare('pkg',$this->pkg,true);
+		$criteria->compare('weight',$this->weight,true);
+		$criteria->compare('time_arrived',$this->time_arrived,true);
+		$criteria->compare('shipment_id',$this->shipment_id);
+		$criteria->compare('cargo_process_id',$this->cargo_process_id);
+		$criteria->compare('status', '<20', true);
+
+		return new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+		));
+	}
+
+	public function getHistoryRecords()
+	{
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('hbn',$this->hbn,true);
+		$criteria->compare('shipment_id',$this->shipment_id);
+		$criteria->compare('cargo_process_id',$this->cargo_process_id);
+		$criteria->compare('status', '>19', true);
+		$criteria->compare('time_processed', $this->time_processed,true);
+		$criteria->compare('problem',$this->problem);
+		$criteria->compare('comment',$this->comment);
+
+		return new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+			'pagination'=>array(
+				'pageSize'=>15,
+			),
+		));
+	}
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return GoogleReview the static model class
+	 */
+	public static function model($className=__CLASS__)
+	{
+		return parent::model($className);
+	}
+}

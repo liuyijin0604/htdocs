@@ -1,0 +1,532 @@
+@charset "UTF-8";
+
+a{
+    color: #be3426;
+}
+
+header.navbar{
+    background: #14487E;
+    color: #f1f1f1;
+    border: none;
+}
+header.navbar a{
+    color: #f1f1f1;
+}
+footer{
+    background: #eee;
+    padding: 20px 0;
+    margin-top: 30px;
+}
+.navbar-nav > li > a:hover, .navbar-nav > li > a:focus{
+    background: rgba(240,240,240,0.6);
+    color: #be3426;
+}
+.navbar-toggle{
+    color: #f1f1f1;
+    border-color: #f1f1f1;
+}
+.navbar-toggle .icon-bar{
+    background-color: #f1f1f1;
+}
+.navbar-nav .dropdown-menu a{
+    color: #14487E;
+    font-size: 1.2em;
+    padding: 0.3em 1em;
+}
+.hredbar {
+    background: linear-gradient(to bottom, #992a1f 0%, #be3426 100%) repeat scroll 0 0 rgba(0, 0, 0, 0);
+    height: 8px;
+}
+a.dash-item{
+    color: #14487E;
+    border: 2px solid;
+    border-radius: 10px;
+    font-weight: bold;
+    font-size: 24px;
+    min-height: 50px;
+    display: block;
+    text-align: center;
+    padding: 15px;
+    margin-bottom: 25px;
+    text-decoration: none;
+}
+a.dash-item:hover, a.dash-item:active{
+    text-decoration: none;
+    color: #be3426;
+    background: #DBEAF9;
+}
+a.dash-item .glyphicon{
+    font-size: 2em;
+}
+.grid-view .summary{ text-align: right; }
+.grid-view thead {
+    background-color: #fff;
+}
+.col-12{
+    width:30%;
+    float: left;
+    margin-top: 1em;
+}
+.col-12-left
+{
+    width:30%;
+    float: left;
+    margin-left:8em;
+    margin-top: 1em;
+    text-align: center;
+    font-weight: bold;
+    font-size: 2em;
+}
+
+@media screen and (max-width: 600px) {
+    .col-12{
+    width:70%;
+    float: left;
+    margin-top: 1em;
+    }
+    .col-12-left
+    {
+        width:30%;
+        float: left;
+        font-size: 1em;
+        margin-top: 1em;
+        margin-left:0em;
+        text-align: center;
+    }
+}
+
+/*yii grid */
+div.search-form{
+    padding: 10px;
+    margin: 10px 0;
+    background: #eee;
+}
+/*grid*/
+.grid-view-loading{
+    background:url(images/loading.gif) no-repeat;
+}
+
+.grid-view{
+    padding-top: 20px;
+    padding-bottom: 20px;
+}
+
+.grid-view table.items{
+    background: white;
+    border-collapse: collapse;
+    width: 100%;
+    border: 1px #D0E3EF solid;
+}
+
+.grid-view table.items th, .grid-view table.items td{
+    font-size: 0.9em;
+    border: 1px white solid;
+    padding: 0.3em;
+    /*white-space: nowrap;*/
+}
+
+.grid-view table.items th{
+    color: white;
+    background: url(images/bg.gif) repeat-x scroll left top white;
+    text-align: center;
+}
+
+.grid-view table.sub-items th{
+    background: #468C00;
+}
+
+.grid-view table.items th a{
+    color: #EEE;
+    font-weight: bold;
+    text-decoration: none;
+}
+
+.grid-view table.items th a:hover{
+    color: #FFF;
+}
+
+.grid-view table.items th a.asc{
+    background:url(images/up.gif) right center no-repeat;
+    padding-right: 10px;
+}
+
+.grid-view table.items th a.desc{
+    background:url(images/down.gif) right center no-repeat;
+    padding-right: 10px;
+}
+
+.grid-view table.items tr.even{
+    background: #F8F8F8;
+}
+
+.grid-view table.items tr.odd{
+    background: #E5F1F4;
+}
+
+.grid-view table.items tr.selected{
+    background: #BCE774;
+}
+
+.grid-view table.items tr:hover{
+    background: #ECFBD4;
+}
+
+.grid-view .link-column img{
+    border: 0;
+}
+
+.grid-view .button-column{
+    text-align: center;
+    width: 60px;
+}
+
+.grid-view .button-column img{
+    border: 0;
+}
+
+.grid-view .checkbox-column{
+    width: 15px;
+}
+
+.grid-view .summary{
+    margin: 0 0 5px 0;
+    text-align: right;
+}
+
+.grid-view .pager{
+    margin: 5px 0 0 0;
+    text-align: right;
+}
+
+.grid-view .empty{
+    font-style: italic;
+}
+
+.grid-view .filters input,
+.grid-view .filters select{
+    width: 100%;
+    border: 1px solid #ccc;
+}
+.grid-view .footerSum{
+    background: #BCE774;
+}
+.colshade_blue{
+    background: rgb(153,204,255);
+    background: rgba(153,204,255,0.4);
+}
+.colshade_orange{
+    background: rgb(255,204,153);
+    background: rgba(255,204,153,0.4);
+}
+td.button-column { white-space: nowrap; }
+a.grid_view_btn, a.grid_edit_btn, a.grid_delete_btn, a.grid_gallery_btn, a.grid_file_btn, a.grid_print_btn, a.grid_swap_btn{
+    background: url(images/grid_btns.png) 0 0 no-repeat;
+    padding-left: 18px;
+    white-space: nowrap;
+    font-size: 13px;
+    height: 16px;
+    line-height: 16px;
+    margin-right: 5px;
+}
+a.grid_edit_btn{
+    background-position: 0 -30px;
+}
+a.grid_delete_btn{
+    background-position: 0 -60px;
+}
+a.grid_gallery_btn{
+    background-position: 0 -90px;
+}
+a.grid_file_btn{
+    background-position: 0 -120px;
+}
+a.grid_print_btn{
+    background-position: 0 -150px;
+}
+a.grid_swap_btn{
+    background-position: 0 -180px;
+}
+.grid-view table.items tbody tr.critical td{
+    background: rgba(200,0,0,0.4);
+}
+.grid-view table.items tbody tr.orange td{
+    background: rgba(255,127,0,0.4);
+}
+.grid-view table.items tbody tr.yellow td{
+    background: rgba(255,200,0,0.4);
+}
+
+td.tright, th.tright{
+    text-align: right;
+}
+.has-warning .form-control{
+    background: #FCF8E3;
+}
+
+.has-error .form-control{
+    background: #f9f2f4;
+}
+
+span.required {
+    color: red;
+}
+.bs-callout {
+    padding: 20px;
+    margin: 20px 0;
+    border: 1px solid #eee;
+    border-left-width: 5px;
+    border-radius: 3px;
+}
+.bs-callout-info {
+    border-left-color: #14487E;
+}
+.bs-callout-info h4 {
+    color: #14487E;
+}
+
+@-moz-keyframes spin {
+    from { -moz-transform: rotate(0deg); }
+    to { -moz-transform: rotate(360deg); }
+}
+@-webkit-keyframes spin {
+    from { -webkit-transform: rotate(0deg); }
+    to { -webkit-transform: rotate(360deg); }
+}
+@keyframes spin {
+    from {transform:rotate(0deg);}
+    to {transform:rotate(360deg);}
+}
+
+.glyphicon-refresh-animate {
+    -animation: spin .7s infinite linear;
+    -webkit-animation: spin .7s infinite linear;
+    -moz-animation: spin .7s infinite linear;
+}
+
+/*notifications*/
+.notifications {
+  position: fixed;
+  z-index: 9999;
+}
+.notifications.bottom-right {
+  right: 10px;
+  bottom: 25px;
+}
+
+.notifications > div {
+  position: relative;
+  margin: 5px 0px;
+}
+.notifications a.close{
+  margin-left: 10px;
+}
+/* jquery ui */
+.ui-autocomplete { position: absolute; cursor: default; max-height: 200px; overflow:auto; z-index: 3100;}
+.ui-helper-hidden-accessible { position: absolute !important; clip: rect(1px 1px 1px 1px); clip: rect(1px,1px,1px,1px); display: none; }
+/* Component containers
+----------------------------------*/
+/*.ui-widget-content { border: 1px solid #dddddd; background: #DBEAF9; color: #362b36; }*/
+.ui-widget-content { color: #362b36; }
+.ui-menu { list-style:none; padding: 2px; margin: 0; display:block; outline: none; }
+.ui-menu .ui-menu-item a { display: block; padding: 2px 5px; color: #14487E; font-size: 1em;}
+.ui-menu .ui-menu-item a.ui-state-focus,
+.ui-menu .ui-menu-item a:hover { background: #14487E; color: #fff;  text-decoration: none; }
+.ui-widget :active { outline: none; }
+
+@media (max-width: 767px){
+    .navbar-nav { margin: 0 -15px; }
+    .navbar-nav .dropdown-toggle { display: none; }
+    .navbar-nav .dropdown-menu { display: block; width: 100%; position: relative; border-radius: 0; box-shadow: none; }
+    .navbar-nav .dropdown-menu a { font-size: 1.5em; padding: 0.5em 1em; }
+    #yw0 tfoot tr { border: none; }
+    #yw0 tfoot td{
+        padding-left: 0;
+        overflow: auto;
+    }
+}
+
+/*!
+ * Datepicker for Bootstrap v1.4.0 (https://github.com/eternicode/bootstrap-datepicker)
+ *
+ * Copyright 2012 Stefan Petre
+ * Improvements by Andrew Rowls
+ * Licensed under the Apache License v2.0 (http://www.apache.org/licenses/LICENSE-2.0)
+ */
+.datepicker{padding:4px;border-radius:4px;direction:ltr}.datepicker-inline{width:220px}.datepicker.datepicker-rtl{direction:rtl}.datepicker.datepicker-rtl table tr td span{float:right}.datepicker-dropdown{top:0;left:0}.datepicker-dropdown:before{content:'';display:inline-block;border-left:7px solid transparent;border-right:7px solid transparent;border-bottom:7px solid #ccc;border-top:0;border-bottom-color:rgba(0,0,0,.2);position:absolute}.datepicker-dropdown:after{content:'';display:inline-block;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:6px solid #fff;border-top:0;position:absolute}.datepicker-dropdown.datepicker-orient-left:before{left:6px}.datepicker-dropdown.datepicker-orient-left:after{left:7px}.datepicker-dropdown.datepicker-orient-right:before{right:6px}.datepicker-dropdown.datepicker-orient-right:after{right:7px}.datepicker-dropdown.datepicker-orient-top:before{top:-7px}.datepicker-dropdown.datepicker-orient-top:after{top:-6px}.datepicker-dropdown.datepicker-orient-bottom:before{bottom:-7px;border-bottom:0;border-top:7px solid #999}.datepicker-dropdown.datepicker-orient-bottom:after{bottom:-6px;border-bottom:0;border-top:6px solid #fff}.datepicker>div{display:none}.datepicker.days .datepicker-days,.datepicker.months .datepicker-months,.datepicker.years .datepicker-years{display:block}.datepicker table{margin:0;-webkit-touch-callout:none;-webkit-user-select:none;-khtml-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none}.datepicker table tr td,.datepicker table tr th{text-align:center;width:30px;height:30px;border-radius:4px;border:none}.table-striped .datepicker table tr td,.table-striped .datepicker table tr th{background-color:transparent}.datepicker table tr td.day:hover,.datepicker table tr td.day.focused{background:#eee;cursor:pointer}.datepicker table tr td.old,.datepicker table tr td.new{color:#999}.datepicker table tr td.disabled,.datepicker table tr td.disabled:hover{background:0 0;color:#999;cursor:default}.datepicker table tr td.today,.datepicker table tr td.today:hover,.datepicker table tr td.today.disabled,.datepicker table tr td.today.disabled:hover{color:#000;background-color:#ffdb99;border-color:#ffb733}.datepicker table tr td.today:hover,.datepicker table tr td.today:hover:hover,.datepicker table tr td.today.disabled:hover,.datepicker table tr td.today.disabled:hover:hover,.datepicker table tr td.today:focus,.datepicker table tr td.today:hover:focus,.datepicker table tr td.today.disabled:focus,.datepicker table tr td.today.disabled:hover:focus,.datepicker table tr td.today:active,.datepicker table tr td.today:hover:active,.datepicker table tr td.today.disabled:active,.datepicker table tr td.today.disabled:hover:active,.datepicker table tr td.today.active,.datepicker table tr td.today:hover.active,.datepicker table tr td.today.disabled.active,.datepicker table tr td.today.disabled:hover.active,.open .dropdown-toggle.datepicker table tr td.today,.open .dropdown-toggle.datepicker table tr td.today:hover,.open .dropdown-toggle.datepicker table tr td.today.disabled,.open .dropdown-toggle.datepicker table tr td.today.disabled:hover{color:#000;background-color:#ffcd70;border-color:#f59e00}.datepicker table tr td.today:active,.datepicker table tr td.today:hover:active,.datepicker table tr td.today.disabled:active,.datepicker table tr td.today.disabled:hover:active,.datepicker table tr td.today.active,.datepicker table tr td.today:hover.active,.datepicker table tr td.today.disabled.active,.datepicker table tr td.today.disabled:hover.active,.open .dropdown-toggle.datepicker table tr td.today,.open .dropdown-toggle.datepicker table tr td.today:hover,.open .dropdown-toggle.datepicker table tr td.today.disabled,.open .dropdown-toggle.datepicker table tr td.today.disabled:hover{background-image:none}.datepicker table tr td.today.disabled,.datepicker table tr td.today:hover.disabled,.datepicker table tr td.today.disabled.disabled,.datepicker table tr td.today.disabled:hover.disabled,.datepicker table tr td.today[disabled],.datepicker table tr td.today:hover[disabled],.datepicker table tr td.today.disabled[disabled],.datepicker table tr td.today.disabled:hover[disabled],fieldset[disabled] .datepicker table tr td.today,fieldset[disabled] .datepicker table tr td.today:hover,fieldset[disabled] .datepicker table tr td.today.disabled,fieldset[disabled] .datepicker table tr td.today.disabled:hover,.datepicker table tr td.today.disabled:hover,.datepicker table tr td.today:hover.disabled:hover,.datepicker table tr td.today.disabled.disabled:hover,.datepicker table tr td.today.disabled:hover.disabled:hover,.datepicker table tr td.today[disabled]:hover,.datepicker table tr td.today:hover[disabled]:hover,.datepicker table tr td.today.disabled[disabled]:hover,.datepicker table tr td.today.disabled:hover[disabled]:hover,fieldset[disabled] .datepicker table tr td.today:hover,fieldset[disabled] .datepicker table tr td.today:hover:hover,fieldset[disabled] .datepicker table tr td.today.disabled:hover,fieldset[disabled] .datepicker table tr td.today.disabled:hover:hover,.datepicker table tr td.today.disabled:focus,.datepicker table tr td.today:hover.disabled:focus,.datepicker table tr td.today.disabled.disabled:focus,.datepicker table tr td.today.disabled:hover.disabled:focus,.datepicker table tr td.today[disabled]:focus,.datepicker table tr td.today:hover[disabled]:focus,.datepicker table tr td.today.disabled[disabled]:focus,.datepicker table tr td.today.disabled:hover[disabled]:focus,fieldset[disabled] .datepicker table tr td.today:focus,fieldset[disabled] .datepicker table tr td.today:hover:focus,fieldset[disabled] .datepicker table tr td.today.disabled:focus,fieldset[disabled] .datepicker table tr td.today.disabled:hover:focus,.datepicker table tr td.today.disabled:active,.datepicker table tr td.today:hover.disabled:active,.datepicker table tr td.today.disabled.disabled:active,.datepicker table tr td.today.disabled:hover.disabled:active,.datepicker table tr td.today[disabled]:active,.datepicker table tr td.today:hover[disabled]:active,.datepicker table tr td.today.disabled[disabled]:active,.datepicker table tr td.today.disabled:hover[disabled]:active,fieldset[disabled] .datepicker table tr td.today:active,fieldset[disabled] .datepicker table tr td.today:hover:active,fieldset[disabled] .datepicker table tr td.today.disabled:active,fieldset[disabled] .datepicker table tr td.today.disabled:hover:active,.datepicker table tr td.today.disabled.active,.datepicker table tr td.today:hover.disabled.active,.datepicker table tr td.today.disabled.disabled.active,.datepicker table tr td.today.disabled:hover.disabled.active,.datepicker table tr td.today[disabled].active,.datepicker table tr td.today:hover[disabled].active,.datepicker table tr td.today.disabled[disabled].active,.datepicker table tr td.today.disabled:hover[disabled].active,fieldset[disabled] .datepicker table tr td.today.active,fieldset[disabled] .datepicker table tr td.today:hover.active,fieldset[disabled] .datepicker table tr td.today.disabled.active,fieldset[disabled] .datepicker table tr td.today.disabled:hover.active{background-color:#ffdb99;border-color:#ffb733}.datepicker table tr td.today:hover:hover{color:#000}.datepicker table tr td.today.active:hover{color:#fff}.datepicker table tr td.range,.datepicker table tr td.range:hover,.datepicker table tr td.range.disabled,.datepicker table tr td.range.disabled:hover{background:#eee;border-radius:0}.datepicker table tr td.range.today,.datepicker table tr td.range.today:hover,.datepicker table tr td.range.today.disabled,.datepicker table tr td.range.today.disabled:hover{color:#000;background-color:#f7ca77;border-color:#f1a417;border-radius:0}.datepicker table tr td.range.today:hover,.datepicker table tr td.range.today:hover:hover,.datepicker table tr td.range.today.disabled:hover,.datepicker table tr td.range.today.disabled:hover:hover,.datepicker table tr td.range.today:focus,.datepicker table tr td.range.today:hover:focus,.datepicker table tr td.range.today.disabled:focus,.datepicker table tr td.range.today.disabled:hover:focus,.datepicker table tr td.range.today:active,.datepicker table tr td.range.today:hover:active,.datepicker table tr td.range.today.disabled:active,.datepicker table tr td.range.today.disabled:hover:active,.datepicker table tr td.range.today.active,.datepicker table tr td.range.today:hover.active,.datepicker table tr td.range.today.disabled.active,.datepicker table tr td.range.today.disabled:hover.active,.open .dropdown-toggle.datepicker table tr td.range.today,.open .dropdown-toggle.datepicker table tr td.range.today:hover,.open .dropdown-toggle.datepicker table tr td.range.today.disabled,.open .dropdown-toggle.datepicker table tr td.range.today.disabled:hover{color:#000;background-color:#f4bb51;border-color:#bf800c}.datepicker table tr td.range.today:active,.datepicker table tr td.range.today:hover:active,.datepicker table tr td.range.today.disabled:active,.datepicker table tr td.range.today.disabled:hover:active,.datepicker table tr td.range.today.active,.datepicker table tr td.range.today:hover.active,.datepicker table tr td.range.today.disabled.active,.datepicker table tr td.range.today.disabled:hover.active,.open .dropdown-toggle.datepicker table tr td.range.today,.open .dropdown-toggle.datepicker table tr td.range.today:hover,.open .dropdown-toggle.datepicker table tr td.range.today.disabled,.open .dropdown-toggle.datepicker table tr td.range.today.disabled:hover{background-image:none}.datepicker table tr td.range.today.disabled,.datepicker table tr td.range.today:hover.disabled,.datepicker table tr td.range.today.disabled.disabled,.datepicker table tr td.range.today.disabled:hover.disabled,.datepicker table tr td.range.today[disabled],.datepicker table tr td.range.today:hover[disabled],.datepicker table tr td.range.today.disabled[disabled],.datepicker table tr td.range.today.disabled:hover[disabled],fieldset[disabled] .datepicker table tr td.range.today,fieldset[disabled] .datepicker table tr td.range.today:hover,fieldset[disabled] .datepicker table tr td.range.today.disabled,fieldset[disabled] .datepicker table tr td.range.today.disabled:hover,.datepicker table tr td.range.today.disabled:hover,.datepicker table tr td.range.today:hover.disabled:hover,.datepicker table tr td.range.today.disabled.disabled:hover,.datepicker table tr td.range.today.disabled:hover.disabled:hover,.datepicker table tr td.range.today[disabled]:hover,.datepicker table tr td.range.today:hover[disabled]:hover,.datepicker table tr td.range.today.disabled[disabled]:hover,.datepicker table tr td.range.today.disabled:hover[disabled]:hover,fieldset[disabled] .datepicker table tr td.range.today:hover,fieldset[disabled] .datepicker table tr td.range.today:hover:hover,fieldset[disabled] .datepicker table tr td.range.today.disabled:hover,fieldset[disabled] .datepicker table tr td.range.today.disabled:hover:hover,.datepicker table tr td.range.today.disabled:focus,.datepicker table tr td.range.today:hover.disabled:focus,.datepicker table tr td.range.today.disabled.disabled:focus,.datepicker table tr td.range.today.disabled:hover.disabled:focus,.datepicker table tr td.range.today[disabled]:focus,.datepicker table tr td.range.today:hover[disabled]:focus,.datepicker table tr td.range.today.disabled[disabled]:focus,.datepicker table tr td.range.today.disabled:hover[disabled]:focus,fieldset[disabled] .datepicker table tr td.range.today:focus,fieldset[disabled] .datepicker table tr td.range.today:hover:focus,fieldset[disabled] .datepicker table tr td.range.today.disabled:focus,fieldset[disabled] .datepicker table tr td.range.today.disabled:hover:focus,.datepicker table tr td.range.today.disabled:active,.datepicker table tr td.range.today:hover.disabled:active,.datepicker table tr td.range.today.disabled.disabled:active,.datepicker table tr td.range.today.disabled:hover.disabled:active,.datepicker table tr td.range.today[disabled]:active,.datepicker table tr td.range.today:hover[disabled]:active,.datepicker table tr td.range.today.disabled[disabled]:active,.datepicker table tr td.range.today.disabled:hover[disabled]:active,fieldset[disabled] .datepicker table tr td.range.today:active,fieldset[disabled] .datepicker table tr td.range.today:hover:active,fieldset[disabled] .datepicker table tr td.range.today.disabled:active,fieldset[disabled] .datepicker table tr td.range.today.disabled:hover:active,.datepicker table tr td.range.today.disabled.active,.datepicker table tr td.range.today:hover.disabled.active,.datepicker table tr td.range.today.disabled.disabled.active,.datepicker table tr td.range.today.disabled:hover.disabled.active,.datepicker table tr td.range.today[disabled].active,.datepicker table tr td.range.today:hover[disabled].active,.datepicker table tr td.range.today.disabled[disabled].active,.datepicker table tr td.range.today.disabled:hover[disabled].active,fieldset[disabled] .datepicker table tr td.range.today.active,fieldset[disabled] .datepicker table tr td.range.today:hover.active,fieldset[disabled] .datepicker table tr td.range.today.disabled.active,fieldset[disabled] .datepicker table tr td.range.today.disabled:hover.active{background-color:#f7ca77;border-color:#f1a417}.datepicker table tr td.selected,.datepicker table tr td.selected:hover,.datepicker table tr td.selected.disabled,.datepicker table tr td.selected.disabled:hover{color:#fff;background-color:#999;border-color:#555;text-shadow:0 -1px 0 rgba(0,0,0,.25)}.datepicker table tr td.selected:hover,.datepicker table tr td.selected:hover:hover,.datepicker table tr td.selected.disabled:hover,.datepicker table tr td.selected.disabled:hover:hover,.datepicker table tr td.selected:focus,.datepicker table tr td.selected:hover:focus,.datepicker table tr td.selected.disabled:focus,.datepicker table tr td.selected.disabled:hover:focus,.datepicker table tr td.selected:active,.datepicker table tr td.selected:hover:active,.datepicker table tr td.selected.disabled:active,.datepicker table tr td.selected.disabled:hover:active,.datepicker table tr td.selected.active,.datepicker table tr td.selected:hover.active,.datepicker table tr td.selected.disabled.active,.datepicker table tr td.selected.disabled:hover.active,.open .dropdown-toggle.datepicker table tr td.selected,.open .dropdown-toggle.datepicker table tr td.selected:hover,.open .dropdown-toggle.datepicker table tr td.selected.disabled,.open .dropdown-toggle.datepicker table tr td.selected.disabled:hover{color:#fff;background-color:#858585;border-color:#373737}.datepicker table tr td.selected:active,.datepicker table tr td.selected:hover:active,.datepicker table tr td.selected.disabled:active,.datepicker table tr td.selected.disabled:hover:active,.datepicker table tr td.selected.active,.datepicker table tr td.selected:hover.active,.datepicker table tr td.selected.disabled.active,.datepicker table tr td.selected.disabled:hover.active,.open .dropdown-toggle.datepicker table tr td.selected,.open .dropdown-toggle.datepicker table tr td.selected:hover,.open .dropdown-toggle.datepicker table tr td.selected.disabled,.open .dropdown-toggle.datepicker table tr td.selected.disabled:hover{background-image:none}.datepicker table tr td.selected.disabled,.datepicker table tr td.selected:hover.disabled,.datepicker table tr td.selected.disabled.disabled,.datepicker table tr td.selected.disabled:hover.disabled,.datepicker table tr td.selected[disabled],.datepicker table tr td.selected:hover[disabled],.datepicker table tr td.selected.disabled[disabled],.datepicker table tr td.selected.disabled:hover[disabled],fieldset[disabled] .datepicker table tr td.selected,fieldset[disabled] .datepicker table tr td.selected:hover,fieldset[disabled] .datepicker table tr td.selected.disabled,fieldset[disabled] .datepicker table tr td.selected.disabled:hover,.datepicker table tr td.selected.disabled:hover,.datepicker table tr td.selected:hover.disabled:hover,.datepicker table tr td.selected.disabled.disabled:hover,.datepicker table tr td.selected.disabled:hover.disabled:hover,.datepicker table tr td.selected[disabled]:hover,.datepicker table tr td.selected:hover[disabled]:hover,.datepicker table tr td.selected.disabled[disabled]:hover,.datepicker table tr td.selected.disabled:hover[disabled]:hover,fieldset[disabled] .datepicker table tr td.selected:hover,fieldset[disabled] .datepicker table tr td.selected:hover:hover,fieldset[disabled] .datepicker table tr td.selected.disabled:hover,fieldset[disabled] .datepicker table tr td.selected.disabled:hover:hover,.datepicker table tr td.selected.disabled:focus,.datepicker table tr td.selected:hover.disabled:focus,.datepicker table tr td.selected.disabled.disabled:focus,.datepicker table tr td.selected.disabled:hover.disabled:focus,.datepicker table tr td.selected[disabled]:focus,.datepicker table tr td.selected:hover[disabled]:focus,.datepicker table tr td.selected.disabled[disabled]:focus,.datepicker table tr td.selected.disabled:hover[disabled]:focus,fieldset[disabled] .datepicker table tr td.selected:focus,fieldset[disabled] .datepicker table tr td.selected:hover:focus,fieldset[disabled] .datepicker table tr td.selected.disabled:focus,fieldset[disabled] .datepicker table tr td.selected.disabled:hover:focus,.datepicker table tr td.selected.disabled:active,.datepicker table tr td.selected:hover.disabled:active,.datepicker table tr td.selected.disabled.disabled:active,.datepicker table tr td.selected.disabled:hover.disabled:active,.datepicker table tr td.selected[disabled]:active,.datepicker table tr td.selected:hover[disabled]:active,.datepicker table tr td.selected.disabled[disabled]:active,.datepicker table tr td.selected.disabled:hover[disabled]:active,fieldset[disabled] .datepicker table tr td.selected:active,fieldset[disabled] .datepicker table tr td.selected:hover:active,fieldset[disabled] .datepicker table tr td.selected.disabled:active,fieldset[disabled] .datepicker table tr td.selected.disabled:hover:active,.datepicker table tr td.selected.disabled.active,.datepicker table tr td.selected:hover.disabled.active,.datepicker table tr td.selected.disabled.disabled.active,.datepicker table tr td.selected.disabled:hover.disabled.active,.datepicker table tr td.selected[disabled].active,.datepicker table tr td.selected:hover[disabled].active,.datepicker table tr td.selected.disabled[disabled].active,.datepicker table tr td.selected.disabled:hover[disabled].active,fieldset[disabled] .datepicker table tr td.selected.active,fieldset[disabled] .datepicker table tr td.selected:hover.active,fieldset[disabled] .datepicker table tr td.selected.disabled.active,fieldset[disabled] .datepicker table tr td.selected.disabled:hover.active{background-color:#999;border-color:#555}.datepicker table tr td.active,.datepicker table tr td.active:hover,.datepicker table tr td.active.disabled,.datepicker table tr td.active.disabled:hover{color:#fff;background-color:#428bca;border-color:#357ebd;text-shadow:0 -1px 0 rgba(0,0,0,.25)}.datepicker table tr td.active:hover,.datepicker table tr td.active:hover:hover,.datepicker table tr td.active.disabled:hover,.datepicker table tr td.active.disabled:hover:hover,.datepicker table tr td.active:focus,.datepicker table tr td.active:hover:focus,.datepicker table tr td.active.disabled:focus,.datepicker table tr td.active.disabled:hover:focus,.datepicker table tr td.active:active,.datepicker table tr td.active:hover:active,.datepicker table tr td.active.disabled:active,.datepicker table tr td.active.disabled:hover:active,.datepicker table tr td.active.active,.datepicker table tr td.active:hover.active,.datepicker table tr td.active.disabled.active,.datepicker table tr td.active.disabled:hover.active,.open .dropdown-toggle.datepicker table tr td.active,.open .dropdown-toggle.datepicker table tr td.active:hover,.open .dropdown-toggle.datepicker table tr td.active.disabled,.open .dropdown-toggle.datepicker table tr td.active.disabled:hover{color:#fff;background-color:#3276b1;border-color:#285e8e}.datepicker table tr td.active:active,.datepicker table tr td.active:hover:active,.datepicker table tr td.active.disabled:active,.datepicker table tr td.active.disabled:hover:active,.datepicker table tr td.active.active,.datepicker table tr td.active:hover.active,.datepicker table tr td.active.disabled.active,.datepicker table tr td.active.disabled:hover.active,.open .dropdown-toggle.datepicker table tr td.active,.open .dropdown-toggle.datepicker table tr td.active:hover,.open .dropdown-toggle.datepicker table tr td.active.disabled,.open .dropdown-toggle.datepicker table tr td.active.disabled:hover{background-image:none}.datepicker table tr td.active.disabled,.datepicker table tr td.active:hover.disabled,.datepicker table tr td.active.disabled.disabled,.datepicker table tr td.active.disabled:hover.disabled,.datepicker table tr td.active[disabled],.datepicker table tr td.active:hover[disabled],.datepicker table tr td.active.disabled[disabled],.datepicker table tr td.active.disabled:hover[disabled],fieldset[disabled] .datepicker table tr td.active,fieldset[disabled] .datepicker table tr td.active:hover,fieldset[disabled] .datepicker table tr td.active.disabled,fieldset[disabled] .datepicker table tr td.active.disabled:hover,.datepicker table tr td.active.disabled:hover,.datepicker table tr td.active:hover.disabled:hover,.datepicker table tr td.active.disabled.disabled:hover,.datepicker table tr td.active.disabled:hover.disabled:hover,.datepicker table tr td.active[disabled]:hover,.datepicker table tr td.active:hover[disabled]:hover,.datepicker table tr td.active.disabled[disabled]:hover,.datepicker table tr td.active.disabled:hover[disabled]:hover,fieldset[disabled] .datepicker table tr td.active:hover,fieldset[disabled] .datepicker table tr td.active:hover:hover,fieldset[disabled] .datepicker table tr td.active.disabled:hover,fieldset[disabled] .datepicker table tr td.active.disabled:hover:hover,.datepicker table tr td.active.disabled:focus,.datepicker table tr td.active:hover.disabled:focus,.datepicker table tr td.active.disabled.disabled:focus,.datepicker table tr td.active.disabled:hover.disabled:focus,.datepicker table tr td.active[disabled]:focus,.datepicker table tr td.active:hover[disabled]:focus,.datepicker table tr td.active.disabled[disabled]:focus,.datepicker table tr td.active.disabled:hover[disabled]:focus,fieldset[disabled] .datepicker table tr td.active:focus,fieldset[disabled] .datepicker table tr td.active:hover:focus,fieldset[disabled] .datepicker table tr td.active.disabled:focus,fieldset[disabled] .datepicker table tr td.active.disabled:hover:focus,.datepicker table tr td.active.disabled:active,.datepicker table tr td.active:hover.disabled:active,.datepicker table tr td.active.disabled.disabled:active,.datepicker table tr td.active.disabled:hover.disabled:active,.datepicker table tr td.active[disabled]:active,.datepicker table tr td.active:hover[disabled]:active,.datepicker table tr td.active.disabled[disabled]:active,.datepicker table tr td.active.disabled:hover[disabled]:active,fieldset[disabled] .datepicker table tr td.active:active,fieldset[disabled] .datepicker table tr td.active:hover:active,fieldset[disabled] .datepicker table tr td.active.disabled:active,fieldset[disabled] .datepicker table tr td.active.disabled:hover:active,.datepicker table tr td.active.disabled.active,.datepicker table tr td.active:hover.disabled.active,.datepicker table tr td.active.disabled.disabled.active,.datepicker table tr td.active.disabled:hover.disabled.active,.datepicker table tr td.active[disabled].active,.datepicker table tr td.active:hover[disabled].active,.datepicker table tr td.active.disabled[disabled].active,.datepicker table tr td.active.disabled:hover[disabled].active,fieldset[disabled] .datepicker table tr td.active.active,fieldset[disabled] .datepicker table tr td.active:hover.active,fieldset[disabled] .datepicker table tr td.active.disabled.active,fieldset[disabled] .datepicker table tr td.active.disabled:hover.active{background-color:#428bca;border-color:#357ebd}.datepicker table tr td span{display:block;width:23%;height:54px;line-height:54px;float:left;margin:1%;cursor:pointer;border-radius:4px}.datepicker table tr td span:hover{background:#eee}.datepicker table tr td span.disabled,.datepicker table tr td span.disabled:hover{background:0 0;color:#999;cursor:default}.datepicker table tr td span.active,.datepicker table tr td span.active:hover,.datepicker table tr td span.active.disabled,.datepicker table tr td span.active.disabled:hover{color:#fff;background-color:#428bca;border-color:#357ebd;text-shadow:0 -1px 0 rgba(0,0,0,.25)}.datepicker table tr td span.active:hover,.datepicker table tr td span.active:hover:hover,.datepicker table tr td span.active.disabled:hover,.datepicker table tr td span.active.disabled:hover:hover,.datepicker table tr td span.active:focus,.datepicker table tr td span.active:hover:focus,.datepicker table tr td span.active.disabled:focus,.datepicker table tr td span.active.disabled:hover:focus,.datepicker table tr td span.active:active,.datepicker table tr td span.active:hover:active,.datepicker table tr td span.active.disabled:active,.datepicker table tr td span.active.disabled:hover:active,.datepicker table tr td span.active.active,.datepicker table tr td span.active:hover.active,.datepicker table tr td span.active.disabled.active,.datepicker table tr td span.active.disabled:hover.active,.open .dropdown-toggle.datepicker table tr td span.active,.open .dropdown-toggle.datepicker table tr td span.active:hover,.open .dropdown-toggle.datepicker table tr td span.active.disabled,.open .dropdown-toggle.datepicker table tr td span.active.disabled:hover{color:#fff;background-color:#3276b1;border-color:#285e8e}.datepicker table tr td span.active:active,.datepicker table tr td span.active:hover:active,.datepicker table tr td span.active.disabled:active,.datepicker table tr td span.active.disabled:hover:active,.datepicker table tr td span.active.active,.datepicker table tr td span.active:hover.active,.datepicker table tr td span.active.disabled.active,.datepicker table tr td span.active.disabled:hover.active,.open .dropdown-toggle.datepicker table tr td span.active,.open .dropdown-toggle.datepicker table tr td span.active:hover,.open .dropdown-toggle.datepicker table tr td span.active.disabled,.open .dropdown-toggle.datepicker table tr td span.active.disabled:hover{background-image:none}.datepicker table tr td span.active.disabled,.datepicker table tr td span.active:hover.disabled,.datepicker table tr td span.active.disabled.disabled,.datepicker table tr td span.active.disabled:hover.disabled,.datepicker table tr td span.active[disabled],.datepicker table tr td span.active:hover[disabled],.datepicker table tr td span.active.disabled[disabled],.datepicker table tr td span.active.disabled:hover[disabled],fieldset[disabled] .datepicker table tr td span.active,fieldset[disabled] .datepicker table tr td span.active:hover,fieldset[disabled] .datepicker table tr td span.active.disabled,fieldset[disabled] .datepicker table tr td span.active.disabled:hover,.datepicker table tr td span.active.disabled:hover,.datepicker table tr td span.active:hover.disabled:hover,.datepicker table tr td span.active.disabled.disabled:hover,.datepicker table tr td span.active.disabled:hover.disabled:hover,.datepicker table tr td span.active[disabled]:hover,.datepicker table tr td span.active:hover[disabled]:hover,.datepicker table tr td span.active.disabled[disabled]:hover,.datepicker table tr td span.active.disabled:hover[disabled]:hover,fieldset[disabled] .datepicker table tr td span.active:hover,fieldset[disabled] .datepicker table tr td span.active:hover:hover,fieldset[disabled] .datepicker table tr td span.active.disabled:hover,fieldset[disabled] .datepicker table tr td span.active.disabled:hover:hover,.datepicker table tr td span.active.disabled:focus,.datepicker table tr td span.active:hover.disabled:focus,.datepicker table tr td span.active.disabled.disabled:focus,.datepicker table tr td span.active.disabled:hover.disabled:focus,.datepicker table tr td span.active[disabled]:focus,.datepicker table tr td span.active:hover[disabled]:focus,.datepicker table tr td span.active.disabled[disabled]:focus,.datepicker table tr td span.active.disabled:hover[disabled]:focus,fieldset[disabled] .datepicker table tr td span.active:focus,fieldset[disabled] .datepicker table tr td span.active:hover:focus,fieldset[disabled] .datepicker table tr td span.active.disabled:focus,fieldset[disabled] .datepicker table tr td span.active.disabled:hover:focus,.datepicker table tr td span.active.disabled:active,.datepicker table tr td span.active:hover.disabled:active,.datepicker table tr td span.active.disabled.disabled:active,.datepicker table tr td span.active.disabled:hover.disabled:active,.datepicker table tr td span.active[disabled]:active,.datepicker table tr td span.active:hover[disabled]:active,.datepicker table tr td span.active.disabled[disabled]:active,.datepicker table tr td span.active.disabled:hover[disabled]:active,fieldset[disabled] .datepicker table tr td span.active:active,fieldset[disabled] .datepicker table tr td span.active:hover:active,fieldset[disabled] .datepicker table tr td span.active.disabled:active,fieldset[disabled] .datepicker table tr td span.active.disabled:hover:active,.datepicker table tr td span.active.disabled.active,.datepicker table tr td span.active:hover.disabled.active,.datepicker table tr td span.active.disabled.disabled.active,.datepicker table tr td span.active.disabled:hover.disabled.active,.datepicker table tr td span.active[disabled].active,.datepicker table tr td span.active:hover[disabled].active,.datepicker table tr td span.active.disabled[disabled].active,.datepicker table tr td span.active.disabled:hover[disabled].active,fieldset[disabled] .datepicker table tr td span.active.active,fieldset[disabled] .datepicker table tr td span.active:hover.active,fieldset[disabled] .datepicker table tr td span.active.disabled.active,fieldset[disabled] .datepicker table tr td span.active.disabled:hover.active{background-color:#428bca;border-color:#357ebd}.datepicker table tr td span.old,.datepicker table tr td span.new{color:#999}.datepicker .datepicker-switch{width:145px}.datepicker thead tr:first-child th,.datepicker tfoot tr th{cursor:pointer}.datepicker thead tr:first-child th:hover,.datepicker tfoot tr th:hover{background:#eee}.datepicker .cw{font-size:10px;width:12px;padding:0 2px 0 5px;vertical-align:middle}.datepicker thead tr:first-child .cw{cursor:default;background-color:transparent}.input-group.date .input-group-addon{cursor:pointer}.input-daterange{width:100%}.input-daterange input{text-align:center}.input-daterange input:first-child{border-radius:3px 0 0 3px}.input-daterange input:last-child{border-radius:0 3px 3px 0}.input-daterange .input-group-addon{width:auto;min-width:16px;padding:4px 5px;font-weight:400;line-height:1.42857143;text-align:center;text-shadow:0 1px 0 #fff;vertical-align:middle;background-color:#eee;border:solid #ccc;border-width:1px 0;margin-left:-5px;margin-right:-5px}
+
+.account-credit-info{
+    border: 1px solid black;
+    border-radius: 6px;
+    padding: 10px;
+    float:right;
+    margin-top: -200px;
+    background: cornsilk;
+ }
+.credit-limits , .credit-balance , .credit-terms, .credit-terms-left{
+    font-weight: bold;
+}
+.credit-balance , .credit-terms-left {
+    color:#008000;
+}
+.credit-balance.warning, .credit-terms-left.warning {
+    color:#ff0000;
+    font-weight: bold;
+    font-size: 2em;
+    text-decoration:underline;
+}
+
+.ims-manifest-export{
+    float: right;
+    position: relative;
+    margin-top: -40px;
+}
+
+    @media (min-width: 1200px)
+    {
+        .col-lg-3 {
+            width: 33.3%;
+        }
+    }
+
+/* Absolute Center Spinner */
+.loading {
+  position: fixed;
+  z-index: 999;
+  height: 2em;
+  width: 2em;
+  overflow: visible;
+  margin: auto;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+}
+
+/* Transparent Overlay */
+.loading:before {
+  content: '';
+  display: block;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0,0,0,0.3);
+}
+
+/* :not(:required) hides these rules from IE9 and below */
+.loading:not(:required) {
+  /* hide "loading..." text */
+  font: 0/0 a;
+  color: transparent;
+  text-shadow: none;
+  background-color: transparent;
+  border: 0;
+}
+
+.loading:not(:required):after {
+  content: '';
+  display: block;
+  font-size: 10px;
+  width: 1em;
+  height: 1em;
+  margin-top: -0.5em;
+  -webkit-animation: spinner 1500ms infinite linear;
+  -moz-animation: spinner 1500ms infinite linear;
+  -ms-animation: spinner 1500ms infinite linear;
+  -o-animation: spinner 1500ms infinite linear;
+  animation: spinner 1500ms infinite linear;
+  border-radius: 0.5em;
+  -webkit-box-shadow: rgba(0, 0, 0, 0.75) 1.5em 0 0 0, rgba(0, 0, 0, 0.75) 1.1em 1.1em 0 0, rgba(0, 0, 0, 0.75) 0 1.5em 0 0, rgba(0, 0, 0, 0.75) -1.1em 1.1em 0 0, rgba(0, 0, 0, 0.5) -1.5em 0 0 0, rgba(0, 0, 0, 0.5) -1.1em -1.1em 0 0, rgba(0, 0, 0, 0.75) 0 -1.5em 0 0, rgba(0, 0, 0, 0.75) 1.1em -1.1em 0 0;
+  box-shadow: rgba(0, 0, 0, 0.75) 1.5em 0 0 0, rgba(0, 0, 0, 0.75) 1.1em 1.1em 0 0, rgba(0, 0, 0, 0.75) 0 1.5em 0 0, rgba(0, 0, 0, 0.75) -1.1em 1.1em 0 0, rgba(0, 0, 0, 0.75) -1.5em 0 0 0, rgba(0, 0, 0, 0.75) -1.1em -1.1em 0 0, rgba(0, 0, 0, 0.75) 0 -1.5em 0 0, rgba(0, 0, 0, 0.75) 1.1em -1.1em 0 0;
+}
+
+/* Animation */
+
+@-webkit-keyframes spinner {
+  0% {
+    -webkit-transform: rotate(0deg);
+    -moz-transform: rotate(0deg);
+    -ms-transform: rotate(0deg);
+    -o-transform: rotate(0deg);
+    transform: rotate(0deg);
+  }
+  100% {
+    -webkit-transform: rotate(360deg);
+    -moz-transform: rotate(360deg);
+    -ms-transform: rotate(360deg);
+    -o-transform: rotate(360deg);
+    transform: rotate(360deg);
+  }
+}
+@-moz-keyframes spinner {
+  0% {
+    -webkit-transform: rotate(0deg);
+    -moz-transform: rotate(0deg);
+    -ms-transform: rotate(0deg);
+    -o-transform: rotate(0deg);
+    transform: rotate(0deg);
+  }
+  100% {
+    -webkit-transform: rotate(360deg);
+    -moz-transform: rotate(360deg);
+    -ms-transform: rotate(360deg);
+    -o-transform: rotate(360deg);
+    transform: rotate(360deg);
+  }
+}
+@-o-keyframes spinner {
+  0% {
+    -webkit-transform: rotate(0deg);
+    -moz-transform: rotate(0deg);
+    -ms-transform: rotate(0deg);
+    -o-transform: rotate(0deg);
+    transform: rotate(0deg);
+  }
+  100% {
+    -webkit-transform: rotate(360deg);
+    -moz-transform: rotate(360deg);
+    -ms-transform: rotate(360deg);
+    -o-transform: rotate(360deg);
+    transform: rotate(360deg);
+  }
+}
+@keyframes spinner {
+  0% {
+    -webkit-transform: rotate(0deg);
+    -moz-transform: rotate(0deg);
+    -ms-transform: rotate(0deg);
+    -o-transform: rotate(0deg);
+    transform: rotate(0deg);
+  }
+  100% {
+    -webkit-transform: rotate(360deg);
+    -moz-transform: rotate(360deg);
+    -ms-transform: rotate(360deg);
+    -o-transform: rotate(360deg);
+    transform: rotate(360deg);
+  }
+}
+
+.loading-container {
+    position: absolute;
+    height: 100vh;
+    width: 100vw;
+    z-index: 1000;
+    display: none;
+}
+
+.ui-tabs-active{
+    border: 2px rgb(100, 110, 118) solid;
+    background-color: #eee; 
+    border-radius: 10px;
+}
+
+#warning{
+    display:none;
+    margin: 10px 0;
+    border: 1px solid;
+    padding:15px 20px;
+    font-size: 14px;
+    background: #fe0;
+}

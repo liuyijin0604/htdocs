@@ -1,0 +1,360 @@
+<ul>
+<?php
+$menu = [
+	'Imports' => [
+		'items' => [
+			['imcoConsol/consolManagement', 'Consol Panel'],
+			//['imcoConsol/create', 'New Consol.'],
+//			['imcoConsol/list', 'Manage Consol.'],
+			//['imParcel/create', 'New Shipment'],
+			['imParcel/list', 'Manage Shipment'],
+			//['rts/scan', 'Import RTS'],
+			['customProcess/customList', 'Custom Process'],
+			['consolProcess/index', 'Consol Process'],
+			['cargoProcess/index', 'Cargo Process'],
+			['customerService/index', 'Customer Service'],
+			['importsMail/myEmails', 'My Mail List'],
+			['seaProcess/list','Sea Process'],
+			['gatepass/newGatepassList', 'Gatepass List'],
+			['zwStorage/list','ZW Storage'],
+			['pickupBooking/admin', 'Collection Booking'],
+			['Tools', 'items' => [
+
+				['imTools/updateShipmentMemo','Update Shipment Memo'],
+//				['dmawbConsol/list', 'Direct MAWB consol.'],
+				//['importsCost/index','Courier Cost'],
+				['importsCost/courierCosts','Courier Cost(Test)'],
+				['importsCost/courierRevenues','Courier Revenue(Test)'],
+				['imcoConsol/exportHeldShipments','Export Held Shipments'],
+				['imParcel/createLabel','Create Courier Label'],
+				['imParcel/changeCourierLabel','Change Courier Label'],
+				['imParcel/changeCourierLabelPallet','Change Courier Label By Pallet'],
+				['elmsConsol/list', 'Aupost ELMS consol.'],
+				['import/caddshipment', 'Add Console Shipments'],
+				['dmawbConsol/amazonSearch','Amazon Search'],
+				['gatepass/checkstorage', 'Check Storage'],
+				['import/chargecodemng', 'Manage Charge Code'],
+				['postcode/list', 'Postcodes'],
+				// ['import/addHunterPortcode', 'Add Hunter Portcode'],
+				['imcoConsol/addressReport', 'Address Report'],
+				['uploadMani/index','Shipments from Manifest'],
+				['wordReplace/list','Word Replace'],
+				['billing/brokerCheck', 'Check Broker Billing'],
+				['imParcel/importD2zOutturn', 'Import Outturn Result'],
+				['importWeightCheck/index', 'Weight Checking'],
+				['Inner Tools','items' => [
+					['imParcel/imParcelArchiveList', 'Check Archive Shipment'],
+					//['import/tmc', 'Tell Me Cost'],
+					//['import/aupostCostImport', 'AuPost Cost Import'],
+					//['import/cmng', 'Courier Cost Check'],
+					//['imcoConsol/costv', 'Cost Validation'],
+					//['insurance/lodge', 'Lodge a claim'],
+					['imParcel/importWhscanAreaSwitch','Whscan Sound Switch'],
+					//['import/addCourierInfo', 'Add Courier Info'],
+					//['dmawbConsol/exportAmazon','Export Amazon Booking Form'],
+					['import/outturnShortReport','Outturn Shortage Report'],
+					['imParcel/importInstruction', 'Add customer mark'],
+					['imParcel/batchProcess', 'Batch Process']
+					//['imParcel/customerParcelList','Customer Parcels'],
+					//['zoneMap/transformingTemplate','Transforming Template']
+				// ['org/createOrgInBatch','Create Org In A Batch'],
+				]],
+			]],
+		// ['import/testmix', 'Test Courier Mix'],
+		// ['import/testfw', 'Test Fastway'],
+		],
+		'pinned' => true,
+	],
+	'WMS' => [
+		'items' => [
+			['imParcel/tpllist', 'WMS Delivery Tasks'],
+			['importsMail/myWmsEmails', 'My WMS Mail List'],
+			['wmsJob/list', 'Jobs'],
+			['wmsTask/list', 'Tasks'],
+			['wmsStock/list', 'Stock'],
+			['wmsProd/list', 'Products'],
+			['wmsLocation/list', 'Locations'],
+			['import/testfw', 'Delivery By Fastway'],
+			['wmsOrg/list','WMS org'],
+			['cnlOrder/list', 'Cainiao Order'],
+			['cartage/arrange', 'Arrange Cartage'],
+			['containerCartage/list', 'Container Cartage'],
+			['Tools','items'=>[
+				['uploadMani/indexTpl','WMS Delivery Tasks from Manifest'],
+				['wmsTask/calcuteFee','WMS Delivery Fee'],
+				['imParcel/importParcelthirdPartyLabelInfo', 'Import Parcel Third Party Label Info']
+			]]
+		],
+		'pinned' => true,
+	],
+	'Top Courier Service' => [
+		'items' => [
+			['topCourierService/index', 'Cargo Process'],
+			['topCourierService/indexJob', 'C-Job Process'],
+			['topCourierService/driverScheduleList','Driver Schedule'],
+			['priceEnquiry/priceEnquiry', 'Price Enquiry'],
+			['topCourierService/listCargoProcessVehicle', 'Cargo Vehicle'],
+			['cargoProcessPlan/list','Pallet Delivery Request'],
+			['cargoProcess/deconsolidationList','Deconsolidation Reminders'],
+			['googleReview/admin', 'Google Review'],
+			['cargoProcess/problemCargoList','Problem Cargo Approve']
+		// ['import/testmix', 'Test Courier Mix'],
+		// ['import/testfw', 'Test Fastway'],
+		],
+		'pinned' => true,
+	],
+	// 'Exports' => [
+	// 	'items' => [
+	// 		//['excoConsol/create', 'New Consol.'],
+	// 		['excoConsol/createplus', 'New Consol.+'],
+	// 		['excoConsol/list', 'Manage Consol.'],
+	// 		//['exParcel/create', 'New Shipment'],
+	// 		['exParcel/list', 'Manage Shipment'],
+	// 		['pickupList/list', 'Receipt List'],
+	// 		['exacConsol/list', 'Air Freight Consol.'],
+	// 		['edi/list', 'Manage EDI AWB'],
+	// 		['exChannel/list', 'Manage Channels'],
+	// 		['exParcel/lsx', 'Conveyor'],
+	// 		//['exParcel/elabel', 'Generate Labels'],
+	// 		['Consumables', 'items' => [
+	// 			//['Cgoods/vendorList','Manage Vendors'],
+	// 			// ['Cgoods/goodsList','Manage Goods'],
+	// 			['Cgoods/orders', 'Orders'],
+	// 			['Cgoods/jobs', 'Batched Orders'],
+	// 			['Cgoods/products', 'Manage Products'],
+	// 			['Cgoods/stocks', 'Manage Stocks'],
+	// 			['Cgoods/settings', 'Manage Settings'],
+	// 			['Cgoods/reports', 'Reports'],
+	// 			],
+	// 		],
+	// 	],
+	// 	'pinned' => false,
+	// ],
+	/*'Courier' => [
+		'items' => [
+			//['locoConsol/create', 'New Consol.'],
+			['locoConsol/list', 'Manage Consol.'],
+			//['coParcel/create', 'New Shipment'],
+			['coParcel/list', 'Manage Shipment'],
+		],
+		'pinned' => false,
+	],
+	'Direct' => [
+		'items' => [
+			//['exdirConsol/create', 'New Consol.'],
+			['exdirConsol/list', 'Manage Consol.'],
+			//['exDirect/create', 'New Order'],
+			['exDirect/list', 'Manage Orders'],
+		],
+		'pinned' => false,
+	],*/
+	'RTS Service' => [
+		'items' => [
+			['rtsProcess/index', 'Import RTS'],
+		],
+		'pinned' => false,
+	],
+	'Warehouse' => [
+		'items' => [
+			['outturn/scan', 'Outturn'],
+			['gatepass/list', 'Gate Pass'],
+			['receival/scan', 'Receival Scan'],
+			['expLabel/scan', 'Exp. Label Scan'],
+			['storage/list', 'Manage Storage'],
+			['deliveryRecord/list', 'Delivery Record/Booking'],
+			['wmsLocation/manageLocationRecommendation', 'Manage Location Recommendation'],
+			['Tools', 'items' => [
+				['storage/exportShipmentLocation','Export Shipment Location Info']
+				],
+			],
+		],
+		'pinned' => false,
+	],
+	'Manifest' => [
+		'items' => [
+			['manifest/upload', 'Upload Manifest'],
+			['manifest/list', 'Manage Manifest'],
+			['manifest/convert', 'Convert Manifest'],
+			['manifest/changeLabel', 'Change Label']
+		],
+	],
+	// 'Accounting' => [
+	// 	'items' => [
+	// 		['bank/overview', 'Banks'],
+	// 		['invoice/list', 'Invoices'],
+	// 		['invoiceTemplate/list', 'Auto Invoices'],
+	// 		['payment/creditNote', 'Credit Note'],
+	// 		['siReconcile/index', 'Si Reconcile'],
+	// 		['payment/list', 'Receipt'],
+	// 		['billing/entry', 'Billings'],
+	// 		['paymentBilling/list', 'Billing Payments'],
+	// 		['billing/streamline', 'Billing StreamLine'],
+	// 		['ediJob/list', 'Air Freight & 3PL Job'],
+	// 		['consolWeightCheck/list', 'Consol. Cost Check'],
+	// 		['Tools', 'items' => [
+	// 			// ['billing/ExportSmallParcelAPImport', 'AP Billing Import'],
+	// 			['invoice/reconciliation', 'Reconciliation Vs Courier'],
+	// 			['generalCostSplit/list', 'General Cost Split'],
+	// 			['billing/progressReport', 'Progress Report'],
+	// 			['invoice/balanceReport', 'Balance Report'],
+	// 			['invoice/mngactions', 'Manager Tools'],
+	// 			['Driver Salary', 'items' => [
+	// 				['pickupList/report/type/drvsalary', 'Export'],
+	// 				['pickupList/reportSetting', 'Setting'],
+	// 			]],
+	// 		]],
+	// 	],
+	// ],
+	'TLA Accounting' => [
+                'items' => [
+                        ['top/bank/overview', 'Banks'],
+                        ['top/invoice/list', 'Invoices'],
+						['top/bank/whatever', 'Bank Reconcile'],
+                        ['top/invoiceTemplate/list', 'Auto Invoices'],
+                        ['top/payment/creditNote', 'Credit Note'],
+                        ['top/siReconcile/index', 'Si Reconcile'],
+                        ['top/payment/list', 'Receipt'],
+                        ['top/billing/entry', 'Billings'],
+                        ['top/paymentBilling/list', 'Billing Payments'],
+                        ['top/billing/streamline', 'Billing StreamLine'],
+                        ['ediJob/list', 'Air Freight & 3PL Job'],
+                        ['top/consolWeightCheck/list', 'Consol. Cost Check'],
+                        ['Tools', 'items' => [
+                                // ['billing/ExportSmallParcelAPImport', 'AP Billing Import'],
+                                ['top/invoice/reconciliation', 'Reconciliation Vs Courier'],
+                                ['top/generalCostSplit/list', 'General Cost Split'],
+                                ['top/billing/progressReport', 'Progress Report'],
+                                ['top/invoice/balanceReport', 'Balance Report'],
+                                ['top/invoice/mngactions', 'Manager Tools'],
+                                ['top/Driver Salary', 'items' => [
+                                        ['top/pickupList/report/type/drvsalary', 'Export'],
+                                        ['top/pickupList/reportSetting', 'Setting'],
+                                ]],
+                        ]],
+                ],
+        ],
+	'Organisation' => [
+		'items' => [
+			//['org/create', 'New Organisation'],
+			['org/list', 'Manage Organisations'],
+			['orgContact/list', 'Org. Contacts'],
+			['org/listDueOrg', 'Invoice Due Org'],
+		],
+	],
+	'Reports' => [
+		'items' => [
+			['report/plReport', 'Management Report'],
+			['report/cogsReport', 'Financial Report'],
+			['report/rebateReport', 'Financial Rebate Report'],
+			['report/kpiReport', 'KPI Report'],
+			['report/shipments', 'Shipments Report'],
+			['report/consol', 'Consol Report'],
+			['report/account', 'Account Report'],
+			['report/cargoProcessReport', 'KP Report'],
+			['report/tplGpReport','TPL GP Report'],
+			['report/chart', 'Charts'],
+			['report/holdAgent', 'Hold Agent Report'],
+
+			['shipmentScan/index', 'WHScan report'],
+			['customProcess/report','Customs Process Report'],
+			['shipmentErrRecord/index','Shipment Error'],
+			['imcoConsol/report','Import Console KPI'],
+			['imParcel/imparcelReport','Imparcel Report'],
+			['imParcel/reportStatistics','Imparcel Report Statistics'],
+			['imParcel/mixedMildsReport','Mixed eParcel cost Report'],
+			['imParcel/dailyEparcelSend','Daily Delivery To Melbourne Report'],
+			['report/cbReport','Courier cubic Report'],
+			['report/rebate', 'Org Rebate Report'],
+			['report/invoiceGST', 'Invoic GST Report'],
+			['import/report', 'Import Client Report'],
+			['Import Reports','items'=>[
+				['report/implReport', 'Import P&L Report (Management)'],
+				['report/imWDReport', 'Import WeightDiff Report'],
+				['report/imCourierReport', 'Import Courier Reports'],
+				['report/imClientConsolReport', 'Client Consol Report'],
+				] 
+			],
+		],
+	],
+	'Reference' => [
+		'items' => [
+			['cnID/list', 'Manage CnID'],
+			['exprod/list', 'Manage Products'],
+			['app/templates', 'Template Files'],
+			['filerepo/list', 'Files'],
+			['emailog/list', 'Email Log'],
+			['faq/list', 'FAQ List'],
+			['excoConsol/ref', 'Exp. Prohibitions'],
+		],
+	],
+
+	'CRM' => [
+		'items' => [
+			['exCrm/crmManage','Export CRM Manage'],
+			['exCrm/ticketList','Export Tickets'],
+			['exCrm/report','Export CRM Report'],
+			['crmmsg/site/index', 'CRM MSG', null, true],
+			['crmmsg/massmsg/list', 'CRM MASS MSG'],
+			['salesFunnel/showAllQuestionAnswer', 'Sales Funnel Question'],
+			['salesFunnel/showCustomersDetail', 'Customer Requirements'],
+		],
+	],
+
+	/*'Tasks' => [
+		'items' => [
+			['task/list','Schedule'],
+		],
+	],*/
+	'Tools' => [
+		'items' => [
+			['chargeCode/list', 'GL Code Manage'],
+			['excel/create', 'Payroll Conversion'],
+			['route/admin', 'Airline Check'],
+			['calculate/index', 'calculate'],
+			// ['cartage/admin', 'Driver task'],
+			['wcaMembers/wca','WCA Management'],
+			['imParcel/costCheck', 'Courier Cost'],
+			['email/create/type/99', 'Mass Email'],
+
+			['ediJobAirline/list', 'KPI Entry'],
+			['marketingTool/marketingTool', 'Marketing Tool'],
+			['priceEnquiry/quickEnquiry','Quick Enquiry(Revenue)'],
+			['priceEnquiry/quickEnquiryCost','Quick Enquiry(Cost)'],
+		],
+	],
+	'TLA Task' => [
+		'items' => [
+			['tlaTask/getTlaTaskList', 'TLA Task List'],
+			['tlaTask/getITTaskPlan', 'IT Task Plan'],
+			['tlaTask/manageDisputeTaskOp', 'Manage Dispute Task OP'],
+		],
+	],
+	'System' => [
+		'items' => [
+			//['user/create', 'New User'],
+			['user/list', 'Manage User'],
+			['user/profile', 'My Info', true],
+			['emailTpl/list', 'Email Template'],
+			['top/emailTpl/list','TLA Email Template'],
+			['oList/list', 'Manage oLists'],
+			['acl/manage', 'Manage ACLs'],
+			['app/settings', 'System Settings'],
+		],
+	],
+	'IT' => [
+		'items' => [
+			//['user/create', 'New User'],
+			['it/checkApplicationLog', 'Check Application Log'],
+			['it/checkApiLog', 'Check Api Log'],
+		],
+	],
+];
+
+foreach($menu as $h=>$sm){
+	$l = $this->buildSubMenu($sm);
+	if(!empty($l))	echo '<li><h2>',$this->t($h),'</h2><ul class="',(isset($sm['pinned']) && $sm['pinned']? 'menusection pinned' : 'menusection'),'">', $l , '</ul></li>';
+}
+
+?>
+</ul>
+

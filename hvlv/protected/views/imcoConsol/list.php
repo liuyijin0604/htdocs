@@ -1,0 +1,155 @@
+<div style="right: 100px;position: absolute;">
+<div id="<?=$_GET["tabid"];?>-dropdown-2" class="dropdown dropdown-tip dropdown-relative dropdown-anchor-right">
+	<ul class="dropdown-menu">
+		<li><a href="<?=$this->createUrl('imcoConsol/export', ['typ' => 'dfe'])?>" target="_blank" id="dfeIm">Export DFE Shipment</a></li>
+   	</ul>
+</div>
+</div>
+<div style="right: 20px;position: absolute;">
+<a href="#" data-dropdown="#<?=$_GET["tabid"];?>-dropdown-1"><div class="icon" style="background-position:-16px 0"></div> New Consol.</a>
+<a class="export_search" target="_blank" href="<?=$this->createUrl('imcoConsol/ExportCurrentSearch', ['typ' => '']);?>"><div style="background-position:-48px -688px" class="icon"></div> Export Current Search</a>
+<div id="<?=$_GET["tabid"];?>-dropdown-1" class="dropdown dropdown-tip dropdown-relative dropdown-anchor-right">
+	<ul class="dropdown-menu">
+		<li><a class="tab_link" href="<?=$this->createUrl('imcoConsol/createManif');?>" title="New Consol.">From Manifest</a></li>
+		<li><a class="tab_link" href="<?=$this->createUrl('imcoConsol/createShips');?>" title="New Consol.">From Shipments</a></li>
+		<li><a class="jqm_link" href="imcoConsol/importImcoConsol">Import From Shipment</a></li>
+		<li><a class="tab_link" href="<?=$this->createUrl('imcoConsol/importImcoConsol');?>" title="Import Consol.">Import From Shipment (New Tab)</a></li>
+	</ul>
+</div>
+</div>
+
+<h1><?=$this->t('Import Consols').'('.$delivery_type.')';?></h1>
+
+<p>
+<?=$this->t('You may optionally enter a comparison operator (<b>&lt;</b>, <b>&lt;=</b>, <b>&gt;</b>, <b>&gt;=</b>, <b>&lt;&gt;</b> or <b>=</b>) at the beginning of each of your search values to specify how the comparison should be done.');?></p>
+
+<?php echo CHtml::link($this->t('Advanced Search'), '#', ['class'=>'search-button']); ?>
+<div class="search-form" style="display:none">
+<?php $this->renderPartial('_search', [
+	'model'=>$model,
+]);
+?>
+</div>
+
+<?php 
+if($model->service==Consol::SEACONSOL)
+{
+	$this->widget('zii.widgets.grid.CGridView', [
+		'id'=>'imco-consol-grid'.$_GET['tabid'],
+		'cssFile' => false,
+		'dataProvider'=>$model->search(true, 60),
+		'filter'=>$model,
+		'columns'=>[
+			['name' => 'no', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->createURL("imcoConsol/update", array("id" => $data->id))."\" class=\"tab_link\" title=\"".$data->no."\">".$data->no."</a>"',],
+			['name' => 'container_no', 'type' => 'raw', 'value' => '$data->container_no'],
+			['header'=>'Customer','name' => 'owner_name','value' => '$data->getOwnerName()'],
+			['name' => 'status', 'value' => '$data->getStatus()',
+				'filter'=>CHtml::dropDownList('ImcoConsol[status]', $model->status, $this->t($model::$states), ['prompt'=>$this->t('All')]),],
+			['name' => 'service', 'value' => '$data->getService()', 'filter'=>CHtml::dropDownList('ImcoConsol[service]', $model->service, $this->t(ImcoConsol::$services), ['prompt'=>'All'])],
+			['name' => 'dpt_id', 'value' => '@$data->depot->name',
+				'filter'=>CHtml::dropDownList('ImcoConsol[dpt_id]', $model->dpt_id, $this->t(Org::dptList()), ['prompt'=>$this->t('All')]),],
+			'flight',
+			'pol',
+			'pod',
+			'eta',
+			['header' => 'Shipments', 'value' => '$data->totShipments()'],
+			['header' => 'Weight', 'value' => '$data->totWeight()'],
+			['header'=>'extra Info','type'=>'raw','value'=>'$data->getConsolDGWarnings()','filter'=>CHtml::dropDownList('ImcoConsol[exInfo]', $model->exInfo, $this->t(Consol::$exInfos), ['prompt'=>'All'])],
+			['header'=>'Unload Date','value'=>'@$data->mdata["ContainerUnloadDate"]'],
+			/*'created',
+			'meta',
+			*/
+			[
+				'class'=>'oButtonColumn',
+				'template'=>'{update}',//{view}
+				'buttons'=>[
+					'view' => [
+						'imageUrl'=>false,
+						'options' => ['class' => 'jqm_link grid_view_btn'],
+					],
+					'update' => [
+						'imageUrl'=>false,
+						'visible'=>'true',
+						'options' => ['class' => 'tab_link grid_edit_btn', 'label'=>$this->t('Update'), 'title' => '$data->no'],
+					],
+				],
+			],
+		],
+	]); 
+}else
+{
+	$this->widget('zii.widgets.grid.CGridView', [
+		'id'=>'imco-consol-grid'.$_GET['tabid'],
+		'cssFile' => false,
+		'dataProvider'=>$model->search(true, 60),
+		'filter'=>$model,
+		'columns'=>[
+			['name' => 'no', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->createURL("imcoConsol/update", array("id" => $data->id))."\" class=\"tab_link\" title=\"".$data->no."\">".$data->no."</a>"',],
+			['name' => 'awb', 'type' => 'raw', 'value' => '$data->AwbTracking()'],
+			['header'=>'Customer','name' => 'owner_name','value' => '$data->getOwnerName()'],
+			['name' => 'status', 'value' => '$data->getStatus()',
+				'filter'=>CHtml::dropDownList('ImcoConsol[status]', $model->status, $this->t($model::$states), ['prompt'=>$this->t('All')]),],
+			['name' => 'service', 'value' => '$data->getService()', 'filter'=>CHtml::dropDownList('ImcoConsol[service]', $model->service, $this->t(ImcoConsol::$services), ['prompt'=>'All'])],
+			['name' => 'dpt_id', 'value' => '@$data->depot->name',
+				'filter'=>CHtml::dropDownList('ImcoConsol[dpt_id]', $model->dpt_id, $this->t(Org::dptList()), ['prompt'=>$this->t('All')]),],
+			'flight',
+			'pol',
+			'pod',
+			'eta',
+			['header' => 'Shipments', 'value' => '$data->totShipments()'],
+			['header' => 'Weight', 'value' => '$data->totWeight()'],
+			['header'=>'extra Info','type'=>'raw','value'=>'$data->getConsolDGWarnings()','filter'=>CHtml::dropDownList('ImcoConsol[exInfo]', $model->exInfo, $this->t(Consol::$exInfos), ['prompt'=>'All'])],
+			['header'=>'Unload Date','value'=>'@$data->mdata["ContainerUnloadDate"]'],
+			/*'created',
+			'meta',
+			*/
+			[
+				'class'=>'oButtonColumn',
+				'template'=>'{update}',//{view}
+				'buttons'=>[
+					'view' => [
+						'imageUrl'=>false,
+						'options' => ['class' => 'jqm_link grid_view_btn'],
+					],
+					'update' => [
+						'imageUrl'=>false,
+						'visible'=>'true',
+						'options' => ['class' => 'tab_link grid_edit_btn', 'label'=>$this->t('Update'), 'title' => '$data->no'],
+					],
+				],
+			],
+		],
+	]); 
+}
+?>
+<script type="text/javascript">
+$(function(){
+	var tab = $('#<?=$_GET["tabid"];?>');
+	var panel = tab.data('panel');
+	$('.search-button', panel).click(function(){
+		$('.search-form', panel).toggle();
+		return false;
+	});
+	$('.search-form form', panel).submit(function(){
+		$.fn.yiiGridView.update('imco-consol-grid<?=$_GET['tabid']?>', {
+			data: $(this).serialize()
+		});
+		return false;
+	});
+	tab.bind('onOpen', function(){
+		$('#imco-consol-grid<?=$_GET['tabid']?>', panel).yiiGridView('update');
+	});
+
+	var dfeHref = $('#dfe').attr('href');
+	$('#dfe', panel).on('mousedown', function(){
+		var q = $('.filters input, .filters select', panel).serialize()+'&'+$('.search-form form', panel).serialize();
+		$(this).attr('href', dfeHref+ '&' + q);
+	});
+
+	$('a.export_search', panel).on('mousedown', function(){
+		var q = $('.filters input, .filters select', panel).serialize()+'&'+$('.search-form form', panel).serialize();
+		$(this).attr('href', '<?=$this->createUrl('imcoConsol/exportCurrentSearch', ['typ' => ''])?>' + '&' + q);
+	});
+
+});
+</script>

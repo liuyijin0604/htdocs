@@ -1,0 +1,61 @@
+<?php if(empty($isDaily)):?>
+<?php
+$scanned = @$totalInfo['total_packs']-@$totalInfo['today_left_packs'];
+?>
+<!-- <br />
+<p><b>Total:</b><?=@$totalInfo['total_packs']?>&nbsp;&nbsp;&nbsp; <b>scaned:</b><?=@$scanned;?>&nbsp;&nbsp;&nbsp; <b>Left:</b><?=@$totalInfo['today_left_packs']?>&nbsp;&nbsp;&nbsp; <b>Percent:</b><?=@$totalInfo['packs_percent']?>%</p>
+<br /> -->
+<div style="width: 50%">
+
+<?php $this->widget('zii.widgets.grid.CGridView', array(
+	'id'=>'im-scan-report-grid',
+	'cssFile' => false,
+	'dataProvider' => isset($dataProvider[0]) ? $dataProvider[0] : null,     //$model->search(),
+	'filter'=>$dataProvider[1],
+	'columns'=>array(
+		array('name'=>'depot','header'=>'Depot'),
+    array('name'=>'user','header'=>'User'),
+    array('name'=>'scan_date','header'=>'scan_date'),
+    array('name'=>'dp_packs','header'=>'dp_scan'),
+    array('name'=>'dp_weight','header'=>'dp_weight'),
+		array('name'=>'pcs_packs','header'=>'pcs_scan'),
+		array('name'=>'pcs_weight','header'=>'pcs_weight'),
+		array('name'=>'carton_packs','header'=>'carton_scan'),
+		array('name'=>'carton_weight','header'=>'carton_weight'),
+		array('name'=>'total_packs','header'=>'Total Packs'),
+		array('name'=>'total_weight','header'=>'Total Weight'),
+		array('name'=>'time','header'=>'time(hours)'),
+    //array('name'=>'rate','header'=>'rate'),
+		),
+	)
+	);
+?>
+
+
+<?php endif?>
+  </div>
+
+  <script type="text/javascript">
+  	function quickWorkTimeInput(date)
+    {
+        var workTime= $("#workTime"+date).val();
+        $.ajax({
+                url: '<?=$this->createUrl("shipmentScan/workTimeChange")?>',
+                type: "post",
+                data: {"workTime":workTime,"date":date},
+                success: function(r) {
+                    if(r=='done')
+                     {
+                        myApp.notice('Done', 5000);
+                     }else
+                     {
+                        myApp.alert(r, false);   
+                     }
+                 },
+                error: function(e) {
+                    console.log(e);
+                }
+            });     
+    }
+    
+  </script>

@@ -1,0 +1,1526 @@
+<?php
+class ImportsCostController extends Controller
+{
+	protected $nonAjax=['downloadTmcResult','downloadTmrResult','downloadPZTResult'];
+	
+	public function actionIndex()
+	{
+		$filtersForm = new FiltersForm;
+		$filtersForm1 = new FiltersForm1;
+		$available_couriers = [];
+		$detailDataArr = [];
+		$order = 0;
+		$provide = [];
+		
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters = $_GET['FiltersForm'];
+			$filtersForm1->filters = $_GET['FiltersForm1'];
+		}
+		if (!empty($_GET['available_couriers'])) {
+			$available_couriers=array_merge($available_couriers, $_GET['available_couriers']);
+		}
+		if (!empty($_GET['test_couriers'])) {
+			$available_couriers=array_merge($available_couriers, $_GET['test_couriers']);
+		}
+		if (!empty($_GET['start_date']) && !empty($_GET['end_date'])&&!empty($_GET['data_source'])&&!empty($available_couriers)) {
+			$start_time = $_GET['start_date'];
+			$end_time = $_GET['end_date'];
+			$end_time=date('Y-m-d', strtotime('+1 day', strtotime($end_time)));
+			$data_source=$_GET['data_source'];
+			$orgRates=[];
+			$include_bfe=$_GET['inc_bfe']=='true'?true:false;
+			foreach ($available_couriers as $c) {
+				$r= OrgRate::model()->findByPk($c);
+				if (!empty($r)) {
+					$orgRates[]=$r;
+				}
+			}
+			$source_array=Reconciliation::$courierIDToTypes;
+			$reconcileService = new ReconcileService();
+			$preCost=0;
+			$preWeight=0;
+			$prePacks=0;
+			$leftPacks=0;
+			
+			$mixedCost=0;
+			$mixedWeight=0;
+			$mixedPacks=0;
+			$mixedLeftPacks=0;
+			foreach ($data_source as $single_source) {
+				$client_type=$single_source;
+				$dptStr = " AND p.dpt_id = 106 ";
+				$dpmtStr = "";
+				$clientStr = "";
+				$courierStr = "";
+				$consolStr = " ";
+				$courierStr = ' AND p.grp2 = '.$client_type.' ';
+
+				$sql = "SELECT p.* from pl_ledger p join consol c on p.grp1=c.id join mani_map ma on ma.fid = p.fid and ma.model='ImParcel' join manifest m on m.id = ma.mani_id and m.type=90  where p.gl = 101 and amt>0 and p.model='ImP_Manifest' ".$dptStr.$dpmtStr.$clientStr.$courierStr.$consolStr." AND m.created >= '".$start_time." 00:00:00' AND m.created <= '".$end_time." 23:00:00' AND p.weight >0 group by p.fid ";
+		
+				$rs = Yii::app()->db->createCommand($sql)->queryAll();
+				$shipmentIds ="";
+				$bkRs=[];
+				foreach ($rs as $r) {
+					$shipmentIds .= "".$r['fid']."".",";
+					$bkRs[$r['fid']][]=$r;
+				}
+				if ($shipmentIds != "") {
+					$shipmentIds = substr($shipmentIds, 0, strlen($shipmentIds)-1);
+					;
+					$sCriteria = new CDbCriteria() ;
+					$sCriteria->order = 'ref';
+					if($client_type==101)
+					{
+						$sCriteria->condition = "id in ({$shipmentIds}) and ref like '%AMQ%'";
+					}else
+					{
+						$sCriteria->condition = "id in ({$shipmentIds})";
+					}
+					$shipments= ImParcel::model()->findAll($sCriteria);
+					foreach ($shipments as $shipment) {
+						if (empty($shipment)) {
+							continue;
+						}
+						if (!$include_bfe) {
+							if ($shipment->agent_id==1206) {
+								continue;
+							}
+						}
+
+						$ref = $shipment->id;
+						$r = $bkRs[$ref][0];
+						$checkWeight = 0;
+						$pkg = 0;
+						foreach ($bkRs[$ref] as $key => $bk) {
+							$checkWeight+=$bk['weight'];
+						}
+						if($checkWeight>5.001&&$shipment->pkg>1&&$orgRates[0]->id==741)
+						{
+							$pkg = $shipment->pkg-1;
+						}else
+						{
+							$pkg = $shipment->pkg;
+						}
+						if($single_source==101)
+						{
+							$orgRateId = $reconcileService->getOrgRateId($shipment,"");
+						}else if($single_source==115)
+						{
+							$orgRateId = $reconcileService->getOrgRateId($shipment,"FWSYD2020");
+						}
+						$ourRate =Shipment::getCourierCostByShipment($shipment->ref, $orgRateId, $checkWeight);
+						$bk['amt'] = $ourRate['price'];
+						$chooseCost=ImParcel::getCouriersByPostcodeWeight($orgRates, $shipment->postcode, $checkWeight, $pkg,$shipment->cnee->suburb,true);
+						if (!empty($chooseCost)) {
+							foreach ($bkRs[$ref] as $key => $bk) {
+								$preCost+=$bk['amt'];
+								$preWeight+=$bk['weight'];
+							}
+							$prePacks+=$shipment->pkg;
+							$mixedCost+=$chooseCost['price'];
+							$mixedWeight+=$r['weight'];
+							$mixedPacks+=$shipment->pkg;
+							$detailData = [];
+						
+							$chooseId = $chooseCost['id'];
+							if (!isset($detailDataArr[$chooseId])) {
+								$detailDataArr[$chooseId] = ['id'=>$order++,'courier'=>$chooseCost['name'],'cost'=> 0.0,'preCost' => 0.0,'weight'=> 0.0,'packs'=>0,'left_packs'=>0,'weightPercent'=>0.0,'packsPercent'=>0.0];
+								;
+							}
+						 
+							$detailDataArr[$chooseId]['cost'] +=$chooseCost['price'];
+							foreach ($bkRs[$ref] as $key => $bk) {
+								$detailDataArr[$chooseId]['preCost'] +=$bk['amt'];
+							}
+							$detailDataArr[$chooseId]['weight'] +=$r['weight'];
+							$detailDataArr[$chooseId]['packs'] +=$shipment->pkg;
+						} else {
+							$leftPacks+=$shipment->pkg;
+							$mixedLeftPacks+=$shipment->pkg;
+							$detailDataArr[$orgRates[0]->id]['left_packs'] +=$shipment->pkg;
+						}
+					}
+				}
+			}
+			$provide[]=['id'=>1,'courier'=>'Pre','cost'=> sprintf('%.2f', $preCost),'weight'=> sprintf('%.2f', $preWeight),'packs'=>$prePacks,'left_packs'=>$leftPacks];
+			$provide[]=['id'=>1,'courier'=>'Mixed','cost'=>sprintf('%.2f', $mixedCost),'weight'=> sprintf('%.2f', $mixedWeight),'packs'=>$mixedPacks,'left_packs'=>$mixedLeftPacks];
+		}
+		if (!empty($detailDataArr)) {
+			foreach ($detailDataArr as $key => $detailData) {
+				$detailDataArr[$key]["weightPercent"] = sprintf('%.2f', $detailDataArr[$key]["weight"]/$provide[1]["weight"]);
+				$detailDataArr[$key]["packsPercent"] = sprintf('%.2f', $detailDataArr[$key]["packs"]/$provide[1]["packs"]);
+			}
+		}
+		$filteredData = $filtersForm->filter($provide);
+		$filteredData1 = $filtersForm1->filter($detailDataArr);
+		$dataprovider = new CArrayDataProvider($filteredData);
+		$dataprovider1 = new CArrayDataProvider($filteredData1);
+		$sort = new CSort();
+		$sort->defaultOrder = "user DESC";
+		$dataprovider->sort = $sort;
+		$dataprovider->pagination = ['pageSize' => 30,];
+		$sort2 = new CSort();
+		$sort2->defaultOrder = "date DESC";
+		$dataprovider1->sort = $sort2;
+		$dataprovider1->pagination = ['pageSize' => 30,];
+		if (!empty($_GET['partial'])) {
+			$this->renderPartial('_search', [
+				'dataProvider' => [$dataprovider, $filtersForm],
+				'dataProvider1' => [$dataprovider1, $filtersForm1]
+			]);
+			return;
+		}
+		$dataSourceArr = [];
+		$courierIDToTypes = Reconciliation::$courierIDToTypes;
+		foreach ($courierIDToTypes as $key => $value) {
+			$dataSourceArr[$key] = Reconciliation::$types[$value];
+		}
+		$orgRateArr = OrgRate::model()->findAll(" type = ".OrgRate::COSTRATETYPE." order by name ");
+		$orgRateTestArr = OrgRate::model()->findAll(" type = ".OrgRate::COSTRATETESTTYPE." order by name ");
+		$zoneMapTestArr = ZoneMapTestImport::model()->findAll(" type = 0");
+		$zoneMapWeightArr = ZoneMapTestImport::model()->findAll(" type = 1");
+		$pcaZoneTestArr = [];
+		$weightMapArr = [];
+		foreach ($zoneMapTestArr as $key => $value) {
+			$pcaZoneTestArr[$value->id] = $value->name;
+		}
+		foreach ($zoneMapWeightArr as $key => $value) {
+			$weightMapArr[$value->id] = $value->name;
+		}
+		$couriersArr = [];
+		$showCouriersArr = [];
+		$couriersTestArr = [];
+		$selection =[];
+		foreach ($orgRateArr as $key => $value) {
+			$couriersArr[$value->id] = $value->name;
+			if (isset($value->mdata["showForTest"])!=null&&$value->mdata["showForTest"]==1) {
+				$showCouriersArr[$value->id] = $value->name;
+				$selection[]=1;
+			} else {
+				$selection[]=0;
+			}
+		}
+		foreach ($orgRateTestArr as $key => $value) {
+			$couriersTestArr[$value->id] = $value->name;
+		}
+		$this->render('tell_cost', [
+			'dataProvider' => [$dataprovider, $filtersForm],
+			'dataProvider1' => [$dataprovider1, $filtersForm1],
+			'dataSourceArr' =>$dataSourceArr,
+			'couriersArr' => $couriersArr,
+			'showCouriersArr' =>$showCouriersArr,
+			'couriersTestArr' => $couriersTestArr,
+			'pcaZoneTestArr' => $pcaZoneTestArr,
+			'weightMapArr' => $weightMapArr,
+			'selection' =>$selection
+		]);
+	}
+
+	//new
+	public function actionCourierCosts(){
+		$filtersForm = new FiltersForm;
+		$filtersForm1 = new FiltersForm1;
+		$available_couriers = [];
+		$detailDataArr = [];
+		$order = 0;
+		$provide = [];
+		//rate id
+		$arrAvailableCourier = [730,775,805,811,845,848,851,52,799,10303,778,781,784,914,1007,1021,1024,1027,952,955,924,925,928,927,934,937,940,934,937,940,943,994,997,1000,1003,1006,10285,10288,10291,10294,70,525,675,949,10501,10504,10507,10510];
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters = $_GET['FiltersForm'];
+			$filtersForm1->filters = $_GET['FiltersForm1'];
+		}
+		if (!empty($_GET['available_couriers'])) {
+			$available_couriers=array_merge($available_couriers, $_GET['available_couriers']);
+		}
+		if (!empty($_GET['test_couriers'])) {
+			$available_couriers=array_merge($available_couriers, $_GET['test_couriers']);
+		}
+		if (!empty($_GET['start_date']) && !empty($_GET['end_date'])&&!empty($_GET['data_source'])&&!empty($available_couriers)) {
+			$start_time = $_GET['start_date'];
+			$end_time = $_GET['end_date'];
+			$end_time=date('Y-m-d', strtotime('+1 day', strtotime($end_time)));
+			$data_source=$_GET['data_source'];
+			$orgRates=[];
+			$include_bfe=$_GET['inc_bfe']=='true'?true:false;
+			foreach ($available_couriers as $c) {
+				$r= OrgRate::model()->findByPk($c);
+				if (!empty($r)) {
+					$orgRates[]=$r;
+				}
+			}
+			$source_array=Reconciliation::$courierIDToTypes;
+			$reconcileService = new ReconcileService();
+			$preCost=0;
+			$preWeight=0;
+			$prePacks=0;
+			$leftPacks=0;
+			
+			$mixedCost=0;
+			$mixedWeight=0;
+			$mixedPacks=0;
+			$mixedLeftPacks=0;
+			foreach ($data_source as $single_source) {
+				$client_type=$single_source;
+				$dptStr = " AND p.dpt_id = 106 ";
+				$dpmtStr = "";
+				$clientStr = "";
+				$courierStr = "";
+				$consolStr = " ";
+				$courierStr = ' AND p.grp2 = '.$client_type.' ';
+
+				$sql = "SELECT p.* from pl_ledger_management p join consol c on p.grp1=c.id join mani_map ma on ma.fid = p.fid and ma.model='ImParcel' join manifest m on m.id = ma.mani_id and m.type=90  where p.gl = 101 and amt>0 and p.model='ImP_Manifest' ".$dptStr.$dpmtStr.$clientStr.$courierStr.$consolStr." AND m.created >= '".$start_time." 00:00:00' AND m.created <= '".$end_time." 23:00:00' AND p.weight >0 group by p.fid ";
+		
+				$rs = Yii::app()->db->createCommand($sql)->queryAll();
+				$shipmentIds ="";
+				$bkRs=[];
+				foreach ($rs as $r) {
+					$shipmentIds .= "".$r['fid']."".",";
+					$bkRs[$r['fid']][]=$r;
+				}
+				if ($shipmentIds != "") {
+					$shipmentIds = substr($shipmentIds, 0, strlen($shipmentIds)-1);
+					;
+					$sCriteria = new CDbCriteria() ;
+					$sCriteria->order = 'ref';
+					if($client_type==101)
+					{
+						$sCriteria->condition = "id in ({$shipmentIds}) and ref like '%AMQ%'";
+					}else
+					{
+						$sCriteria->condition = "id in ({$shipmentIds})";
+					}
+					$shipments= ImParcel::model()->findAll($sCriteria);
+					foreach ($shipments as $shipment) {
+						if (empty($shipment)) {
+							continue;
+						}
+						if (!$include_bfe) {
+							if ($shipment->agent_id==1206) {
+								continue;
+							}
+						}
+
+						$ref = $shipment->id;
+						$r = $bkRs[$ref][0];
+						$checkWeight = 0;
+						$pkg = 0;
+						foreach ($bkRs[$ref] as $key => $bk) {
+							$checkWeight+=$bk['weight'];
+						}
+						if($checkWeight>5.001&&$shipment->pkg>1&&$orgRates[0]->id==741)
+						{
+							$pkg = $shipment->pkg-1;
+						}else
+						{
+							$pkg = $shipment->pkg;
+						}
+						if($single_source==101)
+						{
+							$orgRateId = $reconcileService->getOrgRateId($shipment,"");
+						}else if($single_source==115)
+						{
+							$orgRateId = $reconcileService->getOrgRateId($shipment,"FWSYD2020");
+						}
+						$ourRate =Shipment::getCourierCostByShipment($shipment->ref, $orgRateId, $checkWeight);
+						$bk['amt'] = $ourRate['price'];
+						$chooseCost=ImParcel::getCouriersByPostcodeWeight($orgRates, $shipment->postcode, $checkWeight, $pkg,$shipment->cnee->suburb,true);
+						if (!empty($chooseCost)) {
+							foreach ($bkRs[$ref] as $key => $bk) {
+								$preCost+=$bk['amt'];
+								$preWeight+=$bk['weight'];
+							}
+							$prePacks+=$shipment->pkg;
+							$mixedCost+=$chooseCost['price'];
+							$mixedWeight+=$r['weight'];
+							$mixedPacks+=$shipment->pkg;
+							$detailData = [];
+						
+							$chooseId = $chooseCost['id'];
+							if (!isset($detailDataArr[$chooseId])) {
+								$detailDataArr[$chooseId] = ['id'=>$order++,'courier'=>$chooseCost['name'],'cost'=> 0.0,'preCost' => 0.0,'weight'=> 0.0,'packs'=>0,'left_packs'=>0,'weightPercent'=>0.0,'packsPercent'=>0.0];
+								;
+							}
+						 
+							$detailDataArr[$chooseId]['cost'] +=$chooseCost['price'];
+							foreach ($bkRs[$ref] as $key => $bk) {
+								$detailDataArr[$chooseId]['preCost'] +=$bk['amt'];
+							}
+							$detailDataArr[$chooseId]['weight'] +=$r['weight'];
+							$detailDataArr[$chooseId]['packs'] +=$shipment->pkg;
+						} else {
+							$leftPacks+=$shipment->pkg;
+							$mixedLeftPacks+=$shipment->pkg;
+							$detailDataArr[$orgRates[0]->id]['left_packs'] +=$shipment->pkg;
+						}
+					}
+				}
+			}
+			$provide[]=['id'=>1,'courier'=>'Pre','cost'=> sprintf('%.2f', $preCost),'weight'=> sprintf('%.2f', $preWeight),'packs'=>$prePacks,'left_packs'=>$leftPacks,'temp'=>'1'];
+			$provide[]=['id'=>1,'courier'=>'Mixed','cost'=>sprintf('%.2f', $mixedCost),'weight'=> sprintf('%.2f', $mixedWeight),'packs'=>$mixedPacks,'left_packs'=>$mixedLeftPacks,'temp'=>'1'];
+		}
+		if (!empty($detailDataArr)) {
+			foreach ($detailDataArr as $key => $detailData) {
+				$detailDataArr[$key]["weightPercent"] = sprintf('%.2f', $detailDataArr[$key]["weight"]/$provide[1]["weight"]);
+				$detailDataArr[$key]["packsPercent"] = sprintf('%.2f', $detailDataArr[$key]["packs"]/$provide[1]["packs"]);
+			}
+		}
+		$filteredData = $filtersForm->filter($provide);
+		$filteredData1 = $filtersForm1->filter($detailDataArr);
+		$dataprovider = new CArrayDataProvider($filteredData);
+		$dataprovider1 = new CArrayDataProvider($filteredData1);
+		$sort = new CSort();
+		$sort->defaultOrder = "user DESC";
+		$dataprovider->sort = $sort;
+		$dataprovider->pagination = ['pageSize' => 30,];
+		$sort2 = new CSort();
+		$sort2->defaultOrder = "date DESC";
+		$dataprovider1->sort = $sort2;
+		$dataprovider1->pagination = ['pageSize' => 30,];
+		if (!empty($_GET['partial'])) {
+			$this->renderPartial('_search', [
+				'dataProvider' => [$dataprovider, $filtersForm],
+				'dataProvider1' => [$dataprovider1, $filtersForm1]
+			]);
+			return;
+		}
+		$dataSourceArr = [];
+		$courierIDToTypes = Org::$couriersForImportsCost;
+		foreach ($courierIDToTypes as $key => $value) {
+			$dataSourceArr[$key] = $value;
+		}
+		$orgRateArr = OrgRate::model()->findAll(" type = ".OrgRate::COSTRATETYPE." order by name ");
+		$orgRateTestArr = OrgRate::model()->findAll(" type = ".OrgRate::COSTRATETESTTYPE." order by name ");
+		$zoneMapTestArr = ZoneMapTestImport::model()->findAll(" type = 0");
+		$zoneMapWeightArr = ZoneMapTestImport::model()->findAll(" type = 1");
+		$pcaZoneTestArr = [];
+		$weightMapArr = [];
+		foreach ($zoneMapTestArr as $key => $value) {
+			$pcaZoneTestArr[$value->id] = $value->name;
+		}
+		foreach ($zoneMapWeightArr as $key => $value) {
+			$weightMapArr[$value->id] = $value->name;
+		}
+		$couriersArr = [];
+		$showCouriersArr = [];
+		$couriersTestArr = [];
+		$selection =[];
+		foreach ($orgRateArr as $key => $value) {
+			if(in_array($value->id,$arrAvailableCourier)){
+				$couriersArr[$value->id] = $value->name;
+				if (isset($value->mdata["showForTest"])&&$value->mdata["showForTest"]==1) {
+					$showCouriersArr[$value->id] = $value->name;
+					$selection[]=1;
+				} else {
+					$selection[]=0;
+				}
+			}
+		}
+		foreach ($orgRateTestArr as $key => $value) {
+			$couriersTestArr[$value->id] = $value->name;
+		}
+		$this->render('tell_cost_new', [
+			'dataProvider' => [$dataprovider, $filtersForm],
+			'dataProvider1' => [$dataprovider1, $filtersForm1],
+			'dataSourceArr' =>$dataSourceArr,
+			'couriersArr' => $couriersArr,
+			'showCouriersArr' =>$showCouriersArr,
+			'couriersTestArr' => $couriersTestArr,
+			'pcaZoneTestArr' => $pcaZoneTestArr,
+			'weightMapArr' => $weightMapArr,
+			'selection' =>$selection
+		]);
+	}
+
+	//tell me revenue
+	public function actionCourierRevenues(){
+		$filtersForm = new FiltersForm;
+		$filtersForm1 = new FiltersForm1;
+		$available_couriers = [];
+		$detailDataArr = [];
+		$order = 0;
+		$provide = [];
+		//rate id
+		$arrAvailableCourier = [730,775,805,811,845,848,851,52,799,10303,778,781,784,914,1007,1021,1024,1027,952,955,924,925,928,927,934,937,940,934,937,940,943,994,997,1000,1003,1006];
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters = $_GET['FiltersForm'];
+			$filtersForm1->filters = $_GET['FiltersForm1'];
+		}
+		if (!empty($_GET['available_couriers'])) {
+			$available_couriers=array_merge($available_couriers, $_GET['available_couriers']);
+		}
+		if (!empty($_GET['test_couriers'])) {
+			$available_couriers=array_merge($available_couriers, $_GET['test_couriers']);
+		}
+		if (!empty($_GET['start_date']) && !empty($_GET['end_date'])&&!empty($_GET['data_source'])&&!empty($available_couriers)) {
+			$start_time = $_GET['start_date'];
+			$end_time = $_GET['end_date'];
+			$end_time=date('Y-m-d', strtotime('+1 day', strtotime($end_time)));
+			$data_source=$_GET['data_source'];
+			$orgRates=[];
+			$include_bfe=$_GET['inc_bfe']=='true'?true:false;
+			foreach ($available_couriers as $c) {
+				$r= OrgRate::model()->findByPk($c);
+				if (!empty($r)) {
+					$orgRates[]=$r;
+				}
+			}
+			$source_array=Reconciliation::$courierIDToTypes;
+			$reconcileService = new ReconcileService();
+			$preCost=0;
+			$preWeight=0;
+			$prePacks=0;
+			$leftPacks=0;
+			
+			$mixedCost=0;
+			$mixedWeight=0;
+			$mixedPacks=0;
+			$mixedLeftPacks=0;
+			foreach ($data_source as $single_source) {
+				$client_type=$single_source;
+				$dptStr = " AND p.dpt_id = 106 ";
+				$dpmtStr = "";
+				$clientStr = "";
+				$courierStr = "";
+				$consolStr = " ";
+				$courierStr = ' AND p.grp2 = '.$client_type.' ';
+
+				$sql = "SELECT p.* from pl_ledger_management p join consol c on p.grp1=c.id join mani_map ma on ma.fid = p.fid and ma.model='ImParcel' join manifest m on m.id = ma.mani_id and m.type=90  where p.gl = 101 and amt>0 and p.model='ImP_Manifest' ".$dptStr.$dpmtStr.$clientStr.$courierStr.$consolStr." AND m.created >= '".$start_time." 00:00:00' AND m.created <= '".$end_time." 23:00:00' AND p.weight >0 group by p.fid ";
+		
+				$rs = Yii::app()->db->createCommand($sql)->queryAll();
+				$shipmentIds ="";
+				$bkRs=[];
+				foreach ($rs as $r) {
+					$shipmentIds .= "".$r['fid']."".",";
+					$bkRs[$r['fid']][]=$r;
+				}
+				if ($shipmentIds != "") {
+					$shipmentIds = substr($shipmentIds, 0, strlen($shipmentIds)-1);
+					;
+					$sCriteria = new CDbCriteria() ;
+					$sCriteria->order = 'ref';
+					if($client_type==101)
+					{
+						$sCriteria->condition = "id in ({$shipmentIds}) and ref like '%AMQ%'";
+					}else
+					{
+						$sCriteria->condition = "id in ({$shipmentIds})";
+					}
+					$shipments= ImParcel::model()->findAll($sCriteria);
+					foreach ($shipments as $shipment) {
+						if (empty($shipment)) {
+							continue;
+						}
+						if (!$include_bfe) {
+							if ($shipment->agent_id==1206) {
+								continue;
+							}
+						}
+
+						$ref = $shipment->id;
+						$r = $bkRs[$ref][0];
+						$checkWeight = 0;
+						$pkg = 0;
+						foreach ($bkRs[$ref] as $key => $bk) {
+							$checkWeight+=$bk['weight'];
+						}
+						if($checkWeight>5.001&&$shipment->pkg>1&&$orgRates[0]->id==741)
+						{
+							$pkg = $shipment->pkg-1;
+						}else
+						{
+							$pkg = $shipment->pkg;
+						}
+						if($single_source==101)
+						{
+							$orgRateId = $reconcileService->getOrgRateId($shipment,"");
+						}else if($single_source==115)
+						{
+							$orgRateId = $reconcileService->getOrgRateId($shipment,"FWSYD2020");
+						}
+						$ourRate =Shipment::getCourierCostByShipment($shipment->ref, $orgRateId, $checkWeight);
+						$bk['amt'] = $ourRate['price'];
+						$chooseCost=ImParcel::getCouriersByPostcodeWeight($orgRates, $shipment->postcode, $checkWeight, $pkg,$shipment->cnee->suburb,true);
+						if (!empty($chooseCost)) {
+							foreach ($bkRs[$ref] as $key => $bk) {
+								$preCost+=$bk['amt'];
+								$preWeight+=$bk['weight'];
+							}
+							$prePacks+=$shipment->pkg;
+							$mixedCost+=$chooseCost['price'];
+							$mixedWeight+=$r['weight'];
+							$mixedPacks+=$shipment->pkg;
+							$detailData = [];
+						
+							$chooseId = $chooseCost['id'];
+							if (!isset($detailDataArr[$chooseId])) {
+								$detailDataArr[$chooseId] = ['id'=>$order++,'courier'=>$chooseCost['name'],'cost'=> 0.0,'preCost' => 0.0,'weight'=> 0.0,'packs'=>0,'left_packs'=>0,'weightPercent'=>0.0,'packsPercent'=>0.0];
+								;
+							}
+						 
+							$detailDataArr[$chooseId]['cost'] +=$chooseCost['price'];
+							foreach ($bkRs[$ref] as $key => $bk) {
+								$detailDataArr[$chooseId]['preCost'] +=$bk['amt'];
+							}
+							$detailDataArr[$chooseId]['weight'] +=$r['weight'];
+							$detailDataArr[$chooseId]['packs'] +=$shipment->pkg;
+						} else {
+							$leftPacks+=$shipment->pkg;
+							$mixedLeftPacks+=$shipment->pkg;
+							$detailDataArr[$orgRates[0]->id]['left_packs'] +=$shipment->pkg;
+						}
+					}
+				}
+			}
+			$provide[]=['id'=>1,'courier'=>'Pre','cost'=> sprintf('%.2f', $preCost),'weight'=> sprintf('%.2f', $preWeight),'packs'=>$prePacks,'left_packs'=>$leftPacks,'temp'=>'1'];
+			$provide[]=['id'=>1,'courier'=>'Mixed','cost'=>sprintf('%.2f', $mixedCost),'weight'=> sprintf('%.2f', $mixedWeight),'packs'=>$mixedPacks,'left_packs'=>$mixedLeftPacks,'temp'=>'1'];
+		}
+		if (!empty($detailDataArr)) {
+			foreach ($detailDataArr as $key => $detailData) {
+				$detailDataArr[$key]["weightPercent"] = sprintf('%.2f', $detailDataArr[$key]["weight"]/$provide[1]["weight"]);
+				$detailDataArr[$key]["packsPercent"] = sprintf('%.2f', $detailDataArr[$key]["packs"]/$provide[1]["packs"]);
+			}
+		}
+		$filteredData = $filtersForm->filter($provide);
+		$filteredData1 = $filtersForm1->filter($detailDataArr);
+		$dataprovider = new CArrayDataProvider($filteredData);
+		$dataprovider1 = new CArrayDataProvider($filteredData1);
+		$sort = new CSort();
+		$sort->defaultOrder = "user DESC";
+		$dataprovider->sort = $sort;
+		$dataprovider->pagination = ['pageSize' => 30,];
+		$sort2 = new CSort();
+		$sort2->defaultOrder = "date DESC";
+		$dataprovider1->sort = $sort2;
+		$dataprovider1->pagination = ['pageSize' => 30,];
+		if (!empty($_GET['partial'])) {
+			$this->renderPartial('_search', [
+				'dataProvider' => [$dataprovider, $filtersForm],
+				'dataProvider1' => [$dataprovider1, $filtersForm1]
+			]);
+			return;
+		}
+		$dataSourceArr = [];
+		$courierIDToTypes = Org::$couriersForImportsCost;
+		foreach ($courierIDToTypes as $key => $value) {
+			$dataSourceArr[$key] = $value;
+		}
+		$orgRateArr = OrgRate::model()->findAll(" type = ".OrgRate::COSTRATETYPE." order by name ");
+		$orgRateTestArr = OrgRate::model()->findAll(" type = ".OrgRate::COSTRATETESTTYPE." order by name ");
+		$zoneMapTestArr = ZoneMapTestImport::model()->findAll(" type = 0");
+		$zoneMapWeightArr = ZoneMapTestImport::model()->findAll(" type = 1");
+		$pcaZoneTestArr = [];
+		$weightMapArr = [];
+		foreach ($zoneMapTestArr as $key => $value) {
+			$pcaZoneTestArr[$value->id] = $value->name;
+		}
+		foreach ($zoneMapWeightArr as $key => $value) {
+			$weightMapArr[$value->id] = $value->name;
+		}
+		$couriersArr = [];
+		$showCouriersArr = [];
+		$couriersTestArr = [];
+		$selection =[];
+		foreach ($orgRateArr as $key => $value) {
+			if(in_array($value->id,$arrAvailableCourier)){
+				$couriersArr[$value->id] = $value->name;
+				if (isset($value->mdata["showForTest"])!=null&&$value->mdata["showForTest"]==1) {
+					$showCouriersArr[$value->id] = $value->name;
+					$selection[]=1;
+				} else {
+					$selection[]=0;
+				}
+			}
+		}
+		foreach ($orgRateTestArr as $key => $value) {
+			$couriersTestArr[$value->id] = $value->name;
+		}
+		$this->render('tell_cost_revenue', [
+			'dataProvider' => [$dataprovider, $filtersForm],
+			'dataProvider1' => [$dataprovider1, $filtersForm1],
+			'dataSourceArr' =>$dataSourceArr,
+			'couriersArr' => $couriersArr,
+			'showCouriersArr' =>$showCouriersArr,
+			'couriersTestArr' => $couriersTestArr,
+			'pcaZoneTestArr' => $pcaZoneTestArr,
+			'weightMapArr' => $weightMapArr,
+			'selection' =>$selection
+		]);
+	}
+	
+	public function actionSearchPCAZoneCost()
+	{
+		$filtersForm = new FiltersForm;
+		$available_couriers = [];
+		$detailDataArr = [];
+		$order = 0;
+		$provide = [];
+		$orgRates=[];
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters = $_GET['FiltersForm'];
+		}
+		//get all available couriers
+		if (!empty($_GET['available_couriers'])) {
+			$available_couriers=array_merge($available_couriers, $_GET['available_couriers']);
+
+			foreach ($available_couriers as $c) {
+				//$r= OrgRate::model()->findByPk($c);
+				$r= OrgRate::model()->with(['org.zoneMap'])->findByPk($c);
+				if (!empty($r)) {
+					$orgRates[]=$r;
+				}
+			}
+		}
+
+		//get all test couriers
+		if (!empty($_GET['test_couriers'])) {
+			$available_couriers=array_merge($available_couriers, $_GET['test_couriers']);
+			foreach ($_GET['test_couriers'] as $c) {
+				//$r= OrgRate::model()->findByPk($c);
+				$r= OrgRate::model()->with('zoneMapTest')->findByPk($c);
+				if (!empty($r)) {
+					$orgRates[]=$r;
+				}
+			}
+		}
+		if (!empty($available_couriers)&&!empty($_GET['pca_zone_test'])) {
+			$pcaZoneTest = $_GET['pca_zone_test'];
+			$zoneMapTestImport=null;
+			$withoutCourierName = $_GET['without_courier_name'];
+			// foreach($available_couriers as $c){
+			//   $r= OrgRate::model()->findByPk($c);
+			//   if(!empty($r)) $orgRates[]=$r;
+			// }
+			//print_r(;$orgRates);
+			$zoneMapTestImport = ZoneMapTestImport::model()->findByPk($pcaZoneTest);
+			$weightMaps = ZoneMapTestImport::model()->with('zoneMapTest')->find(' type = 1 ')->zoneMapTest;
+			$weightMapArr =[];
+			$columns = $this->generateColumns($zoneMapTestImport);//the cost distance
+			$rows = ZoneMapTest::model()->findAll(" import_id =:import_id group by z1", [":import_id"=>$zoneMapTestImport->id]);
+			//
+			$allZoneMapArr = ZoneMapTest::model()->findAll("import_id = :import_id", ["import_id"=>$zoneMapTestImport->id]);
+			foreach ($weightMaps as $weightMap) {
+				if ($weightMap["pc_lo"]==$weightMap["pc_hi"]) {
+					$wmpc = $weightMap["pc_lo"];
+					$weightMapArr[$wmpc]= $weightMap->mdata["singleWeight"];
+				} else {
+					for ($i=$weightMap["pc_lo"];$i<=$weightMap["pc_hi"];$i++) {
+						$weightMapArr[$i]= $weightMap->mdata["singleWeight"];
+					}
+				}
+			}
+			//print_r($weightMapArr);
+			foreach ($rows as $keyr => $rvalue) {
+				$thisRow = [];
+				$thisRow['zone']=$rvalue->z1;
+				foreach ($columns as $keyc => $cvalue) {
+					$bestCourier=ZoneRate::getBestCourierByZoneAndKgWithCache($orgRates, $rvalue->z1, $rvalue->import_id, $cvalue, $allZoneMapArr, $weightMapArr);
+					$thisRow["{$cvalue}"] =$bestCourier["price"];
+					if ($withoutCourierName==0) {
+						$thisRow["{$cvalue}_name"] =$bestCourier["name"];
+					}
+				}
+				//$thisRow['id']=$order;
+				$provide[] =$thisRow;
+				$order++;
+			}
+			$filteredData = $filtersForm->filter($provide);
+			$dataprovider = new CArrayDataProvider($filteredData);
+			$sort = new CSort();
+			$sort->defaultOrder = "user DESC";
+			$dataprovider->sort = $sort;
+			$dataprovider->pagination = ['pageSize' => 30,];
+			$columnsFlex = [];
+			//$columnsFlex[] =['name'=>'zone','filter'=>false];
+			$columnsFlex[] ='zone';
+			foreach ($columns as $key => $value) {
+				$columnsFlex[] = $value;
+				if ($withoutCourierName==0) {
+					$columnsFlex[] = '';
+				}
+			}
+			$xsl=new oExcel();
+			$i=1;
+			$xsl->addRow($i++, $columnsFlex);
+			foreach ($provide as $key => $value) {
+				$xsl->addRow($i++, $value);
+			}
+			$tempfile = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.'pca_zone_test.xlsx';
+			$xsl->output($tempfile, null, false);
+			$dlUrl =  $this->createUrl('importsCost/downloadPZTResult');
+			$resp = '<span>Price Template File is ready , Please <a href="'.$dlUrl.'" target="_blank">click me</a> to download now<span>';
+			echo $resp;
+			// foreach ($columns as $key => $value) {
+		//   $columnsFlex[] = ['name'=>$value,'filter'=>false];
+		// }
+		// return $this->renderPartial('_searchPCAZoneCost', array(
+		//         'dataProvider' => [$dataprovider, $filtersForm],
+		//         'columns'=>$columnsFlex,
+		//         'provide'=>$provide
+		//     ));
+		}
+	}
+	private function generateColumns($zoneMapTestImport)
+	{
+		$columns = [];
+		$maxIndex = 0;
+		if (isset($zoneMapTestImport->mdata)&&isset($zoneMapTestImport->mdata["per"])) {
+			$maxIndex=$zoneMapTestImport->mdata["max"]/$zoneMapTestImport->mdata["per"];
+			$current=0.00;
+			for ($i=0;$i<$maxIndex;$i++) {
+				$currentMax = $current+$zoneMapTestImport->mdata["per"];
+				$columns[] = $current."-". $currentMax;
+				$current = $currentMax;
+			}
+		} elseif (isset($zoneMapTestImport->mdata["range"])) {
+			$columns = explode(',', $zoneMapTestImport->mdata["range"]);
+		}
+		return $columns;
+	}
+
+	public function actionAjaxExportImportsCourierRevenue()
+	{
+		if (!empty($_GET['start_date']) && !empty($_GET['end_date'])) {
+			$start_time = $_GET['start_date'];
+			$end_time = $_GET['end_date'];
+			$end_time=date('Y-m-d', strtotime('+1 day', strtotime($end_time)));
+			$new_chargecode = $_GET['new_chargecode'];
+			//$data_source=$_GET['data_source'];
+
+			//$arrHeader = ['Date','Tracking No.','chooseType','Volume','Kg','Postcode','suburb','Packs','Cost','Pre Type','Pre Cost'];
+			$arrHeader = ['Org Name','Shipment Date','Ref No.','Pkg','Volume','Gross Weight','Chargeable Kg','Suburb','Postcode','Pre Chargecode','Pre Revenue','New Chargecode','New Revenue'];
+
+			$xsl=new oExcel();
+			$i=1;
+			$xsl->addRow($i++, $arrHeader);
+			//foreach ($data_source as $single_source) {
+				//$client_type=$single_source;
+				$dptStr = "";
+				$dpmtStr = "";
+				$clientStr = "";
+				$courierStr = "";
+				$consolStr = " ";
+				//$courierStr = ' AND p.grp2 = '.$client_type.' ';
+
+				//$sql = "select * from shipment";
+				$sql = "SELECT p.* from pl_ledger_management p join consol c on p.grp1=c.id join mani_map ma on ma.fid = p.fid and ma.model='ImParcel' join manifest m on m.id = ma.mani_id and m.type=90  where p.gl = 101 and amt>0 and p.model='ImP_Manifest' ".$dptStr.$dpmtStr.$clientStr.$courierStr.$consolStr." AND m.created >= '".$start_time." 00:00:00' AND m.created <= '".$end_time." 23:00:00' AND p.weight >0 group by p.fid ";
+		
+				$rs = Yii::app()->db->createCommand($sql)->queryAll();
+				$shipmentIds ="";
+				$bkRs=[];
+				foreach ($rs as $r) {
+					$shipmentIds .= "".$r['fid']."".",";
+					$bkRs[$r['fid']][]=$r;
+					//$shipmentIds .= "".$r['id']."".",";
+					//$bkRs[$r['id']][]=$r;
+				}
+				if ($shipmentIds != "") {
+					$shipmentIds = substr($shipmentIds, 0, strlen($shipmentIds)-1);
+					;
+					$sCriteria = new CDbCriteria() ;
+					$sCriteria->order = 'ref';
+					$sCriteria->condition = "id in ({$shipmentIds})";
+
+					$shipments= ImParcel::model()->findAll($sCriteria);
+					foreach ($shipments as $shipment) {
+						if (empty($shipment)) {
+							continue;
+						}
+						if($shipment->ot_id==10){
+							continue;
+						}
+
+						$preWeight = $shipment->weight;
+						$preChargeWeight = isset($shipment->mdata['charge_client_weight'])?$shipment->mdata['charge_client_weight']:$preWeight;
+						$preRevenue = $shipment->getChargeByChargecode('', false, null, true,false,false);
+						$preChargeCodeID = ImportChargeCode::model()->findbypk($preRevenue['rate']->chargecode_id)->chargecode;
+
+						$newRevenue = $shipment->getChargeByChargecode($new_chargecode, false, null, true,false,false);
+						//$newChargeCodeID = ImportChargeCode::model()->findbypk($preRevenue['rate']->chargecode_id)->chargecode;
+
+						$arrExcel =[$shipment->agent->name,$shipment->getDispatchDate(),$shipment->ref,$shipment->pkg,sprintf("%.4f", $shipment->cbm*$shipment->pkg),$preWeight,$preChargeWeight,$shipment->cnee->suburb,$shipment->cnee->postcode,$preChargeCodeID,$preRevenue['amount'],$new_chargecode,$newRevenue['amount']];
+						$xsl->addRow($i++, $arrExcel);
+					}
+				}
+			//}
+			$tempfile = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.'revenue_details.xlsx';
+			$xsl->output($tempfile, null, false);
+			$dlUrl =  $this->createUrl('importsCost/downloadTmrResult');
+			$resp = '<span>File is ready , Please <a href="'.$dlUrl.'" target="_blank">click me</a> to download now<span>';
+			echo $resp;
+		}
+	}
+
+
+	//new
+	public function actionAjaxExportImportsCourierCost()
+	{
+		$available_couriers = [];
+		if (!empty($_GET['available_couriers'])) {
+			$available_couriers=array_merge($available_couriers, $_GET['available_couriers']);
+		}
+		if (!empty($_GET['test_couriers'])) {
+			$available_couriers=array_merge($available_couriers, $_GET['test_couriers']);
+		}
+		if (!empty($_GET['start_date']) && !empty($_GET['end_date'])&&!empty($_GET['data_source'])&&!empty($available_couriers)) {
+			$start_time = $_GET['start_date'];
+			$end_time = $_GET['end_date'];
+			$end_time=date('Y-m-d', strtotime('+1 day', strtotime($end_time)));
+			$data_source=$_GET['data_source'];
+			$include_bfe=$_GET['inc_bfe']=='true'?true:false;
+
+			//$arrHeader = ['Date','Tracking No.','chooseType','Volume','Kg','Postcode','suburb','Packs','Cost','Pre Type','Pre Cost'];
+			$arrHeader = ['Org Name','Shipment Date','Depot','Ref No.','Pkg','Volume','Gross Weight','Chargeable Kg','Suburb','Postcode','Pre Type','Pre Cost','Opt Type','Zone','Opt Cost'];
+			$orgRates=[];
+			foreach ($available_couriers as $c) {
+				$r= OrgRate::model()->findByPk($c);
+				if (!empty($r)) {
+					$orgRates[]=$r;
+					array_push($arrHeader,$r->name.' Zone Code');
+					array_push($arrHeader,$r->name);
+				}
+			}
+			$source_array=Reconciliation::$courierIDToTypes;
+			$reconcileService = new ReconcileService();
+			$mixedCost=0;
+			$mixedWeight=0;
+			$mixedPacks=0;
+			$mixedLeftPacks=0;
+			$xsl=new oExcel();
+			$i=1;
+			
+
+			$xsl->addRow($i++, $arrHeader);
+			foreach ($data_source as $single_source) {
+				$client_type=$single_source;
+				$dptStr = "";
+				$dpmtStr = "";
+				$clientStr = "";
+				$courierStr = "";
+				$consolStr = " ";
+				$courierStr = ' AND p.grp2 = '.$client_type.' ';
+
+				//$sql = "select * from shipment";
+				$sql = "SELECT p.* from pl_ledger_management p join consol c on p.grp1=c.id join mani_map ma on ma.fid = p.fid and ma.model='ImParcel' join manifest m on m.id = ma.mani_id and m.type=90  where p.gl = 101 and amt>0 and p.model='ImP_Manifest' ".$dptStr.$dpmtStr.$clientStr.$courierStr.$consolStr." AND m.created >= '".$start_time." 00:00:00' AND m.created <= '".$end_time." 23:00:00' AND p.weight >0 group by p.fid ";
+		
+				$rs = Yii::app()->db->createCommand($sql)->queryAll();
+				$shipmentIds ="";
+				$bkRs=[];
+				foreach ($rs as $r) {
+					$shipmentIds .= "".$r['fid']."".",";
+					$bkRs[$r['fid']][]=$r;
+					//$shipmentIds .= "".$r['id']."".",";
+					//$bkRs[$r['id']][]=$r;
+				}
+				if ($shipmentIds != "") {
+					$shipmentIds = substr($shipmentIds, 0, strlen($shipmentIds)-1);
+					;
+					$sCriteria = new CDbCriteria() ;
+					$sCriteria->order = 'ref';
+					if($client_type==101)
+					{
+						$sCriteria->condition = "id in ({$shipmentIds}) and ref like '%AMQ%'";
+					}else
+					{
+						$sCriteria->condition = "id in ({$shipmentIds})";
+					}
+					$shipments= ImParcel::model()->findAll($sCriteria);
+					foreach ($shipments as $shipment) {
+						if (empty($shipment)) {
+							continue;
+						}
+						if($shipment->ot_id==10){
+							continue;
+						}
+
+						$ref = $shipment->id;
+						$r = $bkRs[$ref][0];
+
+						$preWeight = $shipment->weight;
+
+						$totalCbm = $shipment->cbm * ($shipment->pkg > 0 ? $shipment->pkg : 1);
+						$cubWeight = $totalCbm * 250;
+						$preChargeWeight = round(max($shipment->weight,$cubWeight),2);
+						//$preChargeWeight = isset($shipment->mdata['charge_client_weight'])?$shipment->mdata['charge_client_weight']:(isset($shipment->mdata['chargecode'])?$shipment->chargeWeight():$shipment->weight);
+						//$preChargeWeight = isset($shipment->mdata['charge_client_weight'])?$shipment->mdata['charge_client_weight']:$preWeight;
+						
+						//$preWeight = $shipment->getCubeWeight();
+
+						$orgRateId = empty($shipment->mdata['org_rate_id'])?0:$shipment->mdata['org_rate_id'];
+						
+						if($preWeight>5.001&&$shipment->pkg>1&&$orgRates[0]->id==741)
+						{
+							$pkg = $shipment->pkg-1;
+						}else
+						{
+							$pkg = $shipment->pkg;
+						}
+
+						$orgRatePre = OrgRate::model()->findByPk($orgRateId);
+						//$ourRate = ImParcel::getCouriersByPostcodeWeight($orgRatePre, $shipment->postcode, $preChargeWeight, $pkg,$shipment->cnee->suburb,true);
+						//$ourRate =Shipment::getCourierCostByShipment($shipment->ref, $orgRateId);
+						$ourRate = ImcoConsol::getCourierCostPrice($orgRatePre,$shipment->postcode, $preChargeWeight, $pkg,false,$shipment->cnee->suburb,false,'',$shipment);
+						$preCost = $ourRate;
+
+						$chooseCost=ImParcel::getCouriersByPostcodeWeight($orgRates, $shipment->postcode, $preChargeWeight, $pkg,$shipment->cnee->suburb,true,$shipment);
+						$orgRateChoose = OrgRate::model()->findByPk($chooseCost['id']);
+						$strZone = ImcoConsol::getZoneByRateAndPostCode($orgRateChoose,$shipment->cnee->postcode);
+						
+						if (!empty($chooseCost)) {
+							$arrExcel =[$shipment->agent->name,$shipment->getDispatchDate(),$shipment->ddepot->name,$shipment->ref,$shipment->pkg,sprintf("%.4f", $shipment->cbm*$shipment->pkg),$preWeight,$preChargeWeight,$shipment->cnee->suburb,$shipment->cnee->postcode,empty($orgRatePre->name)?"":$orgRatePre->name,$preCost,$chooseCost['name'],$strZone,$chooseCost['price']];
+							foreach($orgRates as $orgRate){
+								$strChooseZone = ImcoConsol::getZoneByRateAndPostCode($orgRate,$shipment->cnee->postcode);
+								$tempCost = ImcoConsol::getCourierCostPrice($orgRate, $shipment->postcode, $preChargeWeight, $pkg,false,$shipment->cnee->suburb,false,'',$shipment);
+								array_push($arrExcel,$strChooseZone);
+								array_push($arrExcel,$tempCost);
+							}
+							$xsl->addRow($i++, $arrExcel);
+						}else{
+							$arrExcel = [$shipment->agent->name,$shipment->getDispatchDate(),$shipment->ddepot->name,$shipment->ref,$shipment->pkg,sprintf("%.4f", $shipment->cbm*$shipment->pkg),$preWeight,$preChargeWeight,$shipment->cnee->suburb,$shipment->cnee->postcode,empty($orgRatePre->name)?"":$orgRatePre->name,$preCost,$source_array[$single_source],$strZone,$preCost];
+							foreach($orgRates as $orgRate){
+								$strChooseZone = ImcoConsol::getZoneByRateAndPostCode($orgRate,$shipment->cnee->postcode);
+								$tempCost = ImcoConsol::getCourierCostPrice($orgRate, $shipment->postcode, $preChargeWeight, $pkg,false,$shipment->cnee->suburb,false,'',$shipment);
+								array_push($arrExcel,$strChooseZone);
+								array_push($arrExcel,$tempCost);
+							}
+							$xsl->addRow($i++, $arrExcel);
+						}
+					}
+				}
+			}
+			$tempfile = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.'cost_details.xlsx';
+			$xsl->output($tempfile, null, false);
+			$dlUrl =  $this->createUrl('importsCost/downloadTmcResult');
+			$resp = '<span>File is ready , Please <a href="'.$dlUrl.'" target="_blank">click me</a> to download now<span>';
+			echo $resp;
+		}
+	}
+	
+
+	//old
+	public function actionAjaxExportImportsCost()
+	{
+		$available_couriers = [];
+		if (!empty($_GET['available_couriers'])) {
+			$available_couriers=array_merge($available_couriers, $_GET['available_couriers']);
+		}
+		if (!empty($_GET['test_couriers'])) {
+			$available_couriers=array_merge($available_couriers, $_GET['test_couriers']);
+		}
+		if (!empty($_GET['start_date']) && !empty($_GET['end_date'])&&!empty($_GET['data_source'])&&!empty($available_couriers)) {
+			$start_time = $_GET['start_date'];
+			$end_time = $_GET['end_date'];
+			$end_time=date('Y-m-d', strtotime('+1 day', strtotime($end_time)));
+			$data_source=$_GET['data_source'];
+			$include_bfe=$_GET['inc_bfe']=='true'?true:false;
+			$orgRates=[];
+			foreach ($available_couriers as $c) {
+				$r= OrgRate::model()->findByPk($c);
+				if (!empty($r)) {
+					$orgRates[]=$r;
+				}
+			}
+			$source_array=Reconciliation::$courierIDToTypes;
+			$reconcileService = new ReconcileService();
+			$mixedCost=0;
+			$mixedWeight=0;
+			$mixedPacks=0;
+			$mixedLeftPacks=0;
+			$xsl=new oExcel();
+			$i=1;
+			$xsl->addRow($i++, ['Tracking No.','Volume','Kg','Postcode','suburb','date','Packs','chooseType','Cost','Pre Type','Pre Cost']);
+			foreach ($data_source as $single_source) {
+				$client_type=$single_source;
+				$dptStr = " AND p.dpt_id = 106 ";
+				$dpmtStr = "";
+				$clientStr = "";
+				$courierStr = "";
+				$consolStr = " ";
+				$courierStr = ' AND p.grp2 = '.$client_type.' ';
+
+				$sql = "SELECT p.* from pl_ledger_management p join consol c on p.grp1=c.id join mani_map ma on ma.fid = p.fid and ma.model='ImParcel' join manifest m on m.id = ma.mani_id and m.type=90  where p.gl = 101 and amt>0 and p.model='ImP_Manifest' ".$dptStr.$dpmtStr.$clientStr.$courierStr.$consolStr." AND m.created >= '".$start_time." 00:00:00' AND m.created <= '".$end_time." 23:00:00' AND p.weight >0 group by p.fid ";
+		
+				$rs = Yii::app()->db->createCommand($sql)->queryAll();
+				$shipmentIds ="";
+				$bkRs=[];
+				foreach ($rs as $r) {
+					$shipmentIds .= "".$r['fid']."".",";
+					$bkRs[$r['fid']][]=$r;
+				}
+				if ($shipmentIds != "") {
+					$shipmentIds = substr($shipmentIds, 0, strlen($shipmentIds)-1);
+					;
+					$sCriteria = new CDbCriteria() ;
+					$sCriteria->order = 'ref';
+					if($client_type==101)
+					{
+						$sCriteria->condition = "id in ({$shipmentIds}) and ref like '%AMQ%'";
+					}else
+					{
+						$sCriteria->condition = "id in ({$shipmentIds})";
+					}
+					$shipments= ImParcel::model()->findAll($sCriteria);
+					foreach ($shipments as $shipment) {
+						if (empty($shipment)) {
+							continue;
+						}
+						if (!$include_bfe) {
+							if ($shipment->agent_id==1206) {
+								continue;
+							}
+						}
+
+						$ref = $shipment->id;
+						$r = $bkRs[$ref][0];
+						$preWeight = 0;
+						$preCost = 0;
+						foreach ($bkRs[$ref] as $key => $bk) {
+							$preCost+=$bk['amt'];
+							$preWeight+=$bk['weight'];
+						}
+
+						if($single_source==101)
+						{
+							$orgRateId = $reconcileService->getOrgRateId($shipment,"");
+						}else if($single_source==115)
+						{
+							$orgRateId = $reconcileService->getOrgRateId($shipment,"FWSYD2020");
+						}
+						$ourRate =Shipment::getCourierCostByShipment($shipment->ref, $orgRateId, $checkWeight);
+						$preCost = $ourRate['price'];
+
+						if($preWeight>5.001&&$shipment->pkg>1&&$orgRates[0]->id==741)
+						{
+							$pkg = $shipment->pkg-1;
+						}else
+						{
+							$pkg = $shipment->pkg;
+						}
+
+						$chooseCost=ImParcel::getCouriersByPostcodeWeight($orgRates, $shipment->postcode, $preWeight, $pkg,$shipment->cnee->suburb,true);
+						if (!empty($chooseCost)) {
+							$xsl->addRow($i++, [$shipment->ref,sprintf("%.4f", $shipment->cbm*$shipment->pkg),$preWeight,$shipment->cnee->postcode,$shipment->cnee->suburb,$shipment->getDispatchDate(),$shipment->pkg,$chooseCost['name'],$chooseCost['price'],Reconciliation::$types[$source_array[$single_source]],$preCost]);
+						}else
+						{
+							$xsl->addRow($i++, [$shipment->ref,sprintf("%.4f", $shipment->cbm*$shipment->pkg),$preWeight,$shipment->cnee->postcode,$shipment->cnee->suburb,$shipment->getDispatchDate(),$shipment->pkg,$source_array[$single_source],$preCost,Reconciliation::$types[$source_array[$single_source]],$preCost]);
+						}
+					}
+				}
+			}
+			$tempfile = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.'cost_details.xlsx';
+			$xsl->output($tempfile, null, false);
+			$dlUrl =  $this->createUrl('importsCost/downloadTmcResult');
+			$resp = '<span>File is ready , Please <a href="'.$dlUrl.'" target="_blank">click me</a> to download now<span>';
+			echo $resp;
+		}
+	}
+	
+	public function actionShowAvailableCouriers()
+	{
+		$orgRateId =$_POST["id"];
+		$show =$_POST["show"];
+		 
+		$orgRate = OrgRate::model()->findByPk($orgRateId);
+		$orgRate->mdata["showForTest"] = $show;
+		$orgRate->save();
+		$orgRateArr = OrgRate::model()->findAll(" type = ".OrgRate::COSTRATETYPE." order by name ");
+		$showCouriersArr = [];
+		foreach ($orgRateArr as $key => $value) {
+			if (isset($value->mdata["showForTest"])!=null&&$value->mdata["showForTest"]==1) {
+				$showCouriersArr[$value->id] = $value->name;
+			}
+		}
+		echo CHtml::checkBoxList('available_couriers', '', $showCouriersArr, ['labelOptions'=>['class'=>'radio_label'],'separator'=>'&nbsp;&nbsp']);
+	}
+	
+	public function actionDownloadTmcResult()
+	{
+		$xls = new oExcel;
+		$mfn = 'cost_details';
+		$tempfile = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.$mfn.'.xlsx';
+		$xls->load($tempfile);
+		$xls->output($mfn.'.xlsx');
+	}
+
+	public function actionDownloadTmrResult()
+	{
+		$xls = new oExcel;
+		$mfn = 'revenue_details';
+		$tempfile = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.$mfn.'.xlsx';
+		$xls->load($tempfile);
+		$xls->output($mfn.'.xlsx');
+	}
+	
+	public function actionDownloadPZTResult()
+	{
+		$xls = new oExcel;
+		$mfn = 'pca_zone_test';
+		$tempfile = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.$mfn.'.xlsx';
+		$xls->load($tempfile);
+		$xls->output($mfn.'.xlsx');
+	}
+	/**
+	 * save org rate related zone map
+	 */
+	
+	public function actionAjaxSaveTestZonemap()
+	{
+		$resp = ['success' => 1,'msg' => 'import successfully'];
+		$template_file = empty($_FILES['test-zonemap']) ? [] : $_FILES['test-zonemap'];
+		if (empty($template_file['tmp_name']) || !is_uploaded_file($template_file['tmp_name'])) {
+			$resp['msg'] = 'Invalid template file';
+			echo json_encode($resp);
+			return;
+		} else {
+			$xls = new oExcel;
+			$xls->load($template_file['tmp_name']);
+			$data = $xls->getAll();
+			// import org zone map data
+			$this->importOrgZoneMapData($data);
+			$orgRateTestArr = OrgRate::model()->findAll(" type = ".OrgRate::COSTRATETESTTYPE." order by name ");
+			$couriersTestArr = [];
+			foreach ($orgRateTestArr as $key => $value) {
+				$couriersTestArr[$value->id] = $value->name;
+			}
+			$resp['msg'] = $this->renderPartial('_testCouriers', ['couriersTestArr'=>$couriersTestArr], true);
+		}
+		echo json_encode($resp);
+	}
+	/**
+	 * save org rate related zone map
+	 */
+	
+	public function actionAjaxSaveWeightMap()
+	{
+		$resp = ['success' => 1,'msg' => 'import successfully'];
+		$template_file = empty($_FILES['test-weight-zonemap']) ? [] : $_FILES['test-weight-zonemap'];
+		if (empty($template_file['tmp_name']) || !is_uploaded_file($template_file['tmp_name'])) {
+			$resp['msg'] = 'Invalid template file';
+			echo json_encode($resp);
+			return;
+		} else {
+			$xls = new oExcel;
+			$xls->load($template_file['tmp_name']);
+			$data = $xls->getAll();
+			// import org zone map data
+			$this->importWeightZoneMapData($data);
+			$weightMaps = ZoneMapTestImport::model()->findAll(" type = 1 ");
+			$weightMapArr = [];
+			foreach ($weightMaps as $key => $value) {
+				$weightMapArr[$value->id] = $value->name;
+			}
+			$resp['msg'] = $this->renderPartial('_testWeightMap', ['weightMapArr'=>$weightMapArr], true);
+		}
+		echo json_encode($resp);
+	}
+	
+	public function actionDeleteTestCouriers()
+	{
+		$orgRateId =$_POST["id"];
+		OrgRate::model()->deleteAll(" id  = {$orgRateId}");
+		ZoneMapTest::model()->deleteAll(" rate_id  = {$orgRateId}");
+		ZoneRate::model()->deleteAll(" rate_id  = {$orgRateId}");
+		$orgRateTestArr = OrgRate::model()->findAll(" type = ".OrgRate::COSTRATETESTTYPE." order by name ");
+		$couriersTestArr = [];
+		foreach ($orgRateTestArr as $key => $value) {
+			$couriersTestArr[$value->id] = $value->name;
+		}
+		echo $this->renderPartial('_testCouriers', ['couriersTestArr'=>$couriersTestArr]);
+	}
+	
+	public function actionDeleteZoneMapImport()
+	{
+		$importId =$_POST["id"];
+		$type =$_POST["type"];
+		ZoneMapTestImport::model()->deleteAll(" id  = {$importId}");
+		ZoneMapTest::model()->deleteAll(" import_id  = {$importId}");
+		if ($type ==0) {
+			$zoneMapTestArr = ZoneMapTestImport::model()->findAll(" type = 0 ");
+			$pcaZoneTestArr = [];
+			foreach ($zoneMapTestArr as $key => $value) {
+				$pcaZoneTestArr[$value->id] = $value->name;
+			}
+			echo $this->renderPartial('_testPCA', ['pcaZoneTestArr'=>$pcaZoneTestArr], true);
+		} elseif ($type ==1) {
+			$weightMaps = ZoneMapTestImport::model()->findAll(" type = 1 ");
+			$weightMapArr = [];
+			foreach ($weightMaps as $key => $value) {
+				$weightMapArr[$value->id] = $value->name;
+			}
+			echo $this->renderPartial('_testWeightMap', ['weightMapArr'=>$weightMapArr], true);
+		}
+	}
+	/**
+		* save org rate related zone map
+		*/
+	
+	public function actionAjaxSavePCATestZonemap()
+	{
+		$resp = ['success' => 1,'msg' => 'import successfully'];
+		$template_file = empty($_FILES['test-pca-zonemap']) ? [] : $_FILES['test-pca-zonemap'];
+		if (empty($template_file['tmp_name']) || !is_uploaded_file($template_file['tmp_name'])) {
+			$resp['msg'] = 'Invalid template file';
+			echo json_encode($resp);
+			return;
+		} else {
+			$xls = new oExcel;
+			$xls->load($template_file['tmp_name']);
+			$data = $xls->getAll();
+			// import org zone map data
+			$this->importPCATestOrgZoneMapData($data);
+			$zoneMapTestArr = ZoneMapTestImport::model()->findAll(' type = 0 ');
+			$pcaZoneTestArr = [];
+			foreach ($zoneMapTestArr as $key => $value) {
+				$pcaZoneTestArr[$value->id] = $value->name;
+			}
+			$resp['msg'] = $this->renderPartial('_testPCA', ['pcaZoneTestArr'=>$pcaZoneTestArr], true);
+		}
+		echo json_encode($resp);
+	}
+	/**
+	 * @param $orgId
+	 * @param $data
+	 */
+	private function importOrgZoneMapData(&$data)
+	{
+		$index = 0;
+		$zoneId = 0;
+		$orgRate = new OrgRate();
+		$orgRateId = null;
+		$rateArr = [];
+		foreach ($data as $row) {
+			$index++;
+			if ($index == 1) {
+				$testName =  $row[1];
+				$orgRate->org_id=0;
+				$orgRate->zone_id=$zoneId;
+				$orgRate->name=$testName;
+				$orgRate->code="test";
+				$orgRate->type=OrgRate::COSTRATETESTTYPE;
+				$orgRate->vfrom= date("Y-m-d");
+				$orgRate->vto= "0000-00-00";
+				$orgRate->currency= 1;
+				$orgRate->meta = '';
+				$orgRate->updated = date('Y-m-d h:i:s');
+				$orgRate->save();
+				$orgRateId = $orgRate->id;
+			}
+			if ($index == 3) {
+				foreach ($row as $key => $column) {
+					if ($column!="") {
+						$rateArr[] = $column;
+					}
+				}
+				continue;
+			}
+			if (empty($row[1])||$index<=4) {
+				continue;
+			}
+			$code = $row[1];
+			$name = $row[2];
+			$postcodes = explode(',', $row[3]);
+			foreach ($postcodes as $postcode) {
+		// try to find -
+				$postCodesSpan = explode('-', $postcode);
+				if (count($postCodesSpan) == 2) {
+					$start = intval($postCodesSpan[0]);
+					$end = intval($postCodesSpan[1]);
+				} else {
+					// only one post code
+					$start = $end = intval($postCodesSpan[0]);
+				}
+				// if existing , do nothing
+				//$zoneMap = ZoneMap::model()->find('org_id = :oid and z1 = :code and pc_lo = :pclo and pc_hi = :pchi',[':oid' => $orgId,':code' => $code,':pclo' => $start,':pchi' => $end]);
+				//if ( empty($zoneMap) )
+				$zoneMapTest = new ZoneMapTest();
+				$zoneMapTest->setAttributes([
+					'rate_id' => $orgRateId,
+					'zone_id' => intval($zoneId),
+					'z1' => $code,
+					'z2' => '',
+					'zone_name' => $name,
+					'pc_lo' => $start,
+					'pc_hi' => $end,
+					'meta' => ''
+				]);
+				$zoneMapTest->save();
+			}
+			$rateIndex = 4;
+			foreach ($rateArr as $key => $rateName) {
+				$rateNameArr = explode("-", $rateName);
+				$zoneRateTest = new ZoneRate();
+				$rateNameArr[0] = floatval($rateNameArr[0]);
+				if ($rateNameArr[0]!=0) {
+					$rateNameArr[0] = floatval($rateNameArr[0]);
+					$rateNameArr[0] += 0.001;
+				}
+				$weight_lo=floatval($rateNameArr[0]);
+				$weight_hi=floatval(floatval($rateNameArr[1]));
+				$base=floatval($row[$rateIndex+2]);
+				$item=floatval($row[$rateIndex]);
+				$perkg=floatval($row[$rateIndex+1]);
+				$nkg=floatval($row[$rateIndex+4]);
+				$minimum=floatval($row[$rateIndex+3]);
+				$zoneRateTest->setAttributes([
+					'rate_id' => $orgRateId,
+					'chargecode_id' => 0,
+					'zone' =>$row[1],
+					'zone_name' => $row[2],
+					'weight_lo' => $weight_lo,
+					'weight_hi' => $weight_hi,
+					'base' => number_format($base,3,'.',''),
+					'item' => number_format($item,3,'.',''),
+					'perkg' => number_format($perkg,3,'.',''),
+					'nkg' => $nkg,
+					'minimum' => number_format($minimum,3,'.',''),
+					'gst' => 1,
+					'levy' => 0
+				]);
+				$zoneRateTest->save();
+				$rateIndex = $rateIndex + 5;
+			}
+		}
+	}
+	/**
+	 * @param $orgId
+	 * @param $data
+	 */
+	private function importWeightZoneMapData(&$data)
+	{
+		$index = 0;
+		$zoneId = 0;
+		$zoneMapTestImport = new ZoneMapTestImport();
+		$zmtiId = null;
+		foreach ($data as $row) {
+			$index++;
+			if ($index == 1) {
+				if ($row[1]=="") {
+					break;
+				}
+				$testName =  $row[1];
+				$zoneMapTestImport->name = $testName;
+				$zoneMapTestImport->meta = '{"type":"weightMap"}';
+				$zoneMapTestImport->type = 1;
+				$zoneMapTestImport->save();
+				$zmtiId = $zoneMapTestImport->id;
+			}
+			if (empty($row[1])||$index<=2) {
+				continue;
+			}
+			if ($zmtiId==null) {
+				break;
+			}
+			$code = $row[1];
+			$name = "";
+			$weight = $row[3];
+			$postcodes = explode(',', $row[2]);
+			$pcNum = 0;
+			foreach ($postcodes as $key => $postcode) {
+				$postCodesSpan = explode('-', $postcode);
+				if (count($postCodesSpan) == 2) {
+					$start = intval($postCodesSpan[0]);
+					$end = intval($postCodesSpan[1]);
+					$pcNum+= $end- $start+1;
+				} else {
+					$pcNum++;
+				}
+			}
+			foreach ($postcodes as $postcode) {
+		// try to find -
+				$postCodesSpan = explode('-', $postcode);
+				if (count($postCodesSpan) == 2) {
+					$start = intval($postCodesSpan[0]);
+					$end = intval($postCodesSpan[1]);
+				} else {
+					// only one post code
+					$start = $end = intval($postCodesSpan[0]);
+				}
+				// if existing , do nothing
+				//$zoneMap = ZoneMap::model()->find('org_id = :oid and z1 = :code and pc_lo = :pclo and pc_hi = :pchi',[':oid' => $orgId,':code' => $code,':pclo' => $start,':pchi' => $end]);
+				//if ( empty($zoneMap) )
+				$zoneMapTest = new ZoneMapTest();
+				$zoneMapTest->setAttributes([
+					'rate_id' => 0,
+					'zone_id' => intval($zoneId),
+					'z1' => $code,
+					'z2' => '',
+					'zone_name' => $name,
+					'pc_lo' => $start,
+					'pc_hi' => $end,
+					'meta' => json_encode(["weight"=>$weight,"singleWeight"=>$weight/$pcNum]),
+					'import_id'=>$zmtiId
+				]);
+				$zoneMapTest->save();
+			}
+		}
+	}
+	/**
+	 * @param $orgId
+	 * @param $data
+	 */
+	private function importPCATestOrgZoneMapData(&$data)
+	{
+		$index = 0;
+		$zoneId = 0;
+		$zoneMapTestImport = new ZoneMapTestImport();
+		$zmtiId = null;
+		foreach ($data as $row) {
+			$index++;
+			if ($index == 2) {
+				$testName =  $row[1];
+				$zoneMapTestImport->name = $testName;
+				$zoneMapTestImport->meta = "";
+				if ($row[2]!="") {
+					$per = explode(",", $row[2])[0];
+					$max = explode(",", $row[2])[1];
+					$zoneMapTestImport->meta = json_encode(["per"=>$per,"max"=>$max]);
+				} elseif ($row[3]!="") {
+					$zoneMapTestImport->meta = json_encode(["range"=>$row[3]]);
+				}
+				$zoneMapTestImport->save();
+				$zmtiId = $zoneMapTestImport->id;
+			}
+			if (empty($row[1])||$index<=4) {
+				continue;
+			}
+			$code = $row[1];
+			$name = $row[2];
+			$postcodes = explode(',', $row[3]);
+			$transaction=Yii::app()->db->beginTransaction();
+			try {
+					foreach ($postcodes as $postcode) {
+					// try to find -
+					$postCodesSpan = explode('-', $postcode);
+					if (count($postCodesSpan) == 2) {
+						$start = intval($postCodesSpan[0]);
+						$end = intval($postCodesSpan[1]);
+					} else {
+						// only one post code
+						$start = $end = intval($postCodesSpan[0]);
+					}
+					// if existing , do nothing
+					//$zoneMap = ZoneMap::model()->find('org_id = :oid and z1 = :code and pc_lo = :pclo and pc_hi = :pchi',[':oid' => $orgId,':code' => $code,':pclo' => $start,':pchi' => $end]);
+					//if ( empty($zoneMap) )
+					$zoneMapTest = new ZoneMapTest();
+					$zoneMapTest->setAttributes([
+						'rate_id' => 0,
+						'zone_id' => intval($zoneId),
+						'z1' => $code,
+						'z2' => '',
+						'zone_name' => $name,
+						'pc_lo' => $start,
+						'pc_hi' => $end,
+						'meta' => '',
+						'import_id'=>$zmtiId
+					]);
+					$zoneMapTest->save();
+				}
+				$transaction->commit();
+			} catch (Exception $ex) {
+				$transaction->rollback();
+				throw $ex;
+			}
+
+		}
+	}
+}

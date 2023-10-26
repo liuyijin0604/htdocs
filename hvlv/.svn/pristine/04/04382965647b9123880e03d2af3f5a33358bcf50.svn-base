@@ -1,0 +1,980 @@
+<?php
+class TlaTaskController extends Controller
+{
+    protected $nonAjax = ['export', 'label','pcaLabel', 'epLabel','ResendACR','importInstruction','changeChargecode','seaOrder','seaOutturn','cargoReceipt','seaManifest','genGatepassDoc','requestManifest','preAlert','arrivalNotice','storageLabel', 'batchWeight', 'downloadBatchWeight','dgDocument','batchIsB2B','exportAllDFE','exportAllChangedLabelShipment','exportMixSelection','shipmentReportExcel','uploadTaskFile','exportDisputeTask','createInvoice'];
+        /**
+	 * cargolist;
+	 */
+	public function actionGetTlaTaskDashBoard()
+	{
+		$filtersForm=new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+
+		$filtersForm1=new FiltersForm1;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm1->filters=$_GET['FiltersForm'];
+		}
+		
+		$tlaTask=new TlaTask('search');
+		$tlaTask->unsetAttributes();
+		if(!empty($_GET['TlaTask']))
+		{
+			$tlaTask->setAttributes($_GET['TlaTask']);
+			if(!empty($_GET['TlaTask']['assignedUser']))
+			{
+				$tlaTask->assignedUser = $_GET['TlaTask']['assignedUser'];
+			}
+		}
+		if (isset($_GET['status'])) 
+		{
+
+		$this->render('_sub_tla_task_dash', [
+				'tlaTask' => $tlaTask,
+				'name' => 'All']);
+		} else {
+			$tlaTaskService = new TlaTaskService();
+			$provide=$tlaTaskService->getTlaTaskDashBoardKPI();
+			$filteredData=$filtersForm->filter($provide);
+			$dataprovider=new CArrayDataProvider($filteredData);
+			$dataprovider->pagination=['pageSize' =>999,];
+			$sort=new CSort();
+			$sort->attributes=[
+				'user'=>[
+					'asc'=>'name ASC',
+					'desc'=>'name DESC',
+				]
+			];
+			$sort->defaultOrder = "name ASC";
+			$dataprovider->sort=$sort;
+
+			$this->render('tla_task_dash_list', ['dataProvider'=>[$dataprovider,$filtersForm],'tlaTask'=>$tlaTask,'user_id'=>User::currentUserID()]);
+		}
+	}
+
+
+    /**
+	 * cargolist;
+	 */
+	public function actionGetTlaTaskList()
+	{
+		$filtersForm=new FiltersForm;
+		$tlaTask=new TlaTask('search');
+		$tlaTask->unsetAttributes();
+		$userId = empty($_GET['user_id'])?User::currentUserID():$_GET['user_id'];
+		$isMine = ($userId==User::currentUserID());
+		if(!empty($_GET['TlaTask']))
+		{
+			$tlaTask->setAttributes($_GET['TlaTask']);
+		}
+
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+
+		if (isset($_GET['tab'])) {
+			if($_GET['tab']=='tla_task_list'||$_GET['tab']=='dispute_task_list')
+			{
+				if(!empty($_GET['user_id']))
+				{
+					$tlaTask->assignedUser = $userId;
+				}else
+				{
+					$tlaTask->searchingAssigned = true;
+				}
+
+				if(!empty($_GET['TlaTask']))
+				{
+					$tlaTask->setAttributes($_GET['TlaTask']);
+				}elseif(!empty($_POST['TlaTask']))
+				{
+					$tlaTask->setAttributes($_POST['TlaTask']);
+				}
+
+				if($_GET['tab']=='tla_task_list')
+				{
+					$tlaTask->no_type = [DisputeTask::$my_type];
+				}
+
+				if($_GET['tab']=="dispute_task_list")
+				{
+					$tlaTask->type = DisputeTask::$my_type;
+				}
+				
+				if (isset($_GET['TlaTask'])||isset($_POST['TlaTask'])) 
+				{
+				$this->render('_sub_tla_task', [
+						'tlaTask' => $tlaTask,
+						'name' => 'All',
+						'user_id'=>$userId,
+						'tab'=>$_GET['tab']]);
+				} else {
+					$tlaTaskService = new TlaTaskService();
+					$provide=$tlaTaskService->getMyTlaTaskProvide($userId);
+					$filteredData=$filtersForm->filter($provide);
+					$dataProvider=new CArrayDataProvider($filteredData);
+					$dataProvider->pagination=['pageSize' =>999,];
+					$sort=new CSort();
+					$sort->attributes=[
+						'number'=>[
+							'asc'=>'number ASC',
+							'desc'=>'number DESC',
+						],
+						'status'=>[
+							'asc'=>'status ASC',
+							'desc'=>'status DESC',
+						],
+					];
+					$sort->defaultOrder = "status ASC";
+					$dataProvider->sort=$sort;
+					$this->render('tla_task_list', ['dataProvider'=>[$dataProvider,$filtersForm],'tlaTask'=>$tlaTask,'user_id'=>$userId,'isMine'=>$isMine,'tab'=>$_GET['tab']]);
+					return;
+				}
+			}else if($_GET['tab']=='closed_tla_task_need_confirm_list')
+			{
+				$tlaTask->closedByAssignedUser = 1;
+				$tlaTask->status=TlaTask::CLOSE;
+				$tlaTask->isIms = true;
+				if(!empty($_GET['user_id']))
+				{
+					$tlaTask->assignedUser = $userId;
+				}else
+				{
+					$tlaTask->searchingAssigned = true;
+				}
+				$provide=[];
+				$filteredData=$filtersForm->filter($provide);
+				$dataprovider=new CArrayDataProvider($filteredData);
+				$dataprovider->pagination=['pageSize' =>999,];
+				$sort=new CSort();
+				$sort->attributes=[
+					'number'=>[
+						'asc'=>'number ASC',
+						'desc'=>'number DESC',
+					],
+					'status'=>[
+						'asc'=>'status ASC',
+						'desc'=>'status DESC',
+					],
+					'type'=>[
+						'asc'=>'type ASC',
+						'desc'=>'type DESC',
+					],
+				];
+				$sort->defaultOrder = "type ASC";
+				$dataprovider->sort=$sort;
+
+				$this->render('_sub_tla_task', [
+						'tlaTask' => $tlaTask,
+						'name' => 'All',
+						'user_id'=>$userId,
+						'isMine'=>$isMine,
+						'tab'=>$_GET['tab']]);
+		}else
+			{
+				$tlaTask->closedByAssignedUser = 1;
+				$tlaTask->status = TlaTask::CLOSE;
+
+				if(!empty($_GET['user_id']))
+				{
+					$tlaTask->user_id = $userId;
+				}else
+				{
+					$tlaTask->user_id = User::currentUserID();
+				}
+
+				if(!empty($_GET['TlaTask']))
+				{
+					$tlaTask->setAttributes($_GET['TlaTask']);
+				}elseif(!empty($_POST['TlaTask']))
+				{
+					$tlaTask->setAttributes($_POST['TlaTask']);
+				}
+
+				if (isset($_GET['TlaTask'])||isset($_POST['TlaTask'])) 
+				{
+
+				$this->render('_sub_assigned_closed_tla_task_list', [
+						'tlaTask' => $tlaTask,
+						'name' => 'All',
+						'user_id'=>$userId,
+						'tab'=>$_GET['tab']]);
+				} else {
+
+					$this->render('assigned_closed_tla_task_list', ['tlaTask'=>$tlaTask,'user_id'=>$userId,'isMine'=>$isMine,
+						'tab'=>$_GET['tab']]);
+					return;
+				}
+
+			}
+		} else {
+			$tlaTaskService = new TlaTaskService();
+			$provide=$tlaTaskService->getMyTlaTaskTabProvide($userId);
+			$filteredData=$filtersForm->filter($provide);
+			$dataProvider=new CArrayDataProvider($filteredData);
+			$dataProvider->pagination=['pageSize' =>999,];
+			$sort=new CSort();
+			$sort->attributes=[
+				'number'=>[
+					'asc'=>'number ASC',
+					'desc'=>'number DESC',
+				],
+				'status'=>[
+					'asc'=>'status ASC',
+					'desc'=>'status DESC',
+				],
+			];
+			$sort->defaultOrder = "status ASC";
+			$dataProvider->sort=$sort;
+			$this->render('my_tla_task_tab',['dataProvider'=>[$dataProvider,$filtersForm],'user_id'=>$userId,'isMine'=>$isMine]);
+		}
+
+
+	}
+
+	    /**
+	 * cargolist;
+	 */
+	public function actionMyClosedTasks()
+	{
+		$filtersForm=new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+		
+		$tlaTask=new TlaTask('search');
+		$tlaTask->unsetAttributes();
+		if(!empty($_GET['TlaTask']))
+		{
+			$tlaTask->setAttributes($_GET['TlaTask']);
+		}
+		$tlaTask->status=TlaTask::CLOSE;
+		$userId = empty($_GET['user_id'])?User::currentUserID():$_GET['user_id'];
+		if(!empty($_GET['user_id']))
+		{
+			$tlaTask->assignedUser = $userId;
+		}else
+		{
+			$tlaTask->searchingAssigned = true;
+		}
+		$tlaTask->isIms = true;
+
+		$provide=[];
+		$filteredData=$filtersForm->filter($provide);
+		$dataprovider=new CArrayDataProvider($filteredData);
+		$dataprovider->pagination=['pageSize' =>999,];
+		$sort=new CSort();
+		$sort->attributes=[
+			'number'=>[
+				'asc'=>'number ASC',
+				'desc'=>'number DESC',
+			],
+			'status'=>[
+				'asc'=>'status ASC',
+				'desc'=>'status DESC',
+			],
+			'type'=>[
+				'asc'=>'type ASC',
+				'desc'=>'type DESC',
+			],
+		];
+		$sort->defaultOrder = "type ASC";
+		$dataprovider->sort=$sort;
+		
+		$this->render('_sub_tla_task', [
+				'tlaTask' => $tlaTask,
+				'name' => 'All',
+				'tab' =>'closed_task']);
+	}
+
+	/**
+	 * cargolist;
+	 */
+	public function actionGetMyCreatedTlaTaskList()
+	{
+		$filtersForm=new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+		
+		$tlaTask=new TlaTask('search');
+		$tlaTask->unsetAttributes();
+		
+		$userId = empty($_GET['user_id'])?User::currentUserID():$_GET['user_id'];
+		$tlaTask->user_id = $userId;
+
+		if(!empty($_GET['TlaTask']))
+		{
+			$tlaTask->setAttributes($_GET['TlaTask']);
+		}elseif(!empty($_POST['TlaTask']))
+		{
+			$tlaTask->setAttributes($_POST['TlaTask']);
+		}
+
+		if (isset($_GET['TlaTask'])||isset($_POST['TlaTask'])) 
+		{
+
+		$this->render('_my_sub_create_tla_task_list', [
+				'tlaTask' => $tlaTask,
+				'name' => 'All']);
+		} else {
+			$tlaTaskService = new TlaTaskService();
+			$provide=$tlaTaskService->getMyCreateTlaTaskProvide(User::currentUserID());
+			$filteredData=$filtersForm->filter($provide);
+			$dataprovider=new CArrayDataProvider($filteredData);
+			$dataprovider->pagination=['pageSize' =>999,];
+			$sort=new CSort();
+			$sort->attributes=[
+				'number'=>[
+					'asc'=>'number ASC',
+					'desc'=>'number DESC',
+				],
+				'status'=>[
+					'asc'=>'status ASC',
+					'desc'=>'status DESC',
+				],
+				'type'=>[
+					'asc'=>'type ASC',
+					'desc'=>'type DESC',
+				],
+			];
+			$sort->defaultOrder = "type ASC";
+			$dataprovider->sort=$sort;
+
+			$this->render('my_create_tla_task_list', ['dataProvider'=>[$dataprovider,$filtersForm],'tlaTask'=>$tlaTask,'user_id'=>$userId]);
+		}
+	}
+
+	/**
+	 * cargolist;
+	 */
+	public function actionGoToLink()
+	{
+		$filtersForm=new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+		
+		$tlaTask=new TlaTask('search');
+		$tlaTask->unsetAttributes();
+
+		if(!empty($_GET['TlaTask']))
+		{
+			$tlaTask->setAttributes($_GET['TlaTask']);
+		}
+		if(isset($_GET['status'])) 
+		{
+
+		$this->render('_sub_tla_task', [
+				'tlaTask' => $tlaTask,
+				'name' => 'All']);
+		} else {
+
+
+			$provide=[];
+			$filteredData=$filtersForm->filter($provide);
+			$dataprovider=new CArrayDataProvider($filteredData);
+			$dataprovider->pagination=['pageSize' =>10,];
+			$sort=new CSort();
+			$sort->attributes=[
+				'number'=>[
+					'asc'=>'number ASC',
+					'desc'=>'number DESC',
+				],
+				'status'=>[
+					'asc'=>'status ASC',
+					'desc'=>'status DESC',
+				],
+			];
+			$sort->defaultOrder = "status ASC";
+			$dataprovider->sort=$sort;
+
+
+			$this->render('tla_task_list', ['dataProvider'=>[$dataprovider,$filtersForm],'tlaTask'=>$tlaTask]);
+		}
+	}
+
+	public function actionUploadTaskFile()
+	{
+		foreach ($_GET as $key => $value) {
+			$hash = $key;
+			break;
+		}
+		$f = $_FILES['file'];
+		$filename = $f['tmp_name'];
+		$name = $f['name'];
+		if(!is_uploaded_file($filename)) return false;
+		$thisHash = $hash;
+		$filesize = filesize($filename);
+		$date = date('Y-m-d H:i:s');
+		$fileHash = hash_file('crc32b', $filename).hash('crc32b', $filesize);
+		$finfo = finfo_open(FILEINFO_MIME_TYPE);
+		$mime = finfo_file($finfo, $f['tmp_name']);
+		$fr = Service::updateUploadSingleFile($filesize,$date,$fileHash,$finfo,$mime,$filename,$name, $thisHash,false,false,false,true);
+		$tlaTask = $this->loadModel($fr->fid);
+		$tlaTask->log("uploadPOD");
+		echo 'DONE';
+	}
+
+	public function actionOperation()
+	{
+		$result =[];
+		if(!empty($_GET['taskNo']))
+		{
+			$taskNo = $_GET['taskNo'];
+			$result['model'] = TlaTask::model()->find("task_no=:no",[":no"=>$taskNo]);
+		}else
+		{
+			$id = $_GET["id"];
+			$result['model'] = $this->loadModel($id);
+		}
+
+		if(!empty($_GET["tab"]))
+		{
+			$result['tab']=@$_GET["tab"];
+		}
+
+		$this->render('operation_tab', $result);
+	}
+
+    public function actionGetTlaTaskLink($id)
+    {
+    	$model = loadModel($id);
+    	$userId= $_GET['user_id'];
+    }
+
+    public function actionAssignTlaTask($id)
+    {
+    	$model = loadModel($id);
+    	$userId= $_GET['user_id'];
+    }
+
+    public function actionCreateTlaTask()
+    {
+    	if(!empty($_POST))
+    	{
+    		$model = new TlaTask();
+    		if((empty($_POST['TlaTask']['ete'])||$_POST['TlaTask']['ete']=="0000-00-00 00:00:00")&&empty($_POST['mdata']['reoccuring']))
+			{
+				$model->addError('Require Deadline','require Deadline');
+				$this->ajaxResult($model);
+			}
+
+			if((!empty($_POST['TlaTask']['ete'])&&strtotime($_POST['TlaTask']['ete'])<=strtotime(date("Y-m-d H:i:s")))&&empty($_POST['mdata']['reoccuring']))
+			{
+				$model->addError('Deadline is a wrong time','Deadline is a wrong time');
+				$this->ajaxResult($model);
+			}
+
+			if(empty($_POST['user_id'])&&$_POST['TlaTask']['type']!=ITTask::$my_type)
+			{
+				$model->addError('Require Assign User','Require Assign User');
+				$this->ajaxResult($model);
+			}
+
+			if(isset($_POST['TlaTask']['type']))
+			{
+				$meta = ["agent_id"=>$_POST['TlaTask']['agent_id']];
+				foreach ($_POST['mdata'] as $key => $value) {
+					if(!empty($_POST['mdata']['reoccuring']))
+					{
+						$meta['reoccuring'] = $_POST['mdata']['reoccuring'];
+						if(!empty($_POST['mdata']['reoccuring_start_date']))
+						{
+							$meta['reoccuring_start_date'] = $_POST['mdata']['reoccuring_start_date'];
+							$meta['reoccuring_end_date'] = $_POST['mdata']['reoccuring_end_date'];
+
+							if(empty($_POST['mdata']['reoccuring_start_date'])||empty($_POST['mdata']['reoccuring_end_date']))
+							{
+								$model->addError('Reoccuring start and end date are required','Reoccuring start date and end date are required');
+								$this->ajaxResult($model);
+							}
+						}else
+						{
+							$meta['reoccuring_run'] = $_POST['mdata']['reoccuring_run'];
+							if(empty($_POST['mdata']['reoccuring_run']))
+							{
+								$model->addError('Reoccuring run is required','Reoccuring run is required');
+								$this->ajaxResult($model);
+							}
+						}
+						$meta['reoccuring_deadline_days'] = $_POST['mdata']['reoccuring_deadline_days'];
+					}
+				}
+				if(!empty($_POST['noAssign']))
+				{
+					$_POST['user_id'] = 0;
+				}
+				$tlaTaskService = new TlaTaskService();
+				$model= $tlaTaskService->createNewTlaTask($_POST['TlaTask']['type'],"",'',0,$_POST['TlaTask']['dpt_id'],User::currentUserID(),$_POST['TlaTask']['comment'],$meta,$_FILES,$_POST['user_id'],$_POST['TlaTask']['ete'],$_POST['TlaTask']['tag']);
+				echo 'done';
+				return;
+				$this->ajaxResult($model);
+			}
+
+    	}
+
+    	$this->render('create_tla_task',['model'=>new TlaTask()]);
+    }
+
+    public function actionUpdate()
+	{
+		$id = $_GET["id"];
+		$this->updateTlaTask($id);
+		echo "done";
+	}
+
+	public function actionUpdateStatus()
+	{
+		$tlaTaskService = new TlaTaskService();
+		$id = $_GET['id'];
+		$model=$this->loadModel($id);
+		$tlaTaskService->updateStatus($model,$_GET["status"]);
+		echo 'done';
+	}
+
+	public function actionClose()
+	{
+		$tlaTaskService = new TlaTaskService();
+		$id = $_GET['id'];
+		$model=$this->loadModel($id);
+		$tlaTaskService->updateStatus($model,TlaTask::CLOSE);
+		echo 'done';
+	}
+
+	public function actionConfirm()
+	{
+		$tlaTaskService = new TlaTaskService();
+		$id = $_GET['id'];
+		$model=$this->loadModel($id);
+		$tlaTaskService->confirmTask($model);
+		echo 'done';
+	}
+
+	public function actionRejectClosedTask()
+	{
+		$tlaTaskService = new TlaTaskService();
+		$id = $_POST['id'];
+		$model=$this->loadModel($id);
+		if(empty($model->mdata['reject_reason']))
+		{
+			echo 'Requiring reject reason';
+			return;
+		}
+		$tlaTaskService->rejectClosedTask($model);
+		echo 'done';
+	}
+
+	public function actionOrderChange()
+	{
+		$id = $_POST['id'];
+		$model=$this->loadModel($id);
+		foreach ($model->tlaTaskUsers as $key => $u) {
+			$u->task_order = $_POST['order'];
+			$u->save();
+		}
+		echo 'done';
+	}
+
+	public function actionRejectTask()
+	{
+		$tlaTaskService = new TlaTaskService();
+		$id = $_POST['id'];
+		$model=$this->loadModel($id);
+		if(empty($model->mdata['reject_reason']))
+		{
+			echo 'Requiring reject reason';
+			return;
+		}
+		$tlaTaskService->updateStatus($model,TlaTask::REJECT);
+		echo 'done';
+	}
+
+	public function actionAssignTaskAgain()
+	{
+		$tlaTaskService = new TlaTaskService();
+		$id = $_POST['id'];
+		$userId = $_POST['user_id'];
+		if(empty($userId))
+		{
+			echo "Requiring Assign User";
+			return;
+		}
+		$model=$this->loadModel($id);
+		$tlaTaskService->updateStatus($model,TlaTask::NEWTASK);
+		echo 'done';
+	}
+
+	private function updateTlaTask($id)
+	{
+
+		$model= $this->loadModel($id);
+		if(isset($_POST["comment"]))
+		{
+			$model->comment = $_POST["comment"];
+		}
+
+		if(isset($_POST['reject_reason'])&&$_POST['reject_reason']!="Please input the reject reason. For example, I can't meet the deadline, please delay it to be xxxx-xx-xx. Please don't put meaningless reasons, the task creator will mark the task after it is finished.")
+		{
+			$model->mdata['reject_reason'] = $_POST['reject_reason'];
+		}
+
+		if(isset($_POST["TlaTask"]))
+		{
+			$model->ets = $_POST["TlaTask"]['ets'];
+			if(!empty($_POST["TlaTask"]['ete']))
+			{
+				$model->ete = $_POST["TlaTask"]['ete'];
+			}
+			$model->mdata["agent_id"] = $_POST['TlaTask']['agent_id'];
+		}
+		$model->save();
+		if(!empty($_POST["user_id"]))
+		{
+			$userId = $_POST["user_id"];
+			$tlaTaskService = new TlaTaskService();
+			$tlaTaskService->assignTlaTaskToUser($model, $userId);
+		}
+	}
+
+	public function actionLog($id)
+	{
+		$model= $this->loadModel($id);
+		if ($model==null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		$this->render('log', [
+			'model'=>$model,
+		]);
+	}
+
+
+	/**
+	 * cargolist;
+	 */
+	public function actionGetITTaskPlan()
+	{
+		$ITTaskTabList = User::getITUsers(true);
+		$closedTaskUserId = [];
+		foreach ($ITTaskTabList as $userId => $value) {
+			if($userId!=0)
+			{
+				$closedTaskUserId[$userId."99999999999"] = $value." close";
+			}
+		}
+		$ITTaskTabList = $ITTaskTabList+$closedTaskUserId;
+		$this->render('IT_task_plan', ['ITTaskTabList'=>$ITTaskTabList]);
+	}
+
+	/**
+	 * cargolist;
+	 */
+	public function actionGetITTaskPlanDetail($id)
+	{
+		$tlaTask=new TlaTask('search');
+		$tlaTask->unsetAttributes();
+		if(!empty($_GET['TlaTask']))
+		{
+			$tlaTask->setAttributes($_GET['TlaTask']);
+		}
+
+		$tlaTask->type = [ITTask::$my_type,NoteTask::$my_type];
+		if(preg_match('/99999999999/i', $id))
+		{
+			$tlaTask->isIms= true;
+			$id = explode('99999999999', $id)[0];
+			$tlaTask->status = TlaTask::CLOSE;
+		}
+		$tlaTask->assignedUser = $id;
+		
+		$this->render('_sub_IT_task', ['tlaTask' => $tlaTask,'name' => 'All','pageSize'=>200]);
+	}
+
+	/**
+	 * cargolist;
+	 */
+	public function actionAssignUser()
+	{
+		$userId = $_POST['user_id'];
+		$id = $_POST['id'];
+		$tlaTask = $this->loadModel($id);
+		$tlaTaskService = new TlaTaskService();
+		if(Acl::hasAccess("B:TlaTask/assignITTask"))
+		{
+			$tlaTaskService->assignTlaTaskToUser($tlaTask,$userId);
+		}
+		echo 'done';
+	}
+
+	/**
+	 * cargolist;
+	 */
+	public function actionAssignDisputeTaskUser()
+	{
+		$userId = $_POST['user_id'];
+		$id = $_POST['id'];
+		$csFaq = CsFaq::model()->findByPk($id);
+		$tlaTaskService = new TlaTaskService();
+		$tlaTaskService->assignDisputeTypeToUser($csFaq,$userId);
+		echo 'done';
+	}
+
+	/**
+	 * cargolist;
+	 */
+	public function actionChangeTag()
+	{
+		$tag = $_POST['tag'];
+		$id = $_POST['id'];
+		$tlaTask = $this->loadModel($id);
+		$tlaTaskService = new TlaTaskService();
+		if(Acl::hasAccess("B:TlaTask/changeTag")&&$tlaTaskService->changeTag($tlaTask,$tag))
+		{
+			echo 'done';
+		}else
+		{
+			echo 'failure';
+		}
+	}
+
+	public function actionFilterManage()
+	{
+		if (!empty($_POST)) {
+			if (!empty($_POST['filter_meta_items'])) {
+				$meta_item = json_decode($_POST['filter_meta_items'], true);
+				CsFaqUserMap::model()->deleteAll('id>0');
+				foreach ($meta_item as $item) {
+					$model = new CsFaqUserMap('search');
+					$model->attributes = $item;
+					$model->save();
+				}
+				$this->ajaxResult($model);
+			}
+		}
+		$typeList =  CsFaq::getFaqList(3,2);
+		$this->render('filter_manage',["typeList"=>$typeList]);
+	}
+
+	public function actionManageUserMap()
+	{
+		if (!empty($_POST)) {
+			if (!empty($_POST['cs_faq_map_user_items'])) {
+				$meta_item = json_decode($_POST['cs_faq_map_user_items'], true);
+				$history_record = [];
+				$new_record = [];
+				$history = CsFaqUserMap::model()->findAll('id>0');
+				foreach ($history as $h) {
+					$history_record[$h->cs_faq_id][] = $h->user_id;
+				}
+				CsFaqUserMap::model()->deleteAll('id>0');
+				foreach ($meta_item as $key => $value) {
+					foreach ($value as $k => $v) {
+						if (empty($v) || empty($v['uid'])) {
+							continue;
+						}
+						$model = new CsFaqUserMap;
+						$model->cs_faq_id = $k;
+						$model->user_id = $v['uid'];
+						if (!empty($v['tel'])) {
+							$model->tel = $v['tel'];
+						}
+						$new_record[$k][] = $v['uid'];
+						$model->save();
+					}
+				}
+				$this->ajaxResult($model);
+			}
+		}
+	}
+
+	public function actionExportDisputeTask()
+	{
+		$tlaTask=new TlaTask('search');
+		$tlaTask->unsetAttributes();
+		$tlaTask->searchingAssigned = true;
+		if(!empty($_GET['TlaTask']))
+		{
+			$tlaTask->setAttributes($_GET['TlaTask']);
+		}elseif(!empty($_POST['TlaTask']))
+		{
+			$tlaTask->setAttributes($_POST['TlaTask']);
+		}
+
+		$disputeTasks = $tlaTask->search(false)->getData();
+		$tlaCustomerDisputeService = new TlaCustomerDisputeService();
+		$tlaCustomerDisputeService->exportDisputeTaskWithTemplate($disputeTasks);
+	}
+
+	public function actionCreateInvoice($id){
+		$modelTlaTask = $this->loadModel($id);
+
+		[$app_name, Yii::app()->name] = [Yii::app()->name, 'TLA'];
+
+		$model = new Invoice('create');
+		$model->to_id = $modelTlaTask->mdata['agent_id'];
+		$model->type = 40;
+		$model->currency = 1;
+
+		if (isset($_POST['Invoice'])) {
+			$dpmt = isset($_POST['Invoice']['dpmt']) ? $_POST['Invoice']['dpmt'] : 0;
+			if ($dpmt <= 0) {
+				$model->addError('dpmt', 'Invoice Department is mandatory!');
+				$this->ajaxResult($model, ['id']);
+			}
+			$consoleNo = '';
+			if (isset($_POST['consolno'])) {
+				$consoleNo = trim($_POST['consolno']);
+			}
+
+			$model->attributes = $_POST['Invoice'];
+			//$model->to_id =  $_POST['Invoice']['to_id'];
+			$model->status = 1;
+
+			$awb = '';
+			if (!empty($consoleNo)) {
+				$console = Consol::model()->find('no = :no', [':no' => $consoleNo]);
+			}
+			if (!empty($console)) {
+				$model->consol_id = $console->id;
+				$awb = $console->awb;
+			} else if (!empty($_POST['consolno'])) {
+				$model->addError('dpmt', 'Consol No is incorrect!');
+				$this->ajaxResult($model, ['id']);
+			}
+			$model->save();
+			$total = 0;
+			$tgst = 0;
+			if (is_array($_POST['InvLine']['amount'])) {
+				foreach ($_POST['InvLine']['amount'] as $i => $a) {
+					if(!empty($a)){
+						$il = new InvLine;
+						$il->inv_id = $model->id;
+						$il->ccode = $_POST['InvLine']['ccode'][$i];
+						$il->det = $_POST['InvLine']['det'][$i];
+						$il->tax = $_POST['InvLine']['tax'][$i];
+						$il->amount = $a;
+						$gst = 0;
+						if ($il->tax == 'OUTPUT') {
+							$gst = floatval($il->amount) * 10 / 100;
+						}
+						$il->amount += $gst;
+						$il->gst = $gst;
+						$il->qty = empty($_POST['InvLine']['qty'][$i]) ? 1 : $_POST['InvLine']['qty'][$i];
+
+						// linked invoice line with related console if needed
+						if (!empty($console)) {
+							$il->fid = $console->id;
+							$il->model = $console->getType();
+						}
+						$il->save();
+						$total += $il->amount * $il->qty;
+						$tgst += $il->gst * $il->qty;
+					}
+				}
+			} else {
+				$model->addError('id', 'Invoice lines are empty!');
+				Invoice::model()->deleteByPk($model->id);
+				$this->ajaxResult($model, ['id']);
+			}
+			$model->total = number_format($total, 2, '.', '');
+			$model->gst = number_format($tgst, 2, '.', '');
+			$model->mdata['awb'] = $awb;
+			$model->mdata['name'] = $model->cust->name;
+			$model->save();
+
+			$modelTlaTask->mdata['invoice_id']= $model->id;
+			$InvoiceNo = invoice::model()->findByPk($model->id)->no;
+			$modelTlaTask->mdata['invoice_no']= $InvoiceNo;
+			$modelTlaTask->save();
+
+			$this->ajaxResult($model, ['id']);
+		}
+		$model->date = date('Y-m-d');
+		$model->due = date('Y-m-d');
+		$this->render('create_invoice', ['model' => $model,'tlatask'=>$modelTlaTask]);
+	}
+
+	public function actionNotice()
+	{
+		$userId = User::currentUserID();
+		$timestamp = $_GET["timestamp"];
+		$tlaTaskService = new TlaTaskService();
+		$result = $tlaTaskService->getMyTlaTaskListTabNotice($userId,$timestamp);
+		echo join(',',$result);
+	}
+
+	public function actionGetPoints()
+	{
+		$id = $_POST['id'];
+		if(!empty($id))
+		{
+			$tlaTasks = TlaTask::model()->with(['tlaTaskUsers'])->findAll("t.id in ({$id}) and ((t.type = :type and tlaTaskUsers.is_confirm = 1) or t.type != :type) and t.user_id!=tlaTaskUsers.user_id",[":type"=>ITTask::$my_type]);
+			$totalPoints = 0 ;
+			foreach($tlaTasks as $k =>$data)
+			{
+				$totalPoints+=$data->getPoints();
+			}
+			echo $totalPoints;
+			return;
+		}
+		echo 0;
+	}
+
+	public function actionManageDisputeTaskOp()
+	{
+		$model=new CsFaq('search');
+		$model->unsetAttributes();
+		if(!empty($_GET['CsFaq']))
+		{
+			$model->setAttributes($_GET['CsFaq']);
+		}
+
+		$model->status=2;
+		$model->type=3;
+		
+		$this->render('manage_dispute_task_op', ['model' => $model]);
+	}
+
+	public function actionCreateDisputeType()
+    {
+    	if(!empty($_POST))
+    	{
+    		$shipmentType = empty($_POST['shipment_type'])?[]:$_POST['shipment_type'];
+    		$invoiceType = empty($_POST['invoice_type'])?[]:$_POST['invoice_type'];
+
+    		$model = new CsFaq();
+			$tlaTaskService = new TlaTaskService();
+			$model= $tlaTaskService->createDisputeType($_POST['CsFaq']['content'],$_POST['CsFaq']['dpt_id'],$_POST['CsFaq']['agent_id'],join(',',$invoiceType),join(',',$shipmentType),$_POST['user_id']);
+			echo 'done';
+			return;
+			$this->ajaxResult($model);
+
+    	}
+
+    	$this->render('create_dispute_type',['model'=>new CsFaq()]);
+    }
+
+    public function actionDeleteAssignDisputeTaskUser($id)
+    {
+    	$model = CsFaq::model()->findByPk($id);
+    	$model->status = CsFaq::inactive;
+    	$model->update(['status']);
+    	echo "done";
+    }
+
+
+    /**
+	 * Returns the data model based on the primary key given in the GET variable.
+	 * If the data model is not found, an HTTP exception will be raised.
+	 * @param integer the ID of the model to be loaded
+	 */
+	public function loadModel($id)
+	{
+		$model=TlaTask::model()->findByPk($id);
+		if ($model===null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		return $model;
+	}
+}

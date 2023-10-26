@@ -1,0 +1,175 @@
+<?php
+class ImportsMailService extends Service
+{
+    public function sendFeedbackEmail()
+	{
+		$fromTime = date("Y-m-d H:i:s", strtotime("-4 days"));
+		$toTime = date("Y-m-d H:i:s", strtotime("-3 days"));
+		$sql = "SELECT * FROM imports_mail WHERE 
+		ticket != '' 
+		AND `date` >= '" . $fromTime . "'
+		AND `date` <= '" . $toTime . "'
+		AND subject NOT LIKE '%Re:%' 
+		AND id NOT IN (SELECT id FROM imports_mail WHERE from_email LIKE '%@toplogistics.com.au%' AND to_email LIKE '%@toplogistics.com.au%' AND `date` >= '" . $fromTime . "' AND `date` <= '" . $toTime . "')
+		AND from_email NOT LIKE '%@fastway.com.au%'
+		AND from_email NOT LIKE '%@tollgroup.com%'
+		AND from_email NOT LIKE '%@au.gotoubi.com%'
+		AND to_email NOT LIKE '%@fastway.com.au%'
+		AND to_email NOT LIKE '%@tollgroup.com%'
+		AND to_email NOT LIKE '%@au.gotoubi.com%'
+        GROUP BY ticket
+		ORDER BY to_email";
+
+		$emailList = ImportsMail::model()->findAllBySql($sql);	// emailList is ordered by to_email attribute for erasing duplicated emails
+		$count = 1;			// default count value of each email address
+		$prevTo = '';		// store the last email address
+		foreach ($emailList as $email) {
+            if ($email->date > $email->getDeadline()) {
+                continue;
+            }
+			if ($prevTo == $email->to_email) {
+				$count++;
+				// for each duplicated email address, only keep top 10 to send feedback email
+				if ($count > 10) {
+					continue;
+				}
+			} else {
+				$count = 1;     // Reset count
+			}
+			$service = new EmailService();
+			$service->sendImportsMailFeedbackEmail($email);
+			// Set email status
+			$email->status = ImportsMail::STATE_FEEDBACK_SENT;
+			$email->save();
+			// update previous email address
+			$prevTo = $email->to_email;
+		}
+	}
+
+	public function setImportsMailFeedbackReport()
+	{
+		/** Get all imports mail users with feedback email sent to customers. */
+		$sql = "SELECT DISTINCT op_id FROM imports_mail WHERE `status` IN (110, 111) AND op_id != 0";
+		$mailUsers = Yii::app()->db->createCommand($sql)->queryAll();
+		$users = [];
+		foreach($mailUsers as $user) {
+			array_push($users, $user['op_id']);
+		}
+		
+		$result = [];		// Store user name, overall, and this month ratings
+		$date = date('Y-m-01 00:00:00');	// First day of this month
+		/**
+		 * Calculate all time rating and this month rating for each mail user.
+		 */
+		foreach($users as $user) {
+			// Get all time records
+			$sql = "SELECT meta FROM imports_mail WHERE `status`=111 AND op_id=".$user;
+			if ($user == 3592) { // For user cs2, only record feedback after 2023-04-01
+				$sql = "SELECT meta FROM imports_mail WHERE `status`=111 AND `date` >= '2023-04-01 00:00:00' AND op_id=".$user;
+			}
+			$overallResponse = Yii::app()->db->createCommand($sql)->queryAll();
+			// Get this month's records
+			$sql = "SELECT meta FROM imports_mail WHERE `status`=111 AND op_id=".$user." AND `date`>='".$date. "'";
+			$mtdResponse = Yii::app()->db->createCommand($sql)->queryAll();
+			// Get user name
+			$sql = "SELECT fname, lname FROM user WHERE id = ".$user;
+			$userName = Yii::app()->db->createCommand($sql)->queryAll();
+			if (!empty($userName)) {
+				$result[$user]['name'] = $userName[0]['fname']." ".$userName[0]['lname'];
+			} else {
+				$result[$user]['name'] = "Unknown";
+			}
+			// Calculate all time rating
+			$overallCount = 0;
+			$overallTotal = 0;
+			foreach($overallResponse as $r) {
+				$overallCount++;
+				$mdata = json_decode($r['meta']);
+				$overallTotal += $mdata->rating;
+			}
+			if ($overallCount != 0) {
+				$result[$user]['overall_rating'] = $overallTotal/$overallCount;
+			}
+			$result[$user]['overall_count'] = $overallCount;
+			// Calculate this month's rating
+			$mtdCount = 0;
+			$mtdTotal = 0;
+			foreach($mtdResponse as $r) {
+				$mtdCount++;
+				$mtdmdata = json_decode($r['meta']);
+				$mtdTotal += $mtdmdata->rating;
+			}
+			if ($mtdCount != 0) {
+				$result[$user]['mtd_rating'] = $mtdTotal/$mtdCount;
+			}
+			$result[$user]['mtd_count'] = $mtdCount;
+		}
+		/**
+		 * Save result into report_cache table
+		 */
+		$result = json_encode($result);
+		// Deactivate old records
+		$sql = "SELECT * FROM report_cache WHERE `type` = " .ReportCache::IMPORTS_MAIL_FEEDBACK_REPORT. " AND `status` = 1";
+		$oldReportCache = ReportCache::model()->findAllBySql($sql);
+		foreach($oldReportCache as $old) {
+			$old->status = 0;
+			$old->modify_time= date('Y-m-d h:i:s', time());
+			$old->save();
+		}
+		// Save new record and set it to active
+		$reportCache = new ReportCache();
+		$reportCache->type = ReportCache::IMPORTS_MAIL_FEEDBACK_REPORT;
+		$reportCache->status = 1;
+		$reportCache->meta = $result;
+		$reportCache->create_time = date('Y-m-d h:i:s', time());
+		$reportCache->creater = 1;
+		$reportCache->modify_time= date('Y-m-d h:i:s', time());
+		$reportCache->modifyer = 1;
+		$reportCache->save();
+	}
+
+	public function getEmailPreviousAndNext($model)
+	{
+		$id = $model->id;
+		$model = new ImportsMail('search');
+		$model->is3pl = null;
+		$model->myUserId = User::currentUserID();
+
+		$log = Log::model()->find('model = "User" AND lid = :lid AND type = 3', [':lid' => $model->myUserId]);
+		if(!empty($log))
+		{
+			$user_create = $log->time;
+		}else
+		{
+			$user_create = '2000-01-01 00:00:00';
+		}
+
+
+		$ec = new CDbCriteria;
+		$ec->addCondition('t.create_time >= "' . $user_create . '"');
+		$model->id = ">".$id;
+		$previousId = 0;
+		$previousNo = "";
+		$nextId = 0;
+		$nextNo = "";
+
+		$model->id = ">".$id;
+		$_GET['sort'] = "id";
+		$previous = $model->search(true, 1, $ec, false)->data;
+		if(!empty($previous))
+		{
+			$previousId = $previous[0]->id;
+			$previousNo = $previous[0]->no;
+		}
+
+		$model->id = "<".$id;
+		$_GET['sort'] = "id.desc";
+		$next = $model->search(true, 1, $ec, false)->data;
+		if(!empty($next))
+		{
+			$nextId = $next[0]->id;
+			$nextNo = $next[0]->no;
+		}
+		return ["previousId"=>$previousId,"previousNo"=>$previousNo,"nextId"=>$nextId,"nextNo"=>$nextNo];
+	}
+}

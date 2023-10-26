@@ -1,0 +1,912 @@
+{
+  "openapi": "3.0.2",
+  "info": {
+    "title": "TOP Logistics API",
+    "description": "Testing API ID: api_test<br />Testing API KEY: 6366b2bb8b8d7407a3d46f6fa79a9af3472e1381442b49e637dfc96a0b0d6808<br />",
+    "contact": {
+      "email": "imports@toplogistics.com.au"
+    },
+    "version": "v1.0"
+  },
+  "servers": [
+    {
+      "url": "https://api.toplogistics.com.au/",
+      "description": "Production server"
+    },
+    {
+      "url": "http://branch.toplogistics.com.au:8189/api/",
+      "description": "Testing server"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Shipment",
+      "description": "<p>Shipments CRUD</p><h3>Change Log:</h3><p>Date: <b>2018-06-27</b><br />For import shipments (to Australia).</p><ol><li><code>importer_abn</code>: For low value goods (less than 1000 AUD) that are imported for business. The importers will need to supply the ABN (Australian Business Number) if they declare the GST free.</li><li><code>vendor_id</code>: The ABN(Australian Business Number) OR ARN (ATO Reference Number) of the party who charge the GST for imports goods from oversea to Australia.</li><li><code>consignor_tin</code>: The Trader Identification Number (TIN) for a consignor. Which can be used for an identification for custom declaration.</li></ol><p>Date: <b>2018-01-19</b><br />For import shipments (to Australia).</p><ol><li><code>packages</code>: this is to be supplied for each parcel in the shipment, one shipment can have multiple parcels, which include the weight, height, width, length of the parcel</li><li><code>receiver</code>: this is to be used for the import declaration when the consignee information is different from receiver whose information to be for the  custom declaration.<br />If we don’t receive the receiver information, we will use the consignee field information for import declaration.</li><li><code>amazon_po</code>:  This is required when delivery goods to Amazon Warehouse, as the Amazon require the  PO # to identify the goods.</li><li><code>clear</code>: This is required  for import declaration  when the goods’ value is greater than $1000 AUD, “DDU” means duty paid by receiver. “DDP”: means duty paid by sender.</li><li><code>show_sku</code>: Control whether to show SKU on label</li></ol>"
+    },
+    {
+      "name": "Tracking",
+      "description": "Access tracking info"
+    }
+  ],
+  "paths": {
+    "/shipment/create": {
+      "post": {
+        "tags": [
+          "Shipment"
+        ],
+        "summary": "Create shipment",
+        "operationId": "shipment_create",
+        "description": "",
+        "parameters":[
+          {
+            "in": "query",
+            "name": "api_id",
+            "schema": {
+              "type": "string"
+            },
+            "required": "true",
+            "description": "API User ID"
+          },
+          {
+            "in": "query",
+            "name": "method",
+            "schema": {
+              "type": "string",
+              "default": "create"
+            },
+            "required": "true"
+          },
+          {
+            "in": "query",
+            "name": "data",
+            "schema": {
+              "$ref": "#/components/schemas/Shipment"
+            },
+            "required": "true",
+            "description": "JSON string, to send multiple shipment in a single transaction use Array of object(Shipment)"
+          },
+          {
+            "in": "query",
+            "name": "sign",
+            "schema": {
+              "$ref": "#/components/schemas/AuthHash"
+            },
+            "required": "true"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Creation result",
+            "content": {"application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShipmentResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication error, check hash calculation",
+            "content": {}
+          }
+        },
+        "security": [
+          {
+            "hash_auth": []
+          }
+        ]
+      }
+    },
+    "/shipment/update": {
+      "post": {
+        "tags": [
+          "Shipment"
+        ],
+        "summary": "Update shipment",
+        "operationId": "shipment_update",
+        "parameters":[
+          {
+            "in": "query",
+            "name": "api_id",
+            "schema": {
+              "type": "string"
+            },
+            "required": "true",
+            "description": "API User ID"
+          },
+          {
+            "in": "query",
+            "name": "method",
+            "schema": {
+              "type": "string",
+              "default": "update"
+            },
+            "required": "true"
+          },
+          {
+            "in": "query",
+            "name": "data",
+            "schema": {
+              "$ref": "#/components/schemas/Shipment"
+            },
+            "required": "true",
+            "description": "JSON string, to send multiple shipment in a single transaction use Array of object(Shipment)"
+          },
+          {
+            "in": "query",
+            "name": "sign",
+            "schema": {
+              "$ref": "#/components/schemas/AuthHash"
+            },
+            "required": "true"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Update result",
+            "content": {"application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShipmentResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication error, check hash calculation",
+            "content": {}
+          }
+        },
+        "security": [
+          {
+            "hash_auth": []
+          }
+        ]
+      }
+    },
+    "/shipment/cancel": {
+      "post": {
+        "tags": [
+          "Shipment"
+        ],
+        "summary": "Cancel shipment",
+        "operationId": "shipment_cancel",
+        "parameters":[
+          {
+            "in": "query",
+            "name": "api_id",
+            "schema": {
+              "type": "string"
+            },
+            "required": "true",
+            "description": "API User ID"
+          },
+          {
+            "in": "query",
+            "name": "method",
+            "schema": {
+              "type": "string",
+              "default": "cancel"
+            },
+            "required": "true"
+          },
+          {
+            "in": "query",
+            "name": "data",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "no": {
+                  "type": "string",
+                  "description": "Connote Number"
+                }
+              }
+            },
+            "required": "true",
+            "description": ""
+          },
+          {
+            "in": "query",
+            "name": "sign",
+            "schema": {
+              "$ref": "#/components/schemas/AuthHash"
+            },
+            "required": "true"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancel result",
+            "content": {"application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShipmentResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication error, check hash calculation",
+            "content": {}
+          }
+        },
+        "security": [
+          {
+            "hash_auth": [
+              "write:pets",
+              "read:pets"
+            ]
+          }
+        ]
+      }
+    },
+    "/shipment/get": {
+      "post": {
+        "tags": [
+          "Shipment"
+        ],
+        "summary": "Get shipment detail",
+        "operationId": "shipment_get",
+        "parameters":[
+          {
+            "in": "query",
+            "name": "api_id",
+            "schema": {
+              "type": "string"
+            },
+            "required": "true",
+            "description": "API User ID"
+          },
+          {
+            "in": "query",
+            "name": "method",
+            "schema": {
+              "type": "string",
+              "default": "get"
+            },
+            "required": "true"
+          },
+          {
+            "in": "query",
+            "name": "data",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "no": {
+                  "type": "string",
+                  "description": "Connote Number"
+                },
+                "ref": {
+                  "type": "string",
+                  "description": "Courier Tracking Number"
+                },
+                "cust_ref": {
+                  "type": "string",
+                  "description": "Customer Reference Number"
+                }
+              }
+            },
+            "required": "true",
+            "description": "Use either no, ref or cust_ref to retrieve shipment"
+          },
+          {
+            "in": "query",
+            "name": "sign",
+            "schema": {
+              "$ref": "#/components/schemas/AuthHash"
+            },
+            "required": "true"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Shipment Data",
+            "content": {"application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Shipment"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication error, check hash calculation",
+            "content": {}
+          }
+        },
+        "security": [
+          {
+            "hash_auth": [
+              "write:pets",
+              "read:pets"
+            ]
+          }
+        ]
+      }
+    },
+    "/shipment/label": {
+      "post": {
+        "tags": [
+          "Shipment"
+        ],
+        "summary": "Get courier label",
+        "operationId": "shipment_label",
+        "parameters":[
+          {
+            "in": "query",
+            "name": "api_id",
+            "schema": {
+              "type": "string"
+            },
+            "required": "true",
+            "description": "API User ID"
+          },
+          {
+            "in": "query",
+            "name": "method",
+            "schema": {
+              "type": "string",
+              "default": "label"
+            },
+            "required": "true"
+          },
+          {
+            "in": "query",
+            "name": "data",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "no": {
+                  "type": "string",
+                  "description": "Connote Number"
+                },
+                "ref": {
+                  "type": "string",
+                  "description": "Courier Tracking Number"
+                },
+                "cust_ref": {
+                  "type": "string",
+                  "description": "Customer Reference Number"
+                },
+                "barcode": {
+                  "type": "string",
+                  "description": "Label Barcode Number"
+                },
+                "base64":{
+                  "type": "boolean",
+                  "description": "Return PDF in base64 instead of raw"
+                },
+                "zpl":{
+                  "type": "boolean",
+                  "description": "Return ZPL for Zebra printers"
+                }
+              }
+            },
+            "required": "true",
+            "description": "Use either no, ref or cust_ref to retrieve shipment"
+          },
+          {
+            "in": "query",
+            "name": "sign",
+            "schema": {
+              "$ref": "#/components/schemas/AuthHash"
+            },
+            "required": "true"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Label Data",
+            "content": {"application/pdf": {
+               "schema":{
+                  "type": "blob",
+                  "description": "Raw PDF binary data"
+                }
+              },
+              "text/base64":{
+               "schema":{
+                  "type": "string",
+                  "description": "PDF data in base64 encoding"
+                  }
+              },
+              "text/zpl":{
+               "schema":{
+                  "type": "string",
+                  "description": "ZPL format"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication error, check hash calculation",
+            "content": {}
+          }
+        },
+        "security": [
+          {
+            "hash_auth": [
+              "write:pets",
+              "read:pets"
+            ]
+          }
+        ]
+      }
+    },
+    "/tracking": {
+      "post": {
+        "tags": [
+          "Tracking"
+        ],
+        "summary": "Shipment Tracking",
+        "operationId": "shipment_tracking",
+        "parameters":[
+          {
+            "in": "query",
+            "name": "api_id",
+            "schema": {
+              "type": "string"
+            },
+            "required": "true",
+            "description": "API User ID"
+          },
+          {
+            "in": "query",
+            "name": "data",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "connote/ref/cref": {
+                  "type": "string",
+                  "description": "Connote Number/Reference Number/Customer Reference Number"
+                }
+              }
+            },
+            "required": "true",
+            "description": ""
+          },
+          {
+            "in": "query",
+            "name": "sign",
+            "schema": {
+              "$ref": "#/components/schemas/AuthHash"
+            },
+            "required": "true"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tracking data",
+            "content": {"application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrackingResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication error, check hash calculation",
+            "content": {}
+          }
+        },
+        "security": [
+          {
+            "hash_auth": [
+              "write:pets",
+              "read:pets"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Shipment": {
+        "required": [
+          "type",
+          "packs",
+          "weight",
+          "cbm",
+          "shipper",
+          "consignee",
+          "items"
+        ],
+        "type": "object",
+        "properties": {
+          "no": {
+            "type": "string",
+            "description": "Connote Number"
+          },
+          "ref": {
+            "type": "string",
+            "description": "Reference Number"
+          },
+          "cref": {
+            "type": "string",
+            "example": "ABC-123456",
+            "description": "Customer Reference Number"
+          },
+          "type": {
+            "type": "integer",
+            "description": "Shipment type, 10: Import Parcel to Australia, 20: Export Parcel from Australia, 30: Domestic Parcel",
+            "enum": [10,20,30]
+          },
+          "packs": {
+            "type": "integer",
+            "example": 1,
+            "description": "Number of packs"
+          },
+          "weight": {
+            "type": "number",
+            "format": "float",
+            "example": 3.25,
+            "description": "Gross Weight"
+          },
+          "cbm": {
+            "type": "number",
+            "format": "float",
+            "example": 0.002,
+            "description": "Cubic meter"
+          },"plt": {
+            "type": "number",
+            "format": "int",
+            "example": 2,
+            "description": "Pallet Numbers for pallet rate"
+          },
+          "dim": {
+            "$ref": "#/components/schemas/Dim"
+          },
+          "currency": {
+            "type": "string",
+            "enum": ["USD", "RMB", "AUD"],
+            "default": "USD"
+          },
+          "insurance":{
+            "type": "number",
+            "format": "float",
+            "description": "Amount insured"
+          },
+          "shipper": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "consignee": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "receiver": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "items": {
+            "$ref": "#/components/schemas/Items"
+          },
+          "note":{
+            "type": "string",
+            "description": "Notes for delivery instructions"
+          },
+          "label_type":{
+            "type": "string",
+            "enum": ["TLA", "AUSPOST"],
+            "default": "TLA"
+          },
+          "packages":{
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "weight": {
+                  "type": "number",
+                  "format": "float",
+                  "example": 1.75,
+                  "description": "Weight"
+                },
+                "width": {
+                  "type": "number",
+                  "format": "float",
+                  "example": 15,
+                  "description": "Width"
+                },
+                "height": {
+                  "type": "number",
+                  "format": "float",
+                  "example": 20,
+                  "description": "Height"
+                },
+                "depth": {
+                  "type": "number",
+                  "format": "float",
+                  "example": 10,
+                  "description": "Depth"
+                }
+              }
+            }
+          },
+          "chargecode":{
+            "type": "number",
+            "example": "0439",
+            "description": "Charge Code for the quested service"
+          },
+          "direct": {
+            "type": "number",
+            "enum": [null,0,1,2],
+            "example": 1,
+            "description": "This is only for direct tracking event. Don't use this field before you confirm with TLA.<br />'0' or null: do nothing<br />'1': we will manifest the parcel to aupost/fastway on schedule, charges apply once manifested.<br />'2': cancel the manifest before we lodge the manifest"
+          },
+          "amazon_po": {
+            "type": "string",
+            "description": "Amazon delivery PO#, required when delivery goods to Amazon Warehouse"
+          },
+          "amazon_shipment_ids": {
+            "type": "string",
+            "description": "For Amazon warehouse delivery, multiple IDs can be separated by , or ;"
+          },
+          "clear":{
+            "type": "string",
+            "enum": ["DDU", "DDP"],
+            "example": "DDU",
+            "description": "This is required for import declaration when the goods’ value is greater than $1000 AUD, “DDU” means duty paid by receiver. “DDP”: means duty paid by sender."
+          },
+          "importer_abn": {
+            "type": "string",
+            "example": "10123456789",
+            "description": "If the goods are import for business usage, importer abn is required for GST free on low values  goods"
+          },
+          "vendor_id": {
+            "type": "string",
+            "description": "The ABN OR ARN  of the party  who register for the GST"
+          },
+          "consignor_tin": {
+            "type": "string",
+            "description": "The Trader Identification Number (TIN) for a consignor"
+          },
+          "dg": {
+            "type": "integer",
+            "description": "1 is dangerous goods, 0 is not dangerous goods, empty is unset",
+            "enum": [1,0]
+          },
+          "barcode": {
+            "type": "integer",
+            "description": "1 is for requiring to return the barcode. Optional",
+            "enum": [1,0]
+          },"pe_number": {
+            "type": "string",
+            "description": "pe_number is the price enquiry number. Optional",
+            "enum": [1,0]
+          },
+          "is3PL": {
+            "type": "integer",
+            "description": "1 is for creating 3PL label",
+            "enum": [1,0]
+          }
+        }
+      },
+      "Dim":{
+        "type": "object",
+        "properties": {
+          "w": {
+            "type": "number",
+            "format": "float",
+            "example": 10.5,
+            "description": "Width"
+          },
+          "h": {
+            "type": "number",
+            "format": "float",
+            "example": 25,
+            "description": "Height"
+          },
+          "d": {
+            "type": "number",
+            "format": "float",
+            "example": 17,
+            "description": "Depth"
+          }
+        }
+      },
+      "Address":{
+        "type": "object",
+        "required": [
+          "name",
+          "address",
+          "suburb",
+          "state",
+          "postcode",
+          "phone",
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "John Smith"
+          },
+          "company": {
+            "type": "string",
+            "example": "ABC Company"
+          },
+          "address": {
+            "type": "string",
+            "example": "100 King Street"
+          },
+          "suburb": {
+            "type": "string",
+            "example": "Sydney"
+          },
+          "city": {
+            "type": "string",
+          },
+          "state": {
+            "type": "string",
+            "example": "NSW"
+          },
+          "country": {
+            "type": "string",
+            "example": "AU"
+          },
+          "postcode": {
+            "type": "string",
+            "example": "2000"
+          },
+          "phone": {
+            "type": "string",
+            "example": "0401234567"
+          },
+          "email": {
+            "type": "string",
+            "example": "test@example.com"
+          },
+          "cnid":{
+            "type": "string",
+            "description": "Chinese ID number"
+          }
+        }
+      },
+      "Items":{
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["B", "M", "O"],
+              "default": "O",
+              "description": "For import type is always O;<br />For export type can be B,M,O."
+            },
+            "name": {
+              "type": "string",
+              "description": "Product Name"
+            },
+            "name_zh": {
+              "type": "string",
+              "description": "中文品名"
+            },
+            "qty": {
+              "type": "interger",
+              "description": "Quantity"
+            },
+            "price": {
+              "type": "number",
+              "format": "float",
+              "description": "Unit Value"
+            },
+            "hs": {
+              "type": "string",
+              "description": "HS Code"
+            },
+            "sku": {
+              "type": "string",
+              "description": "Product SKU"
+            }
+        }
+
+        }
+      },
+      "ShipmentResult":{
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer",
+            "description": "1:Success, 0:Failed"
+          },
+          "msg": {
+            "type": "string",
+            "description": "Message"
+          },
+          "connote":{
+            "type": "string",
+            "description": "Customs Connote Number"
+          },
+          "ref":{
+            "type": "string",
+            "description": "Delivery Connote Number"
+          },
+          "custref":{
+            "type": "string",
+            "description": "Customer Reference Number"
+          },
+          "lref":{
+            "type": "string",
+            "description": "Long Tracking Number if available"
+          },
+          "longref":{
+            "type": "array",
+            "description": "Multiple tracking numbers"
+          },
+          "barcode":{
+            "type": "array",
+            "description": "Multiple barcode"
+          },
+          "error":{
+            "type": "array",
+            "description": "Collection of detailed error messages"
+          }
+        }
+      },
+      "AuthHash":{
+        "type": "string",
+        "description": "As per authorization spec"
+      },
+      "ApiResponse": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "type": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "TrackingResult":{
+        "type": "object",
+        "properties": {
+          "odpt": {
+            "type": "string",
+            "example": "Shanghai",
+            "description": "Origin"
+          },
+          "ddpt": {
+            "type": "string",
+            "example": "Sydney",
+            "description": "Desitination"
+          },
+          "eta": {
+            "type": "string",
+            "example": "2015-01-12",
+            "description": "ETA"
+          },
+          "ttk":{
+            "type": "string",
+            "example": "AMQ0123456",
+            "description": "Tracking number"
+          },
+          "odate": {
+            "type": "string",
+            "example": "2015-01-10",
+            "description": "Accept/receive Date"
+          },
+          "status": {
+            "type": "string",
+            "example": "Arrived",
+            "description": "Current Tracking status"
+          },
+          "tracks": {
+            "type": "array",
+            "description": "[\"Shipment info received\", \"Sydney\", \"2015-01-05 10:19:26\",\"Create\"]",
+            "items":{
+              "type": "array",
+              "example": ["Shipment info received", "Sydney", "2015-01-05 10:19:26","Create"],
+              "items": {
+                "type": "string",
+              }
+            }
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "hash_auth": {
+        "type": "apiKey",
+        "in": "query",
+        "name": "sign",
+        "description": "Use API Key and request data to generate a hash key for request authentication purpose.<ol><li>All parameters (except ‘sign’) in ascending order, then concatenate them in key value pair, i.e. key1value1key2value2...</li><li>API key on both end of the string.</li><li>Get MD5 hash of the final string and convert to upper case as the sign value.</li></ol>"
+      }
+    }
+  }
+}

@@ -1,0 +1,347 @@
+<h3>Si Reconcile Detail: Invoice--------<?=$model->parent->parent->inv_no?></h3>
+<style>
+    .cloumn_red{
+        background-color:pink;
+    }  
+    .column_direct{
+        color: green;
+        font-weight: bold;
+    }
+</style>
+
+<div class="form">
+<?php 
+	$url = $this->createUrl('cargoProcess/update');
+	$form=$this->beginWidget('CActiveForm', array(
+	'id'=>'si-reconcile-acr_form',
+	'enableAjaxValidation'=>false,
+	'action'=> $url."?id=".$model->rec_id)
+	);
+?>
+<?php if($model->parent->status<SiReconcile::LINKING_BILLING_STATUS):?>
+	<div class="row buttons" style="width:30%;">
+
+			<?php
+			    $uploadType = FileRepo::SI_CONFIRM_FILE;
+			 	$pphash = "";
+				echo '<br /><h3>', CHtml::label($this->t('Import Confirm Invoice File'), '</h3>');
+				$pphash = FileRepo::uploadHash($model->parent, $uploadType);
+				$this->widget('application.extensions.plupload.PluploadWidget', [
+					'config' => [
+						'url' => $this->createUrl('siReconcile/ajaxImportReconciliationConfirmList')."?pphash=".$pphash,
+						'max_file_size' => Yii::app()->params['maxFileSize'],
+						'unique_names' => true,
+						'file_list_height' => 60,
+						'visible_header' => false,
+						'filters' => [
+							['title' => Yii::t('app', 'Excel files'), 'extensions' => 'csv,xls,xlsx,pdf'],
+						],
+						//'resize' => array('width' => 800, 'height' => 800, 'quality' => 80),
+						'language' => Yii::app()->language,
+						'max_file_number' => 2,
+						'autostart' => false,
+						'jquery_ui' => false,
+						'reset_after_upload' => true,
+					],
+					'callbacks' => [
+						'FileUploaded' => 'function(up,file,response){alert("Import Confirm Invoice File Success");$("#'.$_GET["tabid"].'").trigger("reload_excofile_grid");}',
+					],
+					'id' => $_GET['tabid'].'_excofile_uploader_1',
+				]);
+			?>
+	</div>
+<?php endif;?>
+	</br>
+	</br>
+	<div class="row">
+		<div class="col" style="margin-right: 25px">
+			<div class="row rowcol-left">
+				<?php echo CHtml::label('status','status'); ?>
+				<?php echo CHtml::dropDownList('si_reconcile_status',@$model->parent->status, SiReconcile::$states,array('prompt'=>'Select','disabled' => 'disabled')); ?>
+				
+				<div style="background-position:-240px -416px" class="icon"></div>
+				 <?php echo CHtml::button('Update', array('class' => 'updateStatus'));?>
+				</div>
+		</div>
+	</div>
+
+
+	<?php if($model->parent->status==SiReconcile::ERROR_CHECKING_STATUS):?>
+	<div class="row buttons">
+			<?php   echo CHtml::button('Error Check Done',array('class'=>'error_check_done'));?>
+	</div>
+	<?php endif; ?>
+
+	<?php if($model->parent->status==SiReconcile::LINKING_BILLING_STATUS):?>
+	<div class="row buttons">
+			<?php   echo CHtml::button('Linking Billing',array('class'=>'linking_billing','id'=>'linking_billing'));?>
+	</div>
+
+	<div class="row buttons">
+			<?php   echo CHtml::button('Linking Billing Done',array('class'=>'linking_billing_done'));?>
+	</div>
+	<?php endif; ?>
+
+
+	<div class="row buttons" style="position:absolute; right:140px; top:5em; font-size: 24px; ">
+		<?php 
+			foreach(SiReconcile::$confirmed_status as $key => $value) 
+			{
+				if(($model->parent->confirm_status&$key)>0)
+				{
+					echo CHtml::label($value,$value,['style'=>'background-color:RGB(255,152,0)']);
+				}
+			}
+		?>
+
+	</div>
+
+	<div class="row buttons" style="position:absolute;top:3em;right:14em;margin-top: 1em;">
+		<ul>
+			<li>
+			<?php echo "<a target='_blank'  href=\"" .$this->createUrl("siReconcile/exportErrorList",['id'=>$model->rec_id])."\" title=\"exportErrorList\" ><span style=\"background-position:-48px -688px\" class=\"icon\"></span>export_error_list&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</a>"; ?>
+			</li>
+		</ul>
+	</div>
+	
+	<div class="row buttons">
+		<p style="font-size: 1.5em;">
+			<span style="margin-right: 80px;"><font style="font-size: 2em;font-weight: bold;">Total: </font><?=$model->parent->total?> <?=$model->parent->getCurrency()?></span>
+			<span style="margin-right: 80px;"><font style="font-size: 2em;font-weight: bold;">Total EX GST: </font><?=$model->parent->total_ex_gst?> <?=$model->parent->getCurrency()?></span>
+		</p>
+		<p>
+			<span style="margin-right: 80px;"><font style="font-size: 2em;font-weight: bold;">Current Total EX GST: </font><?=$model->parent->getCurrentTotalExGST()?> <?=$model->parent->getCurrency()?></span>
+			<span><font style="font-size: 2em;font-weight: bold;">Total Confirmed:</font> <?=$model->parent->getCurrentConfirmedTotal()?><?=$model->parent->getCurrency()?></span>
+		</p>
+	</div>
+	</br>
+	</br>
+	</br>
+
+<?php
+	$this->widget('application.extensions.CSpanableGridView.CSpanableGridView', [
+		'id'=>$_GET["tabid"].'_reconcile_grid',
+		'cssFile' => false,
+		'dataProvider'=>$model->search(true, 30),
+		'filter'=>$model,
+		'columns'=>[		
+			['name'=>'ref','header'=>'no'],
+			['name' => 'det'],
+			['name'=>'type','type'=>'raw','value'=>'$data->getErrorTypes()'],
+			['name'=>'item_code'],
+			['header'=>'charge_code','value'=>'$data->mdata["charge_code"]'],
+			['name'=>'value','header'=>'amount','value'=>'$data->mdata["amount"]'],
+			['header'=>'qty','value'=>'$data->mdata["qty"]'],
+			['header'=>'price','value'=>'$data->mdata["price"]'],
+			['name'=>'weight'],
+			['name'=>'our_charge_weight'],
+			['name'=>'value','header'=>'value(qty*price)'],
+			['name'=>'my_value'],
+			['name'=>'diff'],
+			['header'=>'gst_type','value'=>'Invoice::$InvoiceCostTaxRate[$data->mdata["gst_type"]]'],
+			['header'=>'is_confirmed','value'=>'$data->getIsConfirmed()'],
+			['class'=>'oButtonColumn',
+				'template'=>'{operate}',
+				'buttons'=>[
+					'operate' => [
+						'url'=>'Yii::app()->createURL("siReconcile/updateLine")."?id=".$data->id',
+						'imageUrl'=>false,
+						'visible'=>'$data->type>0?true:false',
+						'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => 'Si Reconcile Detail'.'$data->id'],
+					]
+				],
+			]
+		],
+	]);
+
+; ?>
+</br>
+</br>
+<div class="row buttons" style="width:30%;display: inline-block;">
+		<?php
+			$uploadType = FileRepo::SI_CONFIRM_FILE;
+			$fr = new FileRepo('search');
+			$fr->unsetAttributes();
+			$fr->theTypes[] = $uploadType;
+			$fr->fid = $model->rec_id;
+			$mf = Acl::hasAccess('B:org/manageFile');
+			$this->widget('zii.widgets.grid.CGridView', [
+				'id'=>$_GET['tabid'].'_excofile-grid',
+				'cssFile' => false,
+				'summaryText'=>'',
+				'dataProvider'=> $fr->search(),
+				'filter'=>$fr,
+				'columns'=>[
+					['name' => 'name', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->baseUrl."/filerepo/".$data->hash."/".$data->name."\" target=\"_blank\">".$data->name."</a>"'],
+					[
+						'name'=>'size',
+						'value'=>'$data->formatSize()',
+						'filter' => false,
+					],
+					'date',
+					'type',
+					['name' => 'status', 'type'=>'raw', 'value' => '$data->getStatus()',
+						'filter'=>CHtml::dropDownList('FileRepo[status]', $fr->status, FileRepo::$states, ['prompt'=>$this->t('All')]) ],
+					[
+						'class'=>'oButtonColumn',
+						'template'=>'{update}',
+						'buttons'=>[
+							'update' => [
+								'url'=>'Yii::app()->createUrl("imParcel/fileUpdate",array("id"=>$data->id))',
+								'imageUrl'=>false,
+								'visible'=>'true',
+								'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Update'), 'title' => '$data->name'],
+							],
+						],
+					],
+				],
+			]);
+			?>
+	</div>
+
+
+
+<script type="text/javascript">
+
+			var tabSi = $('#<?=$_GET["tabid"];?>');
+			var panelSi = $('#<?=$_GET["tabid"];?>').data('panel');
+
+			tabSi.unbind('reload_reconcile_grid').bind('reload_reconcile_grid', function(){
+				$('#<?=$_GET["tabid"];?>_reconcile_grid', tabSi.data('panel')).yiiGridView('update');
+				return false;
+			});
+
+			tabSi.unbind('reload_excofile_grid').bind('reload_excofile_grid', function(){
+				$('#<?=$_GET["tabid"];?>_excofile-grid', tabSi.data('panel')).yiiGridView('update');
+				return false;
+			});
+
+			tabSi.data('panel').off('change', 'select.pfile_status').on('change', 'select.pfile_status', function(){
+				$.post('files/status', {'id': $(this).data('id'), 'status': $(this).val() });
+			});
+
+			function uploading_on(obj) {
+				obj.addClass('uploading');
+				obj.val('    Uploading');
+				obj.prop('disabled', 'disabled');
+			}
+
+			function uploading_off(obj,str) {
+				obj.removeClass('uploading');
+				obj.val(str);
+				obj.removeProp('disabled');
+			}
+
+			 $('.error_check_done',panelSi).on('click',function(){
+				if( confirm('Are you sure to Error Check Done')){
+						$.get('<?=$this->createUrl("siReconcile/updateStatus")."?id=".$model->rec_id."&&status=50"?>',function(r){
+							r = JSON.parse(r);
+								if(r.done==true){
+										myApp.alert(r.msg, false); 
+								 }else{
+										myApp.alert(r.msg, false);   
+							 }
+								tabSi.trigger('reload_reconcile_grid');
+					 });
+				
+				}
+			});
+
+			$('.linking_billing',panelSi).on('click',function(){
+				if( confirm('Are you sure to Link Billing')){
+						uploading_on($('#linking_billing',panelSi));
+						$.get('<?=$this->createUrl("siReconcile/linkBilling")."?id=".$model->rec_id?>',function(r){
+							r = JSON.parse(r);
+								if(r.done==true){
+									uploading_off($('#linking_billing',panelSi),'Linking Billing');
+										myApp.alert(r.msg, false); 
+								 }else{
+								 	uploading_off($('#linking_billing',panelSi),'Linking Billing');
+										myApp.alert(r.msg, false);   
+							 }
+								tabSi.trigger('reload_reconcile_grid');
+					 });
+				
+				}
+			});
+
+			$('.linking_billing_done',panelSi).on('click',function(){
+				if( confirm('Are you sure to Link Billing Done')){
+						$.get('<?=$this->createUrl("siReconcile/updateStatus")."?id=".$model->rec_id."&&status=60"?>',function(r){
+							r = JSON.parse(r);
+								if(r.done==true){
+										myApp.alert(r.msg, false); 
+								 }else{
+										myApp.alert(r.msg, false);   
+							 }
+								tabSi.trigger('reload_reconcile_grid');
+					 });
+				
+				}
+			});
+
+			$('.updateStatus',panelSi).on('click',function(){
+				if( confirm('Are you sure to update status?')){
+					var form = new FormData(document.getElementById("si-reconcile-acr_form"));
+					 $.ajax({
+					            url: '<?=$this->createUrl("siReconcile/updateStatusDirect")."?id=".$model->rec_id?>'+'&&status='+$('#si_reconcile_status',panelSi).val(),
+					            type: "post",
+					            data: form,
+					            processData: false,
+					            contentType: false,
+					            success: function(r) {
+					               	r = JSON.parse(r);
+									if(r.done==true){
+										myApp.alert(r.msg, false);
+									 }else
+									 {
+										myApp.alert(r.msg, false); 
+						             }
+						             tab.trigger('reload_reconcile_grid');
+						         },
+					            error: function(e) {
+					                console.log(e);
+					            }
+					        });			
+				}
+				return false;
+			});
+
+			$('#si_reconcile_status', panelSi).next().on('dblclick', function(){
+				if(window.confirm('Are you sure to override status?')){
+					$(this).prev().attr('disabled', false);
+				}
+			});
+
+
+			$(panelSi).off('click', '#btn-save').on('click', '#btn-save', function() {
+				uploading_on($('#btn-save'));
+
+				var formData = new FormData();
+				formData.append('id', '<?=$model->rec_id?>');
+				formData.append('confirm_inv_file', $('#confirm_inv_file', panelSi)[0].files[0]);
+				$.ajax({
+					url: '<?=Yii::app()->createUrl("siReconcile/ajaxImportReconciliationConfirmList")?>',
+					type: 'POST',
+					data: formData,
+					processData: false,
+					contentType: false,
+					success: function(r) {
+						uploading_off($('#btn-save'),'submit');
+						r = JSON.parse(r);
+						if (r.done) {
+							myApp.notice(r.msg, 5000);
+						} else {
+							myApp.alert(r.msg, false);
+						}
+					},
+					error: function(r) {
+						uploading_off($('#btn-save'),'submit');
+						myApp.alert('System error', false);
+					}
+				});
+		});
+</script>
+
+
+<?php $this->endWidget();?>

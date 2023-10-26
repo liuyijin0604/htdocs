@@ -1,0 +1,651 @@
+{
+  "openapi": "3.0.2",
+  "info": {
+    "title": "FTP Documentation",
+    "description":"FTP文档是用于指导客户如何使用FTP（File Transfer Protocol）进行文件上传和下载的说明文档。在这份文档中，我们将提供有关如何上传两种特定表单的详细说明：Manifest（货运清单）和Tracking（跟踪）表单。\n\nManifest表单是用于记录货运信息的表单，其中包括Shipment（运输）、Subshipment（子运输）和Packages（包裹）等详细信息。第二种表单是Tracking表单，用于跟踪货物的位置和状态。为了确保数据的一致性和规范性，请客户按照我们的表单格式要求进行上传。",
+    
+  },
+ "tags": [
+    {
+      "name": "Manifest",},
+    {
+      "name": "Tracking",
+      "description": "Tracking表格通常是客户需要上传的Excel电子表格。任何错误或不准确性都可能导致运输和交付过程中的延迟和中断。因此，确保跟踪表格完整、准确且及时更新非常重要。"
+    }
+  ],
+  "paths": {
+    "Tracking/": {
+      "get": {
+         "tags": [
+          "Tracking"
+        ],
+        "summary": "Tracking表格格式要求",
+        "description": "Tracking表格通常是客户需要上传的Excel电子表格，应包括以下属性：\n\nTracking #：这是分配给每个运输的唯一参考号码。跟踪号应为字母数字格式，长度不超过20个字符。\n\nLocation：这是运输当前所在的市区或城市。位置应以文本格式指定，不超过50个字符。\n\nEvent State：这是运输当前所在的州。状态应使用两个字母的缩写（例如NSW代表新南威尔士州）指定。\n\nEvent Status：这是运输的当前状态。状态应该是一个独特和明确的代码，代表运输过程中的特定动作。以下是一些状态代码及其相应的描述：\n\nCreate：新的运输已创建，等待处理。\n\nReceive：运输已被承运人或物流提供商接收。\n\nManifested：运输已包含在清单或发货清单中。\n\nEnroute：运输在运输过程中，并且可能在飞行或海上船只上。此状态代码应进一步分解为以下子代码：\nFlight Despatch：运输已装载到飞行中并正在运输中。\nFlight Arrivals：运输已到达目的地机场。\nSea Vessael Despatch：运输已装载到海上船只上并正在运输中。\nSea Vessels Arrivals：运输已到达目的地港口。\nHeld：运输正在被保留，原因可能是海关检查或缴纳税款。\nCleared：运输已经通过海关审批，准备交付。\nDeconsolidation：运输已经被拆分成更小的单元以便交付。\nHand Over：运输已经移交给当地的交付代理。\nAscan：当地交付代理已经扫描了运输。\nCourier：运输正在快递员手中进行交付。\nCourier Problem：交付中出现问题，例如地址不正确或收件人不可用。\nDelivered：运输已经交付给收件人。\nRTS：运输已经被退回给发件人。\n\nEvent Detail：这是触发状态更改的事件的详细信息。例如，如果状态为Enroute，则事件细节可能包括航班号码，出发和到达机场以及预计到达时间。"
+        },
+      "redoc": {
+          "hideDownloadButton": true
+        }
+    },
+    "Manifest/shipment": {
+      "post": {
+        "tags": [
+          "Manifest"
+        ],
+        "summary": "Shipment",
+        "parameters":[
+          {
+            "in": "query",
+            "name": "Customer_ref",
+            "schema": {
+              "type": "string"
+            },
+            "required": "true",
+            "description": "原单号eg.TEST001"
+          },
+          {
+            "in": "query",
+            "name": "CONNOTE NO",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "这个号码最好不要填,我们系统会自动生成。如果需要填号码,请填在customer_ref这一栏。"
+          },
+           {
+            "in": "query",
+            "name": "WEIGHT",
+            "schema": {
+              "type": "int",
+            },
+            "required": "true",
+            "description": "总的重量"
+          },
+          {
+            "in": "query",
+            "name": "CNEE",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "收件人名 eg.zhang san"
+          },
+          {
+            "in": "query",
+            "name": "CNEE COMPANY",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "收件公司名"
+          },
+          {
+            "in": "query",
+            "name": "TEL",
+            "schema": {
+              "type": "int",
+            },
+            "required": "true",
+            "description": "收件电话"
+          },
+          {
+            "in": "query",
+            "name": "ADDRESS",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "收件地址"
+          },
+          {
+            "in": "query",
+            "name": "SUBURB",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "收件城市"
+          },
+          {
+            "in": "query",
+            "name": "STATE",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "收件州名"
+          },
+          {
+            "in": "query",
+            "name": "P/C",
+            "schema": {
+              "type": "int",
+            },
+            "required": "true",
+            "description": "邮编"
+          },
+          {
+            "in": "query",
+            "name": "DESTINATION",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "国家"
+          },
+          {
+            "in": "query",
+            "name": "PCS",
+            "schema": {
+              "type": "int",
+            },
+            "required": "true",
+            "description": "件数(出几张label)"
+          },
+          {
+            "in": "query",
+            "name": "COMMODITY",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "品名"
+          },
+          {
+            "in": "query",
+            "name": "INNER ITEMS",
+            "schema": {
+              "type": "int",
+            },
+            "required": "true",
+            "description": "产品数量"
+          },
+          {
+            "in": "query",
+            "name": "UNIT VALUE",
+            "schema": {
+              "type": "int",
+            },
+            "required": "true",
+            "description": "单价"
+          },
+          {
+            "in": "query",
+            "name": "CMETER",
+            "schema": {
+              "type": "int",
+            },
+            "required": "true",
+            "description": "这个体积是平均每一箱的体积，不是总体积，比如，有2箱货在同一票的话，分别是0.05 跟0.03 立方米，那么这里就填0.04。"
+          },
+          {
+            "in": "query",
+            "name": "SHIPPER",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "出口公司/人"
+          },
+          {
+            "in": "query",
+            "name": "SHIPPER ADD",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "出口公司地址"
+          },
+          {
+            "in": "query",
+            "name": "SHIPPER CITY",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "出口公司城市"
+          },
+          {
+            "in": "query",
+            "name": "SHIPPER STATE",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "省"
+          },
+          {
+            "in": "query",
+            "name": "SHIPPER PC",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "邮编"
+          },
+          {
+            "in": "query",
+            "name": "SHIPPER COUNTRY CODE",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "出口国家"
+          },
+          {
+            "in": "query",
+            "name": "SHIPPER CONTACT",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "出口人联系电话"
+          },
+          {
+            "in": "query",
+            "name": "receiver",
+            "schema": {
+              "type": "string",
+            },
+            "description":"receiver信息不是必须要填的，只有在收件人信息跟报给海关的,收件人信息不同时侯才需要填写的。其中receiver信息是报给海关的进口人抬头。CNEE 信息是面单上面的实际收件人信息。"
+          },
+          {
+            "in": "query",
+            "name": "receiver TEL",
+            "schema": {
+              "type": "string",
+            },
+            "required":"true",
+            "description":"进口人电话"
+          },
+          {
+            "in": "query",
+            "name": "receiver ADDRESS",
+            "schema": {
+              "type": "string",
+            },
+            "required":"true",
+            "description":"进口人地址"
+          },
+          {
+            "in": "query",
+            "name": "receiver SUBURB",
+            "schema": {
+              "type": "string",
+            },
+            "required":"true",
+            "description":"进口人城市"
+          },
+          {
+            "in": "query",
+            "name": "reciever STATE",
+            "schema": {
+              "type": "string",
+            },
+            "required":"true",
+            "description":"进口人州"
+          },
+          {
+            "in": "query",
+            "name": "receiver P/C",
+            "schema": {
+              "type": "int ",
+            },
+            "required":"true",
+            "description":"进口邮编"
+          },
+          {
+            "in": "query",
+            "name": "Clear",
+            "schema": {
+              "type": "int",
+            },
+            "required":"false",
+            "description":"当价值大于1000澳币时候，需要填写DDP或者DDU值，其中,DDP表示关税由发件人缴纳，DDU表示关税由收件人缴纳。"
+          },
+          {
+            "in": "query",
+            "name": "FBA PO",
+            "schema": {
+              "type": "string",
+            },
+            "description":"FBA货物用来填FBA PO号码"
+          },
+          {
+            "in": "query",
+            "name": "FBA shipment ID",
+            "schema": {
+              "type": "string",
+            },
+            "description":"FBA货物用来填SHIPMENT ID号码"
+          },
+          {
+            "in": "query",
+            "name": "Invoice_ref",
+            "schema": {
+              "type": "string",
+            },
+            "required":"false",
+            "description":"账单上次票货物参考号码，方便对账。这个信息会显示 在Invoice 上面，长度限制20"
+          },
+          {
+            "in": "query",
+            "name": "importer_abn",
+            "schema": {
+              "type": "string",
+            },
+            "required":"false",
+            "description":"进口商的澳大利亚税号"
+          },
+          {
+            "in": "query",
+            "name": "vendor_id",
+            "schema": {
+              "type": "string",
+            },
+            "required":"false",
+            "description":"代征收GST的　ABN号码"
+          },
+          {
+            "in": "query",
+            "name": "consignor_tin",
+            "schema": {
+              "type": "string",
+            },
+            "required":"false",
+            "description":"卖家的交易号码"
+          },
+          {
+            "in": "query",
+            "name": "dg",
+            "schema": {
+              "type": "int",
+            },
+            "required":"false",
+            "description":"是否为危险品。1 表示危险品。0 表示非危险品。empty 表示未设置或未指定。"
+          },
+          {
+            "in": "query",
+            "name": "direct_lodge",
+            "schema": {
+              "type": "int",
+            },
+            "required":"false",
+            "description":"是否预上网。 0/null：不执行任何操作。1：按计划向澳邮（Aupost）/快速途（Fastway）提交包裹清单，一旦提交清单将产生费用。2：在我们提交清单之前取消清单。"
+          },
+          {
+            "in": "query",
+            "name": "packages",
+            "schema": {
+              "type": "string",
+            },
+            "required":"false",
+            "description":"weight&length:width:height*qty_weight&length:width:height*qty"
+          },
+          {
+            "in": "query",
+            "name": "PE number",
+            "schema": {
+              "type": "string",
+            },
+            "required":"false",
+            "description":" "
+          },
+          {
+            "in": "query",
+            "name": "CNEE Email",
+            "schema": {
+              "type": "string",
+            },
+            "required":"false",
+            "description":" "
+          }
+        ]
+      }
+    },
+    "Manifest/sub_shipment": {
+      "post": {
+        "tags": [
+          "Manifest"
+        ],
+        "summary": "sub_shipment",
+        "description": "",
+        "parameters":[
+          {
+            "in": "query",
+            "name": "主单号Customer_ref",
+            "schema": {
+              "type": "string"
+            },
+            "required": "true",
+            "description": " "
+          },
+          {
+            "in": "query",
+            "name": "LB贴标顺序",
+            "schema": {
+              "type": "string"
+            },
+            "required": "true",
+            "description":" "
+          },
+          {
+            "in": "query",
+            "name": "蓝标号",
+            "schema": {
+              "type": "string"
+            },
+            "required": "true",
+            "description":""
+          },
+          {
+            "in": "query",
+            "name": "分单号",
+            "schema": {
+              "type": "string"
+            },
+            "required": "true",
+            "description":""
+          },
+          {
+            "in": "query",
+            "name": "重量",
+            "schema": {
+              "type": "int"
+            },
+            "required": "true",
+            "description":""
+          },
+          {
+            "in": "query",
+            "name": "单箱体积",
+            "schema": {
+              "type": "int"
+            },
+            "required": "true",
+            "description":""
+          },
+          {
+            "in": "query",
+            "name": "件数",
+            "schema": {
+              "type": "int"
+            },
+            "required": "true",
+            "description":""
+          },
+          {
+            "in": "query",
+            "name": "收件公司",
+            "schema": {
+              "type": "string"
+            },
+            "required": "true",
+            "description":""
+          },
+          {
+            "in": "query",
+            "name": "地址",
+            "schema": {
+              "type": "string"
+            },
+            "required": "true",
+            "description":"eg.6 LIVERPOOL ROAD"
+          },
+          {
+            "in": "query",
+            "name": "城市region",
+            "schema": {
+              "type": "string"
+            },
+            "required": "true",
+            "description":"城市region"
+          },
+          {
+            "in": "query",
+            "name": "邮编",
+            "schema": {
+              "type": "int"
+            },
+            "required": "true",
+            "description":" "
+          },
+          {
+            "in": "query",
+            "name": "收件联系人",
+            "schema": {
+              "type": "string "
+            },
+            "required": "true",
+            "description":" "
+          },
+          {
+            "in": "query",
+            "name": "电话",
+            "schema": {
+              "type": "int"
+            },
+            "required": "true",
+            "description":" "
+          },
+          {
+            "in": "query",
+            "name": "chargecode",
+            "schema": {
+              "type": "int"
+            },
+            "required": "true",
+            "description":" "
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "type": "string"
+            },
+            "required": "true",
+            "description":" "
+          },
+          {
+            "in": "query",
+            "name": "Email",
+            "schema": {
+              "type": "string"
+            },
+            "required": "true",
+            "description":" "
+          },
+          {
+            "in": "query",
+            "name": "FBA PO",
+            "schema": {
+              "type": "string"
+            },
+            "description":"FBA货物用来填FBA PO号码 "
+          }
+        ]
+       }
+     },
+      "Manifest/packages": {
+      "post": {
+        "tags": [
+          "Manifest"
+        ],
+        "summary":"packages",
+        "description":"",
+        "parameters":[
+          {
+            "in": "query",
+            "name": "客户单号(cref)",
+            "schema": {
+              "type": "string"
+            },
+            "required": "true",
+            "description":" "
+          },
+          {
+            "in": "query",
+            "name": "件数",
+            "schema": {
+              "type": "int"
+            },
+            "required": "true",
+            "description":" "
+          },
+          {
+            "in": "query",
+            "name": "数量",
+            "schema": {
+              "type": "string"
+            },
+            "description":""
+          },
+          {
+            "in": "query",
+            "name": "件实重",
+            "schema": {
+              "type": "string"
+            },
+            "required": "true",
+            "description":""
+          },
+          {
+            "in": "query",
+            "name": "材积重(没有则为空)",
+            "schema": {
+              "type": "int"
+            },
+            "required": "true",
+            "description":""
+          },
+          {
+            "in": "query",
+            "name": "长",
+            "schema": {
+              "type": "int"
+            },
+            "required": "true",
+            "description":""
+          },
+          {
+            "in": "query",
+            "name": "宽",
+            "schema": {
+              "type": "int"
+            },
+            "required": "true",
+            "description":""
+          },
+          {
+            "in": "query",
+            "name": "高",
+            "schema": {
+              "type": "string"
+            },
+            "required": "true",
+            "description":""
+          }
+        ]
+       }
+     }
+  }
+}

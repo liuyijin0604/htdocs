@@ -1,0 +1,686 @@
+<?php
+?>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-MrcW6ZMFYlzcLA8Nl+NtUVF0sA7MsXsP1UyJoMp4YLEuNSfAP+JcXn/tWtIaxVXM" crossorigin="anonymous"></script>
+    <!-- reCaptcha  -->
+    <!-- <script src="https://www.google.com/recaptcha/api.js"></script> -->
+    <!-- Custom CSS -->
+    <style>
+        body {
+            background: #ece7dc;
+        }
+
+        .slots-4 {
+            height: 220px;
+            margin-bottom: 108px;
+        }
+
+        .slots-2 {
+            height: 110px;
+            margin-bottom: -2px;
+        }
+
+        .slots-1 {
+            height: 55px;
+            margin-bottom: -54px;
+        }
+
+        #timeslot-container {
+            text-align: center;
+        }
+
+        .timeslot {
+            margin-bottom: 0px;
+        }
+
+        /* Absolute Center Spinner */
+        .loading {
+            position: fixed;
+            z-index: 999;
+            height: 2em;
+            width: 2em;
+            overflow: visible;
+            margin: auto;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+        }
+
+        /* Transparent Overlay */
+        .loading:before {
+            content: '';
+            display: block;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.3);
+        }
+
+        /* :not(:required) hides these rules from IE9 and below */
+        .loading:not(:required) {
+            /* hide "loading..." text */
+            font: 0/0 a;
+            color: transparent;
+            text-shadow: none;
+            background-color: transparent;
+            border: 0;
+        }
+
+        .loading:not(:required):after {
+            content: '';
+            display: block;
+            font-size: 10px;
+            width: 1em;
+            height: 1em;
+            margin-top: -0.5em;
+            -webkit-animation: spinner 1500ms infinite linear;
+            -moz-animation: spinner 1500ms infinite linear;
+            -ms-animation: spinner 1500ms infinite linear;
+            -o-animation: spinner 1500ms infinite linear;
+            animation: spinner 1500ms infinite linear;
+            border-radius: 0.5em;
+            -webkit-box-shadow: rgba(0, 0, 0, 0.75) 1.5em 0 0 0, rgba(0, 0, 0, 0.75) 1.1em 1.1em 0 0, rgba(0, 0, 0, 0.75) 0 1.5em 0 0, rgba(0, 0, 0, 0.75) -1.1em 1.1em 0 0, rgba(0, 0, 0, 0.5) -1.5em 0 0 0, rgba(0, 0, 0, 0.5) -1.1em -1.1em 0 0, rgba(0, 0, 0, 0.75) 0 -1.5em 0 0, rgba(0, 0, 0, 0.75) 1.1em -1.1em 0 0;
+            box-shadow: rgba(0, 0, 0, 0.75) 1.5em 0 0 0, rgba(0, 0, 0, 0.75) 1.1em 1.1em 0 0, rgba(0, 0, 0, 0.75) 0 1.5em 0 0, rgba(0, 0, 0, 0.75) -1.1em 1.1em 0 0, rgba(0, 0, 0, 0.75) -1.5em 0 0 0, rgba(0, 0, 0, 0.75) -1.1em -1.1em 0 0, rgba(0, 0, 0, 0.75) 0 -1.5em 0 0, rgba(0, 0, 0, 0.75) 1.1em -1.1em 0 0;
+        }
+
+        /* Animation */
+
+        @-webkit-keyframes spinner {
+            0% {
+                -webkit-transform: rotate(0deg);
+                -moz-transform: rotate(0deg);
+                -ms-transform: rotate(0deg);
+                -o-transform: rotate(0deg);
+                transform: rotate(0deg);
+            }
+
+            100% {
+                -webkit-transform: rotate(360deg);
+                -moz-transform: rotate(360deg);
+                -ms-transform: rotate(360deg);
+                -o-transform: rotate(360deg);
+                transform: rotate(360deg);
+            }
+        }
+
+        @-moz-keyframes spinner {
+            0% {
+                -webkit-transform: rotate(0deg);
+                -moz-transform: rotate(0deg);
+                -ms-transform: rotate(0deg);
+                -o-transform: rotate(0deg);
+                transform: rotate(0deg);
+            }
+
+            100% {
+                -webkit-transform: rotate(360deg);
+                -moz-transform: rotate(360deg);
+                -ms-transform: rotate(360deg);
+                -o-transform: rotate(360deg);
+                transform: rotate(360deg);
+            }
+        }
+
+        @-o-keyframes spinner {
+            0% {
+                -webkit-transform: rotate(0deg);
+                -moz-transform: rotate(0deg);
+                -ms-transform: rotate(0deg);
+                -o-transform: rotate(0deg);
+                transform: rotate(0deg);
+            }
+
+            100% {
+                -webkit-transform: rotate(360deg);
+                -moz-transform: rotate(360deg);
+                -ms-transform: rotate(360deg);
+                -o-transform: rotate(360deg);
+                transform: rotate(360deg);
+            }
+        }
+
+        @keyframes spinner {
+            0% {
+                -webkit-transform: rotate(0deg);
+                -moz-transform: rotate(0deg);
+                -ms-transform: rotate(0deg);
+                -o-transform: rotate(0deg);
+                transform: rotate(0deg);
+            }
+
+            100% {
+                -webkit-transform: rotate(360deg);
+                -moz-transform: rotate(360deg);
+                -ms-transform: rotate(360deg);
+                -o-transform: rotate(360deg);
+                transform: rotate(360deg);
+            }
+        }
+
+        .loading-container {
+            position: absolute;
+            height: 100vh;
+            width: 100vw;
+            z-index: 1000;
+            display: none;
+        }
+    </style>
+    <title>TLA Container Pickup Booking</title>
+</head>
+
+<div style="width: 100%;height:100em;">
+    <div class="loading-container" id="loading-container">
+        <div class="loading">Loading&#8230;</div>
+    </div>
+    <br />
+    <!-- Form -->
+    <div class="container-md">
+        <form class="row g-3 needs-validation" id="bookingForm" method="POST" action="<?php $this->createUrl('customerService/containerPickupBooking'); ?>" enctype="multipart/form-data">
+            <div class="card">
+                <div class="card-header">
+                    <h3 style="color:green"><i class="bi bi-calendar2-check"></i>Pickup List Summary</h3>
+                </div>
+                <div class="card-body">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Container#</th>
+                                <th scope="col">House BL</th>
+                                <th scope="col">Number of Pallets</th>
+                                <th scope="col">Number of Packages</th>
+                                <th scope="col">Weight(kg)</th>
+                                <th scope="col">Volume(M<sup>3</sup>)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><?php echo $container_no; ?></td>
+                                <td><?php echo $house_bl; ?></td>
+                                <td><?php echo $pallets; ?></td>
+                                <td><?php echo $packages; ?></td>
+                                <td><?php echo number_format((float)$weight, 2, '.', ''); ?></td>
+                                <td><?php echo number_format((float)$volume, 3, '.', ''); ?></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="col-md-6" style="display: none;">
+                <label for="container_no" class="form-label">Container Number</label>
+                <input type="text" class="form-control" id="container_no" name="container_no" value="<?php echo $container_no; ?>" autocomplete="off" required>
+            </div>
+            <div class="col-md-6" style="display: none;">
+                <label for="house_bl" class="form-label">House BL</label>
+                <input type="text" class="form-control" id="house_bl" name="house_bl" value="<?php echo $house_bl; ?>" autocomplete="off" required>
+            </div>
+            <div class="col-md-6" style="display: none;">
+                <label for="depot" class="form-label">Depot</label>
+                <input type="text" class="form-control" id="depot" name="depot" value="<?php echo $depot; ?>" autocomplete="off" required>
+            </div>
+            <div class="col-md-6">
+                <label for="booking_date" class="form-label">Pickup Date</label>
+                <input type="text" class="form-control" id="booking_date" name="booking_date" autocomplete="off" required>
+            </div>
+            <div class="col-md-6">
+                <label for="booking_time" class="form-label">Pickup Time</label>
+                <input type="text" class="form-control readonly" id="booking_time" name="booking_time" autocomplete="off" required>
+            </div>
+            <br />
+            <div class="container-sm" id="timeslot-container" style="display: none;">
+                <div class="timeslot">
+                    <div class="btn-group-vertical">
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_1" onclick="setBookingTime('7:00', '#time_1')">7:00</button>
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_2" onclick="setBookingTime('7:15', '#time_2')">7:15</button>
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_3" onclick="setBookingTime('7:30', '#time_3')">7:30</button>
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_4" onclick="setBookingTime('7:45', '#time_4')">7:45</button>
+                    </div>
+                    <div class="btn-group-vertical">
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_5" onclick="setBookingTime('8:00', '#time_5')">8:00</button>
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_6" onclick="setBookingTime('8:15', '#time_6')">8:15</button>
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_7" onclick="setBookingTime('8:30', '#time_7')">8:30</button>
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_8" onclick="setBookingTime('8:45', '#time_8')">8:45</button>
+                    </div>
+                    <div class="btn-group-vertical" id="slot-group-2">
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_9" onclick="setBookingTime('9:00', '#time_9')">9:00</button>
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_10" onclick="setBookingTime('9:15', '#time_10')">9:15</button>
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_11" onclick="setBookingTime('9:30', '#time_11')">9:30</button>
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_12" onclick="setBookingTime('9:45', '#time_12')">9:45</button>
+                    </div>
+                    <div class="btn-group-vertical" style="margin-bottom: -60px;">
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_13" onclick="setBookingTime('10:00', '#time_13')">10:00</button>
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_14" onclick="setBookingTime('10:30', '#time_14')">10:30</button>
+                    </div>
+                    <div class="btn-group-vertical" style="margin-bottom: -60px;">
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_15" onclick="setBookingTime('11:00', '#time_15')">11:00</button>
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_16" onclick="setBookingTime('11:30', '#time_16')">11:30</button>
+                    </div>
+                    <div class="btn-group-vertical" style="margin-bottom: -60px;">
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_17" onclick="setBookingTime('12:00', '#time_17')">12:00</button>
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_18" onclick="setBookingTime('12:30', '#time_18')">12:30</button>
+                    </div>
+                    <div class="btn-group-vertical" style="margin-bottom: -90px;">
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_19" onclick="setBookingTime('13:00', '#time_19')">13:00</button>
+                    </div>
+                    <div class="btn-group-vertical" style="margin-bottom: -90px;">
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_20" onclick="setBookingTime('14:00', '#time_20')">14:00</button>
+                    </div>
+                    <div class="btn-group-vertical">
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_21" onclick="setBookingTime('15:00', '#time_21')">15:00</button>
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_22" onclick="setBookingTime('15:15', '#time_22')">15:15</button>
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_23" onclick="setBookingTime('15:30', '#time_23')">15:30</button>
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_24" onclick="setBookingTime('15:45', '#time_24')">15:45</button>
+                    </div>
+                    <div class="btn-group-vertical">
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_25" onclick="setBookingTime('16:00', '#time_25')">16:00</button>
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_26" onclick="setBookingTime('16:15', '#time_26')">16:15</button>
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_27" onclick="setBookingTime('16:30', '#time_27')">16:30</button>
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_28" onclick="setBookingTime('16:45', '#time_28')">16:45</button>
+                    </div>
+                    <div class="btn-group-vertical" style="margin-bottom: -60px;">
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_29" onclick="setBookingTime('17:00', '#time_29')">17:00</button>
+                        <button type="button" class="btn btn-success btn-timeslot btn-sm" id="time_30" onclick="setBookingTime('17:30', '#time_30')">17:30</button>
+                    </div>
+                    <div class="btn-group-vertical" role="group" style="margin-left: 120px;">
+                        <button type="button" class="btn btn-success" id="btn-example-available">Available Slot</button>
+                        <button type="button" class="btn btn-info" id="btn-example-selected">Selected Slot</button>
+                        <button type="button" class="btn btn-danger" id="btn-example-occupied" disabled>Occupied Slot</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <label for="name" class="form-label">Driver Name</label>
+                <input type="text" class="form-control" id="name" name="name" value="<?=@$driver_name?>" required>
+            </div>
+            <div class="col-md-6">
+                <label for="rego" class="form-label">Rego</label>
+                <input type="text" class="form-control" id="rego" name="rego" value="<?=@$rego?>" required>
+            </div>
+            <div class="col-md-6">
+                <label for="company_name" class="form-label">Company Name</label>
+                <input type="text" class="form-control" id="company_name" name="company_name" value="<?=@$company_name?>" required>
+            </div>
+            <div class="col-md-6">
+                <label for="phone" class="form-label">Company Emails(split by ;)</label>
+                <input type="text" class="form-control" id="email" name="email" value="<?=@$company_email?>" required>
+            </div>
+            <b>
+            <div class="col-12">
+                <button type="submit" class="btn btn-primary" id="form_submit">Submit Adjustion</button>
+            </div>
+        </form>
+        <br />
+    </div>
+
+    <script type="text/javascript">
+
+        /**
+         * Set booking time value, adjust display
+         */
+        function setBookingTime(bookingTime, btn_id) {
+            var win = $('#jqmw_<?=$_GET["tabid"];?>');
+            $("#booking_time",win).val(bookingTime);
+            $(".btn-info",win).addClass("btn-success");
+            $(".btn-info",win).removeClass("btn-info");
+
+            $(btn_id).removeClass("btn-success");
+            $(btn_id).addClass("btn-info");
+            $("#btn-example-selected",win).removeClass();
+            $("#btn-example-selected",win).addClass("btn btn-info");
+            $("#btn-example-occupied",win).removeClass();
+            $("#btn-example-occupied",win).addClass("btn btn-danger");
+        }
+
+
+        function isEmail(strEmail)
+        {
+            var emails = strEmail.split(';');
+            for (var i = emails.length - 1; i >= 0; i--)
+            {
+               if (emails[i].search(/^\w+((-\w+)|(\.\w+))*\@[A-Za-z0-9]+((\.|-)[A-Za-z0-9]+)*\.[A-Za-z0-9]+$/) != -1)
+                {
+                    
+                }
+                else
+                {
+                    return false;
+                }
+            }
+            
+            return true;
+        }
+
+        // Convert date format
+        function dateFormat(inputDate, format) {
+            //parse the input date
+            const date = new Date(inputDate);
+
+            //extract the parts of the date
+            const day = date.getDate();
+            const month = date.getMonth() + 1;
+            const year = date.getFullYear();
+
+            //replace the month
+            format = format.replace("MM", month.toString().padStart(2, "0"));
+
+            //replace the year
+            if (format.indexOf("yyyy") > -1) {
+                format = format.replace("yyyy", year.toString());
+            } else if (format.indexOf("yy") > -1) {
+                format = format.replace("yy", year.toString().substr(2, 2));
+            }
+
+            //replace the day
+            format = format.replace("dd", day.toString().padStart(2, "0"));
+
+            return format;
+        }
+
+        $(function() {
+            var win = $('#jqmw_<?=$_GET["tabid"];?>');
+            var tab = $('#<?=$_GET["tabid"];?>');
+            var panel = $('#<?=$_GET["tabid"];?>').data('panel');
+
+            $(".readonly",win).on('keydown paste focus mousedown', function(e) {
+                if (e.keyCode != 9) // ignore tab
+                    e.preventDefault();
+            });
+            var availableDate = <?php echo json_encode($availableDate, JSON_HEX_TAG); ?>;
+            var endDate = <?php echo json_encode($endDate, JSON_HEX_TAG); ?>;
+            availableDate = new Date(availableDate);
+            endDate = new Date(endDate);
+            endDate.setDate(endDate.getDate() - 1);
+            /* var today = new Date();
+            if (availableDate.getTime() < today.getTime()) {
+                availableDate = today;
+            } */
+            var exclude = <?php if($depot == 'Melbourne') {
+                 echo '["' . implode('", "', ["22-09-2022", "23-09-2022"]) . '"]'; 
+                } else {
+                    echo '["' . implode('", "', ["22-09-2022"]) . '"]';
+
+                }
+                ?>;
+            //console.log(exclude);
+            $("#booking_date",win).datepicker({
+                minDate: availableDate,
+                maxDate: endDate,
+                changeMonth: true,
+                beforeShowDay: function(date) {
+                    var day = jQuery.datepicker.formatDate('dd-mm-yy', date);
+                    return [!~$.inArray(day, exclude) && (date.getDay() != 0) && (date.getDay() != 6)];
+                },
+                dateFormat: "dd MM yy"
+            });
+                    /**
+         * Display timeslots based on selected date.
+         * Set pickup time.
+         */
+        $("#booking_date",win).change(function()
+        {
+            $("#booking_time",win).val(''); // Clear booking time on booking date change.
+            $("#timeslot-container",win).show();
+            $(".btn-info",win).addClass("btn-success");
+            $(".btn-info",win).removeClass("btn-info");
+            $(".btn-danger",win).addClass("btn-success");
+            $(".btn-danger",win).attr('disabled', false);
+            $(".btn-danger",win).removeClass("btn-danger");
+
+            $("#btn-example-selected",win).removeClass("btn-success");
+            $("#btn-example-selected",win).addClass("btn-info");
+            $("#btn-example-occupied",win).removeClass("btn-success");
+            $("#btn-example-occupied",win).addClass("btn-danger");
+            var datePicked = $("#booking_date",win).val();
+            datePicked = dateFormat(datePicked, 'yyyy-MM-dd'); // Convert date format
+            // Read occupied slots array on selected date
+            var occupiedSlots = <?php echo json_encode($occupiedSlots, JSON_HEX_TAG); ?>;
+            //console.log(occupiedSlots);
+            var slots = occupiedSlots[datePicked];
+            //console.log(slots);
+            // Set occupied slots to red and disable them
+            if (slots !== undefined && slots.length > 0) {
+                for (let i = 0; i < slots.length; i++) {
+                    switch (slots[i]) {
+                        case "07:00:00":
+                            $("#time_1",win).removeClass("btn-success");
+                            $("#time_1",win).addClass("btn-danger");
+                            $("#time_1",win).attr('disabled', true);
+                            break;
+                        case "07:15:00":
+                            $("#time_2",win).removeClass("btn-success");
+                            $("#time_2",win).addClass("btn-danger");
+                            $("#time_2",win).attr('disabled', true);
+                            break;
+                        case "07:30:00":
+                            $("#time_3",win).removeClass("btn-success");
+                            $("#time_3",win).addClass("btn-danger");
+                            $("#time_3",win).attr('disabled', true);
+                            break;
+                        case "07:45:00":
+                            $("#time_4",win).removeClass("btn-success");
+                            $("#time_4",win).addClass("btn-danger");
+                            $("#time_4",win).attr('disabled', true);
+                            break;
+                        case "08:00:00":
+                            $("#time_5",win).removeClass("btn-success");
+                            $("#time_5",win).addClass("btn-danger");
+                            $("#time_5",win).attr('disabled', true);
+                            break;
+                        case "08:15:00":
+                            $("#time_6",win).removeClass("btn-success");
+                            $("#time_6",win).addClass("btn-danger");
+                            $("#time_6",win).attr('disabled', true);
+                            break;
+                        case "08:30:00":
+                            $("#time_7",win).removeClass("btn-success");
+                            $("#time_7",win).addClass("btn-danger");
+                            $("#time_7",win).attr('disabled', true);
+                            break;
+                        case "08:45:00":
+                            $("#time_8",win).removeClass("btn-success");
+                            $("#time_8",win).addClass("btn-danger");
+                            $("#time_8",win).attr('disabled', true);
+                            break;
+                        case "09:00:00":
+                            $("#time_9",win).removeClass("btn-success");
+                            $("#time_9",win).addClass("btn-danger");
+                            $("#time_9",win).attr('disabled', true);
+                            break;
+                        case "09:15:00":
+                            $("#time_10",win).removeClass("btn-success");
+                            $("#time_10",win).addClass("btn-danger");
+                            $("#time_10",win).attr('disabled', true);
+                            break;
+                        case "09:30:00":
+                            $("#time_11",win).removeClass("btn-success");
+                            $("#time_11",win).addClass("btn-danger");
+                            $("#time_11",win).attr('disabled', true);
+                            break;
+                        case "09:45:00":
+                            $("#time_12",win).removeClass("btn-success");
+                            $("#time_12",win).addClass("btn-danger");
+                            $("#time_12",win).attr('disabled', true);
+                            break;
+                        case "10:00:00":
+                            $("#time_13",win).removeClass("btn-success");
+                            $("#time_13",win).addClass("btn-danger");
+                            $("#time_13",win).attr('disabled', true);
+                            break;
+                        case "10:30:00":
+                            $("#time_14",win).removeClass("btn-success");
+                            $("#time_14",win).addClass("btn-danger");
+                            $("#time_14",win).attr('disabled', true);
+                            break;
+                        case "11:00:00":
+                            $("#time_15",win).removeClass("btn-success");
+                            $("#time_15",win).addClass("btn-danger");
+                            $("#time_15",win).attr('disabled', true);
+                            break;
+                        case "11:30:00":
+                            $("#time_16",win).removeClass("btn-success");
+                            $("#time_16",win).addClass("btn-danger");
+                            $("#time_16",win).attr('disabled', true);
+                            break;
+                        case "12:00:00":
+                            $("#time_17",win).removeClass("btn-success");
+                            $("#time_17",win).addClass("btn-danger");
+                            $("#time_17",win).attr('disabled', true);
+                            break;
+                        case "12:30:00":
+                            $("#time_18",win).removeClass("btn-success");
+                            $("#time_18",win).addClass("btn-danger");
+                            $("#time_18",win).attr('disabled', true);
+                            break;
+                        case "13:00:00":
+                            $("#time_19",win).removeClass("btn-success");
+                            $("#time_19",win).addClass("btn-danger");
+                            $("#time_19",win).attr('disabled', true);
+                            break;
+                        case "14:00:00":
+                            $("#time_20",win).removeClass("btn-success");
+                            $("#time_20",win).addClass("btn-danger");
+                            $("#time_20",win).attr('disabled', true);
+                            break;
+                        case "15:00:00":
+                            $("#time_21",win).removeClass("btn-success");
+                            $("#time_21",win).addClass("btn-danger");
+                            $("#time_21",win).attr('disabled', true);
+                            break;
+                        case "15:15:00":
+                            $("#time_22",win).removeClass("btn-success");
+                            $("#time_22",win).addClass("btn-danger");
+                            $("#time_22",win).attr('disabled', true);
+                            break;
+                        case "15:30:00":
+                            $("#time_23",win).removeClass("btn-success");
+                            $("#time_23",win).addClass("btn-danger");
+                            $("#time_23",win).attr('disabled', true);
+                            break;
+                        case "15:45:00":
+                            $("#time_24",win).removeClass("btn-success");
+                            $("#time_24",win).addClass("btn-danger");
+                            $("#time_24",win).attr('disabled', true);
+                            break;
+                        case "16:00:00":
+                            $("#time_25",win).removeClass("btn-success");
+                            $("#time_25",win).addClass("btn-danger");
+                            $("#time_25",win).attr('disabled', true);
+                            break;
+                        case "16:15:00":
+                            $("#time_26",win).removeClass("btn-success");
+                            $("#time_26",win).addClass("btn-danger");
+                            $("#time_26",win).attr('disabled', true);
+                            break;
+                        case "16:30:00":
+                            $("#time_27",win).removeClass("btn-success");
+                            $("#time_27",win).addClass("btn-danger");
+                            $("#time_27",win).attr('disabled', true);
+                            break;
+                        case "16:45:00":
+                            $("#time_28",win).removeClass("btn-success");
+                            $("#time_28",win).addClass("btn-danger");
+                            $("#time_28",win).attr('disabled', true);
+                            break;
+                        case "17:00:00":
+                            $("#time_29",win).removeClass("btn-success");
+                            $("#time_29",win).addClass("btn-danger");
+                            $("#time_29",win).attr('disabled', true);
+                            break;
+                        case "17:30:00":
+                            $("#time_30",win).removeClass("btn-success");
+                            $("#time_30",win).addClass("btn-danger");
+                            $("#time_30",win).attr('disabled', true);
+                            break;
+                    }
+                }
+            }
+        })
+
+
+        $("form#bookingForm",win).submit(function(event) {
+                if(!isEmail($('#email',win).val()))
+                {
+                    $('#email',win).focus();
+                    alert("Company Email is invalid");
+                    return false;
+                }
+                $('#form_submit',win).prop('disabled', true);
+                $('#loading-container',win).show();
+                event.preventDefault();
+                $("#booking_date",win).val(dateFormat($("#booking_date",win).val(), 'yyyy-MM-dd'));
+                var formData = new FormData(this);
+                $.ajax({
+                    url: "<?=$this->createUrl("pickupBooking/editBookingInfo")?>"+"?id=<?=$id?>",
+                    type: 'POST',
+                    data: formData,
+                    enctype: 'multipart/form-data',
+                    cache: false,
+                    contentType: false,
+                    processData: false,
+                    success: function(res) {
+                        //console.log(formData);
+                        console.log(res);
+                        //alert('Success');
+                        if (res != "Slot has been occupied, please pick another time slot.") {
+                            alert("Adjustment has been submitted. You will receive the confirmation email.");
+                            $('#form_submit',win).prop('disabled', false);
+                            $("#loading-container",win).hide();
+                            //window.location.href = "https://www.toplogistics.com.au";
+                        } else {
+                            alert(res);
+                            $('#form_submit',win).prop('disabled', false);
+                            $("#loading-container",win).hide();
+                        }
+
+                    },
+                });
+            });
+
+            var depot = "<?php echo $depot; ?>";
+            console.log(depot);
+            if(depot == "Melbourne") {
+                $("#time_1",win).hide();
+                $("#time_2",win).hide();
+                $("#time_2",win).hide();
+                $("#time_2",win).hide();
+                $("#time_3",win).hide();
+                $("#time_2",win).hide();
+                $("#time_4",win).hide();
+                $("#time_5",win).hide();
+                $("#time_6",win).hide();
+                $("#time_7",win).hide();
+                $("#time_8",win).hide();
+            } else if (depot == "Brisbane") {
+                $("#time_1",win).hide();
+                $("#time_2",win).hide();
+                $("#time_2",win).hide();
+                $("#time_2",win).hide();
+                $("#time_3",win).hide();
+                $("#time_2",win).hide();
+                $("#time_4",win).hide();
+                $("#time_5",win).hide();
+                $("#time_6",win).hide();
+                $("#time_7",win).hide();
+                $("#time_8",win).hide();
+                $("#time_9",win).hide();
+                $("#time_10",win).hide();
+                $("#slot-group-2",win).css("margin-bottom", "-62px");
+            }
+            $("#booking_date",win).datepicker( "setDate", new Date('<?=$booking_date?>'));
+            $('#booking_time',win).val('<?=$booking_time?>');
+
+        });
+
+    </script>
+</div>
+
+</html>

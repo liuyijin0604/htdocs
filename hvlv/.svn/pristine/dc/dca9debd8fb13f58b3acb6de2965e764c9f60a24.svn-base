@@ -1,0 +1,345 @@
+<?php
+
+class RtsProcessController extends Controller
+{
+	/**
+	 * Declares class-based actions.
+	 */
+	protected $nonAjax = ['index','printAdjustShipmentLabel','rtsInvoice'];
+	protected $skipAcl = [];
+
+	protected $org;
+	protected $type;
+	protected $warehouseProcessService;
+
+	public function beforeAction($action)
+	{
+		if(!Yii::app()->request->isAjaxRequest) $this->layout = 'whscan';
+		if (!Yii::app()->user->isGuest) {
+			$this->org = Org::model()->findByPk(Yii::app()->user->org);
+			$this->type = 'sc';
+		}
+		$this->warehouseProcessService = new WarehouseProcessService();
+		return parent::beforeAction($action);
+	}
+	
+	public function actionIndex()
+	{
+		$rtsProcessService = new RtsProcessService();
+		$provide=$rtsProcessService->getRtsProcessReportProvide(false,0);
+		$this->render('index',['provide'=>$provide]);
+	} 
+
+	public function actionProcessPage()
+	{
+		$warehouseService = new WarehouseService();
+		switch ($_GET['tab']) {
+			case 'rts_scan':
+				$model = new Shipment('search');
+				$model->unsetAttributes();
+				if(!empty($_GET['Shipment']))
+				{
+					$model->setAttributes($_GET['Shipment']);
+				}
+				$status = 0;
+				$status = ShipmentRtsRecord::NEW;
+				$records = ShipmentRtsRecord::model()->findAll("type=:type and status=:status and warehouse_id=:dptId",[':status'=>$status,':type'=>ShipmentRtsRecord::KNOWN,':dptId'=>$warehouseService->getDptId()]);
+				$ids = array_column($records,'shipment_id');
+				$ids[] = -1;
+				$model->ot_id= null;
+				$model->mids = $ids;
+				if (!empty($_GET['ImParcel'])) {
+					$model->setAttributes($_GET['Shipment']);
+					$model->type = ImParcel::RTS_RECEIVED;
+				}
+
+				$op ='rtsscan';
+				$this->render('rts_scan', ['op'=>$op,'model' => $model,'rtsType'=>$status]);
+				break;
+
+
+
+			case 'rts_unknown':
+				$provide = [];
+				$model = new ShipmentRtsRecord('search');
+				$model->unsetAttributes();
+				if(!empty($_GET['ShipmentRtsRecord']))
+				{
+					$model->setAttributes($_GET['ShipmentRtsRecord']);
+				}
+				$model->warehouse_id = $warehouseService->getDptId();
+				if(!empty($_GET['ShipmentRtsRecord']))
+				{
+					$model->setAttributes($_GET['ShipmentRtsRecord']);
+				}
+
+				$model->type = ShipmentRtsRecord::UNKNOWN;
+
+
+				if(empty($_GET['ShipmentRtsRecord']))
+				{
+					$rtsProcessService = new RtsProcessService();
+					$provide = $rtsProcessService->getWhscanRTSUnknownProvide();
+				}
+
+
+				$this->render('rts_unknown',['model'=>$model,'provide'=>$provide]);
+				break;
+
+
+
+			case 'rts_resend':
+				$provide = [];
+				$op ='rtsresend';
+				$model = new ShipmentRtsRecordConfirm('search');
+				$model->unsetAttributes();
+				$model->status = ShipmentRtsRecordConfirm::RTS_WAITING_RESEND;
+				$model->warehouse_id = $warehouseService->getDptId();
+				if(!empty($_GET['ShipmentRtsRecordConfirm']))
+				{
+					print_r($_GET['ShipmentRtsRecordConfirm']);
+					$model->setAttributes($_GET['ShipmentRtsRecordConfirm']);
+				}
+				if(empty($_GET['ShipmentRtsRecordConfirm']))
+				{
+					$rtsProcessService = new RtsProcessService();
+					$provide = $rtsProcessService->getWhscanRTSResendProvide();
+				}
+				$this->render('rts_resend', ['model' => $model,'op'=>$op,'provide'=>$provide]);
+				break;
+
+
+
+			case 'rts_discard':
+				$model = new ShipmentRtsRecord('search');
+				$model->unsetAttributes();
+				if(!empty($_GET['ShipmentRtsRecord']))
+				{
+					$model->setAttributes($_GET['ShipmentRtsRecord']);
+				}
+				$model->status = [ShipmentRtsRecord::WAITING_UNKNOWN_DISCARD,ShipmentRtsRecord::WAITING_KNOWN_DISCARD];
+				$model->warehouse_id = $warehouseService->getDptId();
+				if(!empty($_GET['ShipmentRtsRecord']))
+				{
+					$model->setAttributes($_GET['ShipmentRtsRecord']);
+				}
+				$op ='discard';
+				$this->render('rts_waiting_discard',['model'=>$model,'op'=>$op]);
+				break;
+
+
+
+
+			case 'rts_discard_done':
+				$model = new ShipmentRtsRecord('search');
+				$model->unsetAttributes();
+				if(!empty($_GET['ShipmentRtsRecord']))
+				{
+					$model->setAttributes($_GET['ShipmentRtsRecord']);
+				}
+				$model->status = [ShipmentRtsRecord::UNKNOWN_DISCARD_DONE,ShipmentRtsRecord::KNOWN_DISCARD_DONE];
+				$model->warehouse_id = $warehouseService->getDptId();
+				if(!empty($_GET['ShipmentRtsRecord']))
+				{
+					$model->setAttributes($_GET['ShipmentRtsRecord']);
+				}
+				$this->render('rts_discard_done',['model'=>$model]);
+				break;
+			default:
+				# code...
+				break;
+		}
+	}
+
+	/**
+	 * process scan check in
+ 	*/
+	public function actionScan()
+	{
+		$rtsProcessService = new RtsProcessService();
+		// $model = Consol::model()->findByPk();
+		$rtsProcessService->scanRts($_POST,$_GET['op']);
+
+	}
+
+	public function actionUploadUnknownFile()
+	{
+		$rtsProcessService = new RtsProcessService();
+		$barcode = $_GET["barcode"];
+		$location = $_GET["location"];
+		$sn = 0;
+		$record = ShipmentRtsRecord::model()->find("barcode=:barcode",[":barcode"=>$barcode]);
+		$locationObj = WmsLocation::model()->find('name = :code OR code = :code', [':code' => $location]);
+		if(empty($locationObj))
+		{
+			echo "location not found please input the correct location before submit";
+			return;
+		}
+		if(empty($record))
+		{
+			$record = new ShipmentRtsRecord();
+			$record->barcode = $barcode;
+			$record->user_id = User::currentUserID();
+			$record->warehouse_id = $rtsProcessService->getDptId();
+			$record->location_id = $locationObj->id;
+			$record->save();
+		}
+		$f = $_FILES['unknown_file'];
+		$filename = $f['tmp_name'];
+		$name = $f['name'];
+		if(empty($name)) return "empty files";
+		$namearr = explode('.', $name);
+		$name = $barcode.".".end($namearr);
+
+		$hash = FileRepo::uploadHash($record, FileRepo::UNKNOWN_RTS);
+		if(!is_uploaded_file($filename)) return false;
+		$thisHash = $hash;
+		$filesize = filesize($filename);
+		$date = date('Y-m-d H:i:s');
+		$fileHash = hash_file('crc32b', $filename).hash('crc32b', $filesize);
+		$finfo = finfo_open(FILEINFO_MIME_TYPE);
+		$mime = finfo_file($finfo, $f['tmp_name']);
+		$fr = Service::updateUploadSingleFile($filesize,$date,$fileHash,$finfo,$mime,$filename,$name, $thisHash,false,false,false,true,FileRepo::ACTIVE);
+
+		echo 'done';
+	}
+
+	public function actionUploadRTSReason()
+	{
+		$rtsProcessService = new RtsProcessService();
+		$barcode = $_GET["barcode"];
+		$location = $_GET["location"];
+		$id = $_GET["id"];
+		$sn = $_GET["sn"];
+		$reason = $_GET["reason"];
+		$record = ShipmentRtsRecord::model()->find("(shipment_id=:shipment_id and sn = :sn) or (adjust_shipment_id=:shipment_id and adjust_sn = :sn)",[":shipment_id"=>$id,":sn"=>$sn]);
+		$locationObj = WmsLocation::model()->find('name = :code OR code = :code', [':code' => $location]);
+		if(empty($locationObj))
+		{
+			echo "location not found please input the correct location before submit";
+			return;
+		}
+
+		if(empty($record))
+		{
+			$record = new ShipmentRtsRecord();
+			$record->barcode = $barcode;
+			$record->type = ShipmentRtsRecord::KNOWN;
+			$record->reason = $reason;
+			$record->shipment_id = $id;
+			$record->sn = $sn;
+			$record->user_id = User::currentUserID();
+			$record->location_id = $locationObj->id;
+			$record->warehouse_id = $rtsProcessService->getDptId();
+			$record->agent_id = Shipment::model()->findByPk($id)->agent_id;
+			$record->status = ShipmentRtsRecord::NEW;
+			$record->record_time = date("Y-m-d H:i:s");
+			$record->save();
+		}else
+		{
+			$record->shipment_id = $id;
+			$record->sn = $sn;
+			$record->barcode = $barcode;
+			$record->reason = $reason;
+			$record->type = ShipmentRtsRecord::KNOWN;
+			$record->warehouse_id = $rtsProcessService->getDptId();
+			$record->user_id = User::currentUserID();
+			$record->location_id = $locationObj->id;
+			$record->agent_id = Shipment::model()->findByPk($id)->agent_id;
+			$record->status = ShipmentRtsRecord::NEW;
+			$record->record_time = date("Y-m-d H:i:s");
+			$record->save();
+		}
+
+		$wrs = WmsRackShipment::model()->find('shipment_id = :sid AND sno = :sn', [':sid' => $id, ':sn' => $sn]);
+		if(!empty($wrs)){
+			$wrs->status=WmsRackShipment::REMOVED;
+			$wrs->save();
+		}
+
+		$wrs = new WmsRackShipment('create');
+		$wrs->shipment_id = $id;
+		$wrs->sno = $sn;
+		$wrs->barcode = $barcode;
+		// $wrs->sno = 0;
+		$wrs->rack_id = $locationObj->id;
+		$wrs->save();
+
+
+		if(!empty($_FILES['record_file']['name']))
+		{
+			$p = Shipment::model()->findByPk($id);
+			$f = $_FILES['record_file'];
+			$filename = $f['tmp_name'];
+			$name = $f['name'];
+			$namearr = explode('.', $name);
+			$name = $barcode."_".$sn.".".end($namearr);
+
+			$hash = FileRepo::uploadHash($p, FileRepo::KNOWN_RTS);
+			if(!is_uploaded_file($filename)) return false;
+			$thisHash = $hash;
+			$filesize = filesize($filename);
+			$date = date('Y-m-d H:i:s');
+			$fileHash = hash_file('crc32b', $filename).hash('crc32b', $filesize);
+			$finfo = finfo_open(FILEINFO_MIME_TYPE);
+			$mime = finfo_file($finfo, $f['tmp_name']);
+			$fr = Service::updateUploadSingleFile($filesize,$date,$fileHash,$finfo,$mime,$filename,$name, $thisHash,false,false,false,true,FileRepo::ACTIVE);
+		}
+		echo 'done';
+	}
+	public function actionPrintAdjustShipmentLabel($id)
+	{
+		$sn = $_GET['sno'];
+		$model=ShipmentRtsRecord::model()->findByPk($id);
+		$model->is_print = 1;
+		$model->status = ShipmentRtsRecord::PRINTED_UNKNOWN;
+		$model->save();
+		$model->log("print unknown label");
+
+		$labelService = new LabelService();
+		$labelService->printLabel($model->adjust_shipment_id,false,$sn);
+	}
+
+	public function actionConfirmDiscard()
+	{
+		$model=ShipmentRtsRecord::model()->findByPk($id);
+		if($model->type==ShipmentRtsRecord::KNOWN)
+		{
+		 	$model->shipment->status = ImParcel::RTS_DISCARDED;
+		 	$model->shipment->update(['status']);
+			$model->status = ShipmentRtsRecord::KNOWN_DISCARD_DONE;
+		}else
+		{
+			$model->status = ShipmentRtsRecord::UNKNOWN_DISCARD_DONE;
+		}
+		$model->save();
+	}
+
+	public function actionExportRTSResendList()
+	{
+		$warehouseService = new WarehouseService();
+		$model = new ShipmentRtsRecordConfirm('search');
+		$model->unsetAttributes();
+		$model->status = ShipmentRtsRecordConfirm::RTS_WAITING_RESEND;
+		$model->warehouse_id = $warehouseService->getDptId();
+		if(!empty($_GET['ShipmentRtsRecordConfirm']))
+		{
+			print_r($_GET['ShipmentRtsRecordConfirm']);
+			$model->setAttributes($_GET['ShipmentRtsRecordConfirm']);
+		}
+		$data = $model->search(false,50)->data;
+		oPDF::renderPDF('rts_resend_list', ['data' => $data]);
+	}
+
+	public function actionRtsInvoice($id)
+	{
+		$shipmentRtsRecordConfirm = ShipmentRtsRecordConfirm::model()->findByPk($id);
+		$invoice = $shipmentRtsRecordConfirm->getInvoice();
+		$invoiceService = new InvoiceService();
+		$invoiceService->printInvoice($invoice->id);
+
+
+	}
+
+
+}

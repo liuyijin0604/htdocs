@@ -1,0 +1,1048 @@
+<?php
+//ob_start();
+class PriceEnquiryController extends Controller
+{
+    /**
+	 * Declares class-based actions.
+	 */
+    protected $nonAjax = array('externalPriceEnquiry','containerQuotationPage');
+    protected $skipAcl = array('externalPriceEnquiry','containerQuotationPage');
+    protected $skipLogin = array('externalPriceEnquiry','containerQuotationPage');
+
+
+    public function actionPriceEnquiry()
+    {
+        $this->render('price_enquiry', [
+            'model' => null,
+        ]);
+    }
+
+    public function actionEdit()
+    {
+
+        if (!empty($_POST)) {
+            if (!empty($_POST['id'])) {
+                (new CPriceEnquiry)->funcUpdate(
+                    $_POST['id'],
+                    $_POST['address'],
+                    $_POST['weight'],
+                    $_POST['length'],
+                    $_POST['width'],
+                    $_POST['height'],
+                    $_POST['quantity'],
+                    $_POST['note'],
+                    '',
+                    '',
+                    PriceEnquiry::status_new
+                );
+            } else {
+            }
+
+            echo json_encode(['isSuccess' => true]);
+            return;
+        } else {
+            // get
+            if (isset($_GET['id'])) {
+                $numId = $_GET['id'];
+                $objPriceEnquiry = PriceEnquiry::model()->findByPk($numId);
+            } else {
+                $objPriceEnquiry = new PriceEnquiry;
+                $objPriceEnquiry->status = PriceEnquiry::status_new;
+            }
+
+            $this->layout = 'pe';
+            $this->render('edit', [
+                'model' => $objPriceEnquiry,
+            ]);
+        }
+    }
+
+    public function actionQuickEnquary()
+    {
+        if (!empty($_POST)) {
+            if (!empty($_POST['id'])) {
+                (new CPriceEnquiry)->funcUpdate(
+                    $_POST['id'],
+                    $_POST['address'],
+                    $_POST['weight'],
+                    $_POST['length'],
+                    $_POST['width'],
+                    $_POST['height'],
+                    $_POST['quantity'],
+                    $_POST['note'],
+                    '',
+                    '',
+                    PriceEnquiry::status_new
+                );
+            } else {
+            }
+
+            echo json_encode(['isSuccess' => true]);
+            return;
+        } else {
+            // get
+            if (isset($_GET['id'])) {
+                $numId = $_GET['id'];
+                $objPriceEnquiry = PriceEnquiry::model()->findByPk($numId);
+            } else {
+                $objPriceEnquiry = new PriceEnquiry;
+                $objPriceEnquiry->status = PriceEnquiry::status_new;
+            }
+
+            $this->layout = 'pe';
+            $this->render('quickenquiry', [
+                'model' => $objPriceEnquiry,
+            ]);
+        }
+    }
+
+    public function actionExcel()
+    {
+        if (empty($_POST)) {
+            $objPriceEnquiry = new PriceEnquiry;
+            $objPriceEnquiry->status = PriceEnquiry::status_new;
+            $this->layout = 'pe';
+            $this->render('enquiry_excel', [
+                'model' => $objPriceEnquiry,
+            ]);
+        }
+    }
+
+    public function actionCancel()
+    {
+        if (!empty($_POST)) {
+            $numId = $_POST['id'];
+            $objPriceEnquiry = PriceEnquiry::model()->findByPk($numId);
+            $objPriceEnquiry->status = PriceEnquiry::status_canceled;
+            $objPriceEnquiry->save();
+        }
+        echo json_encode([
+            'isSuccess' => true,
+            'strMessage' => 'canceled',
+        ]);
+    }
+
+    public function actionView()
+    {
+
+        $numId = $_GET['id'];
+        $objPriceEnquiry = PriceEnquiry::model()->findByPk($numId);
+
+        $this->layout = 'pe';
+        $this->render('view', [
+            'model' => $objPriceEnquiry,
+        ]);
+    }
+
+    public function actionAjaxQuickEnquiry()
+    {
+        $numTotalWeight = 0;
+        $numTotalQty = 0;
+        $numTotalDimension = 0;
+        $listItem = [];
+
+        $p = new ImParcel;
+        if (isset($_POST['length'])) {
+            $item = new stdClass;
+            $item->category = 'carton';
+            $item->quantity = 1;
+            $item->length = $_POST['length'];
+            $item->width = 1;
+            $item->height = 1;
+            if($_POST['length']*250>$_POST['weight']){
+                $item->weight = $_POST['length']*250;
+            }else{
+                $item->weight = $_POST['weight'];
+            }
+            $listItem[] = $item;
+            $numTotalWeight += $item->weight * $item->quantity;
+            $numTotalQty += $item->quantity;
+            $numTotalDimension += ($item->length * $item->width * $item->height) * $item->quantity;
+
+            $p->pkg = $numTotalQty;
+            $p->weight = sprintf('%0.2f', round($numTotalWeight * 100) / 100);
+            $p->cbm = round(($numTotalDimension/1000000)/$numTotalQty,6);
+
+            $ae = new Addr;
+            $ae->suburb = $_POST['suburb'];
+            $ae->postcode = $_POST['postcode'];
+            //$ae->address = $_POST['address'];
+            $ae->save();
+            $p->cnee_id = $ae->id;
+            $p->mdata['cargo_delivery'] = 1;
+        } else {
+            return;
+        }
+        if(!empty($_POST['postcode'])){
+            $srtState = Postcode::getStateByPostcode($_POST['postcode']);
+        }
+
+
+        if(!Postcode::validateAddress($_POST['suburb'],$srtState,$_POST['postcode'])){
+            echo json_encode([
+                'strMessage' => "Suburb,state,postcode combination wrong.",
+            ]);
+            return;
+        }
+
+        $objCShowPrice = new CShowPrice;
+        $objCShowPrice->funShowQuickEnqiry(
+            $_POST['Depot'],
+            $_POST['postcode'],
+            $listItem,
+            $_POST['have_forklift'] == "Yes",
+            Yii::app()->user->org,
+            $p,
+            $_POST['suburb'],
+        );
+
+        $listResult = [];
+        $listResult['base_TLD'] = $objCShowPrice->getBaseTld();
+        $listResult['oversize_TLD'] = $objCShowPrice->getOversizeTld();
+        $listResult['tailgate_TLD'] = $objCShowPrice->getUnloadingTld();
+
+        $listResult['base_Toll'] = $objCShowPrice->getBaseToll();
+        $listResult['oversize_Toll'] = $objCShowPrice->getOversizeToll();
+
+        if ($objCShowPrice->getBaseTld() == 0 || $objCShowPrice->getOversizeTld() > 0 || $objCShowPrice->getUnloadingTld() > 0) {
+
+            echo json_encode([
+                'isSuccess' => true,
+                'enumPeTpey' => $objCShowPrice->getPeType(),
+                'data' => $listResult,
+                'numTotalWeight' => $numTotalWeight,
+                'numTotalQty' => $numTotalQty,
+                'numTotalDimension' => $numTotalDimension,
+                'isCode' => true,
+                'paid_by' => $_POST['paid_by'],
+            ]);
+            return;
+        } else {
+            echo json_encode([
+                'isSuccess' => true,
+                'isCode' => false,
+                'enumPeTpey' => $objCShowPrice->getPeType(),
+                'data' => $listResult,
+                'numTotalWeight' => $numTotalWeight,
+                'numTotalQty' => $numTotalQty,
+                'numTotalDimension' => $numTotalDimension,
+                'paid_by' => $_POST['paid_by'],
+            ], -1);
+            return;
+        }
+    }
+
+    public function actionShowPrice()
+    {
+        //Excel to $_post
+        if (!empty($_POST['is_excel'])) {
+            if (empty($_FILES['excel'])) {
+                echo json_encode([
+                    'isSuccess' => false,
+                    'strMessage' => 'please select Excel',
+                ]);
+                return;
+            }
+            $strExcelName = $_FILES['excel']['tmp_name'];
+            $objCExcel2Post = new CExcel2Post($strExcelName);
+            $listPost = $objCExcel2Post->funcToPost();
+            $_POST = $listPost;
+        }
+
+        $p = new ImParcel;
+
+        $numTotalWeight = 0;
+        $numTotalQty = 0;
+        $numTotalDimension = 0;
+        $listItem = [];
+        for ($i = 1; true; $i++) {
+            if (isset($_POST['length_' . $i])) {
+                $item = new stdClass;
+                $item->category = $_POST['Category_' . $i];
+                $item->quantity = $_POST['quantity_' . $i];
+                $item->length = $_POST['length_' . $i];
+                $item->width = $_POST['width_' . $i];
+                $item->height = $_POST['height_' . $i];
+                $item->weight = $_POST['weight_' . $i];
+                $listItem[] = $item;
+                $numTotalWeight += $item->weight * $item->quantity;
+                $numTotalQty += $item->quantity;
+                $numTotalDimension += ($item->length * $item->width * $item->height / 1000000) * $item->quantity;
+                for($j=$item->quantity;$j>0;$j--){
+                    $p->packs[]=[
+                        'weight'=>$_POST['weight_' . $i],
+                        'length'=>$_POST['length_' . $i],
+                        'height'=>$_POST['height_' . $i],
+                        'width'=>$_POST['width_' . $i],
+                        'reference'=>0,
+                        'cbm'=>($_POST['height_' . $i]*$_POST['length_' . $i]*$_POST['weight_' . $i])/1000000
+                    ];
+                }
+            } else {
+                break;
+            }
+        }
+        $p->pkg = $numTotalQty;
+        $p->weight = sprintf('%0.2f', round($numTotalWeight * 100) / 100);
+        $p->cbm = round($numTotalDimension/$numTotalQty,6);
+        $p->consol_id = 0;
+
+        $ae = new Addr;
+        $ae->suburb = $_POST['suburb'];
+        $ae->postcode = $_POST['postcode'];
+        $ae->address = $_POST['address'];
+        $ae->save();
+        $p->cnee_id = $ae->id;
+        $p->mdata['cargo_delivery'] = 1;
+
+        //$total = $p->getChargeByChargecode(4281);
+		//$surcharge = $p->getChargeByChargecode(4281,false,null,true,false,true);
+
+        $objCPriceEnquiry = new CPriceEnquiry;
+        // $listResult = $objCPriceEnquiry->funcShowPrice(
+        //     $_POST['Depot'],
+        //     $_POST['postcode'],
+        //     isset($_POST['mannual_unloading'])?$_POST['mannual_unloading']:'',
+        //     isset($_POST['tailgate_unloading'])?$_POST['tailgate_unloading']:'',
+        //     $listItem,
+        //     Yii::app()->user->org,
+        // );
+
+        $objCShowPrice = new CShowPrice;
+        $objCShowPrice->funcShowPrice(
+            $_POST['Depot'],
+            $_POST['postcode'],
+            $_POST['have_forklift'] == "Yes",
+            $listItem,
+            Yii::app()->user->org,
+            $p
+        );
+
+        $listResult = [];
+        $listResult['base_TLD'] = $objCShowPrice->getBaseTld();
+        $listResult['oversize_TLD'] = $objCShowPrice->getOversizeTld();
+        $listResult['tailgate_TLD'] = $objCShowPrice->getUnloadingTld();
+
+        $listResult['base_Toll'] = $objCShowPrice->getBaseToll();
+        $listResult['oversize_Toll'] = $objCShowPrice->getOversizeToll();
+
+        if ($objCShowPrice->getBaseTld() == 0 || $objCShowPrice->getOversizeTld() > 0 || $objCShowPrice->getUnloadingTld() > 0) {
+
+            $objPriceEnquiry = (new CPriceEnquiry)->funcNew(
+                $_POST['Depot'],
+                $_POST['address'],
+                $_POST['suburb'],
+                $_POST['postcode'],
+                '',
+                '',
+                $_POST['have_forklift'],
+                '',
+                $_POST['note'],
+                $_POST['paid_by'],
+                $_POST['name'],
+                $_POST['tel'],
+                $_POST['email'],
+                Yii::app()->user->org,
+                $listItem
+            );
+
+
+
+            $objPriceEnquiry->mdata['base_TLD'] = $objCShowPrice->getBaseTld();
+            $objPriceEnquiry->mdata['oversize_TLD'] = $objCShowPrice->getOversizeTld();
+            $objPriceEnquiry->mdata['tailgate_TLD'] = $objCShowPrice->getUnloadingTld();
+
+            $objPriceEnquiry->mdata['base_Toll'] = $objCShowPrice->getBaseToll();
+            $objPriceEnquiry->mdata['oversize_Toll'] = $objCShowPrice->getOversizeToll();
+
+            if ($objPriceEnquiry->mdata['base_TLD'] == 0 || $objPriceEnquiry->mdata['oversize_TLD'] > 0 || $objPriceEnquiry->mdata['tailgate_TLD'] > 0) {
+                $objPriceEnquiry->mdata['listLog'] = [];
+                $objPriceEnquiry->mdata['listLog'][] = $objPriceEnquiry->date . '-' . PriceEnquiry::listStatus[PriceEnquiry::status_new];
+            } else {
+                $objPriceEnquiry->mdata['listLog'] = [];
+                $objPriceEnquiry->mdata['listLog'][] = $objPriceEnquiry->date . '-' . PriceEnquiry::listStatus[PriceEnquiry::status_wait_quo];
+            }
+
+            // pictures
+            if (empty($_POST['is_excel'])) {
+                foreach ($_FILES as $objFile) {
+                    $numId = FileRepo::storeFile($objFile['tmp_name'], $objFile['name'], FileRepo::type_price_enquiry, 0);
+                    $objFileRepo = FileRepo::model()->findByPk($numId);
+                    $strUrlPrefix = 'https://' . $_SERVER['HTTP_HOST'];
+                    if ($_SERVER['HTTP_HOST'] == 'localhost:82') {
+                        $strUrlPrefix = 'http://localhost:82';
+                    }
+                    $strUrl = $strUrlPrefix . '/filerepo/' . $objFileRepo->hash . '/' . $objFileRepo->name;
+                    $objPriceEnquiry->mdata['listPicture'][] = $strUrl;
+                }
+            }
+
+
+            $objPriceEnquiry->save();
+
+            echo json_encode([
+                'isSuccess' => true,
+                'enumPeTpey' => $objCShowPrice->getPeType(),
+                'data' => $listResult,
+                'numTotalWeight' => $numTotalWeight,
+                'numTotalQty' => $numTotalQty,
+                'numTotalDimension' => $numTotalDimension,
+                'isCode' => true,
+                'code' => $objPriceEnquiry->code,
+                'paid_by' => $_POST['paid_by'],
+            ]);
+            return;
+        } else {
+            echo json_encode([
+                'isSuccess' => true,
+                'isCode' => false,
+                'enumPeTpey' => $objCShowPrice->getPeType(),
+                'data' => $listResult,
+                'numTotalWeight' => $numTotalWeight,
+                'numTotalQty' => $numTotalQty,
+                'numTotalDimension' => $numTotalDimension,
+                'paid_by' => $_POST['paid_by'],
+            ], -1);
+            return;
+        }
+    }
+
+    public function actionExternalPriceEnquiry()
+    {
+        $this->layout = false;
+        if (empty($_POST)) {
+            $this->render('external_price_enquiry');
+        } else {
+            $itemCount = $_POST['itemCount'];
+            $model = [];
+            $p = new ImParcel;
+
+            $numTotalWeight = 0;
+            $numTotalQty = 0;
+            $numTotalDimension = 0;
+            $listItem = [];
+            for ($i = 1; $i <= $itemCount; $i++) {
+                $item = new stdClass;
+                $item->category = $_POST['category_' . $i];
+                $item->quantity = $_POST['quantity_' . $i];
+                $item->length = $_POST['length_' . $i];
+                $item->width = $_POST['width_' . $i];
+                $item->height = $_POST['height_' . $i];
+                $item->weight = $_POST['weight_' . $i];
+                $listItem[] = $item;
+                $numTotalWeight += $item->weight * $item->quantity;
+                $numTotalQty += $item->quantity;
+                $numTotalDimension += ($item->length * $item->width * $item->height / 1000000) * $item->quantity;
+                for($j=$item->quantity;$j>0;$j--){
+                    $p->packs[]=[
+                        'weight'=>$_POST['weight_' . $i],
+                        'length'=>$_POST['length_' . $i],
+                        'height'=>$_POST['height_' . $i],
+                        'width'=>$_POST['width_' . $i],
+                        'reference'=>0,
+                        'cbm'=>($_POST['height_' . $i]*$_POST['length_' . $i]*$_POST['weight_' . $i])/1000000
+                    ];
+                }
+            }
+            $p->pkg = $numTotalQty;
+            $p->weight = sprintf('%0.2f', round($numTotalWeight * 100) / 100);
+            $p->cbm = round(($numTotalDimension/1000000)/$numTotalQty,6);
+
+            $ae = new Addr;
+            $ae->suburb = $_POST['suburb'];
+            $ae->postcode = $_POST['postcode'];
+            $ae->address = $_POST['address'];
+            $ae->save();
+            $p->cnee_id = $ae->id;
+            $p->mdata['cargo_delivery'] = 1;
+
+            $objCShowPrice = new CShowPrice;
+            $objCShowPrice->funcShowPrice(
+                $_POST['depot'],
+                $_POST['postcode'],
+                $_POST['forklift'] == "Yes",
+                $listItem,
+                4246,
+                $p
+            );
+    
+            $listResult = [];
+            $listResult['base_TLD'] = $objCShowPrice->getBaseTld();
+            $listResult['oversize_TLD'] = $objCShowPrice->getOversizeTld();
+            $listResult['tailgate_TLD'] = $objCShowPrice->getUnloadingTld();
+    
+            $listResult['base_Toll'] = $objCShowPrice->getBaseToll();
+            $listResult['oversize_Toll'] = $objCShowPrice->getOversizeToll();
+            
+            $objPriceEnquiry = (new CPriceEnquiry)->funcNew(
+                    $_POST['depot'],
+                    $_POST['address'],
+                    $_POST['suburb'],
+                    $_POST['postcode'],
+                    '',
+                    '',
+                    $_POST['forklift'],
+                    '',
+                    $_POST['note'],
+                    $_POST['paid_by'],
+                    $_POST['name'],
+                    $_POST['tel'],
+                    $_POST['email'],
+                    4246,
+                    $listItem
+                );
+    
+    
+    
+            $objPriceEnquiry->mdata['base_TLD'] = $objCShowPrice->getBaseTld();
+            $objPriceEnquiry->mdata['oversize_TLD'] = $objCShowPrice->getOversizeTld();
+            $objPriceEnquiry->mdata['tailgate_TLD'] = $objCShowPrice->getUnloadingTld();
+            $objPriceEnquiry->mdata['base_Toll'] = $objCShowPrice->getBaseToll();
+            $objPriceEnquiry->mdata['oversize_Toll'] = $objCShowPrice->getOversizeToll();
+            
+            if ($objPriceEnquiry->mdata['base_TLD'] == 0 || $objPriceEnquiry->mdata['oversize_TLD'] > 0 || $objPriceEnquiry->mdata['tailgate_TLD'] > 0) {
+                $objPriceEnquiry->mdata['listLog'] = [];
+                $objPriceEnquiry->mdata['listLog'][] = $objPriceEnquiry->date . '-' . PriceEnquiry::listStatus[PriceEnquiry::status_new];
+            } else {
+                $objPriceEnquiry->mdata['listLog'] = [];
+                $objPriceEnquiry->mdata['listLog'][] = $objPriceEnquiry->date . '-' . PriceEnquiry::listStatus[PriceEnquiry::status_wait_quo];
+            }
+            $objPriceEnquiry->save();
+
+            $model['peNumber'] = $objPriceEnquiry->code;
+            $model['result'] = $listResult;
+            $model['totalWeight'] = $numTotalWeight;
+            $model['totalQuantity'] = $numTotalQty;
+            $model['totalDimension'] = $numTotalDimension;
+            
+            $this->render('external_price_enquiry', ['model' => $model]);
+        }
+    }
+
+    public function actionSendPriceEnquiryEmail()
+    {
+        $peNumber = $_GET['peNumber'];
+        $totalDimension = $_GET['totalCBM'];
+        $pe = PriceEnquiry::model()->findByAttributes(['code' => $peNumber]);
+        if (!empty($pe)) {
+            $emailService = new EmailService();
+            $emailService->sendPriceEnquiryEmail($pe, $totalDimension);
+        }
+    }
+
+    public function actionContainerQuotationPage()
+    {
+        $this->render('container_quotation_calculator');
+    }
+}
+
+
+class CPriceEnquiry
+{
+
+    public function funcNew(
+        $Depot,
+        $address,
+        $suburb,
+        $postcode,
+        $address_type,
+        $mannual_unloading,
+        $tailgate_unloading,
+        $dangerous_goods,
+        $note,
+        $paid_by,
+        $name,
+        $tel,
+        $email,
+        $org_id,
+        $listItem
+    ) {
+        $objPriceEnquiry = new PriceEnquiry();
+
+        $objPriceEnquiry->depot = $Depot;
+        $objPriceEnquiry->address = $address;
+        $objPriceEnquiry->suburb = $suburb;
+        $objPriceEnquiry->postcode = $postcode;
+        $objPriceEnquiry->address_type = $address_type;
+        $objPriceEnquiry->mannual_unloading = $mannual_unloading;
+        $objPriceEnquiry->tailgate_unloading = $tailgate_unloading;
+        $objPriceEnquiry->dangerous_goods = $dangerous_goods;
+        $objPriceEnquiry->note = $note;
+        $objPriceEnquiry->paid_by = $paid_by;
+
+        $objPriceEnquiry->name = $name;
+        $objPriceEnquiry->tel = $tel;
+        $objPriceEnquiry->email = $email;
+        $objPriceEnquiry->org_id = $org_id;
+
+        $numWeight = 0;
+        $numQuantity = 0;
+        foreach ($listItem as $objItem) {
+            $numWeight += $objItem->weight * $objItem->quantity;
+            $numQuantity += $objItem->quantity;
+        }
+        $objPriceEnquiry->weight = $numWeight;
+        $objPriceEnquiry->quantity = $numQuantity;
+
+        $objPriceEnquiry->mdata['listItem'] = $listItem;
+
+        $objPriceEnquiry->date =  date('Y-m-d H:i:s');
+
+        $objPriceEnquiry->status = PriceEnquiry::status_new;
+
+        $objPriceEnquiry->save();
+        $objPriceEnquiry->code =  'PE' . str_pad($objPriceEnquiry->id, 8, "0", STR_PAD_LEFT);
+        $objPriceEnquiry->save();
+
+        return $objPriceEnquiry;
+    }
+
+
+
+    public function funcUpdate($id, $address, $weight, $length, $width, $height, $quantity, $note, $cost, $price, $status)
+    {
+        $objPriceEnquiry = PriceEnquiry::model()->findByPk($id);
+
+        $objPriceEnquiry->address = $address;
+        $objPriceEnquiry->weight = $weight;
+        $objPriceEnquiry->length = $length;
+        $objPriceEnquiry->width = $width;
+        $objPriceEnquiry->height = $height;
+        $objPriceEnquiry->quantity = $quantity;
+        $objPriceEnquiry->note = $note;
+        $objPriceEnquiry->cost = $cost;
+        $objPriceEnquiry->price = $price;
+        $objPriceEnquiry->status = $status;
+
+        $objPriceEnquiry->save();
+    }
+}
+
+class CShowPrice
+{
+    const enum_pe_normal = 10;
+    const enum_pe_out_postcode = 20;
+    const enum_pe_oversize = 30;
+    const enum_pe_height = 40;
+
+
+    private $numBaseTld = 0;
+    private $numOversizeTld = 0;
+    private $numUnloadingTld = 0;
+
+    private $numBaseToll = 0;
+    private $numOversizeToll = 0;
+
+    private $enumPeType = null;
+
+    public function getBaseTld()
+    {
+        return $this->numBaseTld;
+    }
+    public function getOversizeTld()
+    {
+        return $this->numOversizeTld;
+    }
+    public function getUnloadingTld()
+    {
+        return $this->numUnloadingTld;
+    }
+    public function getBaseToll()
+    {
+        return $this->numBaseToll;
+    }
+    public function getOversizeToll()
+    {
+        return $this->numOversizeToll;
+    }
+    public function getPeType()
+    {
+        return $this->enumPeType;
+    }
+
+    private function funcPeType($listItem)
+    {
+
+        // if($this->numBaseTld=0){
+        //     $this->enumPeType=self::enum_pe_out_postcode;
+        // }
+
+        foreach ($listItem as $objItem) {
+            if ($objItem->height > 210) {
+                $this->enumPeType = self::enum_pe_height;
+            }
+        }
+    }
+
+    public function funShowQuickEnqiry($depot, $postcode, $listItem, $forklift, $org_id,$shipment,$suburb="")
+    {
+
+        $numWeight = 0;
+        $numQuantity = 0;
+        $numCbm = 0;
+        foreach ($listItem as $objItem) {
+            $numWeight += $objItem->weight * $objItem->quantity;
+            $numQuantity += $objItem->quantity;
+            $numCbm += $objItem->length * $objItem->width * $objItem->height * $objItem->quantity;
+        }
+
+        $listResult = [];
+
+        $dicDepot2Chargecode = [
+            'Sydney' => [
+                'TLD' => 'Sydney_TLD_Chargecode',
+                'Toll' => 'Sydney_Toll_Chargecode',
+                // 'Allied'=>'Sydney_Allied_Chargecode',
+                // 'TNT'=>'Sydney_TNT_Chargecode',
+            ],
+            'Melbourne' => [
+                'TLD' => 'Melbourne_TLD_Chargecode',
+                'Toll' => 'Melbourne_Toll_Chargecode',
+                // 'Allied'=>'Melbourne_Allied_Chargecode',
+                // 'TNT'=>'Melbourne_TNT_Chargecode',
+            ],
+            'Brisbane' => [
+                'TLD' => 'Brisbane_TLD_Chargecode',
+                'Toll' => 'Brisbane_Toll_Chargecode',
+                // 'Allied'=>'Brisbane_Allied_Chargecode',
+                // 'TNT'=>'Brisbane_TNT_Chargecode',
+            ],
+            'Perth' => [
+                'TLD' => 'Perth_TLD_Chargecode',
+                'Toll' => 'Perth_Toll_Chargecode',
+                // 'Allied'=>'Perth_Allied_Chargecode',
+                // 'TNT'=>'Perth_TNT_Chargecode',
+            ],
+            'Adelaide' => [
+                'TLD' => 'Adelaide_TLD_Chargecode',
+                'Toll' => 'Adelaide_Toll_Chargecode',
+            ]
+        ];
+
+        $dicCourier2Chargecode = $dicDepot2Chargecode[$depot];
+        $objOrg = Org::model()->findByPk($org_id);
+        if($forklift=="Yes"){
+            $numChargeCodeTld =  $objOrg->extra['Has_TLD_Chargecode'];
+        }else{
+            $numChargeCodeTld =  $objOrg->extra['No_TLD_Chargecode'];
+        }
+        //$numChargeCodeTld =  $objOrg->extra[$dicCourier2Chargecode['TLD']];
+        $numChargeCodeToll =  $objOrg->extra[$dicCourier2Chargecode['Toll']];
+        if (!empty($numChargeCodeTld) && !empty($numChargeCodeToll)) {
+            //base Tld
+            $strBasePrice = round($shipment->getChargeByChargecode($numChargeCodeTld),2);
+            $this->numBaseTld =  $strBasePrice;
+
+            $numPriceOversize = $shipment->getChargeByChargecode($numChargeCodeTld,false,null,true,false,true);
+            $this->numOversizeTld = $numPriceOversize['amount'];
+            //base Toll
+            $objChargeCodePrice = FactoryCourierPrice::funcChargeCodePrice($numChargeCodeToll);
+            if ($objChargeCodePrice->funcIsCalculateCbm()) {
+                $strBasePrice =  round($objChargeCodePrice->funcPrice($postcode, max($numCbm, $numWeight / 250)), 2);
+            } else {
+                $strBasePrice =  round($objChargeCodePrice->funcPrice($postcode, max($numWeight, $numCbm * 250)), 2);
+            }
+
+            $strRemoteCost =  $objChargeCodePrice->funGetRemoteCost($postcode,$suburb,max($numWeight, $numCbm * 250));
+            $this->numOversizeToll = $strRemoteCost;
+
+            $this->numBaseToll =  $strBasePrice;
+            // $this->numOversizeTld = 0;
+            // $this->numOversizeToll = 0;
+            $this->numUnloadingTld = 0;
+        }
+    }
+
+    public function funcShowPrice(
+        $depot,
+        $postcode,
+        $have_forklift,
+        $listItem,
+        $org_id,
+        $shipment
+    ) {
+        $this->funcPeType($listItem);
+        if ($this->enumPeType == self::enum_pe_height) {
+            return; // 如果高度超过2.1M，也不能出常规报价
+        }
+
+
+        $numWeight = 0;
+        $numQuantity = 0;
+        $numCbm = 0;
+        foreach ($listItem as $objItem) {
+            $numWeight += $objItem->weight * $objItem->quantity;
+            $numQuantity += $objItem->quantity;
+            $numCbm += $objItem->length * $objItem->width * $objItem->height / 1000000 * $objItem->quantity;
+        }
+
+        $listResult = [];
+
+        $dicDepot2Chargecode = [
+            'Sydney' => [
+                //'TLD' => 'Sydney_TLD_Chargecode',
+                'Toll' => 'Sydney_Toll_Chargecode',
+                // 'Allied'=>'Sydney_Allied_Chargecode',
+                // 'TNT'=>'Sydney_TNT_Chargecode',
+            ],
+            'Melbourne' => [
+                //'TLD' => 'Melbourne_TLD_Chargecode',
+                'Toll' => 'Melbourne_Toll_Chargecode',
+                // 'Allied'=>'Melbourne_Allied_Chargecode',
+                // 'TNT'=>'Melbourne_TNT_Chargecode',
+            ],
+            'Brisbane' => [
+                //'TLD' => 'Brisbane_TLD_Chargecode',
+                'Toll' => 'Brisbane_Toll_Chargecode',
+                // 'Allied'=>'Brisbane_Allied_Chargecode',
+                // 'TNT'=>'Brisbane_TNT_Chargecode',
+            ],
+            'Perth' => [
+                //'TLD' => 'Perth_TLD_Chargecode',
+                'Toll' => 'Perth_Toll_Chargecode',
+                // 'Allied'=>'Perth_Allied_Chargecode',
+                // 'TNT'=>'Perth_TNT_Chargecode',
+            ],
+            'Adelaide' => [
+                //'TLD' => 'Adelaide_TLD_Chargecode',
+                'Toll' => 'Adelaide_Toll_Chargecode',
+                // 'Allied'=>'Adelaide_Allied_Chargecode',
+                // 'TNT'=>'Adelaide_TNT_Chargecode',
+            ]
+
+        ];
+
+        $dicCourier2Chargecode = $dicDepot2Chargecode[$depot];
+        $objOrg = Org::model()->findByPk($org_id);
+        if($have_forklift=="Yes"){
+            $numChargeCodeTld =  $objOrg->extra['Has_TLD_Chargecode'];
+        }else{
+            $numChargeCodeTld =  $objOrg->extra['No_TLD_Chargecode'];
+        }
+        //$numChargeCodeTld =  $objOrg->extra[$dicCourier2Chargecode['TLD']];
+        $numChargeCodeToll =  $objOrg->extra[$dicCourier2Chargecode['Toll']];
+        if (!empty($numChargeCodeTld) && !empty($numChargeCodeToll)) {
+
+            $strBasePrice = round($shipment->getChargeByChargecode($numChargeCodeTld),2);
+            $this->numBaseTld =  $strBasePrice;
+
+            $objChargeCodePrice = FactoryCourierPrice::funcChargeCodePrice($numChargeCodeToll);
+            if ($objChargeCodePrice->funcIsCalculateCbm()) {
+                $strBasePrice =  round($objChargeCodePrice->funcPrice($postcode, max($numCbm, $numWeight / 250)), 2);
+            } else {
+                $strBasePrice =  round($objChargeCodePrice->funcPrice($postcode, max($numWeight, $numCbm * 250)), 2);
+            }
+            $this->numBaseToll =  $strBasePrice;
+
+            $numPriceOversize = $shipment->getChargeByChargecode($numChargeCodeTld,false,null,true,false,true);
+            $this->numOversizeTld = $numPriceOversize['amount'];
+
+            $objCourierSurcharge = FactoryCourierPrice::funcSurchargeEizToll();
+            $numPriceOversize = 0;
+            foreach ($listItem as $objItem) {
+                $objCourierSurcharge->funcSetItem($objItem->length, $objItem->width, $objItem->height, $objItem->weight);
+                $numPriceOversize += $objCourierSurcharge->funcOverSize() * $objItem->quantity;
+            }
+            $this->numOversizeToll = $numPriceOversize;
+
+            //base Tld
+            // $objChargeCodePrice = FactoryCourierPrice::funcChargeCodePrice($numChargeCodeTld);
+            // if ($objChargeCodePrice->funcIsCalculateCbm()) {
+            //     $strBasePrice =  round($objChargeCodePrice->funcPrice($postcode, max($numCbm, $numWeight / 250)), 2);
+            // } else {
+            //     $strBasePrice =  round($objChargeCodePrice->funcPrice($postcode, max($numWeight, $numCbm * 250)), 2);
+            // }
+            //$this->numBaseTld =  $strBasePrice;
+
+            //base Toll
+            // $objChargeCodePrice = FactoryCourierPrice::funcChargeCodePrice($numChargeCodeToll);
+            // if ($objChargeCodePrice->funcIsCalculateCbm()) {
+            //     $strBasePrice =  round($objChargeCodePrice->funcPrice($postcode, max($numCbm, $numWeight / 250)), 2);
+            // } else {
+            //     $strBasePrice =  round($objChargeCodePrice->funcPrice($postcode, max($numWeight, $numCbm * 250)), 2);
+            // }
+            // $this->numBaseToll =  $strBasePrice;
+
+            //oversize TLD
+            // $objCourierSurcharge = FactoryCourierPrice::funcSurchargeTLD();
+            // $numPriceOversize = 0;
+            // foreach ($listItem as $objItem) {
+            //     $objCourierSurcharge->funcSetItem($objItem->length, $objItem->width, $objItem->height, $objItem->weight);
+            //     $numPriceOversize += $objCourierSurcharge->funcOverSize() * $objItem->quantity;
+            // }
+            // $this->numOversizeTld = $numPriceOversize;
+
+            //oversize toll
+            // $objCourierSurcharge = FactoryCourierPrice::funcSurchargeEizToll();
+            // $numPriceOversize = 0;
+            // foreach ($listItem as $objItem) {
+            //     $objCourierSurcharge->funcSetItem($objItem->length, $objItem->width, $objItem->height, $objItem->weight);
+            //     $numPriceOversize += $objCourierSurcharge->funcOverSize() * $objItem->quantity;
+            // }
+            // $this->numOversizeToll = $numPriceOversize;
+
+            //unloading Tld
+            // $listCItem = FactoryCourierPrice::funcListItem($listItem);
+            // if ($depot == 'Brisbane') {
+            //     $objUnloadingPrice = FactoryCourierPrice::funcUnloadingPriceBNE($listCItem, $have_forklift);
+            // } else {
+            //     $objUnloadingPrice = FactoryCourierPrice::funcUnloadingPrice($listCItem, $have_forklift);
+            // }
+            // $objUnloadingPrice->funcPostcode2ZoneLevel($numChargeCodeTld, $postcode);
+            $this->numUnloadingTld = 0;
+        }
+    }
+}
+
+
+class CExcel2Post
+{
+    private $listRow = null;
+
+
+    function __construct($strExcelName)
+    {
+        $xls = new oExcel;
+        $xls->load($strExcelName);
+        $this->listRow = $xls->getAll();
+    }
+
+    private $dicCategory = [
+        'carton' => 'carton',
+        'pallet' => 'pallet',
+        'crate' => 'crate',
+        'carton' => 'carton',
+        'others' => 'others',
+    ];
+
+    private $dicDepot = [
+        'Sydney' => 'Sydney',
+        'Melbourne' => 'Melbourne',
+        'Brisbane' => 'Brisbane',
+        'Perth' => 'Perth',
+        'Adelaide' => 'Adelaide',
+    ];
+
+    private $dicAddressType = [
+        'Residential 私人地址' => 'Residential',
+        'Commercial without Unloading Facility 商业地址(不带叉车)' => 'Commercial',
+        'Commercial with Unloading Facility 商业地址(自备叉车)' => 'Commercial_Unloading',
+    ];
+
+    private $dicYesNo = [
+        'Yes' => 'Yes',
+        'No' => 'No',
+    ];
+
+    private $dicPaidBy = [
+        'Shipper 发货人' => 'Shipper',
+        'Receiver 收货人' => 'Receiver'
+    ];
+
+
+    function funcCheck()
+    {
+        $strError = '';
+
+        foreach ($this->listRow as $numLine => $arrayRow) {
+
+
+            if ($numLine == 1) {
+                continue;
+            }
+
+            if (!isset($dicCategory[$arrayRow[2]])) {
+                $strError += 'Category错误';
+            }
+
+            if (!is_numeric($arrayRow[3])) {
+                $strError += 'quantity请输入数字';
+            }
+            if (!is_numeric($arrayRow[4])) {
+                $strError += 'length请输入数字';
+            }
+            if (!is_numeric($arrayRow[5])) {
+                $strError += 'width请输入数字';
+            }
+            if (!is_numeric($arrayRow[6])) {
+                $strError += 'height请输入数字';
+            }
+            if (!is_numeric($arrayRow[7])) {
+                $strError += 'weight请输入数字';
+            }
+
+
+            if (!isset($dicDepot[$arrayRow[8]])) {
+                $strError += 'Depot错误';
+            }
+
+            if (empty($arrayRow[9])) {
+                $strError += 'address为空';
+            }
+            if (empty($arrayRow[10])) {
+                $strError += 'suburb为空';
+            }
+            if (empty($arrayRow[11])) {
+                $strError += 'postcode为空';
+            }
+
+            if (!isset($dicAddressType[$arrayRow[12]])) {
+                $strError += 'Address Type错误';
+            }
+            if (!isset($dicYesNo[$arrayRow[13]])) {
+                $strError += 'Mannual Unloading错误';
+            }
+            if (!isset($dicYesNo[$arrayRow[14]])) {
+                $strError += 'Tailgate Unloading错误';
+            }
+
+            if (!isset($dicPaidBy[$arrayRow[16]])) {
+                $strError += '付款人错误';
+            }
+
+            $listPost['name'] = $arrayRow[17];
+            $listPost['tel'] = $arrayRow[18];
+            $listPost['email'] = $arrayRow[19];
+        }
+
+        return $strError;
+    }
+
+    function funcToPost()
+    {
+        $listPost = [];
+        foreach ($this->listRow as $numLine => $arrayRow) {
+
+
+            if ($numLine == 1) {
+                continue;
+            }
+
+            $listPost['Category_' . ($numLine - 1)] = $arrayRow[2];
+            $listPost['quantity_' . ($numLine - 1)] = $arrayRow[3];
+            $listPost['length_' . ($numLine - 1)] = $arrayRow[4];
+            $listPost['width_' . ($numLine - 1)] = $arrayRow[5];
+            $listPost['height_' . ($numLine - 1)] = $arrayRow[6];
+            $listPost['weight_' . ($numLine - 1)] = $arrayRow[7];
+
+
+            $listPost['Depot'] = $arrayRow[8];
+            $listPost['address'] = $arrayRow[9];
+            $listPost['suburb'] = $arrayRow[10];
+            $listPost['postcode'] = $arrayRow[11];
+            $listPost['address_type'] = '';
+            $listPost['mannual_unloading'] = '';
+            $listPost['tailgate_unloading'] = '';
+            $listPost['have_forklift'] = $arrayRow[12];
+            $listPost['dangerous_goods'] = 'No';
+            $listPost['note'] = $arrayRow[13];
+            $listPost['paid_by'] = $this->dicPaidBy[$arrayRow[14]];
+            $listPost['name'] = $arrayRow[15];
+            $listPost['tel'] = $arrayRow[16];
+            $listPost['email'] = $arrayRow[17];
+        }
+
+
+        return $listPost;
+    }
+}

@@ -1,0 +1,442 @@
+<div class="pane">
+    <h1>Best Pricing Tool</h1>
+<div class="form" id="date-form">
+    <div>
+        <input type="hidden" name='tabid' value="<?=$_GET['tabid']?>"/>
+    </div>
+   <div class="row rowcol rowleft">
+       <?php echo CHtml::label('Start Date','start_date');?>
+        <?php echo CHtml::textField('start_date',date('Y-m-d'),array('class'=>'date_input','id'=>'start_date'.$_GET['tabid']));?>
+   </div>
+   <div class="row rowcol">
+       <?php echo CHtml::label('End Date','end_date');?>
+       <?php echo CHtml::textField('end_date',date('Y-m-d'),array('class'=>'date_input','id'=>'end_date'.$_GET['tabid']));?>
+   </div>
+<!--    <div class="row rowcol">
+       <?php echo CHtml::label('Inc BFE','inc_bfe');?>
+       <?php echo CHtml::checkBox('inc_bfe','');?>
+   </div> -->
+   <div class="row">
+            <?php echo CHtml::label('Step 1: Select Gatepass Data Source', 'gatepass_data_source',['style'=>'font-size:1.5em;']); ?>
+            <?php echo CHtml::checkBoxList('gatepass_data_source', '', GatepassCourier::$gatepass_courier, array('labelOptions' => array('class' => 'radio_label'), 'separator' => '&nbsp;&nbsp')) ?>
+    </div>
+    <div class="row">
+        <?php echo CHtml::label('Available Couriers','available_couriers');?>
+        <?= CHtml::button('+', ["class"=>"showAllAvailableCouriersButton"])?>
+        <div id="allAvailableCouriers" style="display:none;">
+        <?php echo CHtml::checkBoxList('all_available_couriers','',$couriersArr,array('labelOptions'=>array('class'=>'radio_label'),'separator'=>'&nbsp;&nbsp'))?>
+        </div>
+        </br>
+         <br>
+        <br>
+        <br>
+        <div id="showedAvailableCouriers">
+                <div class="row">
+                <div class="row rowcol rowcol-left" style="width: 50%;">
+                        <?php echo CHtml::label('Step 2: Select Couriers For Choosing Cheapest Cost','forimchgcode',['style'=>'font-size:1.5em;']); ?>
+                        <div class="row">
+                                <?php
+                                $allOrgRates = OrgRate::model()->findAll("id in (".join(",",array_keys($showCouriersArr)).")");
+                                $defSelected = [];
+                                $rateList = CHtml::listData($allOrgRates,'id','name');
+                                $mdataList = CHtml::listData($allOrgRates,'id','mdata');
+                                $tempLists=[];
+                                $tempRateRaw=[];
+                                foreach ($rateList as $id=>$name){
+                                        if(empty($mdataList[$id]['ddpt_id']))
+                                        {
+                                            if(!in_array($id, ImportChargeCode::$unsetKeys)||in_array($id, $defSelected))
+                                            {
+                                                $tempLists["AU WIDE"][$id] = $name;
+                                            }
+                                        }else
+                                        {
+                                            if(!in_array($id, ImportChargeCode::$unsetKeys)||in_array($id, $defSelected))
+                                            {
+                                                $tempLists[$mdataList[$id]['ddpt_id']][$id] = $name;
+                                            }
+                                        }
+                                }
+                                ksort($tempLists);
+
+                                foreach ($tempLists as $key => $tempList) {
+                                    echo "<div class='row '>";
+                                    $label = empty(Org::$importWarehouseList[$key])?$key:Org::$importWarehouseList[$key];
+                                    echo "<h3>$label</h3>";
+                                    echo CHtml::checkBoxList('available_couriers',$defSelected,$tempList,array(
+                                        'template'=>'{input}{label}',
+                                        'separator'=>'',
+                                        'labelOptions'=>array(
+                                                'style'=> 'padding-right:12px;min-width: 60px;float: left;'),
+                                        'style'=>'float:left;',) );
+                                    echo "</div>";
+                                }
+                                ?>
+
+                        </div>
+                </div>
+
+                <div class="row rowcol rowcol-right" style="width: 48%;">
+                        <div class="form" style="border:1px #000 solid;">
+                            <?php
+                            $form=$this->beginWidget('CActiveForm', array(
+                                'id'=>'test-zone-map-form',
+                                'enableAjaxValidation'=>false,
+                                'action' => $this->createUrl('importsCost/ '),
+                            ));
+                            ?>
+                            <div class="row">
+                                <label for="aupost">Your Can Import Zone Map And Rate For Testing  - <small>.xlsx File</small>(<a href="/ims/zonemapwithprice.xlsx" target="_blank">Get template file</a>)</label><br>
+                                <input type="file" name="test-zonemap" id="test_zonemap" />
+                            </div>
+
+                            <br>
+
+                            <p><input id="test_zone_map_import_btn" type="submit" value="Submit" /></p>
+                            <br>
+                            <br>
+                            <br>
+                            <?php $this->endWidget(); ?>
+                        </div>
+                </div>
+
+                </div>
+
+            </div>
+    </div>
+    <div class="row" id="testCouriers">
+    <?php $this->renderPartial('_testCouriers',['couriersTestArr'=>$couriersTestArr]); ?>
+    </div>
+    <!--  
+    <div class="row buttons">
+        <?php echo CHtml::submitButton('Search',array('class'=>'submit_button')); ?>
+        <?php echo CHtml::submitButton($this->t('Export Details'),array('class'=>'export_detail')); ?>
+    </div>
+      <div class="uploading"><img src="https://www.pcaexpress.com.au/client/css/images/ajaxLoader.gif" width="24" /> Loading</div>
+    <div id="shipment-import-cost-report-view">
+        <?php $this->renderPartial('_search',['dataProvider'=>$dataProvider,'dataProvider1'=>$dataProvider1]); ?>
+    </div>
+
+    <p>_________________________________________________________________________________________________________________</p>
+    <br>
+    <br>
+    <br>
+    <br>
+    <br>
+    <br>
+    <br>
+    <br>
+    <br>
+    <br>
+    <br>
+    <br>
+
+ -->
+    <br>
+    <br>
+    <br>
+    <div class="row" id="pcaTestZone">
+        <div class="row rowcol rowcol-left"  style="width: 50%;">
+         <?php $this->renderPartial('_testPCA',['pcaZoneTestArr'=>$pcaZoneTestArr]); ?>
+        </div>
+        <div class="row rowcol rowcol-right"  style="width: 48%;">
+            <div class="form" style="border:1px #000 solid;">
+                <?php
+                $form=$this->beginWidget('CActiveForm', array(
+                    'id'=>'test-pca-zone-map-form',
+                    'enableAjaxValidation'=>false,
+                    'action' => $this->createUrl('importsCost/AjaxSavePCATestZonemap'),
+                ));
+                ?>
+                <div class="row">
+                    <label for="test_pca_zonemap">Importing Your TLA ZONE TEST Profile For Outputing Cost Metrix  - <small>.xlsx File</small>(<a href="/ims/pcaZoneTemplate.xlsx" target="_blank">Get template file</a>)</label><br>
+                    <input type="file" name="test-pca-zonemap" id="test_pca_zonemap" />
+                </div>
+
+                <br>
+
+                <p><input id="test_pca_zone_map_import_btn" type="submit" value="Submit" /></p>
+                <br>
+                <br>
+                <br>
+                <?php $this->endWidget(); ?>
+            </div>
+
+        </div>
+    </div>
+
+    <!--  <div class="row" id="weightZone">
+    <?php $this->renderPartial('_testWeightMap',['weightMapArr'=>$weightMapArr]); ?>
+    </div> -->
+    <br>
+   <div class="row buttons">
+        <?php echo CHtml::submitButton('Export TLA Zone Cost',array('class'=>'submit_pca_zone_button')); ?>
+    </div>
+    <br>
+    <br>
+    <br>
+    <br>
+    <style>
+        .uploading { position: relative; clear:both; width: 150px; font-size: 1.4em; font-weight: bold; color: #BC3426; line-height: 32px; z-index: 99; padding: 15px 5px; margin-bottom: -50px; display: none; }
+    </style>
+      <div class="uploading"><img src="https://os.toplogistics.com.au/css/images/ajaxLoader.gif" width="24" /> Loading</div>
+          <div id="export_import_cost_detail" style="margin: 10px 0; border: 1px solid;padding:20px;display: none;">
+
+          </div>
+          <div>
+              <?php
+
+                $dlUrl =  $this->createUrl('importsCost/downloadPZTResult');
+                echo '<span>This is for downloading the last Price Template File, Please <a href="'.$dlUrl.'" target="_blank">click me</a> to download now<span>';
+        
+              ?>
+          </div>
+          <br>
+          <br>
+          <br>
+    <div id="zone-cost-report-view">
+        
+    </div>
+
+
+
+<!--         <div class="form">
+        <?php
+        $form=$this->beginWidget('CActiveForm', array(
+            'id'=>'test-weight-zone-map-form',
+            'enableAjaxValidation'=>false,
+            'action' => $this->createUrl('importsCost/ajaxSaveWeightMap'),
+        ));
+        ?>
+        <div class="row">
+            <label for="test_pca_zonemap">Weight Map Profile - <small>.xlsx File</small>(<a href="/ims/zoneMapWeight.xlsx" target="_blank">Get template file</a>)</label><br>
+            <input type="file" name="test-weight-zonemap" id="test_weight_zonemap" />
+        </div>
+
+        <br>
+
+        <p><input id="test_weight_zone_map_import_btn" type="submit" value="Import Weight Map" /></p>
+        <br>
+        <br>
+        <br>
+        <?php $this->endWidget(); ?>
+    </div> -->
+
+
+</div>
+
+</div>
+<script>
+    $(function(){
+        var tab = $('#<?=$_GET["tabid"];?>');
+        var panel = tab.data('panel');
+         $('.submit_button',panel).off('click').on("click",function(){
+         var data = {};
+         data['data_source']=[];
+         data['available_couriers']=[];
+         data['test_couriers']=[];
+         $('input[name="data_source[]"]:checked',panel).each(function(){
+            data['data_source'].push($(this).val());
+         });
+         data['inc_bfe']=$('input[name="inc_bfe"]',panel).prop('checked');
+        $('input[name="available_couriers[]"]:checked',panel).each(function(){
+            data['available_couriers'].push($(this).val());
+         });
+        $('input[name="test_couriers[]"]:checked',panel).each(function(){
+            data['test_couriers'].push($(this).val());
+         });
+        data['start_date'] = $("#start_date<?=$_GET['tabid']?>",panel).val();
+        data['end_date'] = $("#end_date<?=$_GET['tabid']?>",panel).val();
+        data['partial']=11;
+        $('.uploading', panel).fadeIn();
+        $.ajax({
+            type : 'GET',
+            url : '<?php echo Yii::app()->createAbsoluteUrl("importsCost/index",array('tabid'=>$_GET['tabid'])) ;?>',
+            data: data,
+            dataType: 'html',
+            success:function(resp){
+                $('#shipment-import-cost-report-view').html(resp);
+                  $('.uploading', panel).fadeOut();
+            },
+        });       
+    });
+
+    $('.submit_pca_zone_button',panel).off('click').on("click",function(){
+         var data = {};
+         data['available_couriers']=[];
+         data['gatepass_data_source']= [];
+         data['test_couriers']=[];
+         data['pca_zone_test']=0;
+         data['start_date'] = $("#start_date<?=$_GET['tabid']?>",panel).val();
+         data['end_date'] = $("#end_date<?=$_GET['tabid']?>",panel).val();
+         //data['weight_map']=0;
+         data['without_courier_name'] = 0;
+        $('input[name="available_couriers[]"]:checked',panel).each(function(){
+            data['available_couriers'].push($(this).val());
+         });
+        $('input[name="gatepass_data_source[]"]:checked',panel).each(function(){
+            data['gatepass_data_source'].push($(this).val());
+         });
+        $('input[name="test_couriers[]"]:checked',panel).each(function(){
+            data['test_couriers'].push($(this).val());
+         });
+         $('input[name="pca_zone_test[]"]:checked',panel).each(function(){
+            data['pca_zone_test']=$(this).val();
+         });
+         // $('input[name="weight_map[]"]:checked',panel).each(function(){
+         //    data['weight_map']=$(this).val();
+         // });
+
+
+        $('.uploading', panel).fadeIn();
+        $.ajax({
+            type : 'GET',
+            url : '<?php echo Yii::app()->createAbsoluteUrl("importsCost/searchPCAZoneCost",array('tabid'=>$_GET['tabid'])) ;?>',
+            data: data,
+            dataType: 'html',
+            success:function(resp){
+                // $('#zone-cost-report-view').html(resp);
+                //   $('.uploading', panel).fadeOut();
+                $('#export_import_cost_detail',panel).show();
+                $('#export_import_cost_detail',panel).html(resp);
+                $('.uploading', panel).fadeOut();
+            },
+        });       
+    });
+
+    
+    
+    $('.export_detail',panel).click(function(e){
+        e.preventDefault();
+        e.stopPropagation();
+        var data = {};
+         data['data_source']=[];
+         data['available_couriers']=[];
+         data['test_couriers']=[];
+         $('input[name="data_source[]"]:checked',panel).each(function(){
+            data['data_source'].push($(this).val());
+         });
+        $('input[name="available_couriers[]"]:checked',panel).each(function(){
+            data['available_couriers'].push($(this).val());
+         });
+        $('input[name="test_couriers[]"]:checked',panel).each(function(){
+            data['test_couriers'].push($(this).val());
+         });
+        data['start_date'] = $("#start_date<?=$_GET['tabid']?>",panel).val();
+        data['end_date'] = $("#end_date<?=$_GET['tabid']?>",panel).val();
+        data['inc_bfe']=$('input[name="inc_bfe"]',panel).prop('checked');
+        data['partial']=11;
+        $('.uploading', panel).fadeIn();
+        $('#export_import_cost_detail',panel).html('');
+        $.ajax({
+            type : 'GET',
+            url : '<?php echo Yii::app()->createAbsoluteUrl("importsCost/ajaxExportImportsCost") ;?>',
+            data: data,
+            dataType: 'html',
+            success:function(resp){
+                $('#export_import_cost_detail',panel).show();
+                $('#export_import_cost_detail',panel).html(resp);
+                $('.uploading', panel).fadeOut();
+            }
+        });
+    });
+
+     $('form#test-zone-map-form', panel).data('custom_success', function(r){
+            if(r.success == 1)
+            {
+               $("#testCouriers",panel).html(r.msg);
+               myApp.alert("import success");
+            }
+            $("#test_zone_map_import_btn",panel).attr("disabled",false);
+        });
+
+     $('form#test-pca-zone-map-form', panel).data('custom_success', function(r){
+            if(r.success == 1)
+            {
+               $("#pcaTestZone",panel).html(r.msg);
+               myApp.alert("import success");
+            }
+            $("#test_pca_zone_map_import_btn",panel).attr("disabled",false);
+        });
+
+     $('form#test-weight-zone-map-form', panel).data('custom_success', function(r){
+            if(r.success == 1)
+            {
+               $("#weightZone",panel).html(r.msg);
+               myApp.alert("import success");
+            }
+            $("#test_weight_zone_map_import_btn",panel).attr("disabled",false);
+        });
+
+     $('.showAllAvailableCouriersButton',panel).click(function(){
+            if($('#allAvailableCouriers',panel).css("display")=="none")
+            {
+                $('#allAvailableCouriers',panel).show();
+            }else{
+                $('#allAvailableCouriers',panel).hide();
+            }
+     });
+
+     $('input[name="all_available_couriers[]"').click(function(){
+            var myData = {};
+            if($(this).is(":checked")){
+                myData["show"] =1;
+            }else{
+                myData["show"] =0;
+            }
+
+            myData["id"] = $(this).val();
+            $.ajax({
+                    type : 'POST',
+                    url : '<?php echo Yii::app()->createAbsoluteUrl("importsCost/showAvailableCouriersPricing") ;?>',
+                    dataType: 'html',
+                    data:myData,
+                    success:function(resp){
+                       $("#showedAvailableCouriers",panel).html(resp);
+                    }
+                });
+         });
+   });
+
+    function deleteTestCouriers(id)
+    {
+        if(confirm("Are you sure to delete the Test Data?"))
+        {
+            var tab = $('#<?=$_GET["tabid"];?>');
+            var panel = tab.data('panel');
+            $.ajax({
+                type : 'POST',
+                url : '<?php echo Yii::app()->createAbsoluteUrl("importsCost/deleteTestCouriers") ;?>',
+                dataType: 'html',
+                data:{ 'id' : id},
+                success:function(resp){
+                   $("#testCouriers",panel).html(resp);
+                }
+            });
+        }
+    }
+
+     function deleteZoneMapImport(id,type)
+    {
+        if(confirm("Are you sure to delete the Test Data?"))
+        {
+            var tab = $('#<?=$_GET["tabid"];?>');
+            var panel = tab.data('panel');
+            $.ajax({
+                type : 'POST',
+                url : '<?php echo Yii::app()->createAbsoluteUrl("importsCost/deleteZoneMapImport") ;?>',
+                dataType: 'html',
+                data:{ 'id' : id,'type':type},
+                success:function(resp){
+                  if(type ==0)
+                  {
+                   $("#pcaTestZone",panel).html(resp);
+                  }else
+                  {
+                    $("#weightZone",panel).html(resp);
+                  }
+                }
+            });
+        }
+    }
+</script>

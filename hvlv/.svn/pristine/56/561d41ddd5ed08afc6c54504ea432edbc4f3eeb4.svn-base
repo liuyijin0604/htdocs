@@ -1,0 +1,1850 @@
+<?php 
+class EmailService extends Service
+{
+
+	public function sendAvailableNoticeEmail($shipment)
+	{
+		if($shipment->status<ImParcel::STATE_HELD)
+		{
+			return;
+		}
+
+		$date = date("d/m/Y",strtotime($shipment->consol->mdata['available_date']));
+		$consol = $shipment->consol;
+		if(($shipment->bwf & ImParcel::CUSTOM_DDU) == 0)
+		{
+			return;
+		}
+
+		if($shipment->bwf&ImParcel::CUSTOM_DDU)//DDU
+		{
+			$email=isset($shipment->cnee->email)?$shipment->cnee->email:'';
+			if (empty($email)) {
+				Log::log2file("Cnee not having cnee email:shipment".$shipment->ref, "available_notice_failed", "account");
+				return;
+			}
+		}else if($shipment->bwf&ImParcel::CUSTOM_DDP)
+		{
+			$email=isset($shipment->agent->extra['outturn_email'])?$shipment->agent->extra['outturn_email']:'';
+			if (empty($email)) {
+				Log::log2file("Cnee not having agent email:shipment".$shipment->ref, "available_notice_failed", "account");
+				return;
+			}
+		}
+
+		$term = 0;
+		$ss = new OrgRate('search');
+		$cus_services = $ss->getCustomerServicePlans($shipment->agent_id);
+
+		if($consol->service==Consol::AIRCONSOL)
+		{
+			if($consol->isOurWarehouse())
+			{
+				// if (($shipment->bwf & ImParcel::CUSTOM_DDP) > 0) {
+				// 	if (isset($cus_services['services']->AU->str_terms)) 
+				// 	{
+				// 		$term = $cus_services['services']->AU->str_terms." free calendar";
+				// 	}
+				// 	return;
+				// } elseif
+				if(($shipment->bwf & ImParcel::CUSTOM_DDU) > 0) 
+				{
+					$term = "7 free calendar";
+				}
+			}else
+			{
+				if (isset($cus_services['services']->AU->str_oth_terms)) 
+				{
+					$term = $cus_services['services']->AU->str_oth_terms." free business";
+				}else
+				{
+					$term = "2 free business";
+				}
+			}
+
+		}else if($consol->service==Consol::SEACONSOL)
+		{
+			$term = "3 free business";
+		}
+
+		$availableDate = $consol->mdata['available_date'];
+ 
+		$clientName = $shipment->getClientName();
+		$emailLog = new Emailog();
+		$emailLog->fid = $shipment->id;
+		$emailLog->type= Emailog::INVOICE_SHIPMENT_AVAILABLE_NOTICE;
+		$emailLog->dt = date('Y-m-d H:i:s');
+		$emailLog->status = 10;
+		$emailLog->prepTemplate();
+		$emailLog->tpl->assignThese([
+			'SHIPMENT_NO'=>$shipment->ref,
+			'STATUS' => ImParcel::$states[$shipment->status],
+			'TERM' => $term,
+			'AVAILABLE_DATE'=>$availableDate
+		]);
+		$emailLog->subject = $emailLog->tpl->subject;
+		$emailLog->body = $emailLog->tpl->getContent();
+		$emailLog->mdata['to']=$email;
+		$emailLog->mdata['fromName']='TLA Imports';
+		$emailLog->mdata['from']='imports@toplogistics.com.au';
+		$emailLog->mdata['cc']='imports@toplogistics.com.au';
+		$o=$emailLog->sendEmail();
+		if ($o['status']) {
+			$shipment->mdata['is_send_available_notice'] = 1;
+			$shipment->updateMeta();
+		} else {
+			echo $o['msg'];
+			Log::log2file("Available notice not send correctly:".$shipment->hbn, "available_notice_failed", "account");
+		}
+	}
+
+	public function sendPickupCargoOutturnEmail($cpModel)
+	{
+		$path = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.'tmpfile'.DIRECTORY_SEPARATOR;
+		$filename =  $cpModel->shipment->hbn.'  -  '.$cpModel->shipment->ref.' outturn.pdf';
+		$filename = str_replace('/', '-', $filename);
+		$fullFilename = $path.$filename;
+		$type = "";
+		if ($cpModel->shipment->consol->service == 10)
+		{
+			$type = "Air";
+		}else
+		{
+			$type = "Sea";
+		}
+		$ps = [];
+		$coverpage = oPDF::renderPDF('sea_outturn_coverpage', ['shipment' => $cpModel->shipment], 2);
+		$ps[] = $coverpage;
+		$tf = oPDF::renderPDF('sea_outturn', ['model' => $cpModel->shipment,'type'=>$type], 2);
+		$ps[] = $tf;
+		oPDF::mergePDF($ps, 2, true, $fullFilename);
+
+
+		$email = $cpModel->shipment->cnee->email;
+		if(empty($email))
+		{
+			echo "empty email of consignee";
+			return false;
+		}
+		$email = $email;
+		$emailLog = new Emailog();
+		$emailLog->to_id = 0;
+		$emailLog->fid = $cpModel->shipment->id;
+		$emailLog->type= Emailog::PICK_OUTTURN_TEMPLATE;
+		$emailLog->dt = date('Y-m-d H:i:s');
+		$emailLog->status = 10;
+		$emailLog->prepTemplate();
+		$emailLog->tpl->assignSubject('HBN',  "outturn - ".$cpModel->shipment->hbn);
+		// $emailLog->tpl->assignThese([
+		// 	'FILENAME'=>$filename,
+		// ]);
+		$emailLog->subject = $emailLog->tpl->subject;
+		$emailLog->body = $emailLog->tpl->getContent();
+		$emailLog->mdata['to']=$email;
+		$emailLog->mdata['fromName']='Top Logistics Australia';
+		$emailLog->mdata['from']='imports@toplogistics.com.au';
+		$emailLog->mdata['cc']='imports@toplogistics.com.au';
+		$o=$emailLog->sendEmail([[$fullFilename,$filename]]);
+		if(!$o['status'])
+		{
+			echo $o['msg'];
+		}else
+		{
+			$cpModel->log('Send Outturn email');
+		}
+		return $o['status'];
+	}
+
+	public function sendPickupCargoSeaDOEmail($cpModel)
+	{
+		$path = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.'tmpfile'.DIRECTORY_SEPARATOR;
+		$filename =  $cpModel->shipment->hbn.'  -  '.$cpModel->shipment->ref.' delivery_order.pdf';
+		$filename = str_replace('/', '-', $filename);
+		$fullFilename = $path.$filename;
+		$type = "";
+		if ($cpModel->shipment->consol->service == 10)
+		{
+			return false;
+			$type = "Air";
+		}else
+		{
+			$type = "Sea";
+		}
+		$ps = [];
+		$tf = oPDF::renderPDF('sea_order', ['model' => $cpModel->shipment,'type'=>2], 2, $tf); 
+		$ps[] = $tf;
+		oPDF::mergePDF($ps, 2, true, $fullFilename);
+
+
+		$email = $cpModel->shipment->cnee->email;
+		if(empty($email))
+		{
+			echo "empty email of consignee";
+			return false;
+		}
+		$email = $email;
+		$emailLog = new Emailog();
+		$emailLog->to_id = 0;
+		$emailLog->fid = $cpModel->shipment->id;
+		$emailLog->type= Emailog::PICK_OUTTURN_TEMPLATE;
+		$emailLog->dt = date('Y-m-d H:i:s');
+		$emailLog->status = 10;
+		$emailLog->prepTemplate();
+		$emailLog->tpl->assignSubject('HBN',  "delivery order - ".$cpModel->shipment->hbn);
+		// $emailLog->tpl->assignThese([
+		// 	'FILENAME'=>$filename,
+		// ]);
+		$emailLog->subject = $emailLog->tpl->subject;
+		$emailLog->body = $emailLog->tpl->getContent();
+		$emailLog->mdata['to']=$email;
+		$emailLog->mdata['fromName']='Top Logistics Australia';
+		$emailLog->mdata['from']='imports@toplogistics.com.au';
+		$emailLog->mdata['cc']='imports@toplogistics.com.au';
+		$o=$emailLog->sendEmail([[$fullFilename,$filename]]);
+		if(!$o['status'])
+		{
+			echo $o['msg'];
+		}else
+		{
+			$cpModel->log('Send Outturn email');
+		}
+		return $o['status'];
+	}
+
+// 	public static function sendNormalCargoSmsEmail($cpModel)
+// 	{
+// 		$link = "https://book.toplogistics.com.au/cargoConfirm?caref=".$cpModel->getRef();
+// 		$msg = "Hi,".$cpModel->shipment->cnee->name.":
+//  This is Top Logistics Australia，We would like to organize delivery of ".$cpModel->hbn." to you from overseas. 
+//  Please log in to  ".$link."  to confirm your contact detail for delivery booking. Please click here to proceed. DON’T REPLY TO THIS MSG.";
+// 		return self::sendCargoSmsEmail($cpModel,Emailog::CARGO_EMAIL_NOTICE,'sendEmailNotie','Send Email Notice',$msg,'sendSmsNotie','Send Sms Notice','sent_confirm_sms_date');
+// 	}
+
+	public static function sendNormalCargoSmsEmail($cpModel)//only for normal
+	{
+		$objShipment = $cpModel->shipment;
+		$strHbn =  $objShipment->hbn;
+		$strWeight = $objShipment->weight;
+		$strPkg= $objShipment->pkg;
+		$strAddress = $objShipment->cnee->address;
+		$phone = substr($objShipment->cnee->tel,-4);
+
+		$link = "https://book.toplogistics.com.au/cargoConfirmValidate?caref=".$cpModel->getRef();
+		$tracklink = "https://toplogistics.com.au/?s=".$cpModel->getRef();
+
+		$strFromOverseas = ' from overseas';
+		if($cpModel->shipment->ot_id == TplParcel::$my_ot_id){
+			$strFromOverseas = '';
+		}
+
+		//wms task item
+		if(!empty($objShipment->mdata['wmstask_id'])){
+			$strProd = '-Product:
+';
+			$idTask = $objShipment->mdata['wmstask_id'];
+			$listWmsTaskItem = WmsTaskItem::model()->findAll('task_id=:task_id',[':task_id'=>$idTask]);
+			foreach($listWmsTaskItem as $objItem){
+				$strName = $objItem->mdata['sn'];
+				if(!empty($strName)){
+					$strProd.=' [';
+					$objProd = WmsProd::model()->find('name=:name',[':name'=>$strName]);
+					if($objProd != null){
+
+						$strProd.= $objProd->brand.' ';
+					}
+					$strProd.=$strName.']
+';
+				}
+			}
+		}
+
+		$strMessage=
+'Hi '.$cpModel->shipment->cnee->name.',
+
+This is Top Logistics Australia，We would like to arrange delivery to you'.$strFromOverseas.'.
+
+'.$strProd.'
+-Tracking No. '.$strHbn.'
+-Weight:'.$strWeight.' kg
+-No. Cartons:'.$strPkg.' pcs
+-Delivery Address:'.$strAddress.'
+
+Please click here to  '.$link.'  to confirm your delivery details and time.
+
+Please confirm within 24 hours or the delivery might be delayed, or storage fee at $0.15/kg per day applies.
+
+PLS DON’T REPLY TO THIS MSG, FOR DELIVERY UPDATES, PLS VISIT '.$tracklink;
+		
+		$href = '<a id="link" target = "_blank"  href="' . $link .'">Here</a>';
+
+		$objShipment->addTracking(16,'Send SMS to xxxx'.$phone.' Waiting for confirmation. Or Click '.$href.' to confirm',Org::model()->findByPk($objShipment->ddpt_id)->name);
+
+ 		return self::sendCargoSmsEmail($cpModel,Emailog::CARGO_EMAIL_NOTICE,'sendEmailNotie','Send Email Notice',$strMessage,'sendSmsNotie','Send Sms Notice','sent_confirm_sms_date');
+	}
+
+
+
+
+	public static function sendWarehouseCargoSmsEmail($cpModel)//not use
+	{
+		$msg = "HI,".$cpModel->shipment->cnee->name.":
+ Your consignment ".$cpModel->shipment->hbn." is being sorted for delivery in warehouse now. Please be prepared to receive the shipment on the next business day. 
+
+*Important Notices
+-Change of address, 
+-Longer then 15mins waiting time (including self unloading) 
+-Re-delivery
+-Special unloading request
+May incur extra charge
+
+TOP Logistics Australia
+
+*The text is sent automatically, do not reply.";
+		//return self::sendCargoSmsEmail($cpModel,Emailog::CARGO_WH_EMAIL_NOTICE,'sendWarehouseEmailNotie','Send Warehouse Email Notice',$msg,'sendWarehouseSmsNotie','Send Warehouse Sms Notice','sent_warehouse_confirm_sms_date');
+	}
+
+	public static function sendGatepassCargoSmsEmail($cpModel)
+	{
+		$tracklink = "https://toplogistics.com.au/?s=".$cpModel->getRef();
+		$driverName = "";
+		$driverPhone = "";
+		if(!empty($cpModel->job_relation->job->vehicle_id))
+		{
+			$driverName = $cpModel->job_relation->job->vehicle->vehicle_name;
+			$driverPhone = CargoProcessVehicle::$arrayDriversPhone[$cpModel->job_relation->job->vehicle_id];
+			//$driverName = $cpModel->job_relation->job->driver->name;
+			//$driverPhone = $cpModel->job_relation->job->driver->phone;
+		}else if(!empty($cpModel->driver))
+		{
+			$driverName = $cpModel->driver->name;
+			$driverPhone = $cpModel->driver->phone;
+		}
+		if(!empty($driverPhone)){
+			$drivermsg = "";
+			//$drivermsg = "The Customer Service No. is ".$driverPhone.".";
+		}else{
+			$drivermsg = "";
+		}
+
+		$msg = "HI,".$cpModel->shipment->cnee->name.":
+Your consignment ".$cpModel->shipment->hbn." has been loaded, and on its way. Please ensure someone at the addresss to receive it on ".$cpModel->shipment->cnee->address.". 
+
+".$drivermsg."
+
+TOP Logistics Australia
+*PLS DON’T REPLY TO THIS MSG, FOR DELIVERY UPDATES, PLS VISIT ".$tracklink;
+		return self::sendCargoSmsEmail($cpModel,Emailog::CARGO_GP_EMAIL_NOTICE,'sendGatepassEmailNotie','Send Gatepass Email Notice',$msg,'sendGatepassSmsNotie','Send Gatepass Sms Notice','sent_gatepass_sms_date');
+	}
+
+	//for not reply within 24 hours
+	public static function send24HoursNotReplySms($cpModel){//only for normal
+		$strRef = $cpModel->shipment->ref;
+		$time = date('Y-m-d',strtotime($cpModel->job_relation->job->created));
+		$strAddress = $cpModel->shipment->cnee->address;
+		$link = "https://book.toplogistics.com.au/cargoConfirm?caref=".$cpModel->getRef();
+		$href = $link;
+		$msg = $msg = "HI,".$cpModel->shipment->cnee->name.":
+for consignment ".$strRef."to ".$cpModel->shipment->cnee->suburb.",  As no confirmation was received. TLA will organise the delivery on ".$time." from 9:00am to 18:00pm, delivery will be done based to information from your shipper ".$href."
+
+TOP Logistics Australia
+*The text is sent automatically, do not reply.";
+	return self::sendCargoSms($cpModel,$msg,'send24HoursNotReply','Send_24_Hours_Not_Reply','sent_24_hours_not_date');
+	}
+
+	public static function send24HoursnotinCjob($cpModel){//only for normal
+		$strRef = $cpModel->shipment->ref;
+		$time = date('Y-m-d',strtotime($cpModel->job_relation->job->created));
+		$strAddress = $cpModel->shipment->cnee->address;
+		$link = "https://book.toplogistics.com.au/cargoConfirm?caref=".$cpModel->getRef();
+		$href = $link;
+		$msg = $msg = "HI,".$cpModel->shipment->cnee->name.":
+for consignment ".$strRef."to ".$cpModel->shipment->cnee->suburb.",  As no confirmation was received. TLA will organise the delivery within next 5 business days from 9:00am to 18:00pm, delivery will be done based to information from your shipper ".$href."
+
+TOP Logistics Australia
+*The text is sent automatically, do not reply.";
+	return self::sendCargoSms($cpModel,$msg,'send24HoursNotReply','Send_24_Hours_Not_Reply','sent_24_hours_not_date');
+	}
+
+	public static function sendPreProcessIntoCjob($cpModel){//only for normal
+		$strRef = $cpModel->shipment->ref;
+		$time = date('Y-m-d',strtotime($cpModel->job_relation->job->created));
+		$msg = $msg = "HI,".$cpModel->shipment->cnee->name.":
+We will arrange your delivery on ".$time.". if any change, we will notify you via SMS.
+
+TOP Logistics Australia
+*The text is sent automatically, do not reply.";
+	return self::sendCargoSms($cpModel,$msg,'sendPreProcessIntoCjob','Send_PreProcess_Into_Cjob','send_preprocess_into_cjob');
+	}
+
+	public static function sendReceivedConfirm($cpModel){ //for booking normal
+		$msg = "HI,".$cpModel->shipment->cnee->name.":
+Thank you for your reply.
+We will arrange your delivery on ".date('Y-m-d',strtotime($cpModel->job_relation->job->created)).".
+if any change, we will notify you via SMS
+
+TOP Logistics Australia
+*The text is sent automatically, do not reply.";
+	return self::sendCargoSms($cpModel,$msg,'sendReceiveConfirm','Send_Receive_Confirm','sent_receive_confirm');
+	}
+
+	public static function sendScanAndCjobSms($cpModel){ //for booking normal
+		$msg = "HI,".$cpModel->shipment->cnee->name.":
+We will arrange your delivery on ".date('Y-m-d',strtotime($cpModel->job_relation->job->created)).".
+if any change, we will notify you via SMS
+
+TOP Logistics Australia
+*The text is sent automatically, do not reply.";
+	return self::sendCargoSms($cpModel,$msg,'sendScanAndCjobSms','Send_Scan_And_Cjob_Sms','send_scan_and_cjob_Sms');
+	}
+
+	//for confirmed customer
+	public static function sendReceiveConfirm($cpModel){//for booking normal
+		$msg = "HI,".$cpModel->shipment->cnee->name.":
+Thank you for your reply.
+We will arrange your delivery as soon as possible and will notify you in advance. 
+
+TOP Logistics Australia
+*The text is sent automatically, do not reply.";
+	return self::sendCargoSms($cpModel,$msg,'sendReceiveConfirm','Send_Receive_Confirm','sent_receive_confirm');
+	}
+
+	public static function sendGeneratePickupListSmsEmail($cpModel)//generate pick up list button 
+	{
+		$cJob = $cpModel->job_relation->job;
+		$msg = "HI,".$cpModel->shipment->cnee->name.":
+This is Top Logistics Australia.
+Your consignment ".$cpModel->shipment->hbn." scheduled for delivery on ". date('Y-m-d',strtotime($cJob->created)).". Please keep in touch through the phone call as it can be delivered  on time.
+Much appreciated for your waiting. 
+
+TOP Logistics Australia
+*The text is sent automatically, do not reply.";
+	return self::sendCargoSms($cpModel,$msg,'sendPickUpListNotie','Send_PickUp_List_Notice','sent_whpickup_list_notice_date');
+	}
+
+	public static function sendNotPickupCargoSms($cpModel){//not sign gatepass
+		if($cpModel->type != Cargoprocess::INTERSTATE_CARGO){
+			$msg = "HI,".$cpModel->shipment->cnee->name.":
+We are sorry that your shipment was not picked up by the driver. 
+We apologize for the delay. 
+We will reschedule your shipment as soon as possible and will notify you via SMS.";
+			return self::sendCargoSms($cpModel,$msg,'sendNotPickupCargoNotie','Send_Not_PickUp_Cargo_Notice','sent_not_pickup_cargo_notice_date');
+		}
+	}
+
+	//gatepass
+	public static function sendPickupCargoSms($cpModel){//sign gatepass
+		$ref = $cpModel->shipment->ref;
+		$time =  date('Y-m-d',strtotime($cpModel->job_relation->job->created));
+		$destination = !empty($cpModel->job_relation->job->mdata['destination'])? Cargoprocess::$Depot[$cpModel->job_relation->job->mdata['destination']]:$cpModel->shipment->cnee->state;
+		if($cpModel->type != Cargoprocess::INTERSTATE_CARGO){
+			if(!empty($cpModel->job_relation->job->created)){
+				$msg = "HI,".$cpModel->shipment->cnee->name.":
+Your consignment ".$ref." has been loaded, and on its way, please ensure someone is at the receiving address to receive it on ".$time;
+			}else{
+				$msg = "HI,".$cpModel->shipment->cnee->name.":
+Your consignment ".$ref." has been loaded, and on its way, please ensure someone is at the receiving address to receive it";
+			}
+		return self::sendCargoSms($cpModel,$msg,'sendPickupCargoNotie','Send_PickUp_Cargo_Notice','sent_pickup_cargo_notice_date');
+		}else{
+			$msg = "HI,".$cpModel->shipment->cnee->name.":
+Your consignment ".$ref." has been loaded in ".Cargoprocess::$Depot[$cpModel->dpt_id]." and  on its way to ".$destination.".";
+		return self::sendCargoSms($cpModel,$msg,'sendPickupCargoNotie','Send_PickUp_Cargo_Notice','sent_pickup_cargo_notice_date');
+		}	
+	}
+
+	//prepare done
+	public static function sendprepareCargoSms($cpModel){//
+		if($cpModel->type != Cargoprocess::INTERSTATE_CARGO){
+			$hbn = $cpModel->shipment->ref;
+			$time =  date('Y-m-d',strtotime($cpModel->job_relation->job->created));
+			if(!empty($time)){
+				$msg = "HI,".$cpModel->shipment->cnee->name.":
+Your consignment ".$hbn." is being sorted and ready for delivery soon, please ensure someone is at the receiving address to receive on ".$time;
+			}else{
+				$msg = "HI,".$cpModel->shipment->cnee->name.":
+Your consignment ".$hbn." is being sorted and ready for delivery soon, please ensure someone is at the receiving address to receive";	
+			}
+		return self::sendCargoSms($cpModel,$msg,'sendprepareCargoSms','Send_Prepare_Cargo_Sms','send_prepare_cargo_sms');
+		}
+		
+	}
+
+	public static function sendRescheduleSms($cpModel){
+		//$link = "https://toplogistics.com.au/?s=".$cpModel->getRef();
+		//$hbn = $cpModel->shipment->ref;
+		$msg = "HI,".$cpModel->shipment->cnee->name.":
+We are sorry to inform you that your consignment could not be delivered as planned. We apologise for the inconvenience caused. We will reschedule your shipment as soon as possible and notify you via SMS.";
+	return self::sendCargoSms($cpModel,$msg,'sendRescheduleSms','Send_Reschedule_Sms','send_reschedule_sms');
+	}
+
+	public static function sendSuccessfulDeliverySms($cpModel){
+		$link = "https://toplogistics.com.au/?s=".$cpModel->getRef();
+		$hbn = $cpModel->shipment->ref;
+		$msg = "HI,".$cpModel->shipment->cnee->name.":
+Your consignment ".$hbn." has been deliveryed successfully, please click ".$link." to download your POD.";
+	return self::sendCargoSms($cpModel,$msg,'sendSuccessfulDeliverySms','Send_Successful_Delivery_Sms','sent_successful_delivery_sms');
+	}
+
+	public static function sendErrorDeliverySms($cpModel){
+		$errorType = $cpModel->mdata['CargoProcessErrorType'];
+		if($errorType=="Delay"){
+			$msg = "HI,".$cpModel->shipment->cnee->name.":
+We are sorry to inform you that due to traffic & other reasons, your consignment could not be delivered as planned. We apologise for the inconvenience caused. We will reschedule your shipment as soon as possible and notify you via SMS.";
+		}else{
+			$msg = "HI,".$cpModel->shipment->cnee->name.":
+We are sorry to inform you that your delivery was unsuccessful due to ".$errorType."
+We can not go back without further arrangement.";
+		}
+		
+	return self::sendCargoSms($cpModel,$msg,'sendErrorDeliverySms','Send_Error_Delivery_Sms','sent_error_delivery_sms');
+	}
+
+	public static function sendPreNotReply($cpModel){
+		$hbn = $cpModel->shipment->ref;
+		$suburb = $cpModel->shipment->cnee->suburb;
+		$unloadingDate = $cpModel->shipment->mdata['ContainerUnloadDate'];
+		$link = "https://book.toplogistics.com.au/cargoConfirm?caref=".$cpModel->getRef();
+		if(!empty($unloadingDate)&&strtotime($unloadingDate)>strtotime(date('Y-m-d'))){
+			$preStrDate = date('Y-m-d',strtotime($unloadingDate) + (2 * 24 * 3600));
+			$preEndDate = date('Y-m-d',strtotime($unloadingDate) + (6 * 24 * 3600));
+		}else{
+			$preStrDate = date('Y-m-d',strtotime(date('Y-m-d')) + (2 * 24 * 3600));
+			$preEndDate = date('Y-m-d',strtotime(date('Y-m-d')) + (6 * 24 * 3600));
+		}
+		$msg = "HI,".$cpModel->shipment->cnee->name.":
+Your cosignment ".$hbn." to ".$suburb.", As no confirmation was received. TLA will organise the delivery from ".$preStrDate." to ".$preEndDate.",
+delivery will be done based to information form your shipper. Click ".$link." to check.
+
+TOP Logistics Australia
+*The text is sent automatically, do not reply.";
+
+		return self::sendCargoSms($cpModel,$msg,'sendPreNotReply','Send_Pre_Not_Reply','send_pre_not_reply');
+	}
+
+	public static function sendCargoSms($cpModel,$smsMsg,$smsNoticeTag,$smsDateTag,$smsNoticeLog){
+		$phone = $cpModel->shipment->cnee->tel;
+		$phone = Addr::auTelValid($phone);
+		$check = false;
+		if(!empty($phone))
+		{
+			if(preg_match('/^02/i', $phone)||strlen($phone)<9)
+			{
+				return "phone number is wrong";
+			}else
+			{
+				$end = strlen($phone);
+				$phone = "0".substr($phone,$end-9,$end);
+			}
+
+			// $msg = "Dear Valued Customer, We’d like to inform you we are about to arrange the delivery of your goods($hbn). Before that，we will need you to log in $link website，confirm the relevant information. Please reply to us asap. After sending this message, there will be 3 days of free storage time. There will be an extra storage fee If this time is exceeded.";
+			$msg = $smsMsg;
+			$sms = new Sms();
+			$sms->no = $phone;
+			$sms->msg = $msg;
+			$sms->cargoProcessId = $cpModel->id;
+			$sms->send();
+			if($sms->status!=9) {
+				$cpModel->mdata[$smsNoticeTag] =1;
+				$cpModel->mdata[$smsDateTag] = date('Y-m-d H:i:s');
+				$check = true;
+				$cpModel->log($smsNoticeLog);
+			}else
+			{
+				if($check)
+				{
+					return "send SMS failed";
+				}else
+				{
+					return "send email and SMS failed";
+				}
+			}
+		}
+		if($check)
+		{
+			$cpModel->save();
+		}else
+		{
+			return "empty phone number consignee";
+		}
+		return $check;
+	}
+
+	public static function sendBiddingInfo($phone){
+		$link = "https://https://os.toplogistics.com.au/dplatform/";
+		$msg = "New Shipment Arrived. Please see details:".$link ;
+		return self::sendSms($phone,$msg,'sendBidding','Send_Bidding','send_bidding');
+	}
+
+	public static function sendCongratulationSmsBidding($phone,$pickupDate,$endDate){
+		$msg = "Congratulations! The delivery fee you have offered is successfully accepted.
+		Please come to load after ".$pickupDate." and deliver the shipment before ".$endDate;
+		return self::sendSms($phone,$msg,'sendCongraSmsBidding','Send_Congra_SmsBidding','send_congra_sms_bidding');
+	}
+
+	public static function sendSms($phone,$smsMsg,$smsNoticeTag,$smsDateTag,$smsNoticeLog){
+		$phone = Addr::auTelValid($phone);
+		$check = false;
+		if(!empty($phone))
+		{
+			if(preg_match('/^02/i', $phone)||strlen($phone)<9)
+			{
+				return "phone number is wrong";
+			}else
+			{
+				$end = strlen($phone);
+				$phone = "0".substr($phone,$end-9,$end);
+			}
+
+			// $msg = "Dear Valued Customer, We’d like to inform you we are about to arrange the delivery of your goods($hbn). Before that，we will need you to log in $link website，confirm the relevant information. Please reply to us asap. After sending this message, there will be 3 days of free storage time. There will be an extra storage fee If this time is exceeded.";
+			$msg = $smsMsg;
+			$sms = new Sms();
+			$sms->no = $phone;
+			$sms->msg = $msg;
+			$sms->send();
+			if($sms->status!=9) {
+				$check = true;
+			}else
+			{
+				if($check)
+				{
+					return "send SMS failed";
+				}else
+				{
+					return "send email and SMS failed";
+				}
+			}
+		}
+		if($check)
+		{
+		}else
+		{
+			return "empty phone number consignee";
+		}
+		return $check;
+	}
+
+	public static function sendCargoSmsEmail($cpModel,$emailTemplate,$emailNoticeTag,$emailNoticeLog,$smsMsg,$smsNoticeTag,$smsNoticeLog,$smsDateTag,$body = "")
+	{
+		$phone = $cpModel->shipment->cnee->tel;
+		$phone = Addr::auTelValid($phone);
+		$driverName = "";
+		$driverPhone = "";
+		if(!empty($cpModel->job_relation->job->driver))
+		{
+			$driverName = $cpModel->job_relation->job->driver->name;
+			$driverPhone = $cpModel->job_relation->job->driver->phone;
+		}else if(!empty($cpModel->driver))
+		{
+			$driverName = $cpModel->driver->name;
+			$driverPhone = $cpModel->driver->phone;
+		}
+		$email = $cpModel->shipment->cnee->email;
+		$hbn =  $cpModel->shipment->hbn;
+		$check = false;
+		$link = "https://book.toplogistics.com.au/cargoConfirm?caref=".$cpModel->getRef();
+		if(!empty($email))
+		{
+			$emailLog = new Emailog();
+			$emailLog->to_id = 0;
+			$emailLog->fid = $cpModel->shipment_id;
+			$emailLog->type= $emailTemplate;
+			$emailLog->dt = date('Y-m-d H:i:s');
+			$emailLog->status = 10;
+			$emailLog->prepTemplate();
+			$emailLog->tpl->assignSubject('HBN',  $cpModel->shipment->hbn);
+			// $emailLog->tpl->assignThese([
+			// 	'FILENAME'=>$filename,
+			// ]);
+			$emailLog->subject = $emailLog->tpl->subject;
+			$emailLog->tpl->assignThese([
+				'HBN'=>$cpModel->shipment->hbn,
+				'LINK'=>$link,
+				'DRIVERNAME'=>$driverName,
+				'PHONE'=>$driverPhone,
+				'NAME'=>$cpModel->shipment->cnee->name
+			]);
+			if(empty($body))
+			{
+				$emailLog->body = $emailLog->tpl->getContent();
+			}else
+			{
+				$emailLog->body = $body;
+			}
+			$emailLog->mdata['to']=$email;
+			$emailLog->mdata['fromName']='TLA Cartage';
+			$emailLog->mdata['from']='cartage@toplogistics.com.au';
+			$emailLog->mdata['cc']=Org::IM_EMAIL;
+			$o=$emailLog->sendEmail();
+			if($o['status'])
+			{
+				$cpModel->mdata[$emailNoticeTag] =1;
+				$cpModel->mdata[$smsDateTag] = date('Y-m-d H:i:s');
+				$cpModel->log($emailNoticeLog);
+				$check = true;
+			}
+		}
+
+		if(!empty($phone))
+		{
+			if(preg_match('/^02/i', $phone)||strlen($phone)<9)
+			{
+				if($check)
+				{
+					return "send email success but phone number is wrong";
+				}else
+				{
+					return "send email failed and phone number is wrong";
+				}
+			}else
+			{
+				$end = strlen($phone);
+				$phone = "0".substr($phone,$end-9,$end);
+			}
+
+			// $msg = "Dear Valued Customer, We’d like to inform you we are about to arrange the delivery of your goods($hbn). Before that，we will need you to log in $link website，confirm the relevant information. Please reply to us asap. After sending this message, there will be 3 days of free storage time. There will be an extra storage fee If this time is exceeded.";
+			$msg = $smsMsg;
+			$sms = new Sms();
+			$sms->no = $phone;
+			$sms->msg = $msg;
+			$sms->send();
+			if($sms->status!=9) {
+				$cpModel->mdata[$smsNoticeTag] =1;
+				$cpModel->mdata[$smsDateTag] = date('Y-m-d H:i:s');
+				$check = true;
+				$cpModel->log($smsNoticeLog);
+			}else
+			{
+				if($check)
+				{
+					return "send SMS failed";
+				}else
+				{
+					return "send email and SMS failed";
+				}
+			}
+		}
+		if($check)
+		{
+			$cpModel->save();
+		}else
+		{
+			return "empty email and phone number consignee";
+		}
+
+		return $check;
+
+	}
+
+
+	public function sendNormalEmail($toEmail,$subject,$str,$cc="")
+	{
+		$emailLog = new Emailog();
+		$emailLog->to_id = 0;
+		$emailLog->fid = 0;
+		$emailLog->type= Emailog::CARGO_EMAIL_NOTICE;
+		$emailLog->dt = date('Y-m-d H:i:s');
+		$emailLog->status = 10;
+		$emailLog->subject = $subject;
+		$emailLog->body =$str;
+		$emailLog->mdata['to']=$toEmail;
+		$emailLog->mdata['fromName']=Org::IM_EMAIL_NAME;
+		$emailLog->mdata['from']=Org::IM_EMAIL;
+		if(!empty($cc))
+		{
+			$emailLog->mdata['cc']=$cc;
+		}
+		$o=$emailLog->sendEmail();
+		if($o['status'])
+		{
+			return true;
+		}else
+		{
+			return false;
+		}
+	}
+	
+	
+	public function sendFabRemovalActiveAccount($toEmail,$ref)
+	{
+		$emailLog = new Emailog();
+		$emailLog->to_id = 0;
+		$emailLog->fid = 0;
+		$emailLog->type= Emailog::CARGO_EMAIL_NOTICE;
+		$emailLog->dt = date('Y-m-d H:i:s');
+		$emailLog->status = 10;
+		$emailLog->subject = 'Removal of inventory from Amazon Fulfillment Centres in Australia';
+		$emailLog->body ='<div>please click the link to active your account : <a href="'.$ref.'">'.$ref.'<a></div>';
+		$emailLog->mdata['to']=$toEmail;
+		$emailLog->mdata['fromName']=Org::IM_EMAIL_NAME;
+		$emailLog->mdata['from']=Org::IM_EMAIL;
+		$o=$emailLog->sendEmail();
+		if($o['status'])
+		{
+			return true;
+		}else
+		{
+			return false;
+		}
+	}
+	
+	
+	public function sendCneeShipmentQuery($str)
+	{
+		$emailLog = new Emailog();
+		$emailLog->to_id = 0;
+		$emailLog->fid = 0;
+		$emailLog->type= Emailog::CARGO_EMAIL_NOTICE;
+		$emailLog->dt = date('Y-m-d H:i:s');
+		$emailLog->status = 10;
+		$emailLog->subject = 'Cnee Shipment Query';
+		$emailLog->body =$str;
+		$emailLog->mdata['to']=Org::IM_CS_EMAIL;
+		$emailLog->mdata['fromName']='importscs';
+		$emailLog->mdata['from']=Org::IM_CS_EMAIL;
+		$o=$emailLog->sendEmail();
+		if($o['status'])
+		{
+			return true;
+		}else
+		{
+			return false;
+		}
+	}
+	public function sendTodayManifestedSFEmail()
+	{
+		$maniMaps = ManiMap::model()->with(["manifest"])->findAll("TO_DAYS(manifest.created)  = TO_DAYS(:today) and fwd_id = :courierId",[":today"=>date('Y-m-d'),":courierId"=>Org::ORGID_COURIER_SF]);
+		foreach ($maniMaps as $key => $maniMap) {
+			$s = Shipment::model()->findByPk($maniMap->fid);
+		}
+	}
+
+	public function sendSFEmail($shipments)
+	{
+		// ref,pkg,weight,预计提货时间,提货地点，提货联系人
+	}
+
+	public function funcSendEmail($strFrom,$strFromname,$strToEmail,$strCc,$strBcc,$strSubject,$strBody,$numType)
+	{
+		$emailLog = new Emailog();
+		$emailLog->to_id = 0;
+		$emailLog->fid = 0;
+		$emailLog->type= $numType;
+		$emailLog->dt = date('Y-m-d H:i:s');
+		$emailLog->status = 10;
+		$emailLog->mdata['from']=$strFrom;
+		$emailLog->mdata['fromName']=$strFromname;
+		$emailLog->mdata['to']=$strToEmail;
+		$emailLog->mdata['cc']=$strCc;
+		$emailLog->mdata['bcc']=$strBcc;
+		$emailLog->subject = $strSubject;
+		$emailLog->body =$strBody;
+
+		$o=$emailLog->sendEmail();
+
+		if($o['status'])
+		{
+			return true;
+		}else
+		{
+			return false;
+		}
+	}
+
+	public function funcSendEmailTpl($orgId,$strFrom,$strFromname,$strToEmail,$strCc,$strBcc,$strSubject,$strBody,$emailType,$fullFilename="",$filename="")
+	{
+		$emailLog = new Emailog();
+		$emailLog->to_id = $orgId;
+		$emailLog->fid = 0;
+		$emailLog->type= $emailType;
+		$emailLog->dt = date('Y-m-d H:i:s');
+		$emailLog->status = 10;
+        $emailLog->prepTemplate();
+        $emailLog->subject = !empty($strSubject)?$strSubject:$emailLog->tpl->subject;
+        $emailLog->body = !empty($strBody)?$strBody:$emailLog->tpl->getContent();
+        $emailLog->mdata['from']=$strFrom;
+		$emailLog->mdata['fromName']=$strFromname;
+		$ccList = explode(';', $strCc);
+		if(!empty($emailLog->to_id))
+		{
+			$org = Org::model()->findByPk($emailLog->to_id);
+			$thisTo = "";
+			if (!empty($org->extra['client_billing_email'])) {
+				foreach (preg_split('/[,;]+/i', trim($org->extra['client_billing_email'])) as $to) {
+					if(empty($thisTo))
+					{
+						$thisTo = $to;
+					}else
+					{
+						$ccList[] = $to;
+					}
+				}
+			}else
+			{
+				return false;
+			}
+			$emailLog->mdata['to']=$thisTo;
+			$emailLog->mdata['cc']=join(';',$ccList);
+
+		}else
+		{
+			$emailLog->mdata['to']=$strToEmail;
+			$emailLog->mdata['cc']=$strCc;
+			$emailLog->mdata['bcc']=$strBcc;
+		}
+
+		if(empty($fullFilename))
+		{
+			$o=$emailLog->sendEmail();
+		}else
+		{
+			$o=$emailLog->sendEmail([[$fullFilename,$filename]]);
+		}
+		if($o['status'])
+		{
+			return true;
+		}else
+		{
+			return false;
+		}
+	}
+
+	public function funcSendGoogleReviewEmail($strToEmail,$strSubject,$strBody){
+		return $this->funcSendEmail(
+			'donotreply@toplogistics.com.au',
+			'TLA Customer Service',
+			$strToEmail,
+			'',
+			'peter@toplogistics.com.au;weijia@toplogistics.com.au;peter',
+			$strSubject,
+			$strBody,
+			Emailog::Google_Review_Email
+		);
+	}
+
+	public function funcSendGoogleReviewSms($strTel,$strMessage){
+		$sms = new Sms();
+		$sms->no = $strTel;
+		$sms->msg = $strMessage;
+		$sms->send();
+	}
+
+	public function funcSendMarketingEmail($strBCC,$strSubject,$strBody){
+		return $this->funcSendEmail(
+			'sales@toplogistics.com.au',
+			// 'donotreply@toplogistics.com.au',
+			'Top Logistics Marketing',
+			'sales@toplogistics.com.au',
+			//'donotreply@toplogistics.com.au',
+			'',
+			$strBCC,
+			$strSubject,
+			$strBody,
+			Emailog::Marketing_Email
+		);
+	}
+
+	public function funcSendSubShipmentNoticeEmail($strTo,$strTel,$strHbn,$strRef,$strName,$strAddress,$strCourier,$numPcs,$numWeight){
+
+		$strMessage = 'Dear '.$strName.':
+
+Your shipment '.$strHbn.' ('.$strRef.')'.' has arrived into our Depot,
+No of  Cartons：'.$numPcs.'pcs
+Gross Weight：'.$numWeight.'kg
+Address：'.$strAddress.'
+Courier: '.$strCourier.'
+Tracking No.: '.$strRef.'
+
+This shipment is currently being sorted, then send to '.$strCourier.'. You should expect delivery with next 2-7 business days.For detailed information please refer to '.$strCourier.' official website.
+
+TOP Logistics Australia
+
+*The text is sent automatically, do not reply. ';
+
+		$sms = new Sms();
+		$sms->no = $strTel;
+		$sms->msg = $strMessage;
+		$sms->send();
+
+		if(empty($strTo)){
+			return ; // empty email
+		}
+
+		$strSubject= 'Dispatch Notice for shipment '.$strHbn.' ('.$strRef.')';
+
+		$strHTML = 'Dear '.$strName.':<br/>
+<br/>
+Your shipment '.$strHbn.' ('.$strRef.')'.' has arrived into our Depot,<br/>
+No of  Cartons：'.$numPcs.'pcs<br/>
+Gross Weight：'.$numWeight.'kg<br/>
+Address：'.$strAddress.'<br/>
+Courier: '.$strCourier.'<br/>
+Tracking No.: '.$strRef.'<br/>
+<br/>
+This shipment is currently being sorted, then send to '.$strCourier.'. You should expect delivery with next 2-7 business days.For detailed information please refer to '.$strCourier.' official website.<br/>
+<br/>
+TOP Logistics Australia<br/>
+<br/>
+*The text is sent automatically, do not reply. ';
+
+		return $this->funcSendEmail(
+			'3pl@toplogistics.com.au',
+			'TLA Customer Service',
+			$strTo,
+			'',
+			'',
+			$strSubject,
+			$strHTML,
+			Emailog::CARGO_WH_EMAIL_NOTICE
+		);
+	}
+
+	public function funcEmailChangeAddressWhenCargoConfirm($strRef,$strIp,$strEmail,$strTel,$strNewAddress,$strOriginalAddress){
+		$strSubject = 'Change Address '.$strRef;
+		$strHTML='ip: '.$strIp;
+		$strHTML.='<br/>Email: '.$strEmail;
+		$strHTML.='<br/>Tel: '.$strTel;
+		$strHTML.='<br/>'.$strOriginalAddress;
+		$strHTML.='<br/>New Address: '.$strNewAddress;
+
+
+		return $this->funcSendEmail(
+			'cartage@toplogistics.com.au',
+			'TLA Cartage',
+			// Org::IM_EMAIL,
+			'weijia@toplogistics.com.au',
+			'',
+			// 'weijia@toplogistics.com.au',
+			'',
+			$strSubject,
+			$strHTML,
+			Emailog::CARGO_EMAIL_NOTICE
+		);
+	}
+
+	public function funcEmailPriceEnquiry($strCode,$strEmail,$strName,$numPrice){
+		$strSubject = 'Price Enquiry Notice '.$strCode;
+		$strHTML= 'Deat '.$strName.',<br/><br/>您的询价'.$strCode.'，价格为$'.$numPrice.'，详情请去询价系统查询.<br/><br/>Top Logistics Australia';
+
+		return $this->funcSendEmail(
+			'cartage@toplogistics.com.au',
+			'TLA Cartage',
+			$strEmail,
+			'',
+			'',
+			$strSubject,
+			$strHTML,
+			Emailog::Price_Enquiry_Notice
+		);
+	}
+
+	public function sendCustomerServiceTrackingEmail($shipment, $courier, $ref, $cc="")
+	{
+		$emailLog = new Emailog();
+		$emailLog->type = Emailog::CUSTOMER_SERVICE_TRACKING_ENQUIRY;
+		$emailLog->fid = $shipment->id;
+		$emailLog->dt = date('Y-m-d H:i:s');
+		$emailLog->to_id = $courier->id;
+		$emailLog->status = 10;
+		$emailLog->prepTemplate();
+		$emailLog->tpl->assignThese([
+			'SHIPMENT_NO'=>$ref,
+		]);
+		$emailLog->subject = $emailLog->tpl->subject;
+		$emailLog->body = $emailLog->tpl->getContent();
+		if (!empty($courier->extra['outturn_email'])) {
+			$emailLog->mdata['to']=$courier->extra['outturn_email'];
+		} else {
+			$emailLog->mdata['to']=$courier->email;
+		}
+		$emailLog->mdata['from']='imports@toplogistics.com.au';
+		$emailLog->mdata['fromName']='TLA Imports';
+		$emailLog->mdata['cc']=$cc;
+		$emailLog->sendEmail(); 
+	}
+
+	public function sendPireFileToAgent($agentId, $file)
+	{
+		$agent = Org::model()->findByPk($agentId);
+		$emailLog = new Emailog();
+		$emailLog->type = Emailog::PIER_FILE;
+		$emailLog->fid = $file->id;
+		$emailLog->dt = date('Y-m-d H:i:s');
+		$emailLog->to_id = $agent->id;
+		$emailLog->status = 10;
+		$emailLog->prepTemplate();
+		$emailLog->tpl->assignSubject('FILENAME',  $file->name);
+		$emailLog->tpl->assignThese([
+			'ORG_NAME'=>$agent->name,
+		]);
+		$emailLog->body = $emailLog->tpl->getContent();
+		$emailLog->subject = $emailLog->tpl->subject;
+		if (!empty($agent->extra['client_billing_email'])) {
+			$emailLog->mdata['to']=$agent->extra['client_billing_email'];
+		} else {
+			$emailLog->mdata['to']=$agent->email;
+		}
+		$emailLog->mdata['from']='imports@toplogistics.com.au';
+		$emailLog->mdata['fromName']='TLA Imports';
+		$emailLog->mdata['cc']="imports@toplogistics.com.au";
+		$emailLog->attachments = [$file];
+		$emailLog->sendEmail(); 
+	}
+
+	public function createEmail($model,$files= [])
+	{
+		$model->mdata['fromName'] = "TLA ".ucfirst(explode("@", $model->mdata["from"])[0]);
+		$model->save();
+		if(!empty($files))
+		{
+			$this->saveFiles($files,'Emailog',$model->id,FileRepo::ATTACHMENT);
+			$fileRepos = FileRepo::model()->findAll('fid = :fid and type =:type',[":fid"=>$model->id,":type"=>FileRepo::ATTACHMENT]);
+			$model->attachments =$fileRepos;
+		}
+		$result = $model->sendEmail();
+		if(!$result['status'])
+		{
+			$model->addError($result['msg']);
+		}
+		return $model;
+	}
+
+
+	public function sendImportsMailFeedbackEmail($task)
+	{
+		$baseUrl = 'https://ims.toplogistics.com.au/customerService/taskFeedback';
+		$taskId = $task->id;
+		$attributes = ['ticket' => $task->ticket];
+		$shipmentQuestionSubmit = ShipmentQuestionSubmit::model()->findByAttributes($attributes);
+		/* Filter out internal email address */ 
+		$regExp = '/@toplogistics.com.au/i';
+		if (preg_match($regExp, $task->from_email)) {
+			$toEmail = $task->to_email;
+			$toName = $task->to_name;
+		} else {
+			$toEmail = $task->from_email;
+			$toName = $task->from_name;
+		}
+		/* Read c_note from shipment_question_submit table */
+		if (!empty($shipmentQuestionSubmit)) {
+			$taskNote = $shipmentQuestionSubmit->c_note;
+		} else {
+			$taskNote = '';
+		}
+		/* Only keep first 100 characters of c_note */
+		if (strlen($taskNote) > 100) {
+			$taskNote = substr($taskNote, 0, 97) . '...';
+		}
+
+
+		$emailLog = new Emailog();
+		$emailLog->type = Emailog::TASK_FEEDBACK_EMAIL;
+		$emailLog->dt = date('Y-m-d H:i:s');
+		$emailLog->status = 10;
+		$emailLog->prepTemplate();
+		$emailLog->tpl->assignSubject('subject', $task->subject);
+		$emailLog->tpl->assignThese([
+				'subject' => $task->subject,
+				'toName' => $toName,
+				'c_note' => $taskNote,
+				'baseURL' => $baseUrl,
+				'id' => $taskId
+				]);
+		$emailLog->subject = $emailLog->tpl->subject;
+		$emailLog->body = $emailLog->tpl->getContent();
+		$emailLog->mdata['to'] = $toEmail;
+		$emailLog->mdata['fromName'] = 'TLA Customer Service';
+		$emailLog->mdata['from'] = 'donotreply@toplogistics.com.au';
+		$emailLog->mdata['cc'] = '';
+		$emailLog->sendEmail();
+	}
+
+	public function sendPriceEnquiryEmail($pe, $dim)
+	{
+		$emailLog = new Emailog();
+		$emailLog->type = Emailog::PRICE_ENQUIRY_EMAIL;
+		$emailLog->dt = date('Y-m-d H:i:s');
+		$emailLog->status = 10;
+		$emailLog->prepTemplate();
+		$emailLog->tpl->assignSubject('peNumber', $pe->code);
+		if ($pe->mdata['base_TLD'] == 0) {
+			$emailLog->tpl->assignThese([
+				'peNumber' => $pe->code, 
+				'name' => $pe->name,
+				'totalWeight' => $pe->weight,
+				'totalDimension' => $dim,
+				'totalQuantity' => $pe->quantity,
+				'tldBase' => 'Out of service area',
+				'tldOversize' => 'Out of service area',
+				'tldSubtotal' => 'Out of service area',
+				'tldUnloading' => 'Out of service area',
+				'tldTotal' => 'Out of service area',
+				'tollBase' => '$'.$pe->mdata['base_Toll'],
+				'tollOversize' => '$'.$pe->mdata['oversize_Toll'],
+				'tollSubtotal' => '$'.$pe->mdata['base_Toll']+$pe->mdata['oversize_Toll'],
+				'tollUnloading' => '$0.00',
+				'tollTotal' => '$'.$pe->mdata['base_Toll']+$pe->mdata['oversize_Toll']
+			]);
+		} else {
+			$emailLog->tpl->assignThese([
+				'peNumber' => $pe->code, 
+				'name' => $pe->name,
+				'totalWeight' => $pe->weight,
+				'totalDimension' => $dim,
+				'totalQuantity' => $pe->quantity,
+				'tldBase' => '$'.$pe->mdata['base_TLD'],
+				'tldOversize' => '$'.$pe->mdata['oversize_TLD'],
+				'tldSubtotal' => '$'.$pe->mdata['base_TLD']+$pe->mdata['oversize_TLD'],
+				'tldUnloading' => '$'.$pe->mdata['tailgate_TLD'],
+				'tldTotal' => '$'.$pe->mdata['base_TLD']+$pe->mdata['oversize_TLD']+$pe->mdata['tailgate_TLD'],
+				'tollBase' => '$'.$pe->mdata['base_Toll'],
+				'tollOversize' => '$'.$pe->mdata['oversize_Toll'],
+				'tollSubtotal' => '$'.$pe->mdata['base_Toll']+$pe->mdata['oversize_Toll'],
+				'tollUnloading' => '$0.00',
+				'tollTotal' => '$'.$pe->mdata['base_Toll']+$pe->mdata['oversize_Toll']
+			]);
+		}
+		
+		$emailLog->subject = $emailLog->tpl->subject;
+		$emailLog->body = $emailLog->tpl->getContent();
+		$emailLog->mdata['to'] = $pe->email;
+		$emailLog->mdata['fromName'] = 'TLA Customer Service';
+		$emailLog->mdata['from'] = 'sales@toplogistics.com.au';
+		$emailLog->mdata['cc'] = '';
+		$emailLog->sendEmail();
+	}
+
+	public function sendBookingConfirmationEmail($booking, $pallets,$skipInvoice=false)
+	{
+		$email = new Emailog();
+		$email->type = Emailog::BOOKING_CONFIRMATION;
+		$email->dt = date('Y-m-d H:i:s');
+		$email->status = 10;
+		$email->prepTemplate();
+		$email->tpl->assignSubject('pbn', $booking->booking_number);
+
+		// Set collection address
+		$tlaAddress = '';
+		switch (substr($booking->booking_number, 0, 1)) {
+			case "S":
+			case "s":
+				$tlaAddress = '1/233 Milperra Rd, Bankstown Aerodrome NSW';
+				break;
+			case "M":
+			case "m":
+				$tlaAddress = '3B/8 Judge St, Sunshine VIC';
+				break;
+			case "B":
+			case "b":
+				$tlaAddress = '6/55 Musgrave Rd, Coopers Plains QLD';
+				break;
+		}
+
+		if($booking->mdata['pallet_requirement'] == "plain") {
+			$plainPallet = "Yes";
+		} else {
+			$plainPallet = "No";
+		}
+		if ($booking->mdata['shrink_wrap'] == 'wrap') {
+			$wrap = "Yes";
+		} else {
+			$wrap = "No";
+		}
+
+		// Generate Confirmation PDF
+		$confirmationData = [];
+		$confirmationData['booking_no'] = $booking->booking_number;
+		$confirmationData['time'] = date('d-m-Y H:i', strtotime($booking->booking_time));
+		$confirmationData['rego'] = $booking->rego;
+		$confirmationData['driver'] = $booking->driver_name;
+		$confirmationData['company'] = $booking->company_name;
+		$confirmationData['palletCount'] = $pallets;
+		$confirmationData['plain_pallet'] = $plainPallet;
+		$confirmationData['wrap'] = $wrap;
+		
+		$confirmation_file_dir = Yii::app()->basePath . DIRECTORY_SEPARATOR . "runtime" . DIRECTORY_SEPARATOR . "BookingConfirmation" . DIRECTORY_SEPARATOR;
+		if (!is_dir($confirmation_file_dir)) {
+			mkdir($confirmation_file_dir);
+		}
+		$confirmation_file = $confirmation_file_dir . date('Y-m-d') . '-'.$booking->booking_number.'.pdf';
+		oPDF::renderPDF('booking_confirmation', ['confirmationData'=>$confirmationData], 2, $confirmation_file);
+		$email->tpl->assignThese([
+				'pbn' => $booking->booking_number,
+				'house_bl' => $booking->mdata['house_bl'],
+				'address' => $tlaAddress,
+				'booking_time' => date('d-m-Y H:i', strtotime($booking->booking_time)),
+				'rego' => $booking->rego,
+				'name' => $booking->driver_name,
+				'company_name' => $booking->company_name,
+				'pallets' => $pallets,
+				'plain_pallet' => $plainPallet,
+				'wrap' => $wrap,
+				'total' => '$' . ($skipInvoice?"0":number_format((float)$booking->fee * 1.1, 2, '.', ''))
+		]);
+		// Attach files
+		$files = [];
+
+
+		// Generate invoice pdf
+		$invoice = Invoice::model()->findByAttributes(['no' => explode("-",$booking->booking_number)[0]]);
+		if(!$skipInvoice)
+		{
+			$tempDirectory = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.'zip'.time();
+			if (!file_exists($tempDirectory)) {
+				mkdir($tempDirectory);
+			}
+			$fileName=$tempDirectory.DIRECTORY_SEPARATOR.'Invoice_'.$booking->booking_number.'.pdf';
+			oPDF::renderPDF('invoice', ['inv'=>$invoice], 2, $fileName);
+
+			array_push($files, [$fileName,'Invoice_'.$invoice->no.'.pdf']);
+		}
+
+		array_push($files, [$confirmation_file, 'BookingConfirmation.pdf']);
+		$fileRepos = FileRepo::model()->findAllByAttributes(['fid' => $booking->shipment_id, 'type' => FileRepo::BOOKING_DO_FILE]);
+		foreach ($fileRepos as $file) {
+			array_push($files, [$file->getFile(), $file->name]);			
+		}
+
+		$email->subject = $email->tpl->subject;
+		$email->body = $email->tpl->getContent();
+		$email->mdata['to'] = $booking->company_email;
+		$email->mdata['fromName'] = 'TLA Imports Team';
+		$email->mdata['from'] = 'donotreply@toplogistics.com.au';
+		$email->mdata['cc'] = 'imports@toplogistics.com.au';
+		$email->sendEmail($files);
+		unlink($confirmation_file);
+	}
+
+
+	public function sendBookingConfirmationEmailOnly($booking, $pallets,$skipInvoice=false)
+	{
+		$email = new Emailog();
+		$email->type = Emailog::BOOKING_CONFIRMATION;
+		$email->dt = date('Y-m-d H:i:s');
+		$email->status = 10;
+		$email->prepTemplate();
+		$email->tpl->assignSubject('pbn', $booking->booking_number);
+
+		// Set collection address
+		$tlaAddress = '';
+		switch (substr($booking->booking_number, 0, 1)) {
+			case "S":
+			case "s":
+				$tlaAddress = '1/233 Milperra Rd, Bankstown Aerodrome NSW';
+				break;
+			case "M":
+			case "m":
+				$tlaAddress = '3B/8 Judge St, Sunshine VIC';
+				break;
+			case "B":
+			case "b":
+				$tlaAddress = '6/55 Musgrave Rd, Coopers Plains QLD';
+				break;
+		}
+
+		if($booking->mdata['pallet_requirement'] == "plain") {
+			$plainPallet = "Yes";
+		} else {
+			$plainPallet = "No";
+		}
+		if ($booking->mdata['shrink_wrap'] == 'wrap') {
+			$wrap = "Yes";
+		} else {
+			$wrap = "No";
+		}
+
+		// Generate Confirmation PDF
+		$confirmationData = [];
+		$confirmationData['booking_no'] = $booking->booking_number;
+		$confirmationData['time'] = date('d-m-Y H:i', strtotime($booking->booking_time));
+		$confirmationData['rego'] = $booking->rego;
+		$confirmationData['driver'] = $booking->driver_name;
+		$confirmationData['company'] = $booking->company_name;
+		$confirmationData['palletCount'] = $pallets;
+		$confirmationData['plain_pallet'] = $plainPallet;
+		$confirmationData['wrap'] = $wrap;
+		
+		$confirmation_file_dir = Yii::app()->basePath . DIRECTORY_SEPARATOR . "runtime" . DIRECTORY_SEPARATOR . "BookingConfirmation" . DIRECTORY_SEPARATOR;
+		if (!is_dir($confirmation_file_dir)) {
+			mkdir($confirmation_file_dir);
+		}
+		$confirmation_file = $confirmation_file_dir . date('Y-m-d') . '-'.$booking->booking_number.'.pdf';
+		oPDF::renderPDF('booking_confirmation', ['confirmationData'=>$confirmationData], 2, $confirmation_file);
+		$email->tpl->assignThese([
+				'pbn' => $booking->booking_number,
+				'house_bl' => $booking->mdata['house_bl'],
+				'address' => $tlaAddress,
+				'booking_time' => date('d-m-Y H:i', strtotime($booking->booking_time)),
+				'rego' => $booking->rego,
+				'name' => $booking->driver_name,
+				'company_name' => $booking->company_name,
+				'pallets' => $pallets,
+				'plain_pallet' => $plainPallet,
+				'wrap' => $wrap,
+				'total' => '$' . number_format((float)$booking->fee * 1.1, 2, '.', '')
+		]);
+		// Attach files
+		$files = [];
+
+		array_push($files, [$confirmation_file, 'BookingConfirmation.pdf']);
+		$fileRepos = FileRepo::model()->findAllByAttributes(['fid' => $booking->shipment_id, 'type' => FileRepo::BOOKING_DO_FILE]);
+		foreach ($fileRepos as $file) {
+			array_push($files, [$file->getFile(), $file->name]);			
+		}
+
+		$email->subject = $email->tpl->subject;
+		$email->body = $email->tpl->getContent();
+		$email->mdata['to'] = $booking->company_email;
+		$email->mdata['fromName'] = 'TLA Imports Team';
+		$email->mdata['from'] = 'donotreply@toplogistics.com.au';
+		$email->mdata['cc'] = 'imports@toplogistics.com.au';
+		$email->sendEmail($files);
+		unlink($confirmation_file);
+
+		$this->sendBookingNoticeEmail($booking, $pallets,true);
+	}
+
+	public function sendBookingNoticeEmail($booking, $pallets,$skipInvoice=false)
+	{
+		$diffHours = HolidayHelper::hourDiffBetweenTwoDays($booking->booking_time,date("Y-m-d H:i:s"));
+		if($diffHours>8)
+		{
+			return false;
+		}
+
+		if($booking->mdata['pallet_requirement'] == "plain") {
+			$plainPallet = "Yes";
+		} else {
+			$plainPallet = "No";
+		}
+		if ($booking->mdata['shrink_wrap'] == 'wrap') {
+			$wrap = "Yes";
+		} else {
+			$wrap = "No";
+		}
+
+		$confirmationData = [];
+		$taskContent = 'Booking No.:'.$booking->booking_number."</br>";
+		$taskContent .= 'HBN:'.$booking->mdata['house_bl']."</br>";
+		$taskContent .= 'Location:'.$booking->shipment->getRackName(false,false);
+		$taskContent .= 'Booking Time:'.$booking->booking_time."</br>";
+		$taskContent .= 'Rego:'.$booking->rego."</br>";
+		$taskContent .= 'Driver:'.$booking->driver_name."</br>";
+		$taskContent .= 'Company:'.$booking->company_name."</br>";
+		$taskContent .= 'palletCount:'.$pallets."</br>";
+		$taskContent .= 'plain_pallet:'.$plainPallet."</br>";
+		$taskContent .= 'wrap:'.$wrap;
+
+
+		$depot = $booking->mdata['depot'];
+		$user = User::model()->find("(occupation &:occupation)>0 and active =1 and dpt_id =:dptId",[":occupation"=>User::WH_HELD_PREPARATION,":dptId"=>Org::$warehouse_list_id[$depot]]);
+		if(!empty($user->phone))
+		{
+			$taskContent=
+'Booking Notice:'.'
+Booking No.:'.$booking->booking_number.'
+HBN:'.$booking->mdata['house_bl'].'
+Location:'.$booking->shipment->getRackName(false,false).'
+Booking Time:'.$booking->booking_time.'
+Rego:'.$booking->rego.'
+Driver:'.$booking->driver_name.'
+Company:'.$booking->company_name.'
+palletCount:'.$pallets.'
+plain_pallet:'.$plainPallet.'
+wrap:'.$wrap.'';
+			$smsObj = new Sms();
+			$smsObj->no = $user->phone;
+			$smsObj->msg = $taskContent;
+			$smsObj->sendLocal();
+			return true;
+		}
+
+		$tlaTaskService = new TlaTaskService();
+		$date = explode(' ', $booking->booking_time);
+		$tlaTaskService->createNewTlaTask(WarehouseTask::$my_type,"","",0,Org::TLA_DEPARTMENT_SYDNEY,0,$taskContent,[],[],$user->id,$date." 23:50:50");
+
+		// $email = new Emailog();
+		// $email->type = Emailog::BOOKING_WH_NOTICE;
+		// $email->dt = date('Y-m-d H:i:s');
+		// $email->status = 10;
+		// $email->prepTemplate();
+		// $email->tpl->assignSubject('pbn', $booking->booking_number);
+		// $email->tpl->assignSubject('booking_time', $booking->booking_time);
+		// $email->tpl->assignSubject('depot', $booking->mdata['depot']);
+		// $depot = $booking->mdata['depot'];
+		// // Set collection address
+		// $tlaAddress = '';
+		// switch (substr($booking->booking_number, 0, 1)) {
+		// 	case "S":
+		// 	case "s":
+		// 		$tlaAddress = '1/233 Milperra Rd, Bankstown Aerodrome NSW';
+		// 		break;
+		// 	case "M":
+		// 	case "m":
+		// 		$tlaAddress = '3B/8 Judge St, Sunshine VIC';
+		// 		break;
+		// 	case "B":
+		// 	case "b":
+		// 		$tlaAddress = '6/55 Musgrave Rd, Coopers Plains QLD';
+		// 		break;
+		// }
+
+		// if($booking->mdata['pallet_requirement'] != "chep") {
+		// 	$plainPallet = "Yes";
+		// } else {
+		// 	$plainPallet = "No";
+		// }
+		// if ($booking->mdata['shrink_wrap'] == 'wrap') {
+		// 	$wrap = "Yes";
+		// } else {
+		// 	$wrap = "No";
+		// }
+
+		// // Generate Confirmation PDF
+		// $confirmationData = [];
+		// $confirmationData['booking_no'] = $booking->booking_number;
+		// $confirmationData['time'] = date('d-m-Y H:i', strtotime($booking->booking_time));
+		// $confirmationData['rego'] = $booking->rego;
+		// $confirmationData['driver'] = $booking->driver_name;
+		// $confirmationData['company'] = $booking->company_name;
+		// $confirmationData['palletCount'] = $pallets;
+		// $confirmationData['plain_pallet'] = $plainPallet;
+		// $confirmationData['wrap'] = $wrap;
+		
+		// $email->tpl->assignThese([
+		// 		'pbn' => $booking->booking_number,
+		// 		'house_bl' => $booking->mdata['house_bl'],
+		// 		'address' => $tlaAddress,
+		// 		'booking_time' => date('d-m-Y H:i', strtotime($booking->booking_time)),
+		// 		'rego' => $booking->rego,
+		// 		'name' => $booking->driver_name,
+		// 		'company_name' => $booking->company_name,
+		// 		'pallets' => $pallets,
+		// 		'plain_pallet' => $plainPallet,
+		// 		'wrap' => $wrap,
+		// 		'total' => '$' . number_format((float)$booking->fee * 1.1, 2, '.', '')
+		// ]);
+
+		// $email->subject = $email->tpl->subject;
+		// $email->body = $email->tpl->getContent();
+		// $email->mdata['to'] = SystemSetting::getWhPickupNoticeEmail($depot);
+		// $email->mdata['fromName'] = 'TLA Imports Team';
+		// $email->mdata['from'] = 'donotreply@toplogistics.com.au';
+		// $email->mdata['cc'] = 'imports@toplogistics.com.au';
+		// $email->sendEmail([]);
+		return true;
+		
+	}
+
+	public function sendMultiBookingInvoiceEmail($bookingSubmitNo, $pallets,$skipInvoice=false)
+	{
+
+		$pbs = PickupBookingSubmit::model()->find("submit_no = :submitNo",[":submitNo"=>$bookingSubmitNo]);
+		$email = new Emailog();
+		$email->type = Emailog::BOOKING_SUBMIT_CONFIRMATION;
+		$email->dt = date('Y-m-d H:i:s');
+		$email->status = 10;
+		$email->prepTemplate();
+		$email->tpl->assignSubject('pbns', $pbs->submit_no);
+		$booking = $pbs->booking[0];
+		// Set collection address
+		$tlaAddress = '';
+		switch (substr($booking->booking_number, 0, 1)) {
+			case "S":
+			case "s":
+				$tlaAddress = '1/233 Milperra Rd, Bankstown Aerodrome NSW';
+				break;
+			case "M":
+			case "m":
+				$tlaAddress = '3B/8 Judge St, Sunshine VIC';
+				break;
+			case "B":
+			case "b":
+				$tlaAddress = '6/55 Musgrave Rd, Coopers Plains QLD';
+				break;
+		}
+
+		if($booking->mdata['pallet_requirement'] == "plain") {
+			$plainPallet = "Yes";
+		} else {
+			$plainPallet = "No";
+		}
+		if ($booking->mdata['shrink_wrap'] == 'wrap') {
+			$wrap = "Yes";
+		} else {
+			$wrap = "No";
+		}
+		$tableStr = '<table border="1" cellpadding="1" cellspacing="1">
+ 	<tbody>
+ 		<tr>
+ 			<td><span style="font-family:Arial,Helvetica,sans-serif"><span style="font-size:14px">Booking#</span></span></td>
+ 			<td><span style="font-family:Arial,Helvetica,sans-serif"><span style="font-size:14px">Time</span></span></td>
+ 			<td><span style="font-family:Arial,Helvetica,sans-serif"><span style="font-size:14px">Rego</span></span></td>
+ 			<td><span style="font-family:Arial,Helvetica,sans-serif"><span style="font-size:14px">Driver Name</span></span></td>
+ 			<td><span style="font-family:Arial,Helvetica,sans-serif"><span style="font-size:14px">Company Name</span></span></td>
+ 			<td><span style="font-family:Arial,Helvetica,sans-serif"><span style="font-size:14px">Number of Pallets</span></span></td>
+ 			<td><span style="font-family:Arial,Helvetica,sans-serif"><span style="font-size:14px">Plain Pallet</span></span></td>
+ 			<td><span style="font-family:Arial,Helvetica,sans-serif"><span style="font-size:14px">Shrink Wrap</span></span></td>
+ 			<td><span style="font-family:Arial,Helvetica,sans-serif"><span style="font-size:14px">Total Inc GST</span></span></td>
+ 		</tr>';
+ 		$house_bl = [];
+ 		foreach ($pbs->booking as $key => $booking)
+ 		{
+ 			$house_bl[]=$booking->shipment->hbn;
+ 			$tableStr.= '<tr><td><span style="font-family:Arial,Helvetica,sans-serif"><span style="font-size:14px">'.$booking->booking_number.'</span></span></td>';
+ 			$tableStr.= '<td><span style="font-family:Arial,Helvetica,sans-serif"><span style="font-size:14px">'.date('d-m-Y H:i', strtotime($booking->booking_time)).'</span></span></td>';
+ 			$tableStr.= '<td><span style="font-family:Arial,Helvetica,sans-serif"><span style="font-size:14px">'.$booking->rego.'</span></span></td>';
+ 			$tableStr.= '<td><span style="font-family:Arial,Helvetica,sans-serif"><span style="font-size:14px">'.$booking->driver_name.'</span></span></td>';
+ 			$tableStr.= '<td><span style="font-family:Arial,Helvetica,sans-serif"><span style="font-size:14px">'.$booking->company_name.'</span></span></td>';
+ 			$tableStr.= '<td><span style="font-family:Arial,Helvetica,sans-serif"><span style="font-size:14px">'.$pallets.'</span></span></td>';
+ 			$tableStr.= '<td><span style="font-family:Arial,Helvetica,sans-serif"><span style="font-size:14px">'.$plainPallet.'</span></span></td>';
+ 			$tableStr.= '<td><span style="font-family:Arial,Helvetica,sans-serif"><span style="font-size:14px">'.$wrap.'</span></span></td>';
+ 			$tableStr.= '<td><span style="font-family:Arial,Helvetica,sans-serif"><span style="font-size:14px">'.('$' . ($skipInvoice?"0":number_format((float)$booking->fee * 1.1, 2, '.', ''))).'</span></span></td></tr>';
+ 		}
+ 		$tableStr .='</tbody></table>';
+ 		$house_bl = join(',',$house_bl);
+		// Generate Confirmation PDF
+		$confirmationData = [];
+		$confirmationData['booking_no'] = $booking->booking_number;
+		$confirmationData['time'] = date('d-m-Y H:i', strtotime($booking->booking_time));
+		$confirmationData['rego'] = $booking->rego;
+		$confirmationData['driver'] = $booking->driver_name;
+		$confirmationData['company'] = $booking->company_name;
+		$confirmationData['palletCount'] = $pallets;
+		$confirmationData['plain_pallet'] = $plainPallet;
+		$confirmationData['wrap'] = $wrap;
+		
+		$email->tpl->assignThese([
+				'tableStr' => $tableStr,
+				'house_bl' => $house_bl,
+				'address' => $tlaAddress
+		]);
+		// Attach files
+		$files = [];
+
+
+		// Generate invoice pdf
+		$invoice = Invoice::model()->findByAttributes(['no' => $pbs->submit_no]);
+		if(!$skipInvoice)
+		{
+			if(!empty($invoice))
+			{
+				$tempDirectory = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.'zip'.time();
+				if (!file_exists($tempDirectory)) {
+					mkdir($tempDirectory);
+				}
+				$fileName=$tempDirectory.DIRECTORY_SEPARATOR.'Invoice_'.$pbs->submit_no.'.pdf';
+				oPDF::renderPDF('invoice', ['inv'=>$invoice], 2, $fileName);
+
+				array_push($files, [$fileName,'Invoice_'.$invoice->no.'.pdf']);
+			}
+		}
+
+
+		$email->subject = $email->tpl->subject;
+		$email->body = $email->tpl->getContent();
+		$email->mdata['to'] = $booking->company_email;
+		$email->mdata['fromName'] = 'TLA Imports Team';
+		$email->mdata['from'] = 'donotreply@toplogistics.com.au';
+		$email->mdata['cc'] = 'imports@toplogistics.com.au';
+		$email->sendEmail($files);
+	}
+
+	public function sendBookingEditEmail($booking, $token)
+	{
+		$email = new Emailog();
+		$email->type = Emailog::BOOKING_EDIT;
+		$email->dt = date('Y-m-d H:i:s');
+		$email->status = 10;
+		$email->prepTemplate();
+		$email->tpl->assignSubject('pbn', $booking->booking_number);
+
+		$email->tpl->assignThese([
+			'url' => $booking->getEditUrl($token),
+		]);
+
+		$email->subject = $email->tpl->subject;
+		$email->body = $email->tpl->getContent();
+		$email->mdata['to'] = $booking->company_email;
+		$email->mdata['fromName'] = 'TLA Imports Team';
+		$email->mdata['from'] = 'donotreply@toplogistics.com.au';
+		$email->mdata['cc'] = 'imports@toplogistics.com.au';
+		$email->sendEmail([]);
+	}
+	
+
+
+	/* this is used to send credit limit notice summary
+	*
+	*/
+	public function sendCreditNoticeSummary($limitOrgs)
+	{
+		$str = "";
+		foreach ($limitOrgs as $key => $orgIds)
+		{
+			$limit = $key."%";
+			$str.="<tr><td style='border-left:1px solid #F00;border-top:1px solid #F00;'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{$limit}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</td><td style='border-left:1px solid #F00;border-top:1px solid #F00;'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;";
+
+			foreach ($orgIds as $key2 => $orgId) {
+				$org = Org::model()->findByPk($orgId);
+				$str .="<p>{$org->name}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</p>";
+			}
+			$str.="</td></tr>";
+		}
+		$emailService = new EmailService();
+		$toEmail = 'gero@toplogistics.com.au';
+		$ccEmail = "christy.yu@toplogistics.com.au;michelle@toplogistics.com.au;finance@toplogistics.com.au;carmen.teh@toplogistics.com.au;op2@toplogistics.com.au;felix.hu@toplogistics.com.au;cs2@toplogistics.com.au;James.C@vic.toplogistics.com.au;colin.liu@qld.toplogistics.com.au";
+		$body = "<table style='border-right:1px solid #F00;border-bottom:1px solid #F00;'><tr><th>Credit Limit Percentage</th><th>Org Name</th></tr>".$str."</table>";
+		$subject = date("Y-m-d")." TLD Account Limit Summary";
+		$emailService->sendNormalEmail($toEmail,$subject,$body,$ccEmail);
+	}
+
+	/**
+	 * Send Inbound booking error alert email
+	 */
+	public function sendInboundAlertEmail($booking, $containerNo)
+	{
+		$email = new Emailog();
+		$email->type = Emailog::INBOUND_ERROR_ALERT;
+		$email->dt = date('Y-m-d H:i:s');
+		$email->status = 10;
+		$email->prepTemplate();
+		$email->tpl->assignSubject('containerNo', $containerNo);
+		$email->tpl->assignSubject('hbn', $booking->ref);
+		$email->tpl->assignThese([
+			'depot' => $booking->depot_id,
+			'bookingNumber' => $booking->booking_number,
+			'pickupTime' => $booking->booking_time
+		]);
+
+		$email->subject = $email->tpl->subject;
+		$email->body = $email->tpl->getContent();
+		$email->mdata['to'] = 'imports@toplogistics.com.au';
+		$email->mdata['fromName'] = 'TLA Imports Team';
+		$email->mdata['from'] = 'donotreply@toplogistics.com.au';
+		$email->sendEmail();
+	}
+
+	public function sendCargoBookingConfirmationEmail($booking)
+	{
+		$email = new Emailog();
+		$email->type = Emailog::CARGO_BOOKING_CONFIRMATION;
+		$email->dt = date('Y-m-d H:i:s');
+		$email->status = 10;
+		$email->prepTemplate();
+		$email->tpl->assignSubject('hbn', $booking->hbn);
+		$email->tpl->assignSubject('delivery_date', date('d-m-Y', strtotime($booking->confirmed_date)));
+		$email->tpl->assignThese([
+			'hbn' => $booking->hbn,
+			'booking_no' => $booking->booking_number,
+			'delivery_date' => date('d-m-Y', strtotime($booking->confirmed_date)),
+			'delivery_time' => $booking->delivery_period,
+			'unloading' => $booking->mdata['need_unloading'],
+			'other_ref' => !empty($booking->other_ref)?$booking->other_ref:'',
+			'base_price' => '$'.$booking->mdata['base_price'],
+			'oversize_fee' => '$'.$booking->mdata['oversize_fee'],
+			'time_deliver_fee' => '$'.$booking->mdata['time_deliver_fee'],
+			'unloading_fee' => '$'.$booking->mdata['unloading_fee'],
+			'total' => '$'.number_format((float)$booking->fee*1.1, 2, '.', '')
+		]);
+
+		// Attach files
+		$files = [];
+		// Generate invoice pdf
+		if (!empty($booking->mdata['invoiceId'])) {
+			$invoice = Invoice::model()->findByPk($booking->mdata['invoiceId']);
+			if (!empty($invoice)) {
+				$tempDirectory = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.'zip'.time();
+				if (!file_exists($tempDirectory)) {
+					mkdir($tempDirectory);
+				}
+				$fileName=$tempDirectory.DIRECTORY_SEPARATOR.'Invoice_'.$invoice->no.'.pdf';
+				oPDF::renderPDF('invoice', ['inv'=>$invoice], 2, $fileName);
+				array_push($files, [$fileName,'Invoice_'.$invoice->no.'.pdf']);
+			}
+		}
+
+		// Send email
+		$org = Org::model()->findByPk($booking->org_id);
+		$meta = json_decode($org->meta);
+		$toEmail = $meta->outturn_email;
+		if (!empty($toEmail)) {
+			$email->subject = $email->tpl->subject;
+			$email->body = $email->tpl->getContent();
+			$email->mdata['to'] = $toEmail;
+			$email->mdata['fromName'] = 'TLA Courier Service Team';
+			$email->mdata['from'] = 'donotreply@toplogistics.com.au';
+			$email->sendEmail($files);
+		}
+	}
+
+	public function createEmailContent($postData,$getData,$emailTemplate = null,$assignSubject = null,$assignTpl = null,$ccEmail= null,$toEmail= null)
+	{
+		$model = new Emailog();
+		if (isset($postData['Emailog'])) {
+			$model->attributes = $postData['Emailog'];
+			foreach ($postData['mdata'] as $k => $v) {
+				$model->mdata[$k] = $v;
+			}
+			if(empty($model->mdata['cc']))
+			{
+				$model->mdata['cc'] = $model->mdata['from'];
+			}else
+			{
+				if(explode($model->mdata['from'], $model->mdata['cc'])==1)
+				{
+					$model->mdata['cc'] .= ";".$model->mdata['from'];
+				}
+			}
+			
+			$model = $this->createEmail($model,$_FILES);
+
+			return [$model,1];
+		}
+		if(empty($emailTemplate))
+		{
+			$model->type= 0;
+			$model->prepTemplate();
+			$model->subject = "";
+			$model->body = "";
+		}else
+		{
+			$model->type=$emailTemplate;
+			$model->prepTemplate();
+			if(!empty($assignSubject))
+			{
+				$model->tpl->assignSubject($assignSubject[0],  $assignSubject[1]);
+			}
+			if(!empty($assignTpl))
+			{
+				$model->tpl->assignThese($assignTpl);
+			}
+			$model->subject = $model->tpl->subject;
+			$model->body = $model->tpl->getContent();
+
+
+		}
+
+		$model->status=10;
+		$model->to_id=0;
+		$model->dt = date('Y-m-d H:i:s');
+		$model->mdata['fromName']='TLA Finance';
+		$model->mdata['from']='finance@toplogistics.com.au';
+		$model->mdata['cc']='finance@toplogistics.com.au';
+		$sig = ImportsMailSignature::model()->find('user_id=:uid AND status=1', [':uid' => Yii::app()->user->id]);
+		if (!empty($sig)) {
+			$model->body .= $sig->sig_body;
+		}
+		$model->mdata['to'] = "";
+		if(!empty($toEmail)){
+			$model->mdata['to'] = $toEmail;
+		}
+		$allCCEmail = [];
+		$ccEmails = explode(';', $model->mdata['cc']);
+		foreach ($ccEmails as $key => $value) {
+			$allCCEmail[] = $value;
+		}
+		$model->mdata['cc'] = empty($ccEmail)?"":$ccEmail;
+		return [$model,json_encode($getData)];
+	}
+}
+?>

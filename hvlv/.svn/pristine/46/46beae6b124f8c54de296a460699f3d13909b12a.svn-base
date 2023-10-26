@@ -1,0 +1,234 @@
+<?php
+/* @var $this ImportsMailController */
+/* @var $model ImportsMail */
+/* @var $form CActiveForm */
+?>
+<div class="pane">
+<div class="form">
+<?php $form=$this->beginWidget('CActiveForm', array(
+	'id'=>'imports-mail-form',
+	'enableAjaxValidation'=>true,
+)); ?>
+        <div class="row rowcol rowleft">
+		<?php echo $form->labelEx($model,'type'); ?>
+		<?php echo $form->dropDownList($model,'type', ImportsMail::$mailTypes+ImportsMail::$wmsMailTypes);?>
+	</div>
+        <div class="row rowcol">
+		<?php echo $form->labelEx($model,'op_id',array('Assign_To')); ?>
+		<?php 
+                $user_list=ImportsMail::$importscs_list_id+ImportsMail::$wmscs_list_id;
+                  if($model->op_id!=0&& !key_exists($model->op_id, ImportsMail::$imports_list_id)){
+                      $user= User::model()->findByPk($model->op_id);
+                      if(!empty($user)){
+                      $user_list[$model->op_id]=$user->fname." ".$user->lname;
+                      }
+                  }
+                echo $form->dropDownList($model,'op_id',$user_list ,array('prompt'=>'SELECT'));?>
+        </div>
+       <div class="row"><b>Received Time:</b><?=$model->create_time?></div>
+       <hr/>
+	<div class="row">
+		<?php echo $form->labelEx($model,'from_email'); ?>
+		<?php echo $form->textField($model,'from_email',array('size'=>60,'maxlength'=>200));?>
+	</div>
+	<div class="row">
+		<?php echo $form->labelEx($model,'from_name'); ?>
+		<?php echo $form->textField($model,'from_name',array('size'=>60,'maxlength'=>200)); ?>
+	</div>
+    <?php 
+    if(!empty($model->mdata['cc'])){
+        $cc='';
+        foreach($model->mdata['cc'] as $c){
+            $cc.=$c['address'].";";
+        }
+        if(!empty($cc)){
+            echo '<div class="row">';
+            echo CHtml::label('CC','cc_mail');
+            echo CHtml::textField('cc',$cc,array('size'=>60,'maxlength'=>500));
+        }
+       }
+    ?>
+	<div class="row">
+		<?php echo $form->labelEx($model,'to_email'); ?>
+		<?php echo $form->textField($model,'to_email',array('size'=>60,'maxlength'=>500)); ?>
+	</div>
+	<div class="row">
+		<?php echo $form->labelEx($model,'to_name'); ?>
+		<?php echo $form->textField($model,'to_name',array('size'=>60,'maxlength'=>60)); ?>
+	</div>
+	<div class="row">
+		<?php echo $form->labelEx($model,'subject'); ?>
+		<?php echo $form->textField($model,'subject',array('size'=>60 )); ?>
+	</div>
+    <div class="row buttons">
+       <?php echo CHtml::submitButton( 'Update Ticket'); ?>
+     </div>
+
+     <div class="row">
+        <?php echo CHtml::label('Reference Number','Reference number'); ?>
+        <?php echo CHtml::textField('cs_ref',@$model->mdata['cs_ref'],array('size'=>60 )); ?>
+     </div>
+      <div class="row buttons">
+       <?php echo CHtml::submitButton( 'Relate to Customer Service'); ?>
+     </div>
+  <?php $this->endWidget(); ?>
+	<div class="row buttons">
+            <a style="display: hidden" class="jqm_link" id="relpy_email_<?=$_GET['tabid']?>" href="<?=$this->createUrl('importsMail/reply',array('id'=>$model->id))?>" ></a>
+            <a style="display: hidden" class="jqm_link" id="relpy_park_email_<?=$_GET['tabid']?>" href="<?=$this->createUrl('importsMail/replyAndPark',array('id'=>$model->id))?>" ></a>
+            <a style="display: hidden" class="jqm_link" id="forward_email_<?=$_GET['tabid']?>" href="<?=$this->createUrl('importsMail/forward',array('id'=>$model->id))?>" ></a>
+
+		<?php echo CHtml::Button( 'Reply',array('class'=>'reply_btn')); ?>
+    <?php if(($model->flag&ImportsMail::FLAG_PARK)==0)echo CHtml::Button( 'Reply & Park',array('class'=>'reply_park_btn')); ?>
+    <?php 
+                 if(!empty($rt=$model->getMailUserForCurrentUser())&&$rt->status<=10) echo CHtml::Button( 'Park',array('class'=>'park_email')); ?>
+                <?php echo CHtml::Button( 'Forward',array('class'=>'forward_btn')); ?>
+                <?php //if($model->status<=20||(($model->flag&ImportsMail::FLAG_PARK)>0&&$model->status==ImportsMail::STATE_REPLIED)) echo CHtml::Button( 'Close',array('class'=>'close_without_reply')); 
+                echo CHtml::Button( 'Close',array('class'=>'close_without_reply'));
+                ?>
+
+               
+	</div>
+
+     <div class="row">
+        <?php echo CHtml::label('Quick Reply','Quick Reply'); ?>
+               <?php echo CHtml::dropDownList("quickReply".$model->id, @$model->mdata['faq_answer'], $model->getFaqAnswerList(), array("prompt"=>"SELECT","onchange"=>"return quickReplyChange(".$model->id.");","value"=>$model->id));?>
+     </div>
+</div>
+</div>
+  <div style="width: 90%;">
+      <h3>Attachment</h3>
+  <div>
+      <div style="width: 50%; margin: 0;padding: 0;">
+  <?php
+
+$fr = new FileRepo('search');
+$fr->unsetAttributes();
+$fr->non_status=[0];
+if(empty($_GET['FileRepo'])){
+	
+	$fr->theTypes = [28];
+}else{
+	$fr->attributes=$_GET['FileRepo'];
+	if(empty($fr->theTypes)) $fr->theTypes = [28];
+}
+$fr->fid = $model->id;
+$mf = Acl::hasAccess('B:org/manageFile');
+
+$this->widget('zii.widgets.grid.CGridView', array(
+	'id'=>$_GET['tabid'].'_excofile-grid',
+	'cssFile' => false,
+	'summaryText'=>'',
+	'dataProvider'=> $fr->search(),
+	'filter'=>$fr,
+	'columns'=>array(
+		array('name' => 'name', 'type' => 'raw', 'value' => '"<a href=\"".$data->getUrl()."\" target=\"_blank\">".$data->name."</a>"'),
+		array(
+			'name'=>'size',
+			'value'=>'$data->formatSize()',
+			'filter' => false,
+		),
+		'date',
+	),
+));
+?>
+      </div>
+  </div>
+        <div style="position:absolute; margin-top:-25px; right: 20px;"><a href="<?=$this->createUrl('importsMail/eml', ['id' => $model->id]);?>" target="_blank">Download Email</a></div>
+      <div id="accordion<?=$_GET['tabid']?>" style="max-width:1000px;" >
+  <h3>Content</h3>
+  <iframe src="<?=$this->createUrl('importsMail/body', ['id' => $model->id]);?>" width="100%" border="0" height="500"></iframe>
+  </div>
+</div>
+  </div>
+<script>
+        function quickReplyChange(id)
+        {
+                if(confirm("Are you sure to quick reply?"))
+                { 
+                   var selectFA= $("#quickReply"+id).children('option:selected').val();
+                   $.ajax({
+                           url: '<?=$this->createUrl("importsMail/quickReply")?>',
+                           type: "post",
+                           data: {"faqAnswer":selectFA,"id":$("#quickReply"+id).attr("value")},
+                           success: function(r) {
+                                r= JSON.parse(r);
+                               if(r.done)
+                                {
+                                   myApp.notice('Done', 5000);
+                                }else
+                                {
+                                   myApp.alert(r, false);   
+                                }
+                                MyFAQTab.trigger('reload_cs_grid');
+                            },
+                           error: function(e) {
+                               console.log(e);
+                           }
+                       });     
+                }
+        }
+  $( function() {
+      var tab=$('#<?=$_GET['tabid']?>');
+      var panel=tab.data('panel');
+      tab.unbind('reload_imports_mail_list').bind('reload_imports_mail_list', function(){
+		$('#imports-email-total-grid-list1').yiiGridView('update');
+                $('#imports-email-total-grid-list-my1').yiiGridView('update');
+            return false;
+	});
+       $( "#accordion<?=$_GET['tabid']?>",panel ).accordion({
+           collapsible: true,
+           active: 0,
+           heightStyle: "content"
+          });
+       $('img').on('error',function(){
+           $(this).remove();
+       })
+       $(".reply_btn",panel).on('click',function(){
+          $("#relpy_email_<?=$_GET['tabid']?>",panel).trigger('click');
+       });
+
+      $(".reply_park_btn",panel).on('click',function(){
+          $("#relpy_park_email_<?=$_GET['tabid']?>",panel).trigger('click');
+       });
+
+         $(".forward_btn",panel).on('click',function(){
+          $("#forward_email_<?=$_GET['tabid']?>",panel).trigger('click');
+       });
+       $(".close_without_reply",panel).on('click',function(){
+           if(confirm('Are you Sure to Close the email without Reply')){
+            $(this).hide();
+            $.get('<?=$this->createUrl("importsMail/closeEmail", ["id" => $model->id]);?>', function(r){
+                if(r == 'done'){
+                    myApp.notice('Done', 5000);
+                    tab.trigger('load');
+                    tab.trigger('reload_imports_mail_list');
+                }else{
+                    myApp.alert(r, false);
+                }
+            });   
+           }
+           return false;
+       });
+        $(".park_email",panel).on('click',function(){
+           if(confirm('Are you Sure to Park the email without Reply')){
+            $(this).hide();
+            $.get('<?=$this->createUrl("importsMail/parkEmail", ["id" => $model->id]);?>', function(r){
+                if(r == 'done'){
+                    myApp.notice('Park', 5000);
+                    tab.trigger('load');
+                    tab.trigger('reload_imports_mail_list');
+                }else{
+                    myApp.alert(r, false);
+                }
+            });   
+           }
+           return false;
+       });
+       
+       
+           $('form#imports-mail-form', panel).on('success', function(e, r){
+		tab.trigger('load');
+     });
+
+  } );
+</script>

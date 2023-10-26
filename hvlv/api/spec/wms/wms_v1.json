@@ -1,0 +1,1803 @@
+{
+  "openapi": "3.0.2",
+  "info": {
+    "title": "Top Logistics API",
+    "description": "Testing API ID: api_test<br />Testing API KEY: 6366b2bb8b8d7407a3d46f6fa79a9af3472e1381442b49e637dfc96a0b0d6808",
+    "contact": {
+      "email": "dev@toplogistics.com.au"
+    },
+    "version": "v1.0"
+  },
+  "servers": [
+    {
+      "url": "https://api.toplogistics.com.au/",
+      "description": "Production server"
+    },
+    {
+      "url": "http://branch.toplogistics.com.au:8189/api/",
+      "description": "Testing server"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Order",
+      "description": "<p>Order CRUD</p><h3>Change Log:</h3>"
+    },
+    {
+      "name": "Product",
+      "description": "Products info"
+    },
+    {
+      "name": "Stock",
+      "description": "Stock query"
+    },
+    {
+      "name": "Return",
+      "description": "Return label"
+    }
+  ],
+  "paths": {
+    "/wms/order": {
+      "post": {
+        "tags": [
+          "Order"
+        ],
+        "summary": "Create Order",
+        "operationId": "order_create",
+        "description": "Send order details, allow multiple orders in one transaction.",
+        "parameters":[
+          {
+            "in": "header",
+            "name": "Content-Type",
+            "schema": {
+              "type": "string",
+              "default": "application/json"
+            },
+            "required": true
+          },
+          {
+            "in": "header",
+            "name": "Accept",
+            "schema": {
+              "type": "string",
+              "default": "application/json"
+            }
+          }
+        ],
+        "requestBody":{
+          "content":{
+            "application/json":{
+              "schema":{
+                  "oneOf":[
+                    {"$ref": "#/components/schemas/Orders"},
+                    {"$ref": "#/components/schemas/Order"}
+                  ]
+                }
+              }
+            },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Creation result",
+            "content": {"application/json": {
+              "schema": {
+                "oneOf": [
+                  {"$ref": "#/components/schemas/OrderResult"},
+                  {"$ref": "#/components/schemas/OrderErrorResult"}
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {}
+          },
+          "401": {
+            "description": "Authentication error, check hash calculation",
+            "content": {}
+          },
+          "500": {
+            "description": "Internal Process Error",
+            "content": {}
+          },
+          "503": {
+            "description": "Temporarily unavailable",
+            "content": {}
+          }
+        },
+        "security": [
+          {
+            "basicAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Order"
+        ],
+        "summary": "Update Order",
+        "operationId": "order_update",
+        "description": "Send order details, allow multiple orders in one transaction.<br />NOTES:<ol><li>Send complete order info</li><li>Return data is same as order creation</li><li>Error will be returned, if update is not allowed</li></ol>",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Content-Type",
+            "schema": {
+              "type": "string",
+              "default": "application/json"
+            },
+            "required": true
+          },
+          {
+            "in": "header",
+            "name": "Accept",
+            "schema": {
+              "type": "string",
+              "default": "application/json"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/Orders"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Order"
+                  }
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Update result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/OrderResult"
+                    },
+                    {
+                      "$ref": "#/components/schemas/OrderErrorResult"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {}
+          },
+          "401": {
+            "description": "Authentication error, check hash calculation",
+            "content": {}
+          },
+          "500": {
+            "description": "Internal Process Error",
+            "content": {}
+          },
+          "503": {
+            "description": "Temporarily unavailable",
+            "content": {}
+          }
+        },
+        "security": [
+          {
+            "basicAuth": []
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "Order"
+        ],
+        "summary": "Get Order",
+        "operationId": "order_get",
+        "description": "Search by Order Number or ID, may request multiple<br />Return complete order info with current status.<br />Request Example:<br /><code>https://api.toplogistics.com.au/wms/order?no[]=TEST001&no[]=TEST002</code><br /><code>https://api.toplogistics.com.au/wms/order?id[]=562456&id[]=562457&full=false</code>",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "id",
+            "schema": {
+              "type": "array"
+            },
+            "description": "Order IDs"
+          },
+          {
+            "in": "query",
+            "name": "no",
+            "schema": {
+              "type": "array"
+            },
+            "description": "Order Number"
+          },
+          {
+            "in": "query",
+            "name": "full",
+            "schema": {
+              "type": "boolean",
+              "default": true
+            },
+            "description": "Return full order info or status and freight info only"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Order result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Orders"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {}
+          },
+          "401": {
+            "description": "Authentication error, check hash calculation",
+            "content": {}
+          },
+          "404": {
+            "description": "Order not found",
+            "content": {}
+          },
+          "500": {
+            "description": "Internal Process Error",
+            "content": {}
+          },
+          "503": {
+            "description": "Temporarily unavailable",
+            "content": {}
+          }
+        },
+        "security": [
+          {
+            "basicAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Order"
+        ],
+        "summary": "Cancel Order",
+        "operationId": "order_del",
+        "description": "May request multiple Order Number or ID, similar to Search order.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "id",
+            "schema": {
+              "type": "array"
+            },
+            "description": "Order IDs"
+          },
+          {
+            "in": "query",
+            "name": "no",
+            "schema": {
+              "type": "array"
+            },
+            "description": "Order Number"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancel result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {}
+          },
+          "401": {
+            "description": "Authentication error, check hash calculation",
+            "content": {}
+          },
+          "404": {
+            "description": "Order not found",
+            "content": {}
+          },
+          "500": {
+            "description": "Internal Process Error",
+            "content": {}
+          },
+          "503": {
+            "description": "Temporarily unavailable",
+            "content": {}
+          }
+        },
+        "security": [
+          {
+            "basicAuth": []
+          }
+        ]
+      }
+    },
+    "/wms/product": {
+      "post": {
+        "tags": [
+          "Product"
+        ],
+        "summary": "Create Product",
+        "operationId": "product_create",
+        "description": "Send product details, allow multiple products in one transaction.",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Content-Type",
+            "schema": {
+              "type": "string",
+              "default": "application/json"
+            },
+            "required": true
+          },
+          {
+            "in": "header",
+            "name": "Accept",
+            "schema": {
+              "type": "string",
+              "default": "application/json"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/Products"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Product"
+                  }
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Create product result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ProductResult"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ProductErrorResult"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {}
+          },
+          "401": {
+            "description": "Authentication error, check hash calculation",
+            "content": {}
+          },
+          "500": {
+            "description": "Internal Process Error",
+            "content": {}
+          },
+          "503": {
+            "description": "Temporarily unavailable",
+            "content": {}
+          }
+        },
+        "security": [
+          {
+            "basicAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Product"
+        ],
+        "summary": "Update Product",
+        "operationId": "product_update",
+        "description": "Send product details, allow multiple product in one transaction.<br />NOTES:<ol><li>Send complete order info</li><li>Send complete product info</li><li>Return data is same as product creation</li></ol>",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Content-Type",
+            "schema": {
+              "type": "string",
+              "default": "application/json"
+            },
+            "required": true
+          },
+          {
+            "in": "header",
+            "name": "Accept",
+            "schema": {
+              "type": "string",
+              "default": "application/json"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/Products"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Product"
+                  }
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Update product result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ProductResult"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ProductErrorResult"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {}
+          },
+          "401": {
+            "description": "Authentication error, check hash calculation",
+            "content": {}
+          },
+          "500": {
+            "description": "Internal Process Error",
+            "content": {}
+          },
+          "503": {
+            "description": "Temporarily unavailable",
+            "content": {}
+          }
+        },
+        "security": [
+          {
+            "basicAuth": []
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "Product"
+        ],
+        "summary": "Get Product",
+        "operationId": "product_get",
+        "description": "NOTES:<ol><li>Search by Order Number or ID, may request multiple</li><li>Return complete order info with current status</li></ol>Request Example:<br /><code>https://api.toplogistics.com.au/wms/product?ean[]=562456&ean[]=562457</code><br /><code>https://api.toplogistics.com.au/wms/product?sku[]=316456&sku[]=1342457</code>",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "ean",
+            "schema": {
+              "type": "array"
+            },
+            "description": "Product EAN"
+          },
+          {
+            "in": "query",
+            "name": "sku",
+            "schema": {
+              "type": "array"
+            },
+            "description": "Product SKU"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Products result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Products"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {}
+          },
+          "401": {
+            "description": "Authentication error, check hash calculation",
+            "content": {}
+          },
+          "404": {
+            "description": "Product not found",
+            "content": {}
+          },
+          "500": {
+            "description": "Internal Process Error",
+            "content": {}
+          },
+          "503": {
+            "description": "Temporarily unavailable",
+            "content": {}
+          }
+        },
+        "security": [
+          {
+            "basicAuth": []
+          }
+        ]
+      }
+    },
+    "/wms/stock": {
+      "get": {
+        "tags": [
+          "Stock"
+        ],
+        "summary": "Get Stock",
+        "operationId": "stock_get",
+        "description": "NOTES:<ol><li>May request multiple product in one query</li><li>Stock data can be used to query historical stock info</li></ol>",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "ean",
+            "schema": {
+              "type": "array"
+            },
+            "description": "Product EAN"
+          },
+          {
+            "in": "query",
+            "name": "sku",
+            "schema": {
+              "type": "array"
+            },
+            "description": "Product SKU"
+          },
+          {
+            "in": "query",
+            "name": "date",
+            "schema": {
+              "type": "string",
+              "format": "yyyy-mm-dd",
+              "example": "2018-02-03"
+            },
+            "description": "Stock Date (Default: today)"
+          },
+          {
+            "in": "query",
+            "name": "warehouse",
+            "schema": {
+              "type": "string",
+              "example": "W106"
+            },
+            "description": "Warehouse Codes (Default: all warehouse) "
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stock result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Stocks"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StockErrorResult"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {}
+          },
+          "401": {
+            "description": "Authentication error, check hash calculation",
+            "content": {}
+          },
+          "500": {
+            "description": "Internal Process Error",
+            "content": {}
+          },
+          "503": {
+            "description": "Temporarily unavailable",
+            "content": {}
+          }
+        },
+        "security": [
+          {
+            "basicAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Stock"
+        ],
+        "summary": "Transfer Stock",
+        "operationId": "stock_transfer",
+        "description": "Used to transfer stock to a new entity. <br />NOTES:<ol><li>May request multiple stock in one query</li></ol>",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Content-Type",
+            "schema": {
+              "type": "string",
+              "default": "application/json"
+            },
+            "required": true
+          },
+          {
+            "in": "header",
+            "name": "Accept",
+            "schema": {
+              "type": "string",
+              "default": "application/json"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StockTransfer"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Stock Transfer result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/StockTransfer"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StockTransferErrorResult"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {}
+          },
+          "401": {
+            "description": "Authentication error, check hash calculation",
+            "content": {}
+          },
+          "500": {
+            "description": "Internal Process Error",
+            "content": {}
+          },
+          "503": {
+            "description": "Temporarily unavailable",
+            "content": {}
+          }
+        },
+        "security": [
+          {
+            "basicAuth": []
+          }
+        ]
+      }
+    },
+    "/wms/return": {
+      "post": {
+        "tags": [
+          "Return"
+        ],
+        "summary": "Create Return",
+        "operationId": "return_create",
+        "description": "Send return details, allow multiple returns in one transaction.",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Content-Type",
+            "schema": {
+              "type": "string",
+              "default": "application/json"
+            },
+            "required": true
+          },
+          {
+            "in": "header",
+            "name": "Accept",
+            "schema": {
+              "type": "string",
+              "default": "application/json"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/Returns"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Return"
+                  }
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Creation return result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ReturnResult"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ReturnErrorResult"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {}
+          },
+          "401": {
+            "description": "Authentication error, check hash calculation",
+            "content": {}
+          },
+          "500": {
+            "description": "Internal Process Error",
+            "content": {}
+          },
+          "503": {
+            "description": "Temporarily unavailable",
+            "content": {}
+          }
+        },
+        "security": [
+          {
+            "basicAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Return"
+        ],
+        "summary": "Update Return",
+        "operationId": "return_update",
+        "description": "Send return details, allow multiple returns in one transaction.<br />NOTES:<ol><li>Send complete return info</li><li>Data is same as creation</li><li>Error while update is not allowed</li></ol>",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Content-Type",
+            "schema": {
+              "type": "string",
+              "default": "application/json"
+            },
+            "required": true
+          },
+          {
+            "in": "header",
+            "name": "Accept",
+            "schema": {
+              "type": "string",
+              "default": "application/json"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/Returns"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Return"
+                  }
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Update return result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ReturnResult"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ReturnErrorResult"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {}
+          },
+          "401": {
+            "description": "Authentication error, check hash calculation",
+            "content": {}
+          },
+          "500": {
+            "description": "Internal Process Error",
+            "content": {}
+          },
+          "503": {
+            "description": "Temporarily unavailable",
+            "content": {}
+          }
+        },
+        "security": [
+          {
+            "basicAuth": []
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "Return"
+        ],
+        "summary": "Get Return Label",
+        "operationId": "return_get",
+        "description": "NOTES:<ol><li>Search by return ref, ID or label connote, may request multiple</li></ol>Request Example:<br /><code>https://api.toplogistics.com.au/wms/return?id[]=562456&id[]=562457</code><br /><code>https://api.toplogistics.com.au/wms/return?ref[]=316456&ref[]=1342457&size=A4</code><br /><code>https://api.toplogistics.com.au/wms/return?connote[]=316456&connote[]=1342457&size=A6</code><br /><code>https://api.toplogistics.com.au/wms/return?connote[]=316456&connote[]=1342457&link=1</code>",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "id",
+            "schema": {
+              "type": "array"
+            },
+            "description": "Return IDs"
+          },
+          {
+            "in": "query",
+            "name": "ref",
+            "schema": {
+              "type": "array"
+            },
+            "description": "Return Ref Number"
+          },
+          {
+            "in": "query",
+            "name": "connote",
+            "schema": {
+              "type": "array"
+            },
+            "description": "Return label connote number"
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "string",
+              "enum": ["A6", "A4"],
+              "default": "A6"
+            },
+            "description": "Return label size"
+          },
+          {
+            "in": "query",
+            "name": "link",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Get label link, use this instead of size will return a link"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Return labels result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReturnLabels"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {}
+          },
+          "401": {
+            "description": "Authentication error, check hash calculation",
+            "content": {}
+          },
+          "404": {
+            "description": "Return not found",
+            "content": {}
+          },
+          "500": {
+            "description": "Internal Process Error",
+            "content": {}
+          },
+          "503": {
+            "description": "Temporarily unavailable",
+            "content": {}
+          }
+        },
+        "security": [
+          {
+            "basicAuth": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Orders":{
+        "type": "object",
+        "properties": {
+          "orders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Order"
+            }
+          }
+        }
+      },
+      "Products": {
+        "type": "object",
+        "properties": {
+          "products": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Product"
+            }
+          }
+        }
+      },
+      "Stocks": {
+        "type": "object",
+        "properties": {
+          "stocks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Stock"
+            }
+          }
+        }
+      },
+      "Returns": {
+        "type": "object",
+        "properties": {
+          "returns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Return"
+            }
+          }
+        }
+      },
+      "ReturnLabels": {
+        "type": "object",
+        "properties": {
+          "returns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReturnLabel"
+            }
+          }
+        }
+      },
+      "Order": {
+        "required": [
+          "no",
+          "confirmed",
+          "items",
+          "to"
+        ],
+        "type": "object",
+        "properties": {
+          "no": {
+            "type": "string",
+            "description": "Order Number",
+            "example": "PO12345"
+          },
+          "type": {
+            "type": "integer",
+            "description": "Order type, 10: Stock Out, 20: Stock In",
+            "enum": [10,20],
+            "default": 10
+          },
+          "warehouse": {
+            "type": "string",
+            "description": "Warehouse code, used to designate specific warehouse to fulfil the order. If multiple warehouse are used, warehouse codes will be provided",
+            "example": "W106"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Confirmed, ready to action",
+            "default": true
+          },
+          "shipping": {
+            "type": "number",
+            "format": "float",
+            "example": 3.25,
+            "description": "Shipping Cost"
+          },
+          "total": {
+            "type": "number",
+            "format": "float",
+            "example": 105.60,
+            "description": "Order Total"
+          },
+          "items": {
+            "$ref": "#/components/schemas/Items"
+          },
+          "from": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "to": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "freight_type":{
+            "type": "integer",
+            "description": "Freight type, 10: Parcel, 20: Freight",
+            "enum": [10,20],
+            "default": 10
+          },
+          "freight_co":{
+            "type": "string",
+            "example": "TLA",
+            "description": "Freight Company"
+          },
+          "connote_no": {
+            "type": "string",
+            "description": "Connote Number"
+          },
+          "attachments": {
+            "$ref": "#/components/schemas/File"
+          },
+          "note": {
+            "type": "string",
+            "description": "Order Notes (Customer requirement)"
+          },
+          "packing_note":{
+            "type": "string",
+            "description": "Packing Notes"
+          },
+          "shipping_note": {
+            "type": "string",
+            "description": "Shipping Notes"
+          },
+          "courier": {
+            "type": "string",
+            "description": "Courier type, mix or letter"
+          },
+          "status": {
+            "type": "integer",
+            "emnu": [10,20,30,40,99,100],
+            "description": "Order status, 10: Pending, 20: Confirmed, 30: Work in Progress, 40: Hold, 99: Completed, 100: Cancelled"
+          }
+        }
+      },
+      "Address":{
+        "type": "object",
+        "required": [
+          "name",
+          "address",
+          "suburb",
+          "state",
+          "postcode",
+          "phone"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "John Smith"
+          },
+          "company": {
+            "type": "string",
+            "example": "ABC Company"
+          },
+          "address": {
+            "type": "string",
+            "example": "100 King Street"
+          },
+          "suburb": {
+            "type": "string",
+            "example": "Sydney"
+          },
+          "city": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "example": "NSW"
+          },
+          "country": {
+            "type": "string",
+            "example": "AU"
+          },
+          "postcode": {
+            "type": "string",
+            "example": "2000"
+          },
+          "phone": {
+            "type": "string",
+            "example": "0401234567"
+          },
+          "email": {
+            "type": "string",
+            "example": "test@example.com"
+          },
+          "cnid":{
+            "type": "string",
+            "description": "Chinese ID number"
+          }
+        }
+      },
+      "Items":{
+        "required": [
+          "ean",
+          "qty"
+        ],
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "ean": {
+              "type": "string",
+              "description": "Product EAN",
+              "example": "9012345678"
+            },
+            "sku": {
+              "type": "string",
+              "description": "Product code, in addition to EAN to uniquely identify product",
+              "example": "PROD-001"
+            },
+            "name": {
+              "type": "string",
+              "description": "Product name",
+              "example": "Red Apple"
+            },
+            "qty": {
+              "type": "interger",
+              "description": "Quantity",
+              "example": "2"
+            },
+            "price": {
+              "type": "number",
+              "format": "float",
+              "description": "Unit Price",
+              "example": "1.25"
+            },
+            "serial_number": {
+              "type": "string",
+              "description": "Serial Number",
+              "example": "ABCD1234"
+            }
+          }
+        }
+      },
+      "File": {
+        "required": [
+          "type",
+          "content"
+        ],
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "interger",
+              "enum": [10,20,30,90],
+              "description": "File type, 10: Shipping Label, 20: Invoice, 30: Packing Slip, 90: Other file",
+              "example": 10
+            },
+            "name": {
+              "type": "string",
+              "description": "File name",
+              "example": "label.pdf"
+            },
+            "content": {
+              "type": "string",
+              "description": "Base64 encoded file content, max size 2mb",
+              "example": "##File content##"
+            }
+          }
+        }
+      },
+      "Product":{
+        "required": [
+          "ean",
+          "name"
+        ],
+        "type": "object",
+        "properties":{
+          "ean": {
+            "type": "string",
+            "description": "Product EAN",
+            "example": "9012345678"
+          },
+          "sku": {
+            "type": "string",
+            "description": "Product code, in addition to EAN to uniquely identify product",
+            "example": "PROD-001"
+          },
+          "name": {
+            "type": "string",
+            "description": "Product name",
+            "example": "Red Apple"
+          },
+          "name_zh": {
+            "type": "string",
+            "description": "Product name in Chinese 中文品名"
+          },
+          "brand": {
+            "type": "string",
+            "description": "Brand Name",
+            "example": "Fresh"
+          },
+          "model": {
+            "type": "string",
+            "description": "Model Number",
+            "example": "A01"
+          },
+          "weight": {
+            "type": "number",
+            "format": "float",
+            "description": "Product unit weight (kg)",
+            "example": "0.24"
+          },
+          "dim": {
+            "$ref": "#/components/schemas/Dim"
+          },
+          "packages": {
+            "type": "array",
+            "items":{
+              "$ref": "#/components/schemas/Package"
+            }
+          }
+        }
+      },
+      "Dim": {
+        "type": "object",
+        "properties": {
+          "w": {
+            "type": "number",
+            "format": "float",
+            "example": 10.5,
+            "description": "Width in CM"
+          },
+          "h": {
+            "type": "number",
+            "format": "float",
+            "example": 25,
+            "description": "Height in CM"
+          },
+          "d": {
+            "type": "number",
+            "format": "float",
+            "example": 17,
+            "description": "Depth in CM"
+          }
+        }
+      },
+      "Package": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "interger",
+            "enum": [10,20,30],
+            "default": 10,
+            "description": "Package type, 10: Carton, 20: Pallet, 30: Bag"
+          },
+          "qty": {
+            "type": "interger",
+            "example": 25,
+            "description": "Unit quantity per package"
+          },
+          "barcode": {
+            "type": "number",
+            "format": "float",
+            "example": "109012345678",
+            "description": "Packaging barcode"
+          },
+          "weight": {
+            "type": "number",
+            "format": "float",
+            "description": "Product unit weight (kg)",
+            "example": "0.24"
+          },
+          "dim": {
+            "$ref": "#/components/schemas/Dim"
+          }
+        }
+      },
+      "Stock": {
+        "type": "object",
+        "properties": {
+          "ean": {
+            "type": "string",
+            "description": "Product EAN",
+            "example": "9012345678"
+          },
+          "sku": {
+            "type": "string",
+            "description": "Product code, in addition to EAN to uniquely identify product",
+            "example": "PROD-001"
+          },
+          "name": {
+            "type": "string",
+            "description": "Product name",
+            "example": "Red Apple"
+          },
+          "expiry": {
+            "type": "string",
+            "description": "Expiry Date",
+            "example": "2020-01-24",
+            "format": "yyyy-mm-dd"
+          },
+          "batch": {
+            "type": "string",
+            "description": "Batch Number",
+            "example": "B012"
+          },
+          "date": {
+            "type": "string",
+            "description": "Stock as of date",
+            "example": "2018-03-17",
+            "format": "yyyy-mm-dd"
+          },
+          "warehouse": {
+            "$ref": "#/components/schemas/StockWarehouse"
+          }
+        }
+      },
+      "StockWarehouse": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Warehouse code",
+            "example": "W106"
+          },
+          "stock": {
+            "type": "interger",
+            "description": "Available Stock",
+            "example": 105
+          },
+          "lock": {
+            "type": "interger",
+            "description": "Locked Stock (sold but not dispatched yet)",
+            "example": 15
+          },
+          "total": {
+            "type": "interger",
+            "description": "Total Stock",
+            "example": 120
+          }
+        }
+      },
+      "StockTransfer": {
+        "type": "object",
+        "properties": {
+          "to": {
+            "type": "interger",
+            "description": "Receiving entity ID",
+            "example": 12345
+          },
+          "warehouse": {
+            "type": "string",
+            "description": "Warehouse code, used to designate specific warehouse",
+            "example": "W106"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "ean": {
+                  "type": "string",
+                  "description": "Product EAN",
+                  "example": "9012345678"
+                },
+                "sku": {
+                  "type": "string",
+                  "description": "Product code, in addition to EAN to uniquely identify product",
+                  "example": "PROD-001"
+                },
+                "expiry": {
+                  "type": "string",
+                  "description": "Expiry Date",
+                  "example": "2020-01-24",
+                  "format": "yyyy-mm-dd"
+                },
+                "batch": {
+                  "type": "string",
+                  "description": "Batch Number",
+                  "example": "B012"
+                },
+                "qty": {
+                  "type": "interger",
+                  "example": 25,
+                  "description": "Unit quantity per package"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Return": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "string",
+            "description": "Return reference no",
+            "example": "RA123"
+          },
+          "warehouse": {
+            "type": "string",
+            "description": "Warehouse code, used to designate specific warehouse",
+            "example": "W106"
+          },
+          "action": {
+            "type": "interger",
+            "enum": [1,2,3,4,5],
+            "description": "Warehouse Action, 1: Restock, 2: Redelivery, 3: Return-to-office, 4: Discard, 5: Check",
+            "example": 5
+          },
+          "from": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "items": {
+            "$ref": "#/components/schemas/Items"
+          },
+          "weight": {
+            "type": "number",
+            "format": "float",
+            "description": "Package weight (kg)",
+            "example": "2.24"
+          },
+          "note": {
+            "type": "string",
+            "description": "Return Notes"
+          }
+        }
+      },
+      "ReturnLabel": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "ref": {
+              "type": "string",
+              "description": "Return ref"
+            },
+            "id": {
+              "type": "number",
+              "description": "Return ID, system generated ID for this return"
+            },
+            "connote": {
+              "type": "string",
+              "description": "Return label connote"
+            },
+            "pdf": {
+              "type": "string",
+              "description": "Base64 encoded pdf label file",
+              "example": "##File content##"
+            }
+          }
+        }
+      },
+      "OrderResult":{
+        "type": "object",
+        "properties": {
+          "orders": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "no": {
+                  "type": "string",
+                  "description": "Order Number"
+                },
+                "id": {
+                  "type": "number",
+                  "description": "Order ID, system generated ID for this order"
+                },
+                "status": {
+                  "type": "integer",
+                  "emnu": [10,20,30,40,99,100],
+                  "description": "Order status, 10: Pending, 20: Confirmed, 30: Work in Progress, 40: Hold, 99: Completed, 100: Cancelled"
+                }
+              }
+            }
+          }
+        }
+      },
+      "OrderErrorResult":{
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "no": {
+                  "type": "string",
+                  "description": "Order Number"
+                },
+                "id": {
+                  "type": "number",
+                  "description": "Order ID"
+                },
+                "code": {
+                  "type": "string",
+                  "description": "Error Code<table><thead><tr><th>Error Code</th><th>Details</th></tr></thead><tbody><tr><td>101</td><td>Order already exists</td></tr><tr><td>102</td><td>Order cannot be updated</td></tr><tr><td>103</td><td>Order cannot be cancelled</td></tr><tr><td>104</td><td>Unable to find Order</td></tr><tr><td>110</td><td>Order info incomplete</td></tr><tr><td>201</td><td>Unable to find product</td></tr><tr><td>202</td><td>Product not available</td></tr><tr><td>203</td><td>Not enough stock</td></tr><tr><td>301</td><td>Receiver info incomplete</td></tr><tr><td>401</td><td>Unknown courier</td></tr><tr><td>402</td><td>No available courier connote</td></tr></tbody></table>"
+                },
+                "message": {
+                  "type": "string",
+                  "description": "Error message"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ProductResult": {
+        "type": "object",
+        "properties": {
+          "products": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "ean": {
+                  "type": "string",
+                  "description": "Product EAN"
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Product name"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ProductErrorResult": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "ean": {
+                  "type": "string",
+                  "description": "Product EAN"
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Product name"
+                },
+                "code": {
+                  "type": "string",
+                  "description": "Error Code<table><thead><tr><th>Error Code</th><th>Details</th></tr></thead><tbody><tr><td>101</td><td>Product already exists</td></tr><tr><td>102</td><td>Product cannot be updated</td></tr><tr><td>104</td><td>Unable to find Product</td></tr><tr><td>110</td><td>Product info incomplete</td></tr><tr><td>201</td><td>Package info incomplete</td></tr></tbody></table>"
+                },
+                "message": {
+                  "type": "string",
+                  "description": "Error message"
+                }
+              }
+            }
+          }
+        }
+      },
+      "StockErrorResult": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "ean": {
+                  "type": "string",
+                  "description": "Product EAN"
+                },
+                "sku": {
+                  "type": "string",
+                  "description": "Product SKU"
+                },
+                "code": {
+                  "type": "string",
+                  "description": "Error Code<table><thead><tr><th>Error Code</th><th>Details</th></tr></thead><tbody><tr><td>101</td><td>Product not found</td></tr><tr><td>110</td><td>Product info complete</td></tr><tr><td>201</td><td>No stock at requested warehouse</td></tr><tr><td>301</td><td>No stock at this date</td></tr></tbody></table>"
+                },
+                "message": {
+                  "type": "string",
+                  "description": "Error message"
+                }
+              }
+            }
+          }
+        }
+      },
+      "StockTransferErrorResult": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "to":{
+                  "type": "interger",
+                  "description": "Entity ID",
+                  "example": 5678
+                },
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "ean": {
+                        "type": "string",
+                        "description": "Product EAN"
+                      },
+                      "sku": {
+                        "type": "string",
+                        "description": "Product SKU"
+                      },
+                      "expiry": {
+                        "type": "string",
+                        "description": "Expiry Date",
+                        "example": "2020-01-24",
+                        "format": "yyyy-mm-dd"
+                      },
+                      "batch": {
+                        "type": "string",
+                        "description": "Batch Number",
+                        "example": "B012"
+                      },
+                      "code": {
+                        "type": "string",
+                        "description": "Error Code<table><thead><tr><th>Error Code</th><th>Details</th></tr></thead><tbody><tr><td>101</td><td>Product not found</td></tr><tr><td>102</td><td>Request qty exceed limit</td></tr><tr><td>110</td><td>Product info incomplete</td></tr><tr><td>201</td><td>Transfer organization info incomplete</td></tr></tbody></table>"
+                      },
+                      "message": {
+                        "type": "string",
+                        "description": "Error message"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "ReturnResult": {
+        "type": "object",
+        "properties": {
+          "returns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "description": "Return ref"
+                },
+                "id": {
+                  "type": "number",
+                  "description": "Return ID, system generated ID for this return"
+                },
+                "connote": {
+                  "type": "string",
+                  "description": "Return label connote"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ReturnErrorResult": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "description": "Order Number"
+                },
+                "id": {
+                  "type": "number",
+                  "description": "Return ID, system generated ID for this order"
+                },
+                "code": {
+                  "type": "string",
+                  "description": "Error Code<table><thead><tr><th>Error Code</th><th>Details</th></tr></thead><tbody><tr><td>101</td><td>Product not found</td></tr><tr><td>110</td><td>Return info incomplete</td></tr><tr><td>201</td><td>Return service not available for sender's location</td></tr></tbody></table>"
+                },
+                "message": {
+                  "type": "string",
+                  "description": "Error message"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "basicAuth": {
+        "type": "http",
+        "scheme": "basic",
+        "name": "Authorization",
+        "description": "Contains authentication data<br /><code>Authorization: Basic QVBJX1VTRVI6YTlhZGI0MDE1YTJhZTBhZmQyMDI0ZDMzN2Q1NmE5ZDA=</code><br />Authentication data is generated in 4 steps,<ol><li>Form the string for hash check<ol><li>For POST and PUT with a request body, join JSON request body and API Key using |<br /><code>{\"order_id\": 2001234}|API_KEY</code></li><li>For GET and DELETE without any request body<ol><li>Order request parameters in ascending order</li><li>Convert the request parameters to JSON string</li><li>Join the JSON string and API Key using |</li></ol><code>e.g. Request URL https://api.toplogistics.com.au/wms/order?no[]=TEST001&no[]=TEST002<br />{\"no\":[\"TEST001\",\"TEST002\"]}|API_KEY</code></li></ol></li><li>Get MD5 hash of the joined string<br /><code>c99b3f19f33cc85323be07fa78302155</code></li><li>Join API User name and MD5 hash using \":\"<br /><code>API_USER:c99b3f19f33cc85323be07fa78302155</code></li><li>Use base64 to get the authentication string<br /><code>QVBJX1VTRVI6YTlhZGI0MDE1YTJhZTBhZmQyMDI0ZDMzN2Q1NmE5ZDA=</code></li></ol>"
+      }
+    }
+  }
+}

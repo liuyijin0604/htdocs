@@ -1,0 +1,30 @@
+<h1><?=$this->t('View Export Shipment');?> <?php echo $model->id; ?></h1>
+
+<?php $this->widget('zii.widgets.CDetailView', array(
+	'data'=>$model,
+	'attributes'=>array(
+		'id',
+		'owner_id',
+		'agent_id',
+		'consol_id',
+		'status',
+		'type',
+		'pickup',
+		'hbn',
+		'ref',
+		'pkg',
+		'items',
+		'state',
+		'postcode',
+		'value',
+		'dvalue',
+		'currency',
+		'weight',
+		'cbm',
+		'exm',
+		'can',
+		'meta',
+		'scan',
+		'note',
+	),
+)); ?>

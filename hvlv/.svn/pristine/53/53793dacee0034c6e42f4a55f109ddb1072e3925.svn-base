@@ -1,0 +1,128 @@
+<h1><?=User::getUserName($user_id).$this->t(' Tla Task Tabs');?></h1>
+</br>
+</br>
+<h4 style="float:left">My Task KPI :</h4>
+<div style="width:50%;" id="tla-task-overview<?=$_GET['tabid']?>">
+   <?php $this->widget('zii.widgets.grid.CGridView', [
+    'id'=>'my_tla_task_-grid'.$_GET['tabid'],
+    'htmlOptions'=>['style'=>'width: 70%'],
+    'cssFile' => false,
+    'dataProvider'=>$dataProvider[0],
+    'filter'=>$dataProvider[1],
+    'columns'=>[
+        ['name'=>'received_task','header'=>'Received Task'],
+        ['name'=>'task_need_your_confirm','header'=>'Need You Confirm'],
+        ['name'=>'closed_task_need_confirm','header'=>'Need Assignor Confirm'],
+        ['name'=>'closed_and_confirmed','header'=>'Closed & Confirm'],
+        ['name'=>'mtd','value'=>'number_format($data["mtd"]*100,2,".","")."%"','name'=>'MTD %']
+    ],
+   ]); ?>
+</div>
+</br>
+<div style="right: 200px;position: absolute;">
+
+
+      <a class="jqm_link" href="<?=$this->createUrl('tlaTask/createTlaTask');?>" title="Create Task"><div class="icon" style="background-position:-16px -0px"></div>Create Task</a>
+
+
+    <a class="tab_link" href="<?=$this->createUrl('tlaTask/getTlaTaskDashboard');?>" title="Tla Task Dashboard"><div class="icon" style="background-position:-80px -608px"></div>Task Dashboard</a>
+<a class="tab_link" href="<?=$this->createUrl('tlaTask/myClosedTasks', ['user_id' => $user_id]);?>" title="<?=User::getUserName($user_id);?> Total Tasks"><div class="icon" style="background-position:-80px -608px"></div><?=User::getUserName($user_id);?> Closed Tasks</a>
+
+<a class="tab_link" href="<?=$this->createUrl('tlaTask/getMyCreatedTlaTaskList', ['user_id' => $user_id]);?>" title="<?=User::getUserName($user_id);?> Total Tasks"><div class="icon" style="background-position:-80px -608px"></div><?=User::getUserName($user_id);?> Created Tasks</a>
+</div>
+</br>
+<div id="imco-consol-tabs">
+  <ul>
+ <?php
+ $tabs = array(
+	array('tla_task_list',$this->t('My Tla Task List'), true),
+  array('closed_by_assigned_user', $this->t('Need You Confirm'),true),
+  array('closed_tla_task_need_confirm_list', $this->t('Need Assignor Confirm'),true),
+ );
+ foreach($tabs as $tab){
+	if(Acl::hasAccess($this->CaName.'/'.$tab[0]) && $tab[1]){
+    $isMineStr="";
+    if($isMine)
+    {
+      $isMineStr = 'id = "my_tla_task_tab_'.$tab[0].'"';
+    }
+		$href = strpos($tab[0], '/') === false? $this->createUrl('tlaTask/getTlaTaskList',array('tab'=>$tab[0], "tabid" => $_GET["tabid"],"user_id" => $user_id)) : $tab[0];
+		echo '<li><a href="'.$href.'">'.$tab[1].'<span style="color:red" '.$isMineStr.'></span>'.'</a></li>';
+	}
+ }
+ ?>
+  </ul>
+</div>
+<script type="text/javascript">
+$(function(){
+	var tab = $('#<?=$_GET["tabid"];?>');
+	$('#imco-consol-tabs', tab.data('panel')).tabs({active: <?php echo empty($_GET['actab'])? 0 : $_GET['actab']; ?>, load: function(event,ui){
+		myApp.ajaxifyForm(this);
+	}});
+
+ //oTlaTask
+$.oTlaTask = {
+  opt: {cid: 'oTlaTask-container',
+    noticeUrl: myApp.config.baseURL + 'tlaTask/notice',
+    type: 'notify',
+    msg: '',
+    id: 0,
+    from: '',
+    ajax: false,
+    sajx: false,
+    timestamp:""
+  },
+  update: function(id,o) {
+    if(o>0)
+    {
+      o="*";
+    }else
+    {
+      o ="";
+    }
+    if($(id).html()=="")
+    {
+      $(id).html(o);
+    }
+    return "";
+  },
+  clean: function(id) {
+   $(id).html("");
+    return "";
+  },
+   chkAjax: function(){
+    if($.oTlaTask.opt.ajax) $.oTlaTask.opt.ajax.abort();
+    return !$.oTlaTask.opt.sjax;
+  },
+  getNotice: function(){
+    if($.oTlaTask.chkAjax()){
+      var thisUrl = $.oTlaTask.opt.noticeUrl+"?timestamp="+$.oTlaTask.opt.timestamp;
+      // $.oTlaTask.opt.ajax = $.post($.oTlaTask.opt.url, {'ids': $.oTlaTask.serialize()}, function(r){
+      //  for(var i in r){
+      //    $.oTlaTask.add(r[i]);
+      //  }
+      // }, 'json');
+      $.ajax({
+              url: thisUrl,
+              type: "get",
+              processData: false,
+              contentType: false,
+              success: function(r) {
+                  var valueList = r.split(",");
+              $.oTlaTask.update('#my_tla_task_tab_tla_task_list',valueList[0]);
+              $.oTlaTask.update('#my_tla_task_tab_closed_by_assigned_user',valueList[1]);
+              $.oTlaTask.opt.timestamp = valueList[3];
+               },
+              error: function(e) {
+                  console.log(e);
+              }
+      }); 
+    }
+  }
+};
+  $.oTlaTask.getNotice();
+
+    $(window).everyTime(6e4, $.oTlaTask.getNotice);
+
+});
+</script>

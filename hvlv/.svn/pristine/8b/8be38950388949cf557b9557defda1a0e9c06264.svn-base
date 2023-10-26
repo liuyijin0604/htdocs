@@ -1,0 +1,71 @@
+
+<h1>Sales Funnel Requirement - Submitted Customer Submission</h1>
+
+<!-- <div style="right: 20px;position: absolute;">
+    <a class="jqm_link" data-win-class="L" href="<?=$this->createUrl('salesFunnel/createQuestionAnswersForm');?>" title="New question and Answers"><div class="icon" style="background-position:-16px 0"></div>New question and Answers</a>  
+</div> -->
+</br></br></br>
+
+<?php $this->widget('zii.widgets.grid.CGridView', [
+	'id'=>'submission-grid-list1',
+	'cssFile' => false,
+	'dataProvider'=>$submissionModel->search(true, 30, false, false),
+	'filter'=>$submissionModel,
+	'columns'=>[
+		'id',
+        'company_name',
+        'first_name',
+        'last_name',
+        'email',
+        'contact_number',
+        // 'status',
+        ['name'=>'status', 'value'=>'$data->showStatusType()', 'filter'=>CHtml::dropDownList('SalesfunnelRequirementsSubmission[status]', $submissionModel->status, SalesfunnelRequirementsSubmission::$statusType )],
+        [
+        'class'=>'oButtonColumn',
+        'template'=>'{questionnaire}',
+        'buttons'=>[
+            
+            'questionnaire' => [
+                'url'=>'Yii::app()->createURL("salesFunnel/showIndividualRequirement",array("id"=>$data->id))',
+                'imageUrl'=>false,
+                'visible'=>'true',
+                'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Update'), 'title' => '$data->email.$data->id', 'data-win-class' => 'L'],
+                 ],
+            ],
+        ]
+		
+	   ]
+	]);
+?>
+
+
+<script type="text/javascript">
+
+    function quickQueAnswerChange(id)
+    {
+            if(confirm("Are you sure to faq answer?"))
+            { 
+               var nextQuestion= $("#nextQuestion"+id).children('option:selected').val();
+               $.ajax({
+                       url: '<?=$this->createUrl("salesFunnel/queAnswer")?>',
+                       type: "post",
+                       data: {"nextQuestion":nextQuestion,"id":$("#nextQuestion"+id).attr("value")},
+                       success: function(r) {
+                           if(r=='done')
+                            {
+                               //alert(nextQuestion+"   "+id);
+                               myApp.notice('Done', 5000);
+                            }else
+                            {
+                               myApp.alert(r, false);   
+                            }
+                            MyFAQTab.trigger('reload_cs_grid');
+                        },
+                       error: function(e) {
+                           console.log(e);
+                       }
+                   });     
+            }
+    }
+
+</script>

@@ -1,0 +1,27 @@
+<?php
+    if(empty($all_clear_wait)) $all_clear_wait = false;
+
+    $this->widget('zii.widgets.grid.CGridView', array(
+    'selectableRows' => 2,
+    'id'=>'gp-imco-shipments-grid',
+    'cssFile' => false,
+    'dataProvider'=>$shipment_model->search($all_clear_wait,50),
+    'filter'=>$shipment_model,
+    'columns'=>array(
+        array(
+            'id'=>'selectedItems',
+            'class'=>'CCheckBoxColumn',
+        ),
+        ['name' => 'hbn', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->createURL("imParcel/update", array("id" => $data->id))."\" class=\"tab_link\" title=\"".$data->hbn."\">".$data->hbn."</a>"',],
+        'ref',
+        'can',
+        'agent_id',
+        ['name'=>'awb_name','header'=>'awb','type'=>'raw','value'=>'@$data->consol->service==10?@$data->consol->awb:@$data->consol->mdata["container_no"]',],
+        //        array('header' => 'Awb', 'type' => 'raw', 'value' => 'empty($data->consol)? "" : $data->consol->awb',),
+        ['name' => 'consol_no', 'type'=>'raw', 'value' => 'empty($data->consol_id)? "" : "<a href=\"".Yii::app()->createURL(Consol::getTheConsolType($data->consol_id)==70?"dmawbConsol/update":"imcoConsol/update", array("id" => $data->consol_id))."\" class=\"tab_link\" title=\"".@$data->consol->no."\">".@$data->consol->no."</a>"',],
+        ['name' => 'status', 'value' => '$data->getStatus()',
+            'filter'=>false],
+        ['name' => 'ddpt_id', 'value' => '@$data->ddepot->name',
+            'filter'=>CHtml::dropDownList('ImParcel[ddpt_id]', $shipment_model->ddpt_id, $this->t(Org::dptList()), ['prompt'=>$this->t('All')]),],
+        )
+)); ?>

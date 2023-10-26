@@ -1,0 +1,126 @@
+
+<h1> Upload Manifest</h1>
+<div class="form">
+	<?php
+	$form=$this->beginWidget('CActiveForm', array(
+		'id'=>'ship-import-form-chargecode',
+		'enableAjaxValidation'=>false,
+		'htmlOptions'=>['target'=>'err_result','class'=>'ifrm-form','enctype' =>'multipart/form-data'],
+		'action' => $this->createUrl('uploadMani/createByMani',['modelType'=>$modelType]),
+	));
+	?>
+<div class="row">
+	
+
+		  <?php echo  CHtml::hiddenField('agent_id','',['id'=>'agent_id'.$_GET["tabid"]]);
+						echo  CHtml::label('Owner','org_suggest');
+			$this->widget('zii.widgets.jui.CJuiAutoComplete', array(
+				'name' => 'org_suggest',
+				'sourceUrl' => array('org/ownerSuggest'),
+				'options' => array(
+						'showAnim' => 'fold',
+						'minLength' => 2,
+						'delay' => 200,
+						'select' => 'js:function(event, u){ $(this).val(u.item["label"]); $("#agent_id'.$_GET['tabid'].'").val(u.item["value"]);return false;}',
+				),
+				'htmlOptions' => array(
+					'class' => 'required',
+					'size' => '30',
+				),
+		));
+		?>
+	</div>
+	<div class="row">
+	  <?php echo CHtml::label('Charge Code','charge_code'); ?>
+	  <?php echo CHtml::textField('charge_code','',['id' => 'charge_code']); ?>
+	</div>
+	<div class="row">
+        <?php echo CHtml::label('currency','manifest'); ?>
+        <?php echo CHtml::dropDownList('currency','AUD', array(
+            'AUD' => 'AUD',
+            'USD' => 'USD'
+        )); ?>
+    </div>
+
+		<div class="row">
+			<?php echo CHtml::label('No Address Verification','No Address Verification'); ?>
+			<?php echo CHtml::checkbox('noAddrVeri',0); ?>
+		</div>
+		<div class="row">
+			<?php echo CHtml::label('No DIM Required','No DIM Required'); ?>
+			<?php echo CHtml::checkbox('noDimRequired',0); ?>
+		</div>
+   <div class="row" style="margin-top: 2px;">
+		<label for="postw-batch">Consignments List - <small>.xlsx File</small>(<a href="/ims/TLA_Import_Template.xlsx" target="_blank">Get template file</a>)</label> <br>
+		<input type="file" name="maniship_file" id="maniship_file" />
+		<!--<span>Only Output Failed:<input type="checkbox" name="upcheck"/></span>-->
+	</div>
+	<br>
+	<input id="submit_btn" type="submit" value="Upload By ChargeCode" />
+
+	<?php $this->endWidget(); ?>
+</div>
+   
+<br>
+<br>
+<!--<h1>Fastway Area Check</h1>
+<div class="form">
+	<?php
+	$form=$this->beginWidget('CActiveForm', array(
+		'id'=>'testfw-check-form',
+		'enableAjaxValidation'=>false,
+		'action' => $this->createUrl('uploadMani/AjaxFastwayCheck'),
+	));
+	?>
+<div class="row">
+	<div class="rowcol">
+		<?php echo CHtml::label('Suburb','forfwcheck'); ?>
+		<?php echo CHtml::textField('suburb','',array('size'=>50,'maxlength'=>255)); ?>
+	</div>
+
+	<div class="rowcol">
+		<?php echo CHtml::label('State','forfwcheck'); ?>
+		<?php echo CHtml::dropDownList('state', 0, array('ACT' => 'ACT - Australia Capital Territory', 'NSW' => 'NSW - New South Wales', 'NT' => 'NT - Northern Territory', 'QLD' => 'QLD - Queensland', 'SA' => 'SA - South Australia', 'TAS' => 'TAS - Tasmania', 'VIC' => 'VIC - Victoria', 'WA' => 'WA - Western Australia'), array('empty' => $this->t('Select One'), 'style' => 'width:100px')); ?>
+	</div>
+
+	<div class="rowcol">
+		<?php echo CHtml::label('Postcode','forfwcheck'); ?>
+		<?php echo CHtml::textField('postcode','',array('size'=>50,'maxlength'=>255)); ?>
+	</div>
+
+	<div class="rowcol">
+		<?php echo CHtml::label('Weight','forfwcheck'); ?>
+		<?php echo CHtml::textField('weight','',array('size'=>50,'maxlength'=>255)); ?>
+	</div>
+</div>
+<br/>
+	<input id="testfw_check_btn" type="submit" value="Check" />
+
+	<?php $this->endWidget(); ?>
+</div>-->
+
+<br/><br/>
+<iframe id="err_result" name="err_result" style="color: green; margin: 10px 0; border: 1px solid black;padding:20px; width: 90%; "></iframe>
+
+<script type="text/javascript">
+$(function(){
+	var tab = $('#<?=$_GET["tabid"];?>');
+	var panel = tab.data('panel');
+
+//        $('form#testfw-check-form', panel).data('custom_success', function(r){
+//            $('#err_result', panel).empty();
+//            $('#err_result', panel).prepend($('<p>'+r.msg+'</p>').css('color', r.color).fadeIn());
+//            $('input[type="submit"]',panel).prop('disabled',false);
+//            return true;
+//        });
+	
+	$('#ship-import-form-chargecode', panel).on('submit', function(){
+		$("#err_result", panel).contents().find("body").html('');
+		$('input[type=submit]', this).prop('disabled', true);
+	});
+
+	$('#err_result', panel).load(function(){
+		$('#ship-import-form input[type=submit]', panel).prop('disabled', false);
+	});
+});
+</script>

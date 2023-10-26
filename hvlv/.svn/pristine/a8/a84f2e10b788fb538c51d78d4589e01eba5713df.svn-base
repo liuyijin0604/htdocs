@@ -1,0 +1,169 @@
+<h1 style="text-align: center;">Welcome - <?= Yii::app()->user->name;?> - 
+
+<?php if(!empty(Yii::app()->session['classic'])):?>
+
+<?php if(!empty(Yii::app()->session['scan_warehouse'])):?>
+<select name="warehouse" id="warehouseChange" class="form-control-display">
+	<option value="sydney" <?=(Yii::app()->session['scan_warehouse']=='Sydney')?'selected="selected"':""?> style="text-align:center">  Sydney</option>
+	<option value="melbourne" <?=(Yii::app()->session['scan_warehouse']=='melbourne')?'selected="selected"':""?> style="text-align:center">Melbourne</option>
+	<option value="brisbane" <?=(Yii::app()->session['scan_warehouse']=='brisbane')?'selected="selected"':""?> style="text-align:center">Brisbane</option>
+	<option value="perth" <?=(Yii::app()->session['scan_warehouse']=='perth')?'selected="selected"':""?> style="text-align:center">Perth</option>
+</select>
+<?php endif?>
+Warehouse</h1><!-- <a href="<?=Yii::app()->baseUrl;?>?classic=0" style="font-size: 0.5em"> New View</a></h1> -->
+<?php
+$user = User::model()->findByPk(Yii::app()->user->id);
+if (empty(Yii::app()->session['scan_warehouse'])):
+?>
+<div class="row">
+	<?php if ($user->dpt_id == Org::TLA_DEPARTMENT_SYDNEY):?>
+	<div class="col-md-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('site/chooseWarehouse', ['scan_warehouse' => 'sydney']);?>"><span class="glyphicon glyphicon-wrench"></span><br/>Sydney  Warehouse</a></div>
+	<?php endif;?>
+
+	<?php if ($user->dpt_id == Org::TLA_DEPARTMENT_MELBOURNE||$user->dpt_id == Org::TLA_DEPARTMENT_SYDNEY):?>
+	<div class="col-md-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('site/chooseWarehouse', ['scan_warehouse' => 'melbourne']);?>"><span class="glyphicon glyphicon-wrench"></span><br/>Melbourne  Warehouse</a></div>
+	<?php endif;?>
+
+	<?php if ($user->dpt_id == Org::TLA_DEPARTMENT_BRISBANE||$user->dpt_id == Org::TLA_DEPARTMENT_SYDNEY):?>
+	<div class="col-md-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('site/chooseWarehouse', ['scan_warehouse' => 'brisbane']);?>"><span class="glyphicon glyphicon-wrench"></span><br/>Brisbane  Warehouse</a></div>
+	<?php endif;?>
+	<?php if ($user->dpt_id == Org::TLA_DEPARTMENT_PERTH||$user->dpt_id == Org::TLA_DEPARTMENT_SYDNEY):?>
+	<div class="col-md-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('site/chooseWarehouse', ['scan_warehouse' => 'perth']);?>"><span class="glyphicon glyphicon-wrench"></span><br/>Perth  Warehouse</a></div>
+	<?php endif;?>
+</div>
+<?php else: ?>
+<div class="row dyo_list">
+	<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('shipment/scan', ['op' => 'checkin']);?>"><span class="glyphicon glyphicon-wrench"></span><br/>Check In</a></div>
+
+	<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('shipment/scan', ['op' => 'resort']);?>"><span class="glyphicon glyphicon-list"></span><br/>Resorting Stock</a></div>
+
+	<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('shipment/scan', ['op' => 'status']);?>"><span class="glyphicon glyphicon-search"></span><br/>Status Check</a></div>
+
+	<?php if ($user->dpt_id == Org::TLA_DEPARTMENT_SYDNEY||Yii::app()->session['scan_warehouse']!='sydney'):?>
+	<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('shipment/changeLabel');?>"><span class="glyphicon glyphicon-plus"></span><br/>拆单换单</a></div>
+	<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('shipment/impChangeLabel');?>"><span class="glyphicon glyphicon-plus"></span><br/>进口快递换单</a></div>
+	<?php endif;?>
+<?php if (empty(Yii::app()->session['scan_warehouse'])||in_array(Yii::app()->session['scan_warehouse'],['sydney','melbourne'])):?>
+	<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('shipment/held');?>"><span class="glyphicon glyphicon-th"></span><br/>Put in Pallet</a></div>
+	<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('shipment/putawaypallet');?>"><span class="glyphicon glyphicon-map-marker"></span><br/>Put Away</a></div>
+<?php endif;?>
+<?php if (empty(Yii::app()->session['scan_warehouse'])||Yii::app()->session['scan_warehouse']=='sydney'||Yii::app()->session['scan_warehouse']=='melbourne'||Yii::app()->session['scan_warehouse']=='brisbane'||Acl::hasAccess('B:whscan/specialAccess')):?>
+	<!-- <div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('shipment/find');?>"><span class="glyphicon glyphicon-search"></span><br/>Find RTS</a></div> -->
+
+	<!-- <div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('shipment/putaway');?>"><span class="glyphicon glyphicon-plus"></span><br/>Put Away RTS</a></div> -->
+<?php endif;?>
+
+<?php if (empty(Yii::app()->session['scan_warehouse'])||Yii::app()->session['scan_warehouse']=='sydney'):?>
+	<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('shipment/reship');?>"><span class="glyphicon glyphicon-plane"></span><br/>Reship</a></div>
+
+	<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('shipment/palletMovement');?>"><span class="glyphicon glyphicon-map-marker"></span><br/>Pallet Movement</a></div>
+
+	<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('site/logout');?>"><span class="glyphicon glyphicon-usd"></span><br/>Logout</a></div>
+<?php endif;?>
+
+</div>
+<?php endif;?>
+
+<?php endif;?>
+
+
+
+
+
+
+
+
+<?php if(empty(Yii::app()->session['classic'])):?>
+
+<?php if(!empty(Yii::app()->session['scan_warehouse'])):?>
+<select name="warehouse" id="warehouseChange" class="form-control-display">
+	<option value="sydney" <?=(Yii::app()->session['scan_warehouse']=='Sydney')?'selected="selected"':""?> style="text-align:center">  Sydney</option>
+	<option value="melbourne" <?=(Yii::app()->session['scan_warehouse']=='melbourne')?'selected="selected"':""?> style="text-align:center">Melbourne</option>
+	<option value="brisbane" <?=(Yii::app()->session['scan_warehouse']=='brisbane')?'selected="selected"':""?> style="text-align:center">Brisbane</option>
+	<option value="perth" <?=(Yii::app()->session['scan_warehouse']=='perth')?'selected="selected"':""?> style="text-align:center">Perth</option>
+</select>
+<?php endif?>
+Warehouse</h1><!-- <a href="<?=Yii::app()->baseUrl;?>?classic=1" style="font-size: 0.5em"> Classic View</a></h1> -->
+<?php
+$user = User::model()->findByPk(Yii::app()->user->id);
+if (empty(Yii::app()->session['scan_warehouse'])):
+?>
+<div class="row">
+	<?php if ($user->dpt_id == Org::TLA_DEPARTMENT_SYDNEY||$user->dpt_id == Org::TLA_DEPARTMENT_SHENZHEN):?>
+	<div class="col-md-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('site/chooseWarehouse', ['scan_warehouse' => 'sydney']);?>"><span class="glyphicon glyphicon-wrench"></span><br/>Sydney  Warehouse</a></div>
+	<?php endif;?>
+
+	<?php if ($user->dpt_id == Org::TLA_DEPARTMENT_MELBOURNE||$user->dpt_id == Org::TLA_DEPARTMENT_SYDNEY||$user->dpt_id == Org::TLA_DEPARTMENT_SHENZHEN):?>
+	<div class="col-md-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('site/chooseWarehouse', ['scan_warehouse' => 'melbourne']);?>"><span class="glyphicon glyphicon-wrench"></span><br/>Melbourne  Warehouse</a></div>
+	<?php endif;?>
+
+	<?php if ($user->dpt_id == Org::TLA_DEPARTMENT_BRISBANE||$user->dpt_id == Org::TLA_DEPARTMENT_SYDNEY||$user->dpt_id == Org::TLA_DEPARTMENT_SHENZHEN):?>
+	<div class="col-md-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('site/chooseWarehouse', ['scan_warehouse' => 'brisbane']);?>"><span class="glyphicon glyphicon-wrench"></span><br/>Brisbane  Warehouse</a></div>
+	<?php endif;?>
+
+	<?php if ($user->dpt_id == Org::TLA_DEPARTMENT_PERTH||$user->dpt_id == Org::TLA_DEPARTMENT_SYDNEY||$user->dpt_id == Org::TLA_DEPARTMENT_SHENZHEN):?>
+	<div class="col-md-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('site/chooseWarehouse', ['scan_warehouse' => 'perth']);?>"><span class="glyphicon glyphicon-wrench"></span><br/>Perth  Warehouse</a></div>
+	<?php endif;?>
+</div>
+<?php else: ?>
+<div class="row dyo_list">
+	<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('warehouseProcess/index', ['op' => 'checkin']);?>"><span class="glyphicon glyphicon-wrench"></span><br/>Warehouse<br/>Process</a></div>
+	<?php if ($user->dpt_id == Org::TLA_DEPARTMENT_SYDNEY||$user->dpt_id == Org::TLA_DEPARTMENT_MELBOURNE||$user->dpt_id == Org::TLA_DEPARTMENT_SHENZHEN):?>
+
+	<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('shipment/scan', ['op' => 'resort']);?>"><span class="glyphicon glyphicon-list"></span><br/>Resorting<br/>Stock</a></div>
+	<?php endif;?>
+
+	<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('shipment/scan', ['op' => 'status']);?>"><span class="glyphicon glyphicon-search"></span><br/>Status<br/>Check</a></div>
+
+	<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('rtsProcess/index', ['op' => 'checkin']);?>"><span class="glyphicon glyphicon-wrench"></span><br/>RTS<br/>Process</a></div>
+
+	<?php if ($user->dpt_id == Org::TLA_DEPARTMENT_SYDNEY||$user->dpt_id == Org::TLA_DEPARTMENT_SHENZHEN||Yii::app()->session['scan_warehouse']!='sydney'):?>
+	<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('shipment/changeLabel');?>"><span class="glyphicon glyphicon-plus"></span><br/>拆单换单</a></div>
+	<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('shipment/impChangeLabel');?>"><span class="glyphicon glyphicon-plus"></span><br/>进口快递换单</a></div>
+	<?php endif;?>
+
+
+<?php if (empty(Yii::app()->session['scan_warehouse'])||Yii::app()->session['scan_warehouse']=='sydney'||Yii::app()->session['scan_warehouse']=='melbourne'||Yii::app()->session['scan_warehouse']=='brisbane'||Acl::hasAccess('B:whscan/specialAccess')):?>
+	<!-- <div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('shipment/find');?>"><span class="glyphicon glyphicon-search"></span><br/>Find RTS</a></div>
+
+	<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('shipment/putaway');?>"><span class="glyphicon glyphicon-plus"></span><br/>Put Away RTS</a></div> -->
+<?php endif;?>
+
+<?php if (empty(Yii::app()->session['scan_warehouse'])||Yii::app()->session['scan_warehouse']=='sydney'):?>
+	<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('shipment/reship');?>"><span class="glyphicon glyphicon-plane"></span><br/>Reship</a></div>
+
+	<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('shipment/palletMovement');?>"><span class="glyphicon glyphicon-map-marker"></span><br/>Pallet Movement</a></div>
+
+	<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('warehouseProcess/checkContainerDetail', ['op' => 'printout','tab'=>'print_out']);?>"><span class="glyphicon glyphicon-wrench"></span><br/>Print Out For Pallet</a></div>
+
+	<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('unpackContainer/list', ['op' => 'printout','tab'=>'print_out']);?>"><span class="glyphicon glyphicon-wrench"></span><br/>Unpack Container</a></div>
+
+<?php endif;?>
+
+<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('warehouseProcess/getCheckinDash', ['op' => 'printout','tab'=>'print_out']);?>"><span class="glyphicon glyphicon-stats"></span><br/>Checkin Dashboard</a></div>
+	<div class="col-lg-3 col-md-4 col-sm-6 col-xs-12"><a class="dash-item ajax-link" href="<?=$this->createUrl('site/logout');?>"><span class="glyphicon glyphicon-usd"></span><br/>Logout</a></div>
+
+</div>
+<?php endif;?>
+
+<?php endif;?>
+
+
+
+
+
+<script type="text/javascript">
+	$(function(){
+		$('#warehouseChange').on('change',function(){
+				$.ajax({
+					type : 'GET',
+					url : '<?php echo $this->createUrl("site/chooseWarehouse") ;?>'+"?scan_warehouse="+$('#warehouseChange').val(),
+					dataType: 'html',
+					success:function(resp){
+					}
+				});
+		});
+
+	});
+
+</script>

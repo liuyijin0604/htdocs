@@ -1,0 +1,214 @@
+<div class="form">
+<?php 
+	$url = $this->createUrl('salesFunnel/saveQuestionAnswers');
+	if(!empty($model->id))
+	{
+		$url = $url."?id=".$model->id;
+	}
+
+	$form=$this->beginWidget('CActiveForm', array(
+	'id'=>$_GET['tabid'].'question_answer_storage_form',
+	'enableAjaxValidation'=>false)
+	);
+?>
+		<div style="margin-left: 2em">
+			<div class="row">
+				<div class="col-12-left" style="padding-right: 5px;">
+					Question Number
+				</div>
+				<div class="col-12" style="padding-right: 5px;">
+					<?php echo $form->numberField($model,'question_num',['class'=>'form-control',"style"=>"margin-top:1.1em;",'step'=>'1'])?>
+				</div>
+			</div>
+			<div class="row">
+				<div class="col-12-left" style="padding-right: 5px;">
+					Question
+				</div>
+				<div class="col-12" style="padding-right: 5px;">
+					<?php echo $form->textarea($model,'question',['class'=>'form-control',"style"=>"margin-top:1.1em;",'rows'=>'5']); ?>
+				</div>
+			</div>
+			<div class="row">
+				<div class="col-12-left" style="padding-right: 5px;">
+					Question Type
+				</div>
+				<div class="col-12" style="padding-right: 5px;">
+					<?php 
+					echo CHtml::dropDownList('SalesfunnelRequirementsQuestions[question_type]', $model->question_type, SalesfunnelRequirementsQuestions::$questionType, array("prompt"=>"ALL","value"=>$model->question_type)); ?>
+				</div>
+			</div>
+			<div class="row">
+				<div class="col-12-left" style="padding-right: 5px;">
+					Service Type
+				</div>
+				<div class="col-12" style="padding-right: 5px;">
+					<?php 
+					echo CHtml::dropDownList('SalesfunnelRequirementsQuestions[question_category]', $model->question_category, SalesfunnelRequirementsQuestions::$serviceType, array("prompt"=>"ALL","value"=>$model->question_category)); ?>
+				</div>
+			</div>
+		</div>
+
+		<table id="items" class="table table-striped table-bordered">
+
+			<thead>
+				<tr><th width="60">#</th>
+				<th><?=$this->t('Answer for this question');?> <span class="required">*</span></th>
+				<th><?=$this->t("Next question's ID");?> <span class="required">*</span></th>
+			   
+			</thead>
+			<tbody>
+			</tbody>
+			<tfoot>
+			<tr>
+		        <td><button id ="addBtn" class="moreitem btn btn-normal"><span class="glyphicon glyphicon-plus" style="color: #be3426; font-size: 1.2em; padding: 3px 10px;">+</span></button></td>
+		    </tr>
+			</tfoot>
+
+		</table>
+
+		<div class="row">
+			<div class="col-6" style="padding-left: 5px;">
+				<?php echo CHtml::submitButton($this->t($model->isNewRecord ? 'Create' : 'Save'), array('class' => 'save_btn btn btn-primary btn-block')); ?>
+				<!-- <?php 
+				// if (!$model->isNewRecord){
+				// 	echo CHtml::button($this->t('Delete'), array('class' => 'delete_btn btn btn-primary btn-block')); 
+				// }
+				?> -->
+			</div>
+		</div>
+
+<?php $this->endWidget(); ?>
+
+</div><!-- form -->
+
+<script type="text/javascript">
+	$(function(){
+		var win = $('#jqmw_<?=$_GET["tabid"];?>');
+		var tab = $('#<?=$_GET["tabid"];?>');
+		var panel = $('#<?=$_GET["tabid"];?>').data('panel');
+
+		tab.unbind('reload_question_list').bind('reload_question_list', function(){
+				$('#question-grid-list1').yiiGridView('update');
+				return false;
+			});
+
+		$('.save_btn',win).on('click',function(){
+				save();
+				return false;
+			});
+
+		$('.delete_btn',win).on('click',function(){
+				del();
+				return false;
+			});
+		$('#SalesfunnelRequirementsQuestions_question_type',win).on('change',function(){
+				questionType = $(this).val();
+				if (questionType==<?= SalesfunnelRequirementsQuestions::QUESTIONTYPERADIOBUTTON?> || questionType==<?= SalesfunnelRequirementsQuestions::QUESTIONTYPECHECKBOX?>){
+					// $('#addBtn').prop('disabled', false);
+					$('#items').show();
+				}
+				else{
+					// $('#addBtn').prop('disabled', true);
+					$('#items').hide();
+				}
+				return false;
+			}
+		  );
+
+          function save()
+			{
+				confirm("Question and answer will be saved.")
+					var form = new FormData(document.getElementById("<?=@$_GET['tabid']?>question_answer_storage_form"));
+					 $.ajax({
+					            url: '<?=$url?>',
+					            type: "post",
+					            data: form,
+					            processData: false,
+					            contentType: false,
+					            success: function(r) {
+					                if(r=='done')
+					                 {
+										myApp.notice('Done', 5000);
+									 }else
+									 {
+										myApp.alert(r, false);   
+						             }
+						             console.log(tab);
+						             //MyFAQTab.trigger('reload_cs_grid');
+						             tab.trigger('reload_question_list');
+						         },
+					            error: function(e) {
+					                console.log(e);
+					            }
+					        });	
+			}
+
+			var anItems = <?=json_encode(empty($answers)? "" : $answers);?> || {};
+			var addItem = function(add){
+				var tb = $('#items tbody',win);
+				var id = $('tr', tb).length;
+				var add = add || 1;
+				while(add-- > 0){
+		            var items = '';
+		            items = '<tr class="'+(id%2==0? 'even' : 'odd');
+		            items = items + '"><td class="rid">'+'<div class="less btn btn-normal"><span class="glyphicon glyphicon-minus" style="color: #be3426; font-size: 0.8em; padding: 1px 2px;">-</span></div></td>';
+		            items = items + '<td><input type="text" class="item_name'+(anItems.an_answer && anItems.an_answer[id] === false? ' error' : '')+' form-control" name="items[an_answer]['+id+']" size="25" value="'+(anItems.an_answer && anItems.an_answer[id] ? anItems.an_answer[id] : '') + '" /> </td>';
+		            items = items + '<td><input type="hidden" class="item_pid" name="items[pid]['+id+']" value="'+(anItems.pid && anItems.pid[id]? anItems.pid[id] : 0) + '" />';
+		            items = items + '<input type="number" class="item_name'+(anItems.nextQueId && anItems.nextQueId[id] === false? ' error' : '')+' form-control" name="items[nextQueId]['+id+']" size="25" value="'+(anItems.nextQueId && anItems.nextQueId[id]? anItems.nextQueId[id] : '') +  '" /></td>';
+		            items = items + '<td><input type="hidden" class="item_anid" name="items[anid]['+id+']" value="'+(anItems.anid && anItems.anid[id]? anItems.anid[id] : 0) + '" />';
+		            
+		            
+		            items = items + '</tr>';
+					tb.append(items);
+					id++;
+				}
+				calcTot();
+
+				$('.moreitem',win).off('click').on('click', function(e){
+		               e.preventDefault();
+				addItem(1);
+				});
+
+				$('.less',win).off('click').on('click', function(e){
+		            e.preventDefault();
+		            $(this).parent().parent().remove();
+		            calcTot();
+				});
+			};
+
+			var calcTot = function(){
+				var tqty = 0;
+		        var tvalue = 0.0;
+
+				$('#items tbody tr',win).each(function(){
+		            var itemValue =  Number($('.item_value', this).val()) || 0;
+		            var itemQty = Number($('.item_qty', this).val()) || 0;
+					tqty += itemQty;
+		            var subTotal =  itemValue * itemQty;
+		            $('.item_tot', this).html(  subTotal.toFixed(2) );
+		            tvalue += subTotal;
+				});
+				
+				$('#tot_qty',win).text(tqty);
+		        $('#tot_value',win).text(tvalue.toFixed(2));
+			};
+
+        	$('#items',win).off('change', '.item_qty,.item_value').on('change', '.item_qty,.item_value', calcTot);
+
+			$('#items',win).off('keydown', 'input[type=text]').on('keydown', 'input[type=text]', function(evt){
+					if(evt.keyCode == 13){
+						if(Number($(this).parents('tr').find('.rid').text()) == $('#items tbody tr').length) addItem(1);
+						return false;
+					}
+			});
+			$('.moreitem',win).off('click').on('click', function(e){
+		               e.preventDefault();
+				addItem(1);
+			});
+		    
+
+			addItem(anItems.anid? anItems.anid.length : 1);
+        
+    });
+
+</script>

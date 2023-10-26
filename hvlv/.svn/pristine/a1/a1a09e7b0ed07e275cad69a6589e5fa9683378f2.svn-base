@@ -1,0 +1,1164 @@
+<?php
+/**
+ * This is the model class for table "shipment_process".
+ *
+ * The followings are the available columns in table 'shipment_process':
+ * @property integer $id
+ * @property integer $pid
+ * @property integer $status
+ * @property integer $consol_id
+ * @property string $consol_eta
+ * @property integer $s_bwf
+ * @property integer $s_agent_id
+ * @property integer $type  default 0=> high value declaration;  1=>EMPP, only require sender EMPP documents.
+ * @property integer $broker_id  for HV we need the broker id to declare the goods.
+ * @property string $date
+ * @property String $started
+ * @property string $meta
+ */
+class ShipmentProcess extends CActiveRecord
+{
+	/**
+	 * @return string the associated database table name
+	 */
+	public $nolog=false;
+	public $custom_log_note;
+	public $mdata;
+	const MSG_NEW=1;
+	const MSG_SENDER=2;
+	const MSG_CONSIGNEE=3;
+	const DOC_RECEIVED=4;
+	const STATE_AQIS_CUSTOM=5;
+	const STATE_EMPP_CUSTOM=6;
+	const DOCUMENT_CONFIRM=8;
+	const MSG_BROKER=10;
+	const ENTRY_SEND=12;
+	const ENTRY_CONFIRM=14;
+	const WAIT_BROKER_FINAL_ENTRY=15;
+	const INFROM_CUSTOMER_PAY=18;
+	const PAYMENT_RECEIVED=20;
+	const CONFIRM_PAYMENT=22;
+	const INFORM_BROKER_PAY=16;
+	const BROKER_PAID = 23;
+	const CUSTOM_DONE=24;
+		
+	const TYPE_EMPP=1;
+	const TYPE_HV=4;
+	const TYPE_AQIS=2;
+	const TYPE_OTHER=8;
+	const TYPE_SAC=16;
+		
+	const BROKER_FYN_ID=1563;
+	const BROKER_MEGTOP_ID=1068;
+		
+		
+	public static $the_types=[
+		1=>'EMPP',
+		2=>'AQIS',
+		4=>'High Value',
+		16=>'SAC',
+		8=>'OTHER',
+	];
+	
+	public static $states=[
+		1 =>'New',
+		2 =>'Message Send To Sender',
+		3 =>'Message Send To Consignee',
+		4 =>'Documents Received',
+		5 =>'AQIS Message to Custom',
+		6=> 'EMPP Message To Custom',
+		10=>'Waiting Broker to Declaration',
+		12=>'Wating Entry Confirm',
+		14=>'Entry confirmed',
+		15 =>'Waiting Broker Final Entry Lodge',
+		18=>'Waiting Customer to Pay',
+		20=>'Payment Received',
+		22=>'Payment Confirmed',
+		16=>'Waiting Broker to Pay',
+		23 => 'Broker Paid',
+		24=>'Customs Done',
+	];
+		 
+	public static $inv_terms=[
+		1=>'DDP',
+		2=>'DDU',
+		3=>'FOB',
+		4=>'CIF',
+	];
+		 
+		 
+	public static $processTypes=[
+		1=>[2,3],
+		2=>[4],
+		3=>[10],
+		4=>[12],
+		5=>[ShipmentProcess::ENTRY_CONFIRM, ShipmentProcess::INFORM_BROKER_PAY],
+		6=>[ShipmentProcess::INFROM_CUSTOMER_PAY],
+		7=>[ShipmentProcess::PAYMENT_RECEIVED],
+		8=>[ShipmentProcess::CONFIRM_PAYMENT],
+	];
+	public static $processTypesMap=[
+		1=> "Message Send",
+		2=>"Document Received",
+		3=>"Waiting FOR Broker Declaration",
+		4=>"Waiting For Entry Confirm",
+		5=>"Entry Confirmed",
+		6=>"Waiting For Payment",
+		7=>"Payment Received",
+		8=>"Payment Confirmed",
+	];
+		
+	public static $link_types=[
+		1=>'HV Require Document From Sender Link',
+		2=>'LOA link',
+		3=>'Entry Confirm Link',
+		4=>'Require Invoice Receipt Link',
+		5=>'EMPP Require Document Link',
+		6=>'AQIS Require Document Link'
+	];
+
+	public function tableName()
+	{
+		return 'shipment_process';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return [
+			['pid, status, date,started', 'required'],
+			['pid, status,type,broker_id,consol_id,s_bwf,s_agent_id', 'numerical', 'integerOnly'=>true],
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			['consol_eta','length','max'=>20],
+			['id, pid, status,started,type date,consol_eta,consol_id,s_bwf,s_agent_id,broker_id,meta', 'safe', 'on'=>'search'],
+		];
+	}
+
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return [
+			'shipment' => [self::BELONGS_TO, 'ImParcel', 'pid'],
+			'processLog'=>[self::HAS_MANY,'ProcessLog','fid'],
+		];
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return [
+			'id' => 'ID',
+			'pid' => 'Pid',
+			'status' => 'Status',
+			'started' => 'Started',
+			'date' => 'Date',
+			'type' => 'Type',
+			'broker_id' => 'Broker Id',
+			'meta' => 'Meta',
+		];
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search()
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+		$criteria->compare('id', $this->id);
+		$criteria->compare('pid', $this->pid);
+		$criteria->compare('status', $this->status);
+		$criteria->compare('type', $this->type);
+		$criteria->compare('date', $this->date, true);
+		$criteria->compare('started', $this->started, true);
+		$criteria->compare('broker_id', $this->started);
+		$criteria->compare('s_agent_id', $this->s_agent_id);
+		$criteria->compare('consol_id', $this->consol_id);
+		$criteria->compare('s_bwf', $this->s_bwf);
+		$criteria->compare('consol_eta', $this->consol_eta);
+		$criteria->compare('meta', $this->meta, true);
+		return new CActiveDataProvider($this, [
+			'criteria'=>$criteria,
+		]);
+	}
+		
+	public function afterFind()
+	{
+		if (!empty($this->meta)) {
+			$this->mdata= json_decode($this->meta, true);
+		}
+	}
+	public function beforeSave()
+	{
+		if (!empty($this->mdata)) {
+			$this->meta= json_encode($this->mdata);
+		}
+		
+		$this->getStorageStartDate();
+		return true;
+	}
+ 
+	public function updateMeta()
+	{
+		if (!empty($this->mdata)) {
+			$this->meta= json_encode($this->mdata);
+		}
+		$this->update(['meta']);
+	}
+	public function getStatus()
+	{
+		return isset(static::$states[$this->status])? Yii::t(strtolower(__CLASS__), static::$states[$this->status]) : $this->status;
+	}
+
+	public function afterSave()
+	{
+		if (!$this->nolog && !empty($this)) {
+			$extra = empty($this->custom_log_note)? [] : ['note' => $this->custom_log_note];
+			if(!empty($this->mdata['ssdate']))
+			{
+				$extra['ssdate'] = $this->mdata['ssdate'];
+			}
+			Log::add($this, $this->isNewRecord? 3 : 4, array_merge(['status' => $this->getStatus()], $extra));
+		}
+		if ($this->status<24) {
+			foreach (array_keys(self::$the_types) as $type) {
+				if (($this->type&$type)>0) {
+					ProcessLog::addLog($this->id, $type);
+				}
+			}
+		}
+	}
+
+	public static function brokerList($withEmpty=true){
+		$rs = Org::model()->findAll('type = 72 AND status = 1');
+		$nvp = [];
+		foreach($rs as $r){
+			$nvp[$r->id] = $r->name;
+		}
+		if($withEmpty)
+		{
+			$nvp[-1] = "Empty Broker";
+		}
+		return $nvp;
+	}
+	/**
+		* update consol_id consol_eta s_agent_id  s_cbwf;
+		*/
+	public function updateBatchInfo()
+	{
+		$shipment= $this->shipment;
+		if (!empty($shipment)) {
+			$this->s_agent_id=$shipment->agent_id;
+			$this->s_bwf=$shipment->bwf;
+			$this->consol_id=$shipment->consol_id;
+			$this->consol_eta=@$shipment->consol->eta;
+			$this->save();
+		}
+	}
+
+	public static function brokerStats($list = true){
+		$rs = [];
+		foreach(self::$states as $k => $v){
+			if ($list && in_array($k, [3,4,10,12,14,18,20,22])) {
+				$rs[$k] = $k == 15? 'Finalised' : $v;
+			} else if (in_array($k, [3,4,10,12,14])) {
+				$rs[$k] = $k == 15? 'Finalised' : $v;
+			}
+		}
+		return $rs;
+	}
+		 
+	public static function getProcessAmount($status=[])
+	{
+		$amount=0;
+		foreach ($status as $st) {
+			$sql="SELECT COUNT(*) as number FROM `shipment_process` sp join shipment s on sp.pid=s.id WHERE s.type = 10 and s.ot_id = 0 and s.status!=100 and `sp`.`status`=:status";
+			$r=Yii::app()->db->createCommand($sql)->bindValues([':status'=>$st])->queryScalar();
+			if ($r>0) {
+				$amount+=$r;
+			}
+		}
+		return $amount;
+	}
+	
+	public function changeStatus($status)
+	{
+		$this->status=$status;
+		$this->date=date('Y-m-d H:i:s');
+		$this->update(['status','date']);
+	}
+
+	public function getBrokerName()
+	{
+		if ($this->broker_id>0) {
+			$org= Org::model()->findByPk($this->broker_id);
+			if (!empty($org)) {
+				return $org->name;
+			}
+		}
+		return "";
+	}
+	public static function sendDocumentNotice($model)
+	{ //$model is the shipment this is to sender.
+		//send to sender
+		$emailLog = new Emailog();
+		$emailLog->type = Emailog::CUST_DOCUMENT_SENDER;
+		$emailLog->fid = $model->id;
+		$emailLog->dt = date('Y-m-d H:i:s');
+		$emailLog->to_id = $model->agent_id;
+		$emailLog->status = 10;
+		$emailLog->prepTemplate();
+		$emailLog->subject = $emailLog->tpl->subject;
+		$emailLog->body = $emailLog->tpl->getContent();
+		if ($emailLog->requireHighValueDocumentsSend()) {
+			// echo 'send!';
+			if (empty($model->process)) {
+				$model->newShipmentProcess(ShipmentProcess::MSG_SENDER);// send to customer;
+			} else {
+				$processes = ShipmentProcess::model()->findAll('pid = :pid',[':pid'=>$model->id]);
+				foreach ($processes as $key => $process) {
+					$process->changeStatus(ShipmentProcess::MSG_SENDER);
+				}
+			}
+		}
+	}
+		 
+		 
+	public static function sendDocumentNoticeToCustomer($model)
+	{ //$model is the shipment
+		//check if there are email or sms//
+		if (isset($model->cnee->email)&&filter_var(preg_split('/[;,]+/i', $model->cnee->email)[0], FILTER_VALIDATE_EMAIL)) {
+			$emailLog = new Emailog();
+			$emailLog->type = Emailog::CUST_DOCUMENT_CUSTOMER;
+			$emailLog->fid = $model->id;
+			$emailLog->dt = date('Y-m-d H:i:s');
+			$emailLog->status = 10;
+			$emailLog->prepTemplate();
+			$emailLog->subject = $emailLog->tpl->subject;
+			$emailLog->body = $emailLog->tpl->getContent();
+			if($model->isTLA())
+			{
+				$file=Yii::app()->basePath.DIRECTORY_SEPARATOR.'consignee_authorization_letter_template_top.docx';
+			}else
+			{
+				$file=Yii::app()->basePath.DIRECTORY_SEPARATOR.'consignee_authorization_letter_template.docx';
+			}
+			if ($emailLog->requireHighValueDocumentsSendCustomer($model->cnee->email, [$file])) {
+				$model->process->changeStatus(ShipmentProcess::MSG_CONSIGNEE);
+				// after sending email we send sms to notice that
+				if ((isset($model->cnee->tel)&&preg_match('/^04\d{8}$/', ($model->cnee->auTel())))) {
+					$no=$model->cnee->auTel();
+					$link=$model->getTheHashUrl(true); //true means this link is for customer not for sender.
+					$msg='This '.Org::COMPANY_NAME_SL.', a notice is sent to email:'.$model->cnee->email.' for your Parcel '. $model->ref.' Please reply the email as ASAP! tel: 02-99257111';
+					if (Sms::sendCustomsMessageLocal($no, $msg)) {
+						// Log::log2file($model->ref.' no=>'.$no.' msg:=>'.$msg, 'msg_notice_doucument_send', 'smslog');
+					}
+				}
+			}
+		}
+	}
+					 
+	public static function requireLoa($model)
+	{ //$model is the shipment
+		//check if there are email or sms//
+		if (isset($model->cnee->email)&&filter_var(preg_split('/[;,]+/i', $model->cnee->email)[0], FILTER_VALIDATE_EMAIL)) {
+			$emailLog = new Emailog();
+			$emailLog->type = Emailog::CUST_DOCUMENT_CUSTOMER2; //require loa
+			$emailLog->fid = $model->id;
+			$emailLog->dt = date('Y-m-d H:i:s');
+			$emailLog->status = 10;
+			$emailLog->prepTemplate();
+			$emailLog->subject = $emailLog->tpl->subject;
+			$emailLog->body = $emailLog->tpl->getContent();
+									
+			$fs= FileRepo::model()->findAll('fid=:fid and type in (19,20) and status in (20,30)', [':fid'=>$model->id]);
+			foreach ($fs as $f) {
+				$files[]=[Yii::app()->basePath.DIRECTORY_SEPARATOR."filerepo".DIRECTORY_SEPARATOR.substr($f->hash, 0, 2).DIRECTORY_SEPARATOR.$f->hash,$f->name];
+			}
+			if($model->isTLA())
+			{
+				$files[]=[$file=Yii::app()->basePath.DIRECTORY_SEPARATOR.'consignee_authorization_letter_template_top.docx','consignee_authorization_letter_template_top.docx'];
+			}else
+			{
+				$files[]=[$file=Yii::app()->basePath.DIRECTORY_SEPARATOR.'consignee_authorization_letter_template.docx','consignee_authorization_letter_template.docx'];
+			}
+			if ($emailLog->requireHVDCustomerLoa($model->cnee->email, $files)) {
+				$model->process->changeStatus(ShipmentProcess::MSG_CONSIGNEE);
+				// after sending email we send sms to notice that
+				if ((isset($model->cnee->tel)&&preg_match('/^04\d{8}$/', ($model->cnee->auTel())))) {
+					$no=$model->cnee->auTel();
+					$link=$model->getTheHashUrl(true); //true means this link is for customer not for sender.
+					$msg='This '.Org::COMPANY_NAME_SL.', a notice is sent to email:'.$model->cnee->email.' for your Parcel '. $model->ref.' Please reply via the email as ASAP! tel: 02-99257111';
+					if (Sms::sendCustomsMessageLocal($no, $msg)) {
+						// Log::log2file($model->ref.' no=>'.$no.' msg:=>'.$msg, 'msg_notice_doucument_send', 'smslog');
+					}
+				}
+			}
+		} else {
+			echo 'not valid email';
+		}
+	}
+ 
+	public static function sendToBroker($model)
+	{
+		$tempDirectory = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.'zip'.time();
+		if (!file_exists($tempDirectory)) {
+			mkdir($tempDirectory);
+		}
+		$files=[];
+		$fs= FileRepo::model()->findAll('fid=:fid and type in (19,18,20) and status=30', [':fid'=>$model->id]);
+		foreach ($fs as $f) {
+			$files[]=[Yii::app()->basePath.DIRECTORY_SEPARATOR."filerepo".DIRECTORY_SEPARATOR.substr($f->hash, 0, 2).DIRECTORY_SEPARATOR.$f->hash,$f->name];
+		}
+		$fileName=$tempDirectory.DIRECTORY_SEPARATOR.'house_bill_'.$model->hbn.'.pdf';
+		oPDF::renderPDF('custom_airwaybill', ['model' => $model], 2, $fileName);
+		$files[]=[$fileName,'house_bill_'.$model->hbn.'.pdf'];
+		
+		//send to sender
+		$emailLog = new Emailog();
+		$emailLog->type = Emailog::CUST_DOCUMENT_BROKER;
+		$emailLog->fid = $model->id;
+		$emailLog->dt = date('Y-m-d H:i:s');
+		$emailLog->to_id =$model->process->broker_id;
+		$emailLog->status = 10;
+		$emailLog->prepTemplate();
+		$emailLog->subject = $emailLog->tpl->subject;
+		$emailLog->body = $emailLog->tpl->getContent();
+		if ($emailLog->sendToBroker($files)) {
+			// echo 'send!';
+			$model->process->changeStatus(ShipmentProcess::MSG_BROKER);
+			//update the file flag to active
+			unset($f);
+			foreach ($fs as $f) {
+				$f->status=20;
+				$f->update('status');
+			}
+		}
+		AppHelper::unlinkRecursive($tempDirectory);
+	}
+	public static function sendEntryToConfirm($model)
+	{
+
+		//DDP   to sender
+		//DDU  to consignee
+		$email='';
+		if (($model->bwf&ImParcel::CUSTOM_DDP)>0) {
+			$org = Org::model()->findByPk($model->agent_id);
+			if (!empty($org->extra['outturn_email'])) {
+				$email=$org->extra['outturn_email'];
+			}
+			if (($org->id==1002)&&($model->bwf&ImParcel::BWF_SY)>0) {
+				$email='ryan.cs@com1express.net';
+			}
+		} elseif (($model->bwf&ImParcel::CUSTOM_DDU)>0) {
+			if (!empty($model->receiver->name)) {
+				$email = isset($model->receiver->email) ? $model->receiver->email : '';
+				if (empty($email)) return 'Receiver has no email address';
+			} else {
+				$email = isset($model->cnee->email) ? $model->cnee->email : '';
+				if (empty($email)) return 'Consignee has no email address';
+			}
+		}
+
+		if (($model->bwf&ImParcel::CUSTOM_DDU)>0) {
+			$model->process->changeStatus(ShipmentProcess::ENTRY_CONFIRM);
+			return 'done';
+		}
+
+		$files=[];
+		$fs= FileRepo::model()->findAll('fid=:fid and type in (19) and status!=0', [':fid'=>$model->id]);
+		foreach ($fs as $f) {
+			if (!preg_match('/entry/i', $f->name)) {
+				continue;
+			}
+			$files[]=[$f->getFile(), $f->name];
+		}
+						
+
+		if (filter_var(preg_split('/[;,]+/i', $email)[0], FILTER_VALIDATE_EMAIL)) {
+			$emailLog = new Emailog();
+			$emailLog->type = Emailog::CUST_ENTRY_CONFIRM;
+			$emailLog->fid = $model->id;
+			$emailLog->dt = date('Y-m-d H:i:s');
+			$emailLog->status = 10;
+			$emailLog->prepTemplate();
+			$emailLog->subject = $emailLog->tpl->subject;
+			$emailLog->body = $emailLog->tpl->getContent();
+			if ($emailLog->sendEntryToConfirm($email, $files)) {
+				// echo 'send!';
+				$model->process->changeStatus(ShipmentProcess::ENTRY_SEND);
+				if ((($model->bwf&ImParcel::CUSTOM_DDU)>0)&&(isset($model->cnee->tel)&&preg_match('/^04\d{8}$/', ($model->cnee->auTel())))) {
+					$no=$model->cnee->auTel();
+					$msg='This '.Org::COMPANY_NAME_SL.', a entry is sent to email:'.$model->cnee->email.' for your Parcel '. $model->ref.' Please confirm the email ASAP! tel: 02-99257111';
+					if (Sms::sendCustomsMessageLocal($no, $msg)) {
+						// Log::log2file($model->ref.' msg send to customer notice', 'smslog');
+					}
+				}
+			}
+		}
+
+		return 'done';
+	}
+				
+					
+	public static function sendToBrokerToPay($model,$stayHere = false)
+	{
+		if(!empty($model->process->mdata['stay_here'])&&$stayHere==false)
+		{
+			$model->process->changeStatus(ShipmentProcess::BROKER_PAID);
+			return;
+		}
+
+		$model->process->mdata['stay_here'] = $stayHere;
+		$model->process->save();
+
+		$emailLog = new Emailog();
+		$emailLog->type = Emailog::BROKER_TO_PAY;
+		$emailLog->fid = $model->id;
+		$emailLog->dt = date('Y-m-d H:i:s');
+		$emailLog->to_id =$model->process->broker_id;
+		$emailLog->status = 10;
+		$emailLog->prepTemplate();
+		$emailLog->subject = $emailLog->tpl->subject;
+		$emailLog->body = $emailLog->tpl->getContent();
+		if ($emailLog->sendToBrokerToPay()) {
+			// echo 'send!';
+			if(!$stayHere)
+			{
+				$model->process->changeStatus(ShipmentProcess::BROKER_PAID);
+			}
+			//update the file flag to active
+		}
+
+		// DDP to sender
+		// DDU to consignee
+		$email = '';
+		if (($model->bwf & ImParcel::CUSTOM_DDP) > 0) {
+			$org = Org::model()->findByPk($model->agent_id);
+			if (!empty($org->extra['outturn_email'])) {
+				$email = $org->extra['outturn_email'];
+			}
+		} elseif (($model->bwf & ImParcel::CUSTOM_DDU) > 0) {
+			$email = isset($model->cnee->email) ? $model->cnee->email : '';
+		}
+
+		$emailLog = new Emailog();
+		$emailLog->type = Emailog::PAYMENT_RECEIVED;
+		$emailLog->fid = $model->id;
+		$emailLog->dt = date('Y-m-d H:i:s');
+		$emailLog->to_id = $model->agent_id;
+		$emailLog->status = 10;
+		$emailLog->prepTemplate();
+		$emailLog->subject = $emailLog->tpl->subject;
+		$emailLog->body = $emailLog->tpl->getContent();
+		$emailLog->mdata['to'] = $email;
+		$emailLog->mdata['fromName'] = 'TLA Imports';
+		$emailLog->mdata['from'] = 'imports@toplogistics.com.au';
+		$emailLog->mdata['cc'] = 'imports@toplogistics.com.au';
+		$emailLog->sendEmail();
+	}
+					
+	public static function sendToBrokerRequestFinalEntry($model)
+	{
+		$emailLog = new Emailog();
+		$emailLog->type = Emailog::REQUEST_FINAL_ENTRY_BROKER; //
+		$emailLog->fid = $model->id;
+		$emailLog->dt = date('Y-m-d H:i:s');
+		$emailLog->to_id =$model->process->broker_id;
+		$org = Org::model()->findByPk($model->process->broker_id);
+		$emailLog->status = 10;
+		$emailLog->prepTemplate();
+		$emailLog->subject = $emailLog->tpl->subject;
+		$emailLog->body = $emailLog->tpl->getContent();
+		$emailLog->mdata['to']=$org->extra['outturn_email'];
+		$emailLog->mdata['from']='imports@toplogistics.com.au';
+		$emailLog->mdata['fromName']='PCA Imports';
+		$emailLog->mdata['cc']='imports@toplogistics.com.au';
+		$d=$emailLog->sendEmail();
+		if ($d['status']) {
+			$model->process->changeStatus(ShipmentProcess::WAIT_BROKER_FINAL_ENTRY);
+		}
+	}
+	public static function sendOpNotice($model)
+	{
+		$emailLog = new Emailog();
+		$emailLog->type = Emailog::OP_NOTICE;
+		$emailLog->fid = $model->id;
+		$emailLog->dt = date('Y-m-d H:i:s');
+		$emailLog->status = 10;
+		$emailLog->prepTemplate();
+		$emailLog->subject = $emailLog->tpl->subject;
+		$emailLog->body = $emailLog->tpl->getContent();
+		if ($emailLog->sendInformOp()) {
+			// Log::log2file($model->ref.' inform op', 'inform_op');
+			return true;
+		}
+		return false;
+	}
+					
+					 
+	public static function sendInvoiceToInform($model)
+	{
+		$files=[];
+		$tempDirectory = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.'emlatt'.time();
+		if (!file_exists($tempDirectory)) {
+			mkdir($tempDirectory);
+		}
+		$invs = Invoice::model()->findAll(
+				'dpmt=10 AND type IN(41,45) AND pid = :pid AND status not in (10,9,8,6) ORDER BY id DESC',
+			[':pid'=>$model->id]
+			);
+		if (empty($invs)) {
+			echo 'invoice not created';
+			return;
+		}
+		$isDdp=false;
+
+		$confirmFiles = [];
+
+		if (($model->bwf&ImParcel::CUSTOM_DDU)>0)//for DDU preparing the entry confirm files with invoice
+		{
+			$fs= FileRepo::model()->findAll('fid=:fid and type in (19) and status!=0', [':fid'=>$model->id]);
+			foreach ($fs as $f) {
+				if (!preg_match('/entry/i', $f->name)) {
+					continue;
+				}
+				$confirmFiles[]=[$f->getFile(), $f->name];
+			}
+		}
+
+		foreach ($invs as $tempInv) {
+			$fileName=$tempDirectory.DIRECTORY_SEPARATOR.'Invoice_'.$tempInv->no.'.pdf';
+			oPDF::renderPDF('invoice', ['inv'=>$tempInv], 2, $fileName);
+			$files[]=[$fileName, 'Invoice_'.$tempInv->no.'.pdf'];
+		}
+		$files = array_merge($files,$confirmFiles);
+		//DDP   to sender
+		//DDU  to consignee
+		$email='';
+		if (($model->bwf&ImParcel::CUSTOM_DDP)>0) {
+			$org = Org::model()->findByPk($model->agent_id);
+			if (!empty($org->extra['outturn_email'])) {
+				$email=$org->extra['outturn_email'];
+			}
+
+			if($model->agent_id==Org::ORGID_COURIER_4PX)
+			{
+				$org = Org::model()->findByPk($model->agent_id);
+				$email=$org->extra['outturn_email'];
+			}
+
+			
+			$isDdp=true;
+		} elseif (($model->bwf&ImParcel::CUSTOM_DDU)>0) {
+			$email=isset($model->cnee->email)?$model->cnee->email:'';
+
+			if($model->agent_id==Org::ORGID_COURIER_4PX)
+			{
+				$org = Org::model()->findByPk($model->agent_id);
+				$email=$org->extra['outturn_email'];
+			}
+			$isDdp=false;
+		}
+		if (filter_var(preg_split('/[;,]+/i', $email)[0], FILTER_VALIDATE_EMAIL)) {
+			$emailLog = new Emailog();
+			if ($isDdp) {
+				$emailLog->type= Emailog::CUSTOM_INVOICE_AGENT;
+			} else {
+				$emailLog->type = Emailog::CUST_INVOICE_INFORM;
+			}
+			$emailLog->fid = $model->id;
+			$emailLog->dt = date('Y-m-d H:i:s');
+			$emailLog->status = 10;
+			$emailLog->prepTemplate();
+			$emailLog->subject = $emailLog->tpl->subject;
+			$emailLog->body = $emailLog->tpl->getContent();
+			$emailLog->mdata['to']=$email;
+			$emailLog->mdata['fromName']='TLA Imports';
+			$emailLog->mdata['from']='donotreply@toplogistics.com.au';
+			$emailLog->mdata['cc']='imports@toplogistics.com.au';
+			$o=$emailLog->sendEmail($files);
+									
+			if ($o['status']) {
+				foreach($invs as $invoice){
+					if($invoice->status == Invoice::INVOICE_STATUS_PENDING){
+						$invoice->status = Invoice::INVOICE_STATUS_POSTED;
+						$invoice->update('status');
+					}
+				}
+				if ($model->bwf & ImParcel::CUSTOM_DDU > 0) {
+					$model->process->changeStatus(ShipmentProcess::INFROM_CUSTOMER_PAY);
+				}
+				if ((($model->bwf&ImParcel::CUSTOM_DDU)>0)&&(isset($model->cnee->tel)&&preg_match('/^04\d{8}$/', ($model->cnee->auTel())))) {
+					$no=$model->cnee->auTel();
+					$msg='This '.Org::COMPANY_NAME_SL.', a entry is sent to email:'.$model->cnee->email.' for your Parcel '. $model->ref.' Please confirm the email ASAP! tel:  02-99257111';
+					if (Sms::sendCustomsMessageLocal($no, $msg)) {
+						// Log::log2file($model->ref.' msg send to customer notice', 'smslog');
+					}
+				}
+			}
+		}
+		AppHelper::unlinkRecursive($tempDirectory);
+	}
+					
+									 
+	public static function noticeDelivery($model)
+	{
+		//DDP   to sender
+		//DDU  to consignee
+		$o=['status'=>false,'msg'=>'email not valid'];
+		if(!in_array($model->status,[ImParcel::STATE_CLEAR,ImParcel::STATE_CLEAR_WAIT]))
+		{
+			$o=['status'=>false,'msg'=>'status not valid'];
+			return $o;
+		}
+		$email='';
+		if (($model->bwf&ImParcel::CUSTOM_DDP)>0) {
+			$org = Org::model()->findByPk($model->agent_id);
+			if (!empty($org->extra['outturn_email'])) {
+				$email=$org->extra['outturn_email'];
+			}
+		} elseif (($model->bwf&ImParcel::CUSTOM_DDU)>0) {
+			$email=isset($model->cnee->email)?$model->cnee->email:'';
+		}
+		if (filter_var(filter_var(preg_split('/[;,]+/i', $email)[0], FILTER_VALIDATE_EMAIL), FILTER_VALIDATE_EMAIL)) {
+			$emailLog = new Emailog();
+			$emailLog->type = Emailog::NOTICE_DELIVERY;
+			$emailLog->fid = $model->id;
+			$emailLog->dt = date('Y-m-d H:i:s');
+			$emailLog->status = 10;
+			$emailLog->prepTemplate();
+			$emailLog->subject = $emailLog->tpl->subject;
+			if(!empty($model->process->notice_content))
+			{
+				$emailLog->body = $model->process->notice_content;
+			}else
+			{
+				$emailLog->body = $emailLog->tpl->getContent();
+			}
+			$d=$emailLog->sendNoticeDelivery($email);
+			if ($d['status']) {
+				$o['status']=true;
+				$o['msg']='send successfully';
+				if ((($model->bwf&ImParcel::CUSTOM_DDU)>0)&&(isset($model->cnee->tel)&&preg_match('/^04\d{8}$/', ($model->cnee->auTel())))) {
+					$no=$model->cnee->auTel();
+					$msg='This '.Org::COMPANY_NAME_SL.', your Parcel '. $model->ref.' is already cleared and will be delivery to you.';
+					if (Sms::sendCustomsMessageLocal($no, $msg)) {
+						// Log::log2file($model->ref.' msg send to customer notice delivery', 'msg_customer', 'smslog');
+					}
+				}
+			} else {
+				$o['status']=false;
+				$o['msg']=$d['msg'];
+			}
+		}
+		return $o;
+	}
+
+	public static function getNoticeContent($model)
+	{
+		//DDP   to sender
+		//DDU  to consignee
+		$o=['status'=>false,'msg'=>'email not valid'];
+		$email='';
+		if (($model->bwf&ImParcel::CUSTOM_DDP)>0) {
+			$org = Org::model()->findByPk($model->agent_id);
+			if (!empty($org->extra['outturn_email'])) {
+				$email=$org->extra['outturn_email'];
+			}
+		} elseif (($model->bwf&ImParcel::CUSTOM_DDU)>0) {
+			$email=isset($model->cnee->email)?$model->cnee->email:'';
+		}
+		if (filter_var(filter_var(preg_split('/[;,]+/i', $email)[0], FILTER_VALIDATE_EMAIL), FILTER_VALIDATE_EMAIL)) {
+			$emailLog = new Emailog();
+			$emailLog->type = Emailog::NOTICE_DELIVERY;
+			$emailLog->fid = $model->id;
+			$emailLog->dt = date('Y-m-d H:i:s');
+			$emailLog->status = 10;
+			$emailLog->prepTemplate();
+			$emailLog->subject = $emailLog->tpl->subject;
+			$emailLog->body = $emailLog->tpl->getContent();
+			return $emailLog;
+		}
+		return $o;
+	}
+		
+	public static function requireEmppDocument($model)
+	{ //$model is the shipment this is to sender.
+		//send to sender
+		$o=['status'=>false,'msg'=>''];
+		$emailLog = new Emailog();
+		$emailLog->type = Emailog::EMPP_DOCUMENT;
+		$emailLog->fid = $model->id;
+		$emailLog->dt = date('Y-m-d H:i:s');
+		$emailLog->to_id = $model->agent_id;
+		$emailLog->status = 10;
+		$emailLog->prepTemplate();
+		$emailLog->subject = $emailLog->tpl->subject;
+		$emailLog->body = $emailLog->tpl->getContent();
+		$d=$emailLog->requireEmppDocuments();
+		if ($d['status']) {
+			$o['status']=true;
+			$o['msg']='send successfully';
+			if (empty($model->process)) {
+				$model->newShipmentProcess(ShipmentProcess::MSG_SENDER, ShipmentProcess::TYPE_EMPP);// send to customer;
+			} else {
+				$processes = ShipmentProcess::model()->findAll('pid = :pid',[':pid'=>$model->id]);
+				foreach ($processes as $key => $process) {
+					$process->changeStatus(ShipmentProcess::MSG_SENDER);
+				}
+			}
+		} else {
+			$o['status']=false;
+			$o['msg']=$d['msg'];
+		}
+		return $o;
+	}
+		 
+	public static function requireAqisDocument($model)
+	{ //$model is the shipment this is to sender.
+		//send to sender
+		$o=['status'=>false,'msg'=>''];
+		$emailLog = new Emailog();
+		$emailLog->type = Emailog::AQIS_DOCUMENT;
+		$emailLog->fid = $model->id;
+		$emailLog->dt = date('Y-m-d H:i:s');
+		$emailLog->to_id = $model->agent_id;
+		$org = Org::model()->findByPk($model->agent_id);
+		$emailLog->status = 10;
+		$emailLog->prepTemplate();
+		$emailLog->subject = $emailLog->tpl->subject;
+		$emailLog->body = $emailLog->tpl->getContent();
+		$emailLog->mdata['to']=$org->extra['outturn_email'];
+		$emailLog->mdata['from']='imports@toplogistics.com.au';
+		$emailLog->mdata['fromName']='TLA Imports';
+		$emailLog->mdata['cc']='imports@toplogistics.com.au';
+		$d=$emailLog->sendEmail();
+		if ($d['status']) {
+			$o['status']=true;
+			$o['msg']='send successfully';
+			if (empty($model->process)) {
+				$model->newShipmentProcess(ShipmentProcess::MSG_SENDER, ShipmentProcess::TYPE_AQIS);// send to customer;
+			} else {
+				$processes = ShipmentProcess::model()->findAll('pid = :pid',[':pid'=>$model->id]);
+				foreach ($processes as $key => $process) {
+					$process->changeStatus(ShipmentProcess::MSG_SENDER);
+				}
+			}
+		} else {
+			$o['status']=false;
+			$o['msg']=$d['msg'];
+		}
+		return $o;
+	}
+	/* this function is used to send AQIS inovice to the custom
+	 * SACNCC@agriculture.gov.au
+	 */
+	public static function sendAqisToCustom($model)
+	{
+		$files=[];
+		$o=['status'=>false,'msg'=>''];
+		$fs= FileRepo::model()->findAll('fid=:fid and type in (19,20) and status=30', [':fid'=>$model->id]);
+		foreach ($fs as $f) {
+			// if (!preg_match('/invoice/i', $f->name)) {
+			// 	continue;
+			// }
+			$files[]=[Yii::app()->basePath.DIRECTORY_SEPARATOR."filerepo".DIRECTORY_SEPARATOR.substr($f->hash, 0, 2).DIRECTORY_SEPARATOR.$f->hash,$f->name];
+		}
+		if (empty($files)) {
+			foreach ($fs as $f) {
+				$files[]=[Yii::app()->basePath.DIRECTORY_SEPARATOR."filerepo".DIRECTORY_SEPARATOR.substr($f->hash, 0, 2).DIRECTORY_SEPARATOR.$f->hash,$f->name];
+			}
+		}
+		if (empty($files)) {
+			$o['status']=false;
+			$o['msg']='no file find to custom';
+			return $o;
+		}
+		$emailLog=new Emailog();
+		$emailLog->type= Emailog::AQIS_TO_CUSTOM;
+		$emailLog->fid = $model->id;
+		$emailLog->dt = date('Y-m-d H:i:s');
+		$emailLog->to_id = $model->agent_id;
+		$org = Org::model()->findByPk($model->agent_id);
+		$emailLog->status = 10;
+		$emailLog->prepTemplate();
+		$emailLog->subject = $emailLog->tpl->subject;
+		$emailLog->body = $emailLog->tpl->getContent();
+		$emailLog->mdata['to']="SACNCC@agriculture.gov.au";
+		$emailLog->mdata['from']='imports@toplogistics.com.au';
+		$emailLog->mdata['fromName']='Imports';
+		$emailLog->mdata['cc']='imports@toplogistics.com.au';
+		$d=$emailLog->sendEmail($files);
+		if ($d['status']) {
+			$o['status']=true;
+			$o['msg']='send successfully';
+			$model->process->changeStatus(ShipmentProcess::STATE_AQIS_CUSTOM);
+		} else {
+			$o['status']=false;
+			$o['msg']=$d['msg'];
+		}
+		return $o;
+	}
+	
+	public function getUpdateToNow()
+	{
+		if ($this->status!=24) {
+			$etaDay=new DateTime(date('Y-m-d', strtotime($this->date)), new DateTimeZone('Australia/Sydney'));
+			$now=new DateTime('now', new DateTimeZone('Australia/Sydney'));
+			$daydiff = $now->diff($etaDay)->format("%a");
+			return $daydiff;
+		} else {
+			return 0;
+		}
+	}
+	public function getProcessType()
+	{
+		$value='';
+		if (($this->type&4)>0) {
+			$value.="<span class='warn'>HV</span>";
+		}
+		if (($this->type&1)>0) {
+			$value.="<span class='warn'>EMPP</span>";
+		}
+		if (($this->type&2)>0) {
+			$value.="<span class='warn'>AQIS</span>";
+		}
+		if (($this->type&8)>0) {
+			$value.="<span class='warn'>OT</span>";
+		}
+		if (($this->type&16)>0) {
+			$value.="<span class='warn'>SAC</span>";
+		}
+		return $value;
+	}
+	public function paymentReceived($custom_log='')
+	{
+		$this->status= self::PAYMENT_RECEIVED;
+		$this->custom_log_note=$custom_log;
+		$shipment= $this->shipment;
+		// if shipment already cleared we change it to clear-wait
+			if ($shipment->status==57) {//duty held
+				$shipment->status= ImParcel::STATE_CLEAR_WAIT;
+				$shipment->update('status');
+			}
+		$this->update('status');
+	}
+			
+			
+	/**
+	 * check if the related invoice are  already paid!
+	 */
+	public function checkPaidByTransactionAlready()
+	{
+		$invoices=Invoice::model()->findAll('type in (41,45) AND total>0 AND status NOT IN (8,10) AND pid=:pid', [':pid'=> $this->pid]);
+		if (!empty($invoices)) {
+			$total=0;
+			foreach ($invoices as $inv) {
+				if($inv->status==Invoice::INVOICE_STATUS_PENDING_PAID)
+				{
+
+				}else
+				{
+					$total+=($inv->total-$inv->paid()>0?$inv->total-$inv->paid():0);
+				}
+			}
+			if ($total<=0.01) {//means fully paid
+				$this->status= self::PAYMENT_RECEIVED;
+				$this->custom_log_note=" Payment Received By Bank Transaction,Confirm with Finance";
+				$this->update('status');
+			}
+		}
+	}
+			
+	public function findRelatedConsignee()
+	{
+		$provide=[];
+		$cnee= $this->shipment->cnee;
+		$sql='SELECT t.id FROM `shipment` t INNER JOIN `shipment_process` s ON t.id=s.pid INNER JOIN `addr` a ON t.cnee_id=a.id WHERE LOWER(a.name)=:name AND a.postcode=:postcode';
+		$rs=Yii::app()->db->createCommand($sql)->bindValues([':name'=> strtolower($cnee->name),':postcode'=>$cnee->postcode])->queryAll();
+		$provide=[];
+		if (!empty($rs)) {
+			foreach ($rs as $r) {
+				if ($r['id']==$this->pid) {
+					continue;
+				}
+				$p = ImParcel::model()->findByPk($r['id']);
+				$fs= FileRepo::model()->findAll('fid=:fid and type in (19,18,20) and status!=0', [':fid'=>$r['id']]);
+				$loa=null;
+				foreach ($fs as $f) {
+					if (preg_match('/loa/i', $f->name)) {
+						$loa=$f;
+						break;
+					}
+				}
+				if (empty($loa)) {
+					continue;
+				}
+				$provide[]=['ref'=>empty($p->ref)?$p->hbn:$p->ref,'id'=>$p->id,'name'=>$p->cnee->name,'tel'=>$p->cnee->tel,'email'=>$p->cnee->email,
+					'loa_id'=>(!empty($loa)?$loa->id:0),'loa_name'=>(!empty($loa)?$loa->name:''),'loa_hash'=>(!empty($loa)?$loa->hash:'')];
+			}
+		}
+		return $provide;
+	}
+
+	public function getStorageStartDate()
+	{
+		if(empty($this->mdata['ssdate']))
+		{
+			if(!empty($this->shipment->consol))
+			{
+				if($this->shipment->consol->isOurWarehouse()&&$this->shipment->consol->service==Consol::AIRCONSOL)
+				{
+					$startDate = $this->shipment->consol->eta;
+					if(!empty($startDate))
+					{
+						$check = 3;
+						while ($check>0) {
+							$startDate = date('Y-m-d', strtotime($startDate . '+ 1 day'));
+							if (!HolidayHelper::checkDateIsHoliday($startDate, $this->shipment->consol->pod)) {
+								$check--;
+							}
+						}
+						$this->mdata['ssdate'] = $startDate;
+					}
+
+				}
+				
+				if(!$this->shipment->consol->isOurWarehouse()||$this->shipment->consol->service==Consol::SEACONSOL)
+				{
+					$availableDate = empty($this->shipment->consol->mdata['available_date'])?"":$this->shipment->consol->mdata['available_date'];
+					if(!empty($availableDate))
+					{
+						$startDate = $availableDate;
+						$check = 3;
+						while ($check>0) {
+							$startDate = date('Y-m-d', strtotime($startDate . '+ 1 day'));
+							if (!HolidayHelper::checkDateIsHoliday($startDate, $this->shipment->consol->pod)) {
+								$check--;
+							}
+						}
+						$this->mdata['ssdate'] = $startDate;
+					}
+				}
+			}
+		}
+
+		return @$this->mdata['ssdate'];
+	}
+	
+	public static function getStaticOnDayRange()
+	{
+		$provide = [];
+		$hv_total = $aqis_total = $empp_total = $other_total = 0;
+		$sql = 'SELECT p.*, s.consol_id, c.eta FROM `shipment_process` p INNER JOIN shipment s ON p.pid = s.id LEFT JOIN consol c ON c.id = s.consol_id WHERE p.status<24';
+		$rs = Yii::app()->db->createCommand($sql)->queryAll();
+		$orgShipmentProcess = [];
+		foreach ($rs as $r) {
+			if (($r['s_bwf'] & 2) > 0 && ($r['s_agent_id'] == 1002)) {
+				$orgShipmentProcess[1401][] = $r;
+			} else {
+				$orgShipmentProcess[$r['s_agent_id']][] = $r;
+			}
+		}
+		foreach ($orgShipmentProcess as $org_id => $processGroup) {
+			$temp = [1 => [-1, 3], 2 => [3, 5], 3 => [5, 7], 4 => [7, 1000]];
+			foreach ($temp as $key => $range) {
+				${'n' . $key . 'H'} = ${'n' . $key . 'A'} = ${'n' . $key . 'E'}= ${'n' . $key . 'S'} = ${'n' . $key . 'O'} = 0;
+			}
+			$number = 0;
+			foreach ($processGroup as $r) {
+				// $consol = ImParcel::model()->findByPk($r['pid'])->consol;
+				if(empty($r['consol_id']))
+				{
+					$daysdiff = -1;
+				}else
+				{
+					$daysdiff = ceil((time() - strtotime($r['eta'])) / 86400);
+				}
+				$k = 0;
+				$number++;
+				foreach ($temp as $key => $range) {
+					if ($range[0] < $daysdiff && $range[1] >= $daysdiff) {
+						$k = $key;
+					}
+				}
+				if($daysdiff<0)
+				{
+					$k = 1;
+				}
+				if ($k == 0) {
+					continue;
+				}
+
+				if ($daysdiff > 1000) {
+					$k = 4;
+				}
+				if (($r['type'] & ShipmentProcess::TYPE_HV) > 0) {
+					${'n' . $k . "H"}++;
+					$hv_total++;
+				}
+				if (($r['type'] & ShipmentProcess::TYPE_EMPP) > 0) {
+					${'n' . $k . "E"}++;
+					$empp_total++;
+				}
+				if (($r['type'] & ShipmentProcess::TYPE_AQIS) > 0) {
+					${'n' . $k . "A"}++;
+					$aqis_total++;
+				}
+				if (($r['type'] & ShipmentProcess::TYPE_OTHER) > 0) {
+					${'n' . $k . "O"}++;
+					$other_total++;
+				}
+				if (($r['type'] & ShipmentProcess::TYPE_SAC) > 0) {
+					${'n' . $k . "S"}++;
+					$other_total++;
+				}
+			}
+			foreach ($temp as $k => $range) {
+				${'n' . $k} = (${'n' . $k . 'E'} > 0 ? 'Empp:' . ${'n' . $k . 'E'} . '<br/>' : '') . (${'n' . $k . 'A'} > 0 ? 'AQIS:' . ${'n' . $k . 'A'} . '<br/>' : '') . (${'n' . $k . 'H'} > 0 ? 'HV:' . ${'n' . $k . 'H'} . '<br/>' : '') . (${'n' . $k . 'S'} > 0 ? 'SAC:' . ${'n' . $k . 'S'} . '<br/>' : '') . (${'n' . $k . 'O'} > 0 ? 'OT:' . ${'n' . $k . 'O'} . '<br/>' : '');
+			}
+			$org = Org::model()->find('id=:id', [':id' => $org_id]);
+			if ($org_id == 1401) {
+				$orgName = "商壹";
+			} else {
+				$orgName = @$org->name;
+			}
+			$provide[] = ['id' => $org_id, 'number' => $number, 'agent_id' => $org_id, 'owner' => $orgName, 'day1' => $n1, 'day2' => $n2, 'day3' => $n3, 'day4' => $n4];
+		}
+		return ['provide' => $provide, 'hv_total' => $hv_total, 'aqis_total' => $aqis_total, 'empp_total' => $empp_total, 'other_total' => $other_total];
+	}
+
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return ShipmentProcess the static model class
+	 */
+	public static function model($className=__CLASS__)
+	{
+		return parent::model($className);
+	}
+}

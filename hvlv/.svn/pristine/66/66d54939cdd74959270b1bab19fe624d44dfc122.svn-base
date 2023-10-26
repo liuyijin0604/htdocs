@@ -1,0 +1,18 @@
+<?php
+return array(
+	'testing'=>true,
+	'customs_id' => 'AAA336C',
+	'customs_pk' => 'file://'.realpath(dirname(__DIR__).DIRECTORY_SEPARATOR.'data'.DIRECTORY_SEPARATOR.'CCFEmailGateway202110.cer'),
+	'customs_email' => 'cargo@ccf.abf.gov.au',
+	'test_site' => 'AAP467L',
+	'prod_site' => 'FJT773H',
+	'email' => 'ics@toplogistics.com.au',
+	'email_pwd' => 'icstop2020##',
+	'email_server' => 'mail.toplogistics.com.au',
+	'sig_pem' => 'file://'.realpath(dirname(__DIR__).DIRECTORY_SEPARATOR.'data'.DIRECTORY_SEPARATOR.'tla_sig.pem'),
+	'enc_pem' => 'file://'.realpath(dirname(__DIR__).DIRECTORY_SEPARATOR.'data'.DIRECTORY_SEPARATOR.'tla_enc.pem'),
+	'pem_pwd' => 'tla2020',
+	'abn' => '67119225133', //TLA ABN
+	'est_id_AUSYD' => 'GP29H',
+	'est_id_AUMEL' => '',//GH82A
+);

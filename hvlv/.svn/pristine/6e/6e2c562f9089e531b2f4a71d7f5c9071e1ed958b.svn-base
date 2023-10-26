@@ -1,0 +1,107 @@
+<div id ="trackingPanel">
+<h1>Shipment Tracking</h1>
+<p>多个单号用回车键隔开</p>
+<form method="get" action="<?=$this->createUrl('shipment/tracking');?>" id="tracking_form" data-bit="1">
+<div class="form-group">
+<textarea class="form-control input-lg" wrap="hard" id="track_code" name="mhbns"></textarea>
+</div>
+<div class="form-group">
+<input class="btn btn-primary btn-lg" type="submit" value="Multiple Tracking »">
+</div>
+</form>
+<div id="result" style="padding: 20px 0;"></div>
+
+
+<?php
+$org = Org::model()->findByPk(Yii::app()->user->org);
+$this->widget('application.extensions.booster.TbExtendedGridView', array(
+	'id'=>'im-parcel-grid',
+	'fixedHeader' => true,
+	'headerOffset' => 40,
+	'type' => 'striped',
+	'dataProvider' => $model->search(true, (empty($org->extra['pager_size'])? 5 : $org->extra['pager_size']),false,false),
+	'responsiveTable' => true,
+	'template' => "{summary}\n{items}\n{pager}",
+	'filter'=>$model,
+	'selectableRows' => 2,
+	'enableSorting' => false,
+	'afterAjaxUpdate' => 'js:function(id, data){ $(\'#egw0\').after(\'<div class="pull-right"><button type="button" data-toggle="modal" data-target="#modal-export" class="btn btn-default btn-sm">Export</button></div>\'); }',
+	'columns' => array(
+		array('name' => 'hbn', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->createURL("ims/shipment/update", array("id" => $data->id))."\" class=\"ajax-link\">".$data->hbn."</a>"'),
+		'ref',
+               'cref',
+                array('name' => 'status', 'value' => '$data->getStatus()', 
+			'filter'=>CHtml::dropDownList(get_class($model).'[status]', $model->status, $this->t($model->statusList()), array('prompt' => $this->t('All'), 'class' => 'form-control')),),
+		array('name' => 'weight'),
+		array('name' => 'cnor_name', 'value' => 'empty($data->cnor)? "" : $data->cnor->name', 'visible' => $type =='im'),
+		array('name' => 'cnor_tel', 'value' => 'empty($data->cnor)? "" : $data->cnor->tel', 'visible' => $type =='im'),
+		array('name' => 'cnee_name', 'value' => 'empty($data->cnee)? "" : $data->cnee->name',),
+		array('name' => 'cnee_tel', 'value' => 'empty($data->cnee)? "" : $data->cnee->tel',),
+		'state',
+		array(
+			'class'=>'application.extensions.booster.TbButtonColumn',
+			'template'=>'{find} &nbsp; {customerService} &nbsp; ',
+			'header' => 'Actions',
+			'buttons'=>array(
+				'find' => array(
+					'visible'=>'true',
+					'icon' => 'search',
+					'url' => 'Yii::app()->createUrl("ims/shipment/tracking",["c" => $data->hbn])',
+					'options' => array('class' => 'tracking-modal-link', 'label'=>$this->t('Tracking'), 'title' => 'Tracking'),
+				),
+				'customerService' => array(
+					'visible'=>'true',
+					'icon' => 'heart',
+					'url' => 'Yii::app()->createUrl("ims/customerService/index",["ref" => $data->ref,"tabid"=>$data->ref])',
+					'options' => array('class' => 'tracking-modal-link', 'label'=>$this->t('Customer Service'), 'title' => 'Customer Service'),
+				)
+			),
+		),
+	),
+)
+);
+
+?>
+</div>
+<div class="modal fade" id="modal-tracking" tabindex="-1" role="dialog" aria-labelledby="modal-tracking-label" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+	<div class="modal-content">
+	  <div class="modal-body">
+	  </div>
+	  <div class="modal-footer">
+		<button type="button" id='modal_close' class="btn btn-default" data-dismiss="modal">////<?=$this->t('Close');?></button>
+	  </div>
+	</div>
+  </div>
+</div>
+<?php ob_start(); ?>
+<script type="text/javascript">
+$(function(){
+	var tab = $('#trackingPanel');
+	$('body').off('click', 'a.tracking-modal-link').on('click', 'a.tracking-modal-link', function(e){
+		$('#modal-tracking<?=@$_GET['tabid']?>').modal();
+		$('#modal-tracking<?=@$_GET['tabid']?> .modal-body').load($(this).attr('href'));
+		e.preventDefault();
+	});
+	$('#tracking_form').on('submit', function(){
+		$('#im-parcel-grid').show();
+		$('#im-parcel-grid').yiiGridView('update', {data: $('.filters input, .filters select', tab).serialize() + '&' + $(this).serialize()});
+		return false;
+	});
+
+
+	// $('#tracking_form').ajaxForm({
+	// 	success: function(r) {
+	// 		$('#result').stop().hide().html(r).slideDown();
+	// 	},
+	// 	beforeSubmit: function(a,f,o){
+	// 		return $('#track_code').val() != '';
+	// 	},
+	// 	dataType: 'html'
+	// }).data('ajaxf', true);
+	$('#im-parcel-grid').hide();
+});
+
+
+</script>
+<?php $this->registerJS(ob_get_clean()); ?>

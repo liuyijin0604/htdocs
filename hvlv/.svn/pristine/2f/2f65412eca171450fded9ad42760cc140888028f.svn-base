@@ -1,0 +1,11 @@
+{
+    "require": {
+		"overtrue/pinyin": "~3.0",
+        "calcinai/xero-php": "^1.8",
+        "soundasleep/html2text": "^0.5.0",
+        "php-mime-mail-parser/php-mime-mail-parser": "^3.0",
+        "amphp/amp": "^2.2",
+        "amphp/artax": "^3.0",
+		"mirakl/sdk-php-shop": "*"
+    }
+}

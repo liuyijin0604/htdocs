@@ -1,0 +1,31 @@
+<h1><?=$this->t('Import Outturn Result File');?></h1>
+
+<div class="form">
+	<?php $form = $this->beginWidget('CActiveForm', array(
+		'id' => 'import-d2z-outturn-form',
+		'enableAjaxValidation' => false,
+	)); ?>
+
+		<div class="row">
+			<label for="outturn">Outturn - <small>.csv File</small>(<a href="/ims/import_outturn_template.xlsx" target="_blank">Get template file</a>)(<a href="/ims/import_outturn_template_dg.xlsx" target="_blank">Get Dg file</a>)(<a href="/ims/bag_tag_template.xlsx" target="_blank">Get Bag Tag file</a>)(<a href="/ims/Master_and_sub_master_import_template.xlsx" target="_blank">Get Sub-Master Import file</a>)  </label>
+
+			<input type="file" name="outturn" id="outturn" />
+		</div>
+
+		<div class="row buttons">
+			<?php echo CHtml::submitButton($this->t('Upload')); ?>
+		</div>
+
+	<?php $this->endWidget(); ?>
+</div>
+
+<script type="text/javascript">
+$(function() {
+	var tab = $('#<?=$_GET["tabid"];?>');
+	var panel = tab.data('panel');
+
+	$('#import-d2z-outturn-form', panel).on('submit', function() {
+		$('input[type=submit]', this).prop('disabled', true);
+	});
+});
+</script>

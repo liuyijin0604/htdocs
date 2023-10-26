@@ -1,0 +1,63 @@
+<?php
+$this->widget('zii.widgets.CBreadcrumbs', [
+    'homeLink'=>CHtml::link('Home', ['site/index']),
+    'links' => [
+        'Ims Instruction',
+    ],
+]);
+?>
+<h1><?=$this->t('Ims Instruction');?></h1>
+
+<div class="instruction-list">
+	<?php foreach($instructions as $instruction): ?>
+		<div class="instruction-item">
+			<a class="instruction-link" href="<?php echo $this->createUrl('view', array('id' => $instruction->id)); ?>">
+				<div class="instruction-title"><?php echo $instruction->title; ?></div>
+				<div class="instruction-update">Updated: <?php echo date('Y-m-d', strtotime($instruction->updated)); ?></div>
+				<div class="instruction-arrow"></div>
+			</a>
+		</div>
+	<?php endforeach; ?>
+</div>
+<style>
+/* CSS styles for index.php */
+
+.instruction-list {
+	margin-top: 20px;
+}
+
+.instruction-item {
+	border-bottom: 1px solid #ccc;
+	padding: 10px;
+	position: relative;
+}
+
+.instruction-link {
+	display: flex;
+	align-items: center;
+	text-decoration: none;
+	color: red;
+}
+
+.instruction-title {
+	font-size: 18px;
+	font-weight: bold;
+	flex-grow: 1;
+	color: #14487E;
+}
+
+.instruction-update {
+	font-size: 12px;
+	color: #14487E;
+}
+
+.instruction-arrow {
+	width: 10px;
+	height: 10px;
+	border-left: 2px solid #14487E;
+	border-top: 2px solid #14487E;
+	transform: rotate(135deg) translateY(20%);
+	margin-right: -5px;
+}
+
+</style>

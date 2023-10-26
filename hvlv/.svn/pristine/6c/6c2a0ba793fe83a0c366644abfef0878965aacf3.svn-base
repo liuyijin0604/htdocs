@@ -1,0 +1,283 @@
+<?php
+class HvlvJavaAPI extends APILog
+{
+	protected $domain = 'http://localhost:8700/';
+	protected $apiDomain = 'http://localhost:8812/';
+	protected $api_user = 'pcae';
+	protected $api_key = 'd47bf1edad3c73d2748231e0bf2b891e1737cbde232009f488854b5f325a7c27';
+
+	public function __construct($type="SYD")
+	{
+		parent::__construct("tla",$type);
+	}
+
+	public function recognize($barcode)
+	{
+		$params = [];
+		$params['data'] = ["barcode"=>"".$barcode];
+		return $this->httpPost('shipment/recognize', $params);
+	}
+
+	public function scanShipment($barcode,$userId,$type,$warehouseId)
+	{
+		$params = [];
+		$params['data'] = ["barcode"=>"".$barcode,"userId"=>$userId,"type"=>$type,"warehouse"=>"".$warehouseId];
+		return $this->httpPostTry('shipment/scan', $params);
+	}
+
+	public function orderAochenStorage($data)
+	{
+		$params = [];
+		$params['data'] = $data;
+		return $this->httpPost('api/orderAochenStorage', $params,$this->apiDomain);
+	}
+
+	public function checkAochenOrder($data)
+	{
+		$params = [];
+		$params['data'] = $data;
+		return $this->httpPost('api/checkAochenOrder', $params,$this->apiDomain);
+	}
+
+	
+	protected function getRequestUrl($endpoint, $params = [],$domain="")
+	{
+		if(empty($domain))
+		{
+			$domain = $this->domain;
+		}
+
+		if ($params) {
+			$endpoint .= '?';
+			foreach ($params as $k => $v) {
+				$endpoint .= $k . '=' . $v . '&';
+			}
+		}
+
+		return $domain . '/' . $endpoint;
+	}
+
+	protected function httpGet($endpoint, $params = [])
+	{
+		$this->genSign($params);
+		// Set the curl parameters.
+		$ch = curl_init();
+		curl_setopt($ch, CURLOPT_URL, $this->getRequestUrl($endpoint, $params));
+		curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+		curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+		curl_setopt($ch, CURLOPT_POST, false);
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+		$httpResponse = curl_exec($ch);
+		curl_close($ch);
+
+		if (!$httpResponse) {
+			return ['done' => false];
+		}
+
+		// Extract the response details
+		$this->log2file(json_encode($params),'java');
+		$this->log2file($httpResponse,'java');
+		$httpParsedResponseAr = json_decode($httpResponse, true,'java','tla');
+
+		if (sizeof($httpParsedResponseAr) == 0) {
+			return ['done' => false];
+		}
+
+		return array_merge($httpParsedResponseAr, ['done' => true]);
+	}
+
+	protected function httpPost($endpoint, $params = [],$domain="")
+	{
+		$this->genSign($params);
+		// Set the curl parameters
+		$ch = curl_init();
+		curl_setopt($ch, CURLOPT_URL, $this->getRequestUrl($endpoint,[],$domain));
+		curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+		curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+
+		// $header = [];
+		// $header[] = 'Content-Type:application/json';
+		// curl_setopt($ch, CURLOPT_HTTPHEADER, $header);
+		curl_setopt($ch, CURLOPT_POST, true);
+		curl_setopt($ch, CURLOPT_POSTFIELDS, $params);
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+		$httpResponse = curl_exec($ch);
+		curl_close($ch);
+
+		if (!$httpResponse) {
+			return ['done' => false];
+		}
+
+		// Extract the response details
+		$this->log2file(date("Y-m-d H:i:s").":".json_encode($params),'java');
+		$this->log2file(date("Y-m-d H:i:s").":".$httpResponse,'java');
+		$httpParsedResponseAr = json_decode($httpResponse, true);
+
+		if(!is_array($httpParsedResponseAr))
+		{
+			return ['done' => false,'status' => 0];
+		}
+
+		if (sizeof($httpParsedResponseAr) == 0) {
+			return ['done' => false];
+		}
+
+		return array_merge($httpParsedResponseAr, ['done' => true]);
+	}
+
+	protected function httpPostTry($endpoint, $params = [],$domain="")
+	{
+		$this->genSign($params);
+		try{
+			// Set the curl parameters
+			$ch = curl_init();
+			curl_setopt($ch, CURLOPT_URL, $this->getRequestUrl($endpoint,[],$domain));
+			curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+			curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+
+			// $header = [];
+			// $header[] = 'Content-Type:application/json';
+			// curl_setopt($ch, CURLOPT_HTTPHEADER, $header);
+			curl_setopt($ch, CURLOPT_POST, true);
+			curl_setopt($ch, CURLOPT_POSTFIELDS, $params);
+			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+			$httpResponse = curl_exec($ch);
+			curl_close($ch);
+
+			if (!$httpResponse) {
+				Emailog::sendEmailTo('gero@toplogistics.com.au',date("Y-m-d H:i:s").": ".$this->getRequestUrl($endpoint,[],$domain)." url can not be reached"," Java Server error");
+				$this->log2file(date("Y-m-d H:i:s").": ".$this->getRequestUrl($endpoint,[],$domain)." url can not be reached",'java');
+				return ['done' => false];
+			}
+
+			// Extract the response details
+			$this->log2file(date("Y-m-d H:i:s").":".json_encode($params),'java');
+			$this->log2file(date("Y-m-d H:i:s").":".$httpResponse,'java');
+			$httpParsedResponseAr = json_decode($httpResponse, true);
+
+			if(!is_array($httpParsedResponseAr))
+			{
+				return ['done' => false,'status' => 0];
+			}
+
+			if (sizeof($httpParsedResponseAr) == 0) {
+				return ['done' => false];
+			}
+
+			return array_merge($httpParsedResponseAr, ['done' => true]);
+		} catch (Exception $ex) {
+			Emailog::sendEmailTo('gero@toplogistics.com.au',date("Y-m-d H:i:s").": ".$ex->getMessage()," Java Server error");
+			$this->log2file(date("Y-m-d H:i:s").": ".$ex->getMessage(),'java');
+			return [];
+		}
+
+		return [];
+	}
+
+	protected function httpPut($endpoint, $params = [])
+	{
+		$this->genSign($params);
+		// Set the curl parameters
+		$ch = curl_init();
+		curl_setopt($ch, CURLOPT_URL, $this->getRequestUrl($endpoint));
+		curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+		curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+
+		// $header = [];
+		// $header[] = 'Content-Type:application/json';
+		// curl_setopt($ch, CURLOPT_HTTPHEADER, $header);
+		curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PUT');
+		curl_setopt($ch, CURLOPT_POSTFIELDS, $params);
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+		$httpResponse = curl_exec($ch);
+		curl_close($ch);
+
+		if (!$httpResponse) {
+			return ['done' => false];
+		}
+
+		// Extract the response details
+		$this->log2file(json_encode($params),'java');
+		$this->log2file($httpResponse,'java');
+		$httpParsedResponseAr = json_decode($httpResponse, true);
+
+		if(!is_array($httpParsedResponseAr))
+		{
+			return ['done' => false,'status' => 0];
+		}
+
+		if (sizeof($httpParsedResponseAr) == 0) {
+			return ['done' => false,'status' => 0];
+		}
+
+		return array_merge($httpParsedResponseAr, ['done' => true]);
+	}
+
+	protected function genSign(&$params)
+	{
+		$params['data'] = json_encode($params['data']);
+		ksort($params);
+		$s = $this->api_key;
+		foreach ($params as $k => $v) {
+			if ($k == 'sign' || empty($v)) continue;
+			$s .= $k . $v;
+		}
+		$s .= $this->api_key;
+		$params['sign'] = strtoupper(md5($s));
+	}
+
+
+	public static function canDeliver($shipment,$orgRate)
+	{
+		$service = new Service();
+		$orgRate = OrgRate::model()->findByPk($orgRate);
+		$canDeliver = true;
+		$msg = "";
+
+		// if($orgRate->mdata['ddpt_id'] ==Org::TLA_DEPARTMENT_SYDNEY)
+		// {
+		// 	if(AddressService::isMatchAmazonOrB2B($shipment->cnee->postcode,$shipment->cnee->suburb,$shipment->cnee->address))
+		// 	{
+		// 		if(AddressService::isMatchAmazon($shipment->cnee->postcode,$shipment->cnee->suburb,$shipment->cnee->address))
+		// 		{
+
+		// 			$FBA = SystemSetting::getTLDLimitSetting(CargoProcess::FBA_CARGO);
+		// 			if($service->getCacheData($orgRate->mdata['ddpt_id']."TLDLimitCBM".CargoProcess::FBA_CARGO)[CargoProcess::FBA_CARGO]>$FBA)
+		// 			{
+		// 				$msg = "The TLD service is full, please change to courier service;卡派服务已满,建议改打快递渠道";
+		// 				$canDeliver = false;
+		// 			}
+
+		// 		}else
+		// 		{
+		// 			$B2B = SystemSetting::getTLDLimitSetting(CargoProcess::B2B_CARGO);
+		// 			if($service->getCacheData($orgRate->mdata['ddpt_id']."TLDLimitCBM".CargoProcess::B2B_CARGO)[CargoProcess::B2B_CARGO]>$B2B)
+		// 			{
+		// 				$msg = "The TLD service is full, please change to courier service;卡派服务已满,建议改打快递渠道";
+		// 				$canDeliver = false;
+		// 			}
+		// 		}
+		// 	}else
+		// 	{
+		// 		$NORMAL = SystemSetting::getTLDLimitSetting(CargoProcess::NORMAL_CARGO);
+		// 		if($service->getCacheData($orgRate->mdata['ddpt_id']."TLDLimitCBM".CargoProcess::NORMAL_CARGO)[CargoProcess::NORMAL_CARGO]>$NORMAL)
+		// 		{
+		// 			$msg = "The TLD service is full, please change to courier service;卡派服务已满,建议改打快递渠道";
+		// 			$canDeliver = false;
+		// 		}
+				
+		// 	}
+		// }
+		$o = new stdClass();
+		$o->code = $canDeliver;
+		$o->msg=$msg;
+		$o->data = 0;
+		return $o;
+        
+    }
+
+}

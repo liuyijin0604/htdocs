@@ -1,0 +1,60 @@
+<h1>Check Api Log</h1>
+<div class="form">
+    <form id="api_log_form">
+        <div class="row">
+            <div class="row rowcol">
+                <?php echo CHtml::label('Choose Api', 'api'); ?>
+                <?php echo CHtml::dropDownList(
+                    'api',
+                    '',
+                    array(
+                        'auspost' => 'auspost',
+                        'tnt' => 'tnt',
+                        'tla-JAVA' => 'TLA-JAVA',
+                        'xero' => 'xero',
+                        'shipment' => 'shipment',
+                        'ubi' => 'ubi',
+                        'etower' => 'etower',
+                        'border' => 'border'
+                    ),
+                    array('prompt' => 'SELECT', 'style' => "width:120px;")
+                ); ?>
+            </div>
+            <div class="row rowcol">
+                <?php echo CHtml::label('Date', 'api_date'); ?>
+                <?php echo CHtml::textField('api_date', '', array('size' => 20, 'class' => "datetime_input", 'id' => 'api_date', 'autocomplete' => 'off')); ?>
+            </div>
+        </div>
+        <div class="row">
+            <button type="submit">Search</button>
+        </div>
+    </form>
+    <div class="container">
+        <div class="row">
+            <textarea rows="50" cols="200" id="result"><?= $data ?></textarea>
+        </div>
+    </div>
+</div>
+<script type="text/javascript">
+    $(function() {
+        $('#api_log_form').submit(function(event) {
+            var formData = {
+                api: $('#api').val(),
+                date: $('#api_date').val()
+            };
+
+            $.ajax({
+                type: "POST",
+                url: '<?= Yii::app()->createUrl('it/checkApiLog'); ?>',
+                data: formData,
+                encode: true,
+                success: function(data) {
+                    //console.log(data);
+                    $('#result').html(data);
+                }
+            });
+
+            event.preventDefault();
+        });
+    });
+</script>

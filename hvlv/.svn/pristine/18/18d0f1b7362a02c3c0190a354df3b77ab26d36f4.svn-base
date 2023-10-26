@@ -1,0 +1,419 @@
+<?php
+class ApiController extends CController{
+	public $user, $key, $host, $data, $api_id;
+	public $debug = false;
+	
+	public function actions(){
+		return array(
+			'captcha' => array('class'=>'CCaptchaAction', 'backColor'=>0xEBF0FA,),
+			'tracking' => 'application.controllers.ApiTrackingAction',
+			'shipment' => 'application.controllers.ApiShipmentAction',
+			'cnid' => 'application.controllers.ApiCnIDAction', 
+			'rcpt' => 'application.controllers.ApiRcptAction',
+			'print' => 'application.controllers.ApiPrintAction',
+			'conveyor' => 'application.controllers.ApiConveyorAction',
+			'ddt' => 'application.controllers.ApiDdtAction',
+			'syncshipment' => 'application.controllers.ApiSyncShipmentAction',
+			'scanner' => 'application.controllers.ApiScannerAction',
+			'kd' => 'application.controllers.ApiKdAction',
+			'shunfeng' => 'application.controllers.ApiShunfengAction',
+			'kdn' => 'application.controllers.ApiKdnAction',
+			'dxt' => 'application.controllers.ApiDxtAction',
+			'xero' => 'application.controllers.ApiXeroAction',
+			'product' => 'application.controllers.ApiProductAction',
+			'winweb' => 'application.controllers.ApiWinwebAction',
+			'image'=>'application.controllers.ApiImageAction',
+			'anzu' => 'application.controllers.ApiAnzuAction',
+			'cainiao'=>'application.controllers.ApiCainiaoAction',
+			'wms' => 'application.controllers.ApiWmsAction',
+			'ics' => 'application.controllers.ApiIcsAction',
+			'storage' => 'application.controllers.ApiStorageAction',
+			'wmslink' => 'application.controllers.ApiWmsLinkAction',
+		);
+	}
+	
+	protected function beforeAction($action){
+		$a = false;
+		foreach ($_POST as $key => $value) {
+            $_POST[$key] = trim($value,'"');
+            $_POST[$key] = str_replace('\"','"',$_POST[$key]);
+        }
+		if(!empty($_POST['id']) && !empty($_POST['key'])){
+			$api = Api::model()->find('user = :u', array(':u' => $_POST['id']));
+			if($api){
+				//$data = trim(mcrypt_decrypt(MCRYPT_RIJNDAEL_256, md5($api->key), base64_decode($_POST['data']), MCRYPT_MODE_CBC, base64_decode($_POST['key'])));
+				$a = sha1($_POST['data'].$api->key) == $_POST['key'];
+				$this->data = json_decode(base64_decode($_POST['data']));
+				$this->host = $_POST['host'];
+				$this->key = $api->key;
+				$this->user = empty($this->data->user_id)? 0 : $this->data->user_id;
+				$this->api_id = $api->id;
+			}
+		}
+		if(!empty($_POST['api_id'])){
+			$api = Api::model()->find('user = :u', array(':u' => $_POST['api_id']));
+			if($api){
+				if(!empty($_POST['method'])&&$_POST['method']=='updateShipmentStatusForPCAE')
+				{
+					$_POST['data'] = str_replace("\\\\\\/","\\/", $_POST['data']);
+					$_POST['data'] = str_replace("\\\\","\\", $_POST['data']);
+				}
+				$this->key = $api->key;
+				$this->data = json_decode(empty($_POST['data'])? '{}' : $_POST['data']);
+				$this->user = empty($api->user_id)? 0 : $api->user_id;
+				$this->api_id = $api->id;
+				if($this->validate()) $a = true;
+			}
+		}
+		if(!$a) $this->log(json_encode($_POST));
+
+		if(!$a && in_array($action->id, ['kd', 'kdn', 'dxt', 'shunfeng', 'winweb', 'cainiao', 'wms', 'ics'])) $a = true;
+
+		if(!$a) throw new CHttpException(400, 'Bad Request, API Access Only!');
+
+		Yii::app()->request->hostInfo = 'https://os.toplogistics.com.au';
+		
+		return parent::beforeAction($action);
+	}
+
+	public function validate(){
+		ksort($_POST);
+		$s = $this->key;
+		foreach($_POST as $k=>$v){
+			if($k == 'sign' || empty($v)) continue;
+			$s .= $k.$v;
+		}
+		$s .= $this->key;
+
+
+		if ( $this->debug ) {
+			$sign = strtoupper(MD5($s));
+			$this->log($this->user . ' signed : ' . $sign);
+		}
+
+		if(strtoupper(MD5($s)) == strtoupper($_POST['sign']))
+		{
+			return true;
+		}
+
+		$s = str_replace('\u','**',json_encode($s));
+		$s =  json_decode($s);
+		$s =  str_replace('**','\u',$s);
+		if(strtoupper(MD5($s)) == strtoupper($_POST['sign']))
+		{
+			return true;
+		}
+		$this->log($s);
+		$this->log(strtoupper(MD5($s)));
+		$this->log(strtoupper($_POST['sign']));
+		return false;
+	}
+	
+
+	
+	public function actionIndex(){
+		if(!empty($this->data->action) && method_exists($this, $this->data->action)){
+			$this->{$this->data->action}();
+		}else{
+			throw new CHttpException(400, 'Bad Request, unknown action');
+		}
+	}
+	
+	public function track(){
+		$ddpts = array(
+			'NSW' => 'Sydney',
+			'VIC' => 'Melbourne',
+			'QLD' => 'Brisbane',
+		);
+		$codes = explode("\n", $this->data->codes);
+		$os = array();
+		foreach($codes as $c){
+			$c = trim($c);
+			if(empty($c)) continue;
+			$p = Shipment::model()->find('(hbn = :c or ref=:c) AND status > 0 AND status != 100', array(':c' => $c));
+			$o = new stdClass;
+			$ti = $p->trackingInfo();
+			if(empty($p) || empty($ti)){
+				$o->tracks = false;
+			}else{
+				$o = $ti;
+			}
+			$o->code = $c;
+			$os[] = $o;
+		}
+		$this->output($os);
+	}
+
+	public function validID(){
+		$c = CnID::model()->count('status < 99 AND name = :n AND no = :u', [':n' => $this->data->name, ':u' => $this->data->no]);
+		if($c > 0) $this->output(true);
+		if(!CnID::validCnIDNo($this->data->no)) $this->output(false);
+		$df = Yii::app()->basePath.DIRECTORY_SEPARATOR.'data'.DIRECTORY_SEPARATOR.'invalid_id.bsv';
+		if(mb_strpos(file_get_contents($df), $this->data->name.'|'.$this->data->no) !== false) $this->output(false);
+
+		//api check
+		$c = new AliCloudAPI(true);
+		$r = $c->idValid($this->data->name, $this->data->no);
+		if(empty($r) || empty($r->result)) $this->output(false);
+		if($r->result->isok > 0){
+			$c = new CnID;
+			$c->name = $this->data->name;
+			$c->no = $this->data->no;
+			$c->status = 10;
+			$c->save();
+			$this->output(true);
+		}else{
+			file_put_contents($df, $this->data->name.'|'.$this->data->no."\n", FILE_APPEND);
+			$this->output(false);
+		}
+	}
+	
+	public function auth(){
+		if(isset($this->data->login)){
+			$model=new LoginForm;
+			$model->attributes= (array) $this->data->login;
+			$ca = $this->createAction('captcha');
+			$model->vvc = $ca->getVerifyCode();
+			if($model->validate()) $model->login();
+		}
+		
+		if(empty($this->host) || Yii::app()->user->isGuest){
+			$auth = false;
+		}else{
+			$sub = explode('.', $this->host);
+			$org = Org::model()->find('code = :c', array(':c' => $sub[0]));
+			if(in_array($_SERVER['SERVER_NAME'], ['api.pcaex.com', 'api.pcaexpress.com.au']) && (empty($org) || !$org->hasUser(Yii::app()->user->id))){
+				$auth = false;
+			}else{
+				$auth = new StdClass;
+				$auth->id = Yii::app()->user->id;
+				$auth->email = Yii::app()->user->email;
+				$auth->name = Yii::app()->user->name;
+				$auth->grp = Yii::app()->user->grp;
+				$auth->org = Yii::app()->user->org;
+			}
+		}
+		
+		$this->output($auth);
+	}
+	
+	public function find(){
+		if(class_exists($this->data->model)){
+			$model = new $this->data->model;
+			if(method_exists($model, 'rFind')){
+				$r = $model->rFind($this->data->q, (array) $this->data->p);
+			}else{
+				$m = $model::model()->find($this->data->q, (array) $this->data->p);
+				$r = empty($m)? false : $m->attributes;
+			}
+			if($r)	$this->output($r);
+		}
+		
+		$this->output(false);
+	}
+	
+	public function count(){
+		if(class_exists($this->data->model)){
+			$model = new $this->data->model;
+			if(method_exists($model, 'rCount')){
+				$c = $model->rCount($this->data->q, (array) $this->data->p);
+			}else{
+				$c = $model::model()->count($this->data->q, (array) $this->data->p);
+			}
+			$this->output($c);
+		}
+		
+		$this->output(false);
+	}
+	
+	public function findAll(){
+		if(class_exists($this->data->model)){
+			$model = new $this->data->model;
+			$this->data->q = $this->deepCastObj2Array($this->data->q);
+			if(method_exists($model, 'rFindAll')){
+				$rs = $model->rFindAll($this->data->q, (array) $this->data->p);
+			}else{
+				$rs = $model::model()->findAll($this->data->q, (array) $this->data->p);
+			}
+			if(!empty($rs)){
+				$ra = array();
+				foreach($rs as $r){
+					$o = $r->attributes;
+					$ra[] = $o;
+				}
+				$this->output($ra);
+			}
+		}
+		
+		$this->output(false);
+	}
+
+	public function deepCastObj2Array($o){
+		if(is_object($o)){
+			$a = (array) $o;
+			foreach($a as $k=>$v){
+				if(is_object($v)){
+					$a[$k] = $this->deepCastObj2Array($v);
+				}
+			}
+			return $a;
+		}else{
+			return $o;
+		}
+	}
+
+	public function log($l){
+		$tmp = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR;
+		file_put_contents($tmp.'api_request.log', date('Y-m-d H:i:s').' '.$l."\n", FILE_APPEND);
+	}
+	
+	public function search(){
+		if(class_exists($this->data->model)){
+			$model = new $this->data->model;
+			$criteria = json_decode($this->data->criteria, true);
+			if(!empty($this->data->select)) $this->data->select[] = 'id';
+			$rdp = new stdClass;
+			$rdp->data = [];
+			$rdp->count = 0;
+			$pos = ($this->data->pg[0] - 1) * $this->data->pg[1];
+
+			if(method_exists($model, 'rSearch')){
+				$ra = $model->rSearch($criteria);
+				$rdp->count = sizeof($ra);
+				$ra = array_slice($ra, $pos, $this->data->pg[1]);
+				foreach($ra as $r){
+					if(!empty($this->data->select)){
+						foreach($r as $k=>$v){
+							if(!in_array($k, $this->data->select)) unset($r[$k]);
+						}
+					}
+				}
+				$rdp->data = $ra;
+			}else{
+				$rs = $model::model()->findAll($criteria);
+				$rdp->count = sizeof($rs);
+				$ra = array();
+				$i = 0;
+				$rs = array_slice($rs, $pos, $this->data->pg[1]);
+				foreach($rs as $r){
+					$d = $r->attributes;
+					if(!empty($this->data->select)){
+						foreach($d as $k=>$v){
+							if(!in_array($k, $this->data->select)) unset($d[$k]);
+						}
+					}
+					$ra[] = $d;
+				}
+				$rdp->data = $ra;
+			}
+			$this->output(json_encode($rdp));
+		}
+		$this->output(false);
+	}
+	
+	public function save(){
+		$cls = $this->data->model;
+		if(class_exists($cls)){
+			if(empty($this->data->attr->id)){
+				$model = new $cls;
+			}else{
+				$model = $cls::model()->findByPk($this->data->attr->id);
+			}
+			if(method_exists($model, 'rSave')){
+				$model = $model->rSave($this->data->attr);
+			}else{
+				foreach((array) $this->data->attr as $k=>$v){
+					if($model->hasAttribute($k)) $model->{$k} = $v;
+				}
+				$model->save();
+			}
+			$this->output($model->attributes);
+		}
+		$this->output(false);
+	}
+	
+	public function update(){
+		if(class_exists($this->data->model)){
+			$m = $this->data->model;
+			$model = $m::model()->findByPk($this->data->id);
+			if(method_exists($model, 'rUpdate')){
+				$model->rUpdate($this->data);
+			}else{
+				$model->{$this->data->attr} = $this->data->val;
+				$model->update([$this->data->attr]);
+			}
+			$this->output($model->attributes);
+		}
+		$this->output(false);
+	}
+
+	public function updateAll(){
+		if(class_exists($this->data->model)){
+			$m = $this->data->model;
+			$c = $m::model()->updateAll((array) $this->data->attr, json_decode($this->data->cond, true), (array) $this->data->params);
+			$this->output($c);
+		}
+
+		$this->output(false);
+	}
+	
+	public function method(){
+		if(class_exists($this->data->model)){
+			$m = $this->data->model;
+			$model = empty($this->data->id)? new $m : $m::model()->findByPk($this->data->id);
+			if(method_exists($model, $this->data->method)){
+				$r = $model->{$this->data->method}((array) $this->data->attr);
+				$this->output($r);
+			}
+		}
+		$this->output(false);
+	}
+	
+	public function delete(){
+		$this->output(true);
+	}
+
+	public function rebound($url, $cookie=false){
+		$c = new curl($url);
+		$c->setopt(CURLOPT_FOLLOWLOCATION, true);
+		$c->setopt(CURLOPT_SSL_VERIFYPEER, false);
+		$c->setopt(CURLOPT_RETURNTRANSFER, 1);
+		if($cookie && isset(Yii::app()->session['remote_ssid'])){
+			$c->setopt(CURLOPT_COOKIE, Yii::app()->session['remote_ssid']);
+		}
+		if(!empty($_POST)){
+			$c->setopt(CURLOPT_POST, 1);
+			$c->setopt(CURLOPT_POSTFIELDS, $c->asPostString($_POST));
+		}
+		$c->exec();
+		if(!empty($c->status['http_code']) && $c->status['http_code'] != 200){
+			header("HTTP/1.1 400 Bad Request");
+		}
+		if($cookie){
+			if(isset($c->header['Set-Cookie'])){
+				Yii::app()->session['remote_ssid'] = $c->header['Set-Cookie'];
+			}elseif(isset($c->header['set-cookie'])){
+				Yii::app()->session['remote_ssid'] = $c->header['set-cookie'];
+			}
+		}
+		echo $c->result;
+		Yii::app()->end();
+	}
+	
+	public function output($data){
+		$o = new stdClass;
+		$o->data = base64_encode(json_encode($data));
+		$o->key = sha1($o->data.$this->key);
+
+		if($this->debug) $this->log(json_encode($data));
+
+		if(json_last_error() > 0){
+			$jle = json_last_error_msg();
+			Yii::log($jle, 'error');
+			throw new CHttpException(500, 'Internal Server Error: '.$jle);
+		}else{
+			echo json_encode($o);
+		}
+		Yii::app()->end();
+	}
+}

@@ -1,0 +1,148 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="wkhtmltopdf" content="--dpi 100 --page-width 101 --page-height 152 -T 3 -R 3 -B 3 -L 3 -O Portrait" win-only="--disable-smart-shrinking" />
+<meta name="wkhtmltoimage" content="--disable-smart-width --zoom 0.6 --width 420 --quality 80" />
+<?php $label_title="TLA Express Label"; 
+if(sizeof($rs)==1) $label_title=empty($rs[0]->cref)?$label_title:$rs[0]->cref;
+?>
+<title><?=$label_title?></title>
+<style type="text/css">
+*{ margin: 0; padding: 0; letter-spacing: normal !important; }
+body{ font-family: Verdana, Geneva, sans-serif; font-size: 20px; text-rendering: optimize-speed; width: 700px; }
+p.logo { text-align: center; padding-bottom: 30px; }
+.barcode{ font-family: IDAutomationHC39M; font-size: 36px; padding: 30px; text-align: center; }
+h1.dest { padding: 30px; font-size: 60px; text-align: center; }
+h4 { font-size: 26px; }
+small { font-size: 16px; }
+div.page-break { page-break-after: always; }
+h2.connote { text-align: center; padding: 30px;}
+.sender { font-size: 17px; }
+table td{ padding: 10px; }
+table td table td { padding: 5px; }
+div.bc_center div{ margin: 0 auto; }
+.dto{ font-size: 22px; }
+hr { border: none; border-top: #000 1px solid;}
+</style>
+</head>
+<body width="700">
+<?php
+$allPage = 1;
+Yii::import('application.libs.tcpdf.tcpdf_barcodes_1d', true);
+if(!isset($default_rts)) $default_rts = false;
+foreach($rs as $label){
+	if(empty($sn)) $sn = false;
+	/*if(preg_match('/^PBS\d+/', $label->hbn)){
+		$label->cnee = $label->randCnee($label->consol_id);
+	}*/
+	if(!empty($barcode)&&!empty($barcode[$label->ref]))
+	{
+		$sn = $barcode[$label->ref];
+	}
+	if(!empty($sn)&&!is_array($sn))
+	{
+		$sn = [$sn];
+	}
+	$nn = $label->pkg;
+	if(!empty($isWDTPallet))
+	{
+		$nn = $label->mdata['amzon_pallet'];
+	}
+	for($pkg_sn = 1; $pkg_sn <= $nn; $pkg_sn++){
+		if(!empty($sn) && !in_array($pkg_sn, $sn)) continue;
+		// if(!empty($sn) && $pkg_sn != $sn) continue;
+		$endTrans = null;
+		if(!empty($label->trans))
+		{
+			$endTrans = $label->trans[count($label->trans)-1];
+		}
+		if (isset($label->mdata['ss_lbl_request_id'])) {
+	   // if ( $label->id == 2926103 ) {
+			include(dirname(__FILE__) . '/' . '_label-startrack.php');
+		} else {
+			if (isset($label->trans) && !empty($endTrans) && $endTrans->org_id == Org::ORGID_COURIER_FASTWAY  ) {
+				 // if(!empty($endTrans->mdata['satchelSize'])){
+				 	include(dirname(__FILE__) . '/' . '_label-fastway_2020.php');
+				 // }else{
+					// include(dirname(__FILE__) . '/' . '_label-fastway.php');
+				 // }
+		  //  } else if (isset($label->trans) && !empty($label->trans) && $label->trans[0]->org_id == Org::ORGID_COURIER_TOLL  ) {
+			} elseif ( preg_match('/^AWNL\d{6,7}/', $label->ref) || preg_match('/^AWUJ\d{6,7}/', $label->ref)) {
+				include( dirname(__FILE__) . '/' . '_label-toll.php');
+			} elseif ( preg_match('/LET\d{7}/', $label->ref)) {
+				include( dirname(__FILE__) . '/' . '_label_letter.php');
+
+			} elseif (preg_match("/^(DKC|PCD|BPC|LMA|TLS|TBC|LPC)\d{9}/i", $label->ref)){
+				include( dirname(__FILE__) . '/' . '_label_tnt.php');
+			} elseif ((!empty($endTrans) && $endTrans->org_id == Org::ORGID_COURIER_HUNTER) || preg_match('/PB\d{6}/', $label->ref)) {
+				include(dirname(__FILE__) . '/' . '_label-hunter.php');
+			} elseif (isset($label->mdata['gv_oid'])){
+				include(dirname(__FILE__) . '/' . '_label-gv-4ports' . '.php');
+			} elseif (!empty($endTrans) && (($endTrans->org_id == Org::ORGID_COURIER_D2Z)||$endTrans->org_id == Org::ORGID_COURIER_UBI)) {
+				$orgRate =OrgRate::model()->findByPk($label->mdata['org_rate_id']);
+				$code = $orgRate->code;
+				if(preg_match('/Allied/i',$code))
+				{
+					$depotCode = LabelService::getAlliedDepotCode($label);
+					$barcodes =  $label->getParcelBarcode(null);
+					include(dirname(__FILE__) . '/' . '_label-allied' . '.php');
+				}else
+				{
+					if (!empty($label->mdata['d2ztype']) && !in_array($label->mdata['d2ztype'], ['local', 'local-mel'])) {
+						include(dirname(__FILE__) . '/' . '_label-d2z' . '.php');
+					} else {
+						include(dirname(__FILE__) . '/' . '_label-d2z_local' . '.php');
+					}
+				}
+			}elseif (!empty($endTrans) && (in_array($endTrans->org_id,[Org::ORGID_COURIER_DFE,Org::ORGID_COURIER_DFE_TOP]))) {
+				include(dirname(__FILE__) . '/' . '_label-change'.'.php');
+			}elseif (!empty($endTrans) && (in_array($endTrans->org_id,[Org::ORGID_COURIER_CHUKOU1]))) {
+				include(dirname(__FILE__) . '/' . '_chukou1_eparcel' . '.php');
+			}elseif (!empty($endTrans) && (in_array($endTrans->org_id,[Org::ORGID_COURIER_SF]))) {
+				$orgRate =OrgRate::model()->findByPk($label->mdata['org_rate_id']);
+				$port = $orgRate->mdata['port'];
+				include(dirname(__FILE__) . '/' . '_label-sf' . '.php');
+			}elseif (!empty($endTrans) && (in_array($endTrans->org_id,[Org::ORGID_COURIER_ALLIED_TOP]))) {
+				$orgRate =OrgRate::model()->findByPk($label->mdata['org_rate_id']);
+				$code = $orgRate->code;
+				$depotCode = LabelService::getAlliedDepotCode($label);
+				$barcodes =  $label->getParcelBarcode(null);
+				include(dirname(__FILE__) . '/' . '_label-allied' . '.php');
+			}else {
+				if (preg_match('/^(AMQ|UBY|333UF|33EVJ|33FJV|33FKB|33EVH|JDQ|SJU|ZK6|UC7|33A8Y|33MBQ|34AWE|TEST|34KHX|34KHW|34KG6|34KHY|34WMP)\d{7}$/', $label->ref)) { // for Australia eParcel label
+					if ( isset($label->mdata['test_aupost_2014']) ) { // test with jiacheng some shipments only
+						include( dirname(__FILE__) . '/' . '_label-eparcel_2014_pls15skin.php');
+					} else if (isset($label->mdata['aupost_exp'])) {
+						include(dirname(__FILE__) . '/' . '_label-eparcel_express.php');
+					} else if (isset($label->mdata['aupost_return'])) {
+						include(dirname(__FILE__) . '/' . '_label-eparcel_return.php');
+					} else if(isset($label->mdata['test_aupost_2017'])) {
+						include(dirname(__FILE__) . '/' . '_label-eparcel_2015' . '.php');
+					}else{
+						include(dirname(__FILE__) . '/' . '_label-eparcel_2017' . '.php');
+					}
+				} else {
+					if((!empty($tpl)&&$tpl=='_label_1')||$label->type==10)
+					{
+						  $blueLabelObj = $label->getBlueLabelWithIndex($pkg_sn);
+						  if($label->hasSubShipments()&&empty($blueLabelObj))
+						  {
+						  		continue;
+						  }
+					}
+					include((empty($tpl) ? ($label->type == 20 ? '_label-ex' : '_label_1') : dirname(__FILE__) . '/' . $tpl) . '.php');
+				}
+			}
+		}
+		$allPage++;
+		// if(!empty($label->mdata['is_dg'])&&!empty($label->getImportChargecode()->mdata['print_dg']))
+		// {
+		// 	echo "<div><img  src=".Yii::app()->request->hostInfo.Yii::app()->baseUrl.'/images/dg_img.jpg'." width='100%'/></div>";
+		// }
+		echo '<div class="page-break"></div>';
+	}
+}
+?>
+</body>
+</html>

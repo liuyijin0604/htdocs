@@ -1,0 +1,3018 @@
+<?php
+
+class TopCourierServiceController extends Controller
+{
+	protected $skipAcl = ['driverScheduleList'];
+	protected $nonAjax=['scanInfo','export','exportAgent','generateCargoReceipt','printGatePass','uploadPOD','uploadSignatureFile','uploadPODCargoJob','uploadSignatureFileForCargoJob','viewDriverJobs','exportAmazonInfo','exportWithFee','exportCargoProcessReport','exportCitoExcel','exportCargoProcessJobReport','exportFBAPlan'];
+	private $joinSql = "JOIN `shipment` s2 ON c.shipment_id=s2.id 
+           left join `addr` ad2 on s2.cnee_id = ad2.id ";
+
+    private $joinSqlC = "JOIN `shipment` s2 ON c.shipment_id=s2.id
+           left join `addr` ad2 on s2.cnee_id = ad2.id";       
+
+	public function actionIndex()
+	{
+		$filtersForm1=new FiltersForm1;
+		$filtersForm=new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+		if (isset($_GET['FiltersForm1'])) {
+			$filtersForm1->filters=$_GET['FiltersForm1'];
+		}
+
+		$dataprovider = $this->getOverviewReport($filtersForm);
+		$provide1=SystemSetting::getCargoProcessPodSetting();
+		$dataprovider2=new CArrayDataProvider([]);
+		$filterData1=$filtersForm1->filter($provide1);
+		$dataprovider1=new CArrayDataProvider($filterData1);
+		$dataprovider1->pagination=['pageSize'=>10];
+		$sort=new CSort();
+		$sort->defaultOrder = "pod";
+		$dataprovider1->sort=$sort;
+		$this->render('index', ['dataProvider1'=>[$dataprovider1,$filtersForm1],'dataProvider'=>[$dataprovider,$filtersForm],'dataProvider2'=>[$dataprovider2,$filtersForm],'dataProvider3'=>[$dataprovider2,$filtersForm1],'name'=>'Select The pod!']);
+	}
+
+
+	public function actionIndexJob()
+	{
+		$filtersForm1=new FiltersForm1;
+		$filtersForm=new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+		if (isset($_GET['FiltersForm1'])) {
+			$filtersForm1->filters=$_GET['FiltersForm1'];
+		}
+
+		$dataprovider = $this->getJobOverviewReport($filtersForm);
+
+
+		$provide1=SystemSetting::getCargoProcessPodSetting();
+		$dataprovider2=new CArrayDataProvider([]);
+		$filterData1=$filtersForm1->filter($provide1);
+		$dataprovider1=new CArrayDataProvider($filterData1);
+		$dataprovider1->pagination=['pageSize'=>10];
+		$sort=new CSort();
+		$sort->defaultOrder = "pod";
+		$dataprovider1->sort=$sort;
+		$this->render('index_job', ['dataProvider1'=>[$dataprovider1,$filtersForm1],'dataProvider'=>[$dataprovider,$filtersForm],'dataProvider2'=>[$dataprovider2,$filtersForm],'dataProvider3'=>[$dataprovider2,$filtersForm1],'name'=>'Select The pod!']);
+	}
+
+	private function getOverviewReport(&$filtersForm, $type='')
+	{
+		$typeStrC="";
+		$typeStrCg="";
+		if(!empty($type))
+		{ 
+			$typeStrC = "c.type =  {$type} and ";
+			$typeStrCg = "cg.type =  {$type} and ";
+		}
+		$provide=[];
+		$sql="SELECT (@i :=@i + 1) AS id,cg.status,count(*) as number, (SELECT count(*) FROM `cargo_process` c WHERE {$typeStrC} DATEDIFF(NOW(),date)<=1 and c.status=cg.status {$this->getUserStr()}) as day1
+			, (SELECT count(*) FROM `cargo_process` c WHERE {$typeStrC} DATEDIFF(NOW(),date)<3 and DATEDIFF(NOW(),date)>1 and c.status=cg.status {$this->getUserStr()} ) as day2
+			, (SELECT count(*) FROM `cargo_process` c WHERE {$typeStrC} DATEDIFF(NOW(),date)>=3 and c.status=cg.status {$this->getUserStr()} ) as day3
+			FROM `cargo_process` cg JOIN `shipment` s ON cg.shipment_id=s.id,
+			(SELECT @i := 0) AS it  WHERE s.status<100 and {$typeStrCg} cg.status<".CargoProcess::PROCESSDONE." {$this->getUserStr(true)} group by cg.status";
+		$provide=Yii::app()->db->createCommand($sql)->queryAll();
+		$filteredData=$filtersForm->filter($provide);
+		$dataprovider=new CArrayDataProvider($filteredData);
+		$dataprovider->pagination=['pageSize' =>10,];
+		$sort=new CSort();
+		$sort->attributes=[
+			'number'=>[
+				'asc'=>'number ASC',
+				'desc'=>'number DESC',
+			],
+			'status'=>[
+				'asc'=>'status ASC',
+				'desc'=>'status DESC',
+			],
+		];
+		$sort->defaultOrder = "status ASC";
+		$dataprovider->sort=$sort;
+		return $dataprovider;
+	}
+
+	private function getJobOverviewReport(&$filtersForm, $type='')
+	{
+		$typeStrC="";
+		$typeStrCg="";
+		if(!empty($type))
+		{ 
+			$typeStrC = "c.type =  {$type} and ";
+			$typeStrCg = "cg.type =  {$type} and ";
+		}
+		$provide=[];
+		$sql="SELECT (@i :=@i + 1) AS id,status,count(*) as number, (SELECT count(*) FROM `cargo_process_job` c WHERE {$typeStrC} DATEDIFF(NOW(),created)<=1 and c.status=cg.status {$this->getUserStr()}) as day1
+			, (SELECT count(*) FROM `cargo_process_job` c WHERE {$typeStrC} DATEDIFF(NOW(),created)<3 and DATEDIFF(NOW(),created)>1 and c.status=cg.status {$this->getUserStr()} ) as day2
+			, (SELECT count(*) FROM `cargo_process_job` c WHERE {$typeStrC} DATEDIFF(NOW(),created)>=3 and c.status=cg.status {$this->getUserStr()} ) as day3
+			FROM `cargo_process_job` cg,
+			(SELECT @i := 0) AS it  WHERE {$typeStrCg} status<".CargoProcessJob::PROCESSDONE." {$this->getUserStr(true)} group by status";
+		$provide=Yii::app()->db->createCommand($sql)->queryAll();
+		$filteredData=$filtersForm->filter($provide);
+		$dataprovider=new CArrayDataProvider($filteredData);
+		$dataprovider->pagination=['pageSize' =>10,];
+		$sort=new CSort();
+		$sort->attributes=[
+			'number'=>[
+				'asc'=>'number ASC',
+				'desc'=>'number DESC',
+			],
+			'status'=>[
+				'asc'=>'status ASC',
+				'desc'=>'status DESC',
+			],
+		];
+		$sort->defaultOrder = "status ASC";
+		$dataprovider->sort=$sort;
+		return $dataprovider;
+	}
+		
+	/**
+	 * normal consol list;
+	 */
+	public function actionPreAlert()
+	{
+		$model = new ImParcel('search');
+		$model->unsetAttributes();
+		if(!empty($_GET["ImParcel"]))
+		{
+			$model->setAttributes($_GET["ImParcel"]);
+		}
+
+		$model->cargoProcessPreAlert = ["podId"=>$_GET["pod_id"],"cargoType"=>$_GET['cargo_type']];
+		$this->render('pre_alert',["model"=>$model,"podId"=>$_GET["pod_id"],"cargoType"=>$_GET['cargo_type']]);
+	}
+
+	/**
+	 * normal job list;
+	 */
+	public function actionCargoJobList()
+	{
+		$this->getCargoJobList(CargoProcessJob::NORMAL_JOB);
+	}
+
+	/**
+	 * normal job list;
+	 */
+	public function actionFbaJobList()
+	{
+		$this->getCargoJobList(CargoProcessJob::FBA_JOB);
+	}
+
+	/**
+	 * b2b job list;
+	 */
+	public function actionB2bJobList()
+	{
+		$this->getCargoJobList(CargoProcessJob::B2B_JOB);
+	}
+	/**
+	 * normal job list;
+	 */
+	public function actionPalletJobList()
+	{
+		$this->getCargoJobList(CargoProcessJob::PALLET_JOB);
+	}
+
+	public function actionInterstateJobList()
+	{
+		$this->getCargoJobList(CargoProcessJob::INTERSTATE_JOB);
+	}
+	
+	/**
+	 * normal cargo list;
+	 */
+	public function actionCargoList()
+	{
+		$this->getCargoList(CargoProcess::NORMAL_CARGO);
+	}
+	/**
+	 * FBA list;
+	 */
+	public function actionFbaList()
+	{
+		$this->getCargoList(CargoProcess::FBA_CARGO);
+	}
+
+	public function actionPalletList()
+	{
+		$this->getCargoList(CargoProcess::PALLET_CARGO);
+	}
+
+	/**
+	 * B2B list;
+	 */
+	public function actionB2bList()
+	{
+		$this->getCargoList(CargoProcess::B2B_CARGO);
+	}
+
+	/**
+	 * B2B list;
+	 */
+	public function actionPreB2bList()
+	{
+		//$this->getCargoList(CargoProcess::B2B_PRECARGO);
+	}
+
+	/**
+	 * Interstate list;
+	 */
+	public function actionInterstateList()
+	{
+		$this->getCargoList(CargoProcess::INTERSTATE_CARGO);
+	}
+
+
+		/**
+	 * pickup list;
+	 */
+	public function actionPickupList()
+	{
+		$this->getCargoList(CargoProcess::PICKUP_CARGO);
+	}
+
+	/**
+	 * cargolist;
+	 */
+	private function getCargoList($cargo_type)
+	{
+		
+
+		$filtersForm=new FiltersForm;
+		$podId=$_GET['pod_id'];
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+		$provide=[];
+		$joinSql = $cargo_type == CargoProcess::PICKUP_CARGO?$this->joinSqlC:$this->joinSql;
+		$pod = SystemSetting::getCargoProcessPodSetting($podId);
+		$state = @$pod["postcode"];
+		$selectStateStr = "postcode like ";
+		$sql ="";
+		if(empty($state))
+		{
+			$state = @$pod["state"];
+			$selectStateStr = "state = ";
+		}
+
+		$state = "'".$state."'";
+
+		$sql =" SELECT (@i :=@i + 1) AS id,cg.status,count(*) as number
+				, (SELECT count(*) FROM `cargo_process` c ${joinSql} WHERE DATEDIFF(NOW(),date)<=1 and c.status=cg.status and s2.status<100 and c.dpt_id ={$podId} and c.type = {$cargo_type} {$this->getUserStr()} ) as day1
+				, (SELECT count(*) FROM `cargo_process` c ${joinSql} WHERE DATEDIFF(NOW(),date)<3 and DATEDIFF(NOW(),date)>1 and c.status=cg.status and s2.status<100  and c.dpt_id ={$podId} and c.type = {$cargo_type}  {$this->getUserStr()} ) as day2
+				, (SELECT count(*) FROM `cargo_process` c ${joinSql} WHERE DATEDIFF(NOW(),date)>=3 and c.status=cg.status and s2.status<100  and c.dpt_id ={$podId} and c.type = {$cargo_type}  {$this->getUserStr()} ) as day3
+				FROM (SELECT @i := 0) AS it ,`cargo_process` cg JOIN `shipment` s ON cg.shipment_id=s.id 
+	            join `addr` ad on s.cnee_id = ad.id
+				 WHERE cg.status<".CargoProcess::PROCESSDONE." and cg.dpt_id ={$podId} and cg.type = {$cargo_type}  {$this->getUserStr(true)} and s.status<100 group by cg.status ";
+
+		$provide=Yii::app()->db->createCommand($sql)->queryAll();
+		$filteredData=$filtersForm->filter($provide);
+		$dataprovider=new CArrayDataProvider($filteredData);
+		$dataprovider->pagination=['pageSize' =>10,];
+		$sort=new CSort();
+		$sort->attributes=[
+			'number'=>[
+				'asc'=>'number ASC',
+				'desc'=>'number DESC',
+			],
+			'status'=>[
+				'asc'=>'status ASC',
+				'desc'=>'status DESC',
+			],
+		];
+		$sort->defaultOrder = "status ASC";
+		$dataprovider->sort=$sort;
+
+		$amazonWeekPlan = [];
+		if($cargo_type==CargoProcess::FBA_CARGO)
+		{
+			$day = date('N');
+			if($day<=3)
+			{
+				$today = date('Y-m-d');
+				$thisWeekDayOne = date('Y-m-d',strtotime('-'.($day-1).' day',strtotime($today)));
+				$lastWeekDayOne =  date('Y-m-d',strtotime('-7 day',strtotime($thisWeekDayOne)));
+				$week1 = [];
+				$week2 = [];
+				for ($i=0; $i < 7; $i++)
+				{
+					$iap=ImportsAmazonPlan::model()->find('amazon_booking_time = :abt and dpt_id=:dptId',[':abt'=>$thisWeekDayOne.' 00:00:00',':dptId'=>$podId]);
+					$pallet = empty($iap)?'':$iap->pallet;
+					$week1[] = [$thisWeekDayOne,$pallet];
+					$thisWeekDayOne = HolidayHelper::getNextDay($thisWeekDayOne);
+
+					$iap=ImportsAmazonPlan::model()->find('amazon_booking_time = :abt and dpt_id=:dptId',[':abt'=>$lastWeekDayOne.' 00:00:00',':dptId'=>$podId]);
+					$pallet = empty($iap)?'':$iap->pallet;
+					$week2[] = [$lastWeekDayOne,$pallet];
+					$lastWeekDayOne = HolidayHelper::getNextDay($lastWeekDayOne);
+				}
+				$amazonWeekPlan = [$week1,$week2];
+			}else
+			{
+				$today = date('Y-m-d');
+				$thisWeekDayOne = date('Y-m-d',strtotime('-'.($day-1).' day',strtotime($today)));
+				$nextWeekDayOne =  date('Y-m-d',strtotime('+7 day',strtotime($thisWeekDayOne)));
+				$week1 = [];
+				$week2 = [];
+				for ($i=0; $i < 7; $i++)
+				{
+					$iap=ImportsAmazonPlan::model()->find('amazon_booking_time = :abt and dpt_id=:dptId',[':abt'=>$thisWeekDayOne.' 00:00:00',':dptId'=>$podId]);
+					$pallet = empty($iap)?'':$iap->pallet;
+					$week1[] = [$thisWeekDayOne,$pallet];
+					$thisWeekDayOne = HolidayHelper::getNextDay($thisWeekDayOne);
+
+					$iap=ImportsAmazonPlan::model()->find('amazon_booking_time = :abt and dpt_id=:dptId',[':abt'=>$nextWeekDayOne.' 00:00:00',':dptId'=>$podId]);
+					$pallet = empty($iap)?'':$iap->pallet;
+					$week2[] = [$nextWeekDayOne,$pallet];
+					$nextWeekDayOne = HolidayHelper::getNextDay($nextWeekDayOne);
+				}
+				$amazonWeekPlan = [$week1,$week2];
+			}
+		}
+
+
+		$cargo=new CargoProcess('search');
+		$cargo->unsetAttributes();
+
+		if(!empty($_GET['CargoProcess']))
+		{
+			$cargo->setAttributes($_GET['CargoProcess']);
+			if(isset($_GET['CargoProcess']['assignedUser']))
+			{
+				$cargo->assignedUser = $_GET['CargoProcess']['assignedUser'];
+			}
+			if(isset($_GET['CargoProcess']['driver_id']))
+			{
+				$cargo->driver_id = $_GET['CargoProcess']['driver_id'];
+			}
+			if(isset($_GET['ImParcel']['consol_no']))
+			{
+				$cargo->consol_no = $_GET['ImParcel']['consol_no'];
+			}
+			if(isset($_GET['CargoProcess']['exInfo']))
+			{
+				$cargo->exInfo = $_GET['CargoProcess']['exInfo'];
+			}
+		}
+			
+		if (isset($_GET['status'])) {
+			if (!empty($_GET['status'])) {
+				$cargo->setAttribute('status', $_GET['status']);
+			}
+			
+			if($cargo->status==CargoProcess::PROCESSDONE)
+			{
+				if(!isset($_GET['CargoProcess']['ref']))
+				{
+					$cargo->ref ='searching';
+				}
+			}
+
+
+			$this->renderPartial('_sub_cargos', [
+				'cargo' => $cargo,
+				'name' => 'All',
+				'pod_id'=> $podId,
+				'cargo_type' => $cargo_type,
+				'status' => $_GET['status']
+			],false, true);
+		} else {
+			//$cargo->setAttribute('id', -1);
+			$this->render('cargo_list', ['dataProvider'=>[$dataprovider,$filtersForm],'cargo'=>$cargo,'cargo_type' =>$cargo_type,'amazonWeekPlan'=>$amazonWeekPlan]);
+		}
+	}
+
+	/**
+	 * cargolist;
+	 */
+	public function actionCreateCargoJob()
+	{
+		$cargoType = $_GET['typ'];
+		$podId=$_GET['pod_id'];
+		$filtersForm=new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+		$cargo=new CargoProcess('search');
+		$cargo->unsetAttributes();
+		$cargo->isCreateJob = 1;
+		if(!empty($_GET['CargoProcess']))
+		{
+			$cargo->setAttributes($_GET['CargoProcess']);
+			if(isset($_GET['CargoProcess']['assignedUser']))
+			{
+				$cargo->assignedUser = $_GET['CargoProcess']['assignedUser'];
+			}
+			if(isset($_GET['CargoProcess']['driver_id']))
+			{
+				$cargo->driver_id = $_GET['CargoProcess']['driver_id'];
+			}
+			if(isset($_GET['ImParcel']['consol_no']))
+			{
+				$cargo->consol_no = $_GET['ImParcel']['consol_no'];
+			}
+			if(isset($_GET['CargoProcess']['exInfo']))
+			{
+				$cargo->exInfo = $_GET['CargoProcess']['exInfo'];
+			}
+		}
+
+		$drivers = TopCourierService::getDriverList($podId);
+		$vehicles = TopCourierService::getVehicleList();
+		$regions = TopCourierService::getTruckDeliveryRegions($podId);
+
+		if($cargoType==CargoProcess::INTERSTATE_CARGO){
+			$cargo->paid_interstate = 1;
+		}
+			
+		$this->render('create_cargo_job', [
+				'cargo' => $cargo,
+				'pod_id'=> $podId,
+				'cargo_type' => $cargoType,
+				'drivers' => $drivers,
+				'vehicles' => $vehicles,
+				'regions' => $regions
+		]);
+	}
+
+	/**
+	 * cargolist;
+	 */
+	public function actionJobDetails($id)
+	{
+		$model = CargoProcessJob::model()->findByPk($id);
+		$filtersForm=new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+		$cargo=new CargoProcess('search');
+		$cargo->unsetAttributes();
+		if($model->type == 6){
+			$cargo->isSearchJob = 1;
+			$cargo->isInterStateJob = 1;
+		}else{
+			$cargo->isSearchJob = 1;
+		}
+		$cargo->jobId = $model->id;
+		if(!empty($_GET['CargoProcess']))
+		{
+			$cargo->setAttributes($_GET['CargoProcess']);
+			if(isset($_GET['CargoProcess']['assignedUser']))
+			{
+				$cargo->assignedUser = $_GET['CargoProcess']['assignedUser'];
+			}
+			if(isset($_GET['CargoProcess']['driver_id']))
+			{
+				$cargo->driver_id = $_GET['CargoProcess']['driver_id'];
+			}
+			if(isset($_GET['ImParcel']['consol_no']))
+			{
+				$cargo->consol_no = $_GET['ImParcel']['consol_no'];
+			}
+			if(isset($_GET['CargoProcess']['exInfo']))
+			{
+				$cargo->exInfo = $_GET['CargoProcess']['exInfo'];
+			}
+		}
+
+		$drivers = TopCourierService::getDriverList($model->dpt_id);
+		$vehicles = TopCourierService::getVehicleList();
+			
+		$this->render('edit_cargo_job', [
+				'model' => $model,
+				'cargo' => $cargo,
+				'drivers' => $drivers,
+				'vehicles' => $vehicles
+		]);
+	}
+
+
+	/**
+	 * cargolist;
+	 */
+	private function getCargoJobList($jobType)
+	{
+		$filtersForm=new FiltersForm;
+		$dpt_id=$_GET['pod_id'];
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+		$provide=[];
+		$sql ="";
+
+		$sql="SELECT (@i :=@i + 1) AS id,status,count(*) as number, (SELECT count(*) FROM `cargo_process_job` c WHERE DATEDIFF(NOW(),created)<=1 and c.status=cg.status {$this->getUserStr()} and dpt_id = {$dpt_id} and type = {$jobType}) as day1
+			, (SELECT count(*) FROM `cargo_process_job` c WHERE DATEDIFF(NOW(),created)<3 and DATEDIFF(NOW(),created)>1 and c.status=cg.status {$this->getUserStr()} and dpt_id = {$dpt_id} and type = {$jobType}) as day2
+			, (SELECT count(*) FROM `cargo_process_job` c WHERE DATEDIFF(NOW(),created)>=3 and c.status=cg.status {$this->getUserStr()} and dpt_id = {$dpt_id} and type = {$jobType}) as day3
+			FROM `cargo_process_job` cg,
+			(SELECT @i := 0) AS it  WHERE  status<".CargoProcessJob::PROCESSDONE." {$this->getUserStr(true)} and dpt_id = {$dpt_id} and type = {$jobType} group by status";
+
+		$provide=Yii::app()->db->createCommand($sql)->queryAll();
+		$filteredData=$filtersForm->filter($provide);
+		$dataprovider=new CArrayDataProvider($filteredData);
+		$dataprovider->pagination=['pageSize' =>10,];
+		$sort=new CSort();
+		$sort->attributes=[
+			'number'=>[
+				'asc'=>'number ASC',
+				'desc'=>'number DESC',
+			],
+			'status'=>[
+				'asc'=>'status ASC',
+				'desc'=>'status DESC',
+			],
+		];
+		$sort->defaultOrder = "status ASC";
+		$dataprovider->sort=$sort;
+		$job=new CargoProcessJob('search');
+		$job->unsetAttributes();
+		if(!empty($_GET['CargoProcessJob']))
+		{
+			$job->setAttributes($_GET['CargoProcessJob']);
+			//$job->driver_id = $_GET['CargoProcessJob']['driver_id'];
+		}
+		if (isset($_GET['status'])) {
+			if (!empty($_GET['status'])) {
+				$job->setAttribute('status', $_GET['status']);
+			}
+			$this->renderPartial('_sub_jobs', [
+				'job' => $job,
+				'name' => 'All',
+				'pod_id'=> $dpt_id,
+				'job_type' => $jobType
+			],false, true);
+		} else {
+			$this->render('job_list', ['dataProvider'=>[$dataprovider,$filtersForm],'job'=>$job,'job_type' =>$jobType]);
+		}
+	}
+
+	private function getPostCode($cargoType,$type = false)
+	{
+		$postCodeStr = "";
+		$postcode =CargoProcess::FBAPOSTCODE;
+		switch ($cargoType) {
+			case CargoProcess::NORMAL_CARGO:
+				$postCodeStr ="type =".CargoProcess::NORMAL_CARGO;
+				break;
+			case CargoProcess::FBA_CARGO:
+				$postCodeStr ="type =".CargoProcess::FBA_CARGO;
+				break;
+			case CargoProcess::B2B_CARGO:
+				$postCodeStr ="type =".CargoProcess::B2B_CARGO;
+				break;
+			case CargoProcess::PICKUP_CARGO:
+				$postCodeStr ="type =".CargoProcess::PICKUP_CARGO;
+				break;
+			default:
+				return "";
+				break;
+		}
+
+		if($type)
+		{
+			$postCodeStr = " and cg.".$postCodeStr;
+		}else
+		{
+			$postCodeStr = " and c.".$postCodeStr;
+		}
+		return $postCodeStr;
+	}
+		
+	/**
+	 * Air and normal summary;
+	 */
+	public function actionSummary()
+	{
+		$preAlert = new ImParcel('search');
+		$preAlert->unsetAttributes();
+		$preAlert->cargoProcessPreAlert = ["podId"=>'all',"cargoType"=>'all'];
+		if(!empty($_GET["ImParcel"]))
+		{
+			$allEmpty=true;
+			foreach ($_GET["ImParcel"] as $key => $value) {
+				if(!empty($value)) $allEmpty = false;
+			}
+			$preAlert->setAttributes($_GET["ImParcel"]);
+			if($allEmpty) $preAlert->ref = 'enter ref';
+			$this->render('_sub_cargos_pre_alert_summary',["preAlert"=>$preAlert,"podId"=>'all',"cargoType"=>'all']);
+			return;
+		}else
+		{
+			$preAlert->ref = 'enter ref';
+		}
+
+		$filtersForm=new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+		$provide=[];
+		$sql="SELECT (@i :=@i + 1) AS id, s.agent_id, o.name,count(*) as number, (SELECT count(*) FROM `cargo_process` c  join shipment s2  on c.shipment_id = s2.id
+             join org o2 on s2.agent_id = o2.id WHERE DATEDIFF(NOW(),date)<=1 and s.agent_id=s2.agent_id and c.status< ".CargoProcess::PROCESSDONE." {$this->getUserStr()} ) as day1
+			, (SELECT count(*) FROM `cargo_process` c join shipment s2  on c.shipment_id = s2.id
+             join org o2 on s2.agent_id = o2.id WHERE DATEDIFF(NOW(),date)<3 and DATEDIFF(NOW(),date)>1 and s.agent_id=s2.agent_id  and c.status< ".CargoProcess::PROCESSDONE." {$this->getUserStr()} ) as day2
+			, (SELECT count(*) FROM `cargo_process` c join shipment s2  on c.shipment_id = s2.id
+             join org o2 on s2.agent_id = o2.id WHERE DATEDIFF(NOW(),date)>=3 and s.agent_id=s2.agent_id  and c.status< ".CargoProcess::PROCESSDONE." {$this->getUserStr()} ) as day3 from
+			(SELECT @i := 0) AS it,`cargo_process` cg
+             join shipment s  on cg.shipment_id = s.id
+             join org o on s.agent_id = o.id
+            WHERE cg.status< ".CargoProcess::PROCESSDONE." {$this->getUserStr(true)} group by s.agent_id order by id";
+
+		$provide=Yii::app()->db->createCommand($sql)->queryAll();
+		$filteredData=$filtersForm->filter($provide);
+		$dataprovider=new CArrayDataProvider($filteredData);
+		$dataprovider->pagination=['pageSize' =>10,];
+		$sort=new CSort();
+		$sort->attributes=[
+			'number'=>[
+				'asc'=>'number ASC',
+				'desc'=>'number DESC',
+			],
+			'name' => [
+				'asc' => 'name ASC',
+				'desc' => 'name DESC',
+			],
+		];
+		$sort->defaultOrder = "status ASC";
+		$dataprovider->sort=$sort;
+		$cargo=new CargoProcess('search');
+		$cargo->unsetAttributes();
+		if(!empty($_GET['CargoProcess']))
+		{
+			$cargo->setAttributes($_GET['CargoProcess']);
+			if(isset($_GET['CargoProcess']['assignedUser']))
+			{
+				$cargo->assignedUser = $_GET['CargoProcess']['assignedUser'];
+			}
+			if(isset($_GET['CargoProcess']['driver_id']))
+			{
+				$cargo->driver_id = $_GET['CargoProcess']['driver_id'];
+			}
+			if(isset($_GET['CargoProcess']['consol_no']))
+			{
+				$cargo->consol_no = $_GET['CargoProcess']['consol_no'];
+			}
+
+		}
+			
+		if (isset($_GET['agent_id'])) {
+			if (!empty($_GET['agent_id'])) {
+				$cargo->setAgentId($_GET['agent_id']);
+			}
+			$this->renderPartial('_sub_cargos_summary', [
+				'cargo' => $cargo,
+				'name' => 'All',
+				'cargo_type' => CargoProcess::NORMAL_CARGO
+			]);
+		} else {
+			$cargo->setAttribute('id', -1);
+			$this->render('summary', ['dataProvider'=>[$dataprovider,$filtersForm],'cargo'=>$cargo,'preAlert'=>$preAlert]);
+		}
+	}
+
+	private function getUserStr($type =false,$userId = 0)
+	{
+		if((User::getCurrentUserType()==User::IMPORT_TRUCK_DELIVERY)||$userId != 0)
+		{
+			$head ="";
+			if($type)
+			{
+				$head = " and cg.";
+			}else
+			{
+				$head = " and c.";
+			}
+
+			if($userId ==0)
+			{
+				$userId =User::currentUserID();
+			}
+			return $head."meta like '%\"assigned_user\":\"".$userId."\"%' ";
+		}else
+		{
+			return "";
+		}
+
+	}
+
+
+	public function actionWaitAcr()
+	{
+		$model=new Consol('search');
+		$model->unsetAttributes();
+		if (!empty($_GET['Consol'])) {
+			$model->setAttributes($_GET['Consol']);
+		}
+		$model->dpt_id=$_GET['pod_id'];
+		$model->service=$_GET['consol_type'];
+		$podName=Org::dptList()[$_GET['pod_id']]."-".($_GET['consol_type']==20?"Sea":"Air");
+		$model->process_statuses=[ConsolProcess::STATE_WAITING_MAIN_ACR, ConsolProcess::STATE_WAITING_SUB_ACR];
+		$model->process_types=[ConsolProcess::TYPE_FULL_PROCESS, ConsolProcess::TYPE_DIRECT_AIR_CONSOL, ConsolProcess::TYPE_DIRECT_SEA_CONSOL];
+		$this->render('_sub_consols', ['consol'=>$model,'name'=>$podName.' Waiting ACR']);
+	}
+		
+	public function actionOperation()
+	{
+		$id = $_GET["id"];
+		$cargoProcess = new CargoProcess();
+		$ids = [];
+		$result =[];
+		if(strpos($id,CargoProcess::IP_SEPERATOR))
+		{
+			$ids = explode(CargoProcess::IP_SEPERATOR,$id);
+			$model= $cargoProcess->findByPk($ids[0]);
+			$result['ids'] = $id;
+			$result['ismulti'] = 1;
+		}else
+		{
+			$model= $cargoProcess->findByPk($id);
+		}
+
+		if($model->status== CargoProcess::WAITINGASSIGNDRIVER||$model->status== CargoProcess::AGENTWAITINGASSIGNDRIVER)
+		{
+			$cargoType = $model->getCargoType();
+			$driverType = $model->getShipmentPod();
+			$orgModel= new Org();
+			$drivers =[];
+			if(!empty($driverType)){
+				$orgs = $orgModel->findAll(["condition"=>"(cargo_driver_type & ".$driverType.") > 0 and status = 1 ","order"=>'`by` desc']);
+				foreach ($orgs as $key => $org) {
+					if($org->by!=1)
+					{
+						$oname = 'A';
+					}else
+					{
+						$oname = 'system';
+					}
+					$drivers[$org->id] = "(".$oname.")".$org->name;
+				}
+			$result['drivers'] =$drivers;
+			}
+		}
+
+		$result['model'] = $model;
+		if(!empty($model->job_relation_inactive)){
+			$objCargoProcessRelation = new CargoProcessJobRelations('search');
+			$objCargoProcessRelation->cargo_process_id = $model->id;
+			$objCargoProcessRelation->enable = 0;
+			$result['objCargoProcessRelation'] = $objCargoProcessRelation;
+		}
+		$this->render('operation_tab', $result);
+	}
+
+	public function actionBidding(){
+		$id = $_GET["id"];
+		$model = $this->loadModel($id);
+		if(!empty($model)){
+			if(!empty($model->cargo_process_bidding)){
+				$objBidding = $model->cargo_process_bidding;
+			}else{
+				$objBidding = new CargoProcessBidding;
+			}
+			if(!empty($model->job_relation->job)){
+				$objCargoProcessJob = $model->job_relation->job;
+			}
+		}
+		$this->render('bidding_tab', ['objBidding'=>$objBidding,'model'=>$model,'cargoProcessJob'=>$objCargoProcessJob]);
+	}
+
+	public function actionOperationJob()
+	{
+		$id = $_GET["id"];
+		$cargoProcessJob = new CargoProcessJob();
+		$result =[];
+		$model= $cargoProcessJob->findByPk($id);
+		$result['drivers'] =$this->getDriverList($model->dpt_id);
+
+		$result['model'] = $model;
+		$this->render('operation_job_tab', $result);
+	}
+	private function getDriverList($podId)
+	{
+		return TopCourierService::getDriverList($podId);
+	}
+	public function actionLog($id)
+	{
+		$model = CargoProcess::model()->findByPk($id);
+		if ($model==null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		$this->render('log', [
+			'model'=>$model,
+		]);
+	}
+
+	public function actionLogJob($id)
+	{
+		$model = CargoProcessJob::model()->findByPk($id);
+		if ($model==null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		$this->render('log', [
+			'model'=>$model,
+		]);
+	}
+	/*
+		 * change the shipmentProcess status
+		 */
+	public function actionProcess()
+	{
+		if (empty($_GET['id'])||empty($_GET['status'])) {
+			return false;
+		} else {
+			$process= ConsolProcess::model()->find('fid=:fid', [':fid'=>$_GET['id']]);
+			$process->updateStatus($_GET['status']);
+		}
+		echo 'done';
+		return true;
+	}
+
+	public function actionLoadCargoProcess()
+	{
+		$imparcels = ImParcel::model()->findAll(' (status=60||status=42) && scan_no = 0 && ref like \'ECN%\'');
+		foreach ($imparcels as $key => $imparcel) {
+			$imparcel->saveToCargoProcess();
+		}
+		echo "done";
+	}
+
+	public function actionUploadPOD($hash)
+	{
+		$f = $_FILES['file'];
+		$filename = $f['tmp_name'];
+		$name = $f['name'];
+		if(!is_uploaded_file($filename)) return false;
+		$hashArray = explode(CargoProcess::IP_SEPERATOR,$hash);
+		$filesize = filesize($filename);
+		$date = date('Y-m-d H:i:s');
+		$fileHash = hash_file('crc32b', $filename).hash('crc32b', $filesize);
+		$finfo = finfo_open(FILEINFO_MIME_TYPE);
+		$mime = finfo_file($finfo, $f['tmp_name']);
+		foreach ($hashArray as $key => $thisHash) {
+			$fr = CargoProcess::updateUploadSingleFile($filesize,$date,$fileHash,$finfo,$mime,$filename,$name, $thisHash,false,true,false,true);
+			$cargoProcess = CargoProcess::Model()->findByPk($fr->mdata['cargo_process_id']);
+			$cargoProcess->log("uploadPOD");
+			$cargoProcess->agg_pod_id = $fr->id;
+			$cargoProcess->update(["agg_pod_id"]);
+			if(!empty($cargoProcess->mdata['caref']))
+			{
+				$cargoProcess->shipment->updatePodTrackingUrl($cargoProcess->id);
+			}else
+			{
+				$cargoProcess->shipment->updatePodTrackingUrl();
+			}
+		}
+		echo 'DONE';
+	}
+
+	public function actionUploadPODCargoJob()
+	{
+		$hash = $_GET['hash'];
+		$images = $this->uploadMultiFile($hash,false);
+		$mainImage = $images[0];
+		$cargoJob = CargoProcessJob::model()->findByPk($mainImage->fid);
+		$cargoProcesses = $cargoJob->getCargoProcess();
+		$hashArray = [];
+		$uploadType = FileRepo::CARGOPROCESSJOBPOD;
+		foreach ($cargoProcesses as $key => $cp) {
+			$pphash = FileRepo::uploadHash($cp, $uploadType);
+			$hashArray[] = $pphash;
+		}
+
+
+		$f = $_FILES['file'];
+		$filename = $f['tmp_name'];
+		$name = $f['name'];
+		if(!is_uploaded_file($filename)) return false;
+		$filesize = filesize($filename);
+		$date = date('Y-m-d H:i:s');
+		$fileHash = hash_file('crc32b', $filename).hash('crc32b', $filesize);
+		$finfo = finfo_open(FILEINFO_MIME_TYPE);
+		$mime = finfo_file($finfo, $f['tmp_name']);
+		foreach ($hashArray as $key => $thisHash) {
+			$fr = CargoProcess::updateUploadSingleFile($filesize,$date,$fileHash,$finfo,$mime,$filename,$name, $thisHash,false,true,false,true);
+			$cargoProcess = CargoProcess::Model()->findByPk($fr->mdata['cargo_process_id']);
+			$cargoProcess->log("uploadPOD");
+			$cargoProcess->agg_pod_id = $fr->id;
+			$cargoProcess->update(["agg_pod_id"]);
+			if(!empty($cargoProcess->mdata['caref']))
+			{
+				$cargoProcess->shipment->updatePodTrackingUrl($cargoProcess->id);
+			}else
+			{
+				$cargoProcess->shipment->updatePodTrackingUrl();
+			}
+		}
+		echo 'DONE';
+	}
+
+	public function actionUpdate()
+	{
+		$id = $_GET["id"];
+		if(strpos($id,CargoProcess::IP_SEPERATOR))
+		{
+			$ids = explode(CargoProcess::IP_SEPERATOR,$id);
+			$result['ids'] = $id;
+			foreach ($ids as $key => $thisId) 
+			{
+				$this->updateCargoProcess($thisId);
+			}
+		}else
+		{
+			$this->updateCargoProcess($id);
+		}
+		echo "done";
+	}
+
+	public function actionAssignUser()
+	{
+		Yii::import('application.controllers.GatepassController');
+		$id = $_GET["id"];
+		$_GET["assignedUser"]=1;
+		$user_id = $_GET["user_id"];
+		$model = $this->loadModel($id);
+
+		if(strpos($id,CargoProcess::IP_SEPERATOR)||$model->getCargoType()==CargoProcess::FBA_CARGO)
+		{
+			echo "can't assign user to FBA";
+			return;
+		}else
+		{
+			$model->assignUser($user_id);
+		}
+		echo "done";
+	}
+
+	private function updateCargoProcess($id)
+	{
+
+		$model= CargoProcess::model()->findByPk($id);
+		if(isset($_POST["driver_id"]))
+		{
+			$model->driver_id = $_POST["driver_id"];
+		}
+		if(isset($_POST["dpt_id"]))
+		{
+			$model->dpt_id = $_POST["dpt_id"];
+		}
+		if(isset($_POST["note"]))
+		{
+			$model->note = $_POST["note"];
+		}
+		if(isset($_POST["job_pallet_no"]))
+		{
+			$model->mdata['job_pallet_no'] = $_POST["job_pallet_no"];
+		}
+		if(isset($_POST["inputcost"]))
+		{
+			$model->mdata['inputcost'] = $_POST["inputcost"];
+		}
+		if(isset($_POST["forklift"]))
+		{
+			$model->mdata["custconfirmforklift"] = $_POST["forklift"];
+		}
+		if(isset($_POST["inputcostinterstate"]))
+		{
+			$model->mdata['inputcostinterstate'] = $_POST["inputcostinterstate"];
+		}
+		if(isset($_POST["interstateotno"]))
+		{
+			$model->mdata['interstateotno'] = $_POST["interstateotno"];
+		}
+		if(isset($_POST["interstatechargecode"]))
+		{
+			$model->mdata['interstatechargecode'] = $_POST["interstatechargecode"];
+			$model->shipment->mdata['interstatechargecode'] = $_POST["interstatechargecode"];
+			$model->shipment->save();
+		}
+		if(isset($_POST["third_part_label_no"]))
+		{
+			$model->mdata['third_part_label_no'] = $_POST["third_part_label_no"];
+		}
+		if(isset($_POST["need_invoice"]))
+		{
+			$model->mdata['need_invoice'] = $_POST["need_invoice"];
+		}
+
+		if(isset($_POST["cargo_type"]))
+		{
+			$model->type = $_POST["cargo_type"];
+		}
+
+		if(isset($_POST["pallet"]))
+		{
+			//$model->mdata['pallet'] = $_POST["pallet"];
+			//$model->shipment->mdata['amzon_pallet']=$_POST["pallet"];
+		}
+
+		if(isset($_POST["CargoDeliveryInfo"]))
+		{
+			if($model->isNotSub())
+			{
+				$model->saveNormalDeliveryInfo($_POST['CargoDeliveryInfo']['delivery_booking_time']);
+				$model->copyAmazonAndCargoDeliveryInfo(1);
+			}else
+			{
+				$model->saveNormalDeliveryInfo($_POST['CargoDeliveryInfo']['delivery_booking_time']);
+			}
+		}
+
+		if(isset($_POST["ImParcel"]["pickup_booking_time"]))
+		{
+			if(empty($_POST["ImParcel"]["pickup_booking_time"]))
+			{
+				$model->shipment->mdata['pickup_booking_time'] = '';
+			}else
+			{
+				$model->shipment->mdata['pickup_booking_time'] = $_POST["ImParcel"]["pickup_booking_time"];
+			}
+			$model->shipment->updateMeta();
+		}
+
+		if(isset($_POST['AmazonInfo']['booking_ref']))
+		{
+			if (!empty($_POST['AmazonInfo']['booking_ref'])) 
+			{
+				// if($model->isNotSub())
+				// {
+				// 	$obj = $model->shipment;
+				// }else
+				// {
+					$obj = $model;
+				// }
+				$amazonInfo=$obj->getAmazonInfo();
+				$amazonInfo->booking_ref=$_POST['AmazonInfo']['booking_ref'];
+				$date = !empty($_POST['AmazonInfo']['amazon_booking_time'])?$_POST['AmazonInfo']['amazon_booking_time']:null;
+				if (!empty($_POST['AmazonInfo']['amazon_booking_time'])||!empty($amazonInfo->amazon_booking_time)) {
+					$amazonInfo->amazon_booking_time=$date;
+					$obj->mdata['amazon_booking_time']=$date;
+					$obj->mdata['booking_ref']=$_POST['AmazonInfo']['booking_ref'];
+					if ($obj->shipment->status<90) 
+					{
+						$obj->updateAmazonBookingTime();
+					}
+				}
+				$amazonInfo->save();
+				$obj->update(['meta']);
+				if($model->isNotSub())
+				{
+					$model->copyAmazonAndCargoDeliveryInfo(1);
+				}
+			}
+
+			$amazonDeleteType = 0;
+			if (empty($_POST['AmazonInfo']['booking_ref'])&&(!empty($obj->amazon_info->booking_ref))) {
+				$amazonDeleteType += 1;
+			}
+			
+			if (empty($_POST['AmazonInfo']['amazon_booking_time'])&&(!empty($obj->amazon_info->amazon_booking_time))) {
+				$amazonDeleteType += 2;
+			}
+
+			if($amazonDeleteType>0)
+			{
+				if($amazonDeleteType>=1&&$amazonDeleteType!=2)
+				{
+					$obj->amazon_info->booking_ref='';
+					$obj->mdata['booking_ref']='';
+				}
+
+				if($amazonDeleteType>=2)
+				{
+					$obj->amazon_info->booking_ref='';
+					$obj->mdata['amazon_booking_time']='';
+					$obj->amazon_info->amazon_booking_time = null;
+				}
+
+				$obj->amazon_info->save();
+				$obj->update(['meta']);
+			}
+		}
+
+		$model->save();
+
+		if(isset($_POST["pallet"])&&is_numeric($_POST["pallet"]))
+		{
+			self::updateShipmentPallets($model);
+		}
+	}
+
+	private static function updateShipmentPallets($cargoModel){
+		$numPalletsTotal = 0;
+		$cargoProcessModels = CargoProcess::model()->findAll('shipment_id = :shipment_id and status !=100',[':shipment_id'=>$cargoModel->shipment_id]);
+		foreach($cargoProcessModels as $cargoProcessModel){
+			$numPalletsTotal += $cargoProcessModel->mdata['job_pallet_no'];
+		}
+		if($numPalletsTotal>0){
+			$cargoModel->shipment->mdata['amzon_pallet']=$numPalletsTotal;
+			$cargoModel->shipment->updateMeta();
+		}
+	}
+
+	public function actionTypeList()
+	{
+		$filtersForm=new FiltersForm;
+		$filtersForm1=new FiltersForm1;
+		$dpt_id=isset($_GET['pod_id'])?$_GET['pod_id']:-1;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+		if (isset($_GET['FiltersForm1'])) {
+			$filtersForm1->filters=$_GET['FiltersForm1'];
+		}
+		$joinSql = $this->joinSql;
+		$sql="";
+		$provide=[];
+		$pod = SystemSetting::getCargoProcessPodSetting($dpt_id);
+		$strState = Org::model()->findByPk($dpt_id)->state;
+		$state = @$pod["postcode"];
+		$selectStateStr = "postcode like ";
+		$sql ="";
+		if(empty($state))
+		{
+			$state = @$pod["state"];
+			$selectStateStr = "state = ";
+		}
+
+		$state = "'".$state."'";
+
+		$sql="SELECT (@i :=@i + 1) AS id,cg.status,count(*) as number, (SELECT count(*) FROM `cargo_process` c {$joinSql} WHERE DATEDIFF(NOW(),date)<=1 and c.status=cg.status and  ((c.type in (1,2) and 
+(c.dpt_id = {$dpt_id} or json_value(c.meta,'$.goods_state') = {$state})) ) {$this->getUserStr()} ) as day1
+			, (SELECT count(*) FROM `cargo_process` c {$joinSql} WHERE DATEDIFF(NOW(),date)<3 and DATEDIFF(NOW(),date)>1 and c.status=cg.status and ((c.type in (1,2) and 
+(c.dpt_id = {$dpt_id} or json_value(c.meta,'$.goods_state') = {$state})) ) {$this->getUserStr()} ) as day2
+			, (SELECT count(*) FROM `cargo_process` c {$joinSql} 
+			WHERE DATEDIFF(NOW(),date)>=3 and c.status=cg.status and ((c.type in (1,2) and 
+(c.dpt_id = {$dpt_id} or json_value(c.meta,'$.goods_state') = {$state})) ) {$this->getUserStr()} ) as day3
+			FROM (SELECT @i := 0) AS it ,`cargo_process` cg JOIN `shipment` s ON cg.shipment_id=s.id join `addr` ad on s.cnee_id = ad.id
+			 WHERE cg.status<".CargoProcess::PROCESSDONE." and ((cg.type in (1,2) and s.status<100 and (cg.dpt_id = {$dpt_id} or json_value(cg.meta,'$.goods_state') = {$state})) ) {$this->getUserStr(true)} group by cg.status";
+
+
+		$intetstateReceiveSql = "SELECT * FROM `cargo_process` cg JOIN `shipment` s ON cg.shipment_id=s.id join `addr` ad on s.cnee_id = ad.id
+		WHERE cg.status<".CargoProcess::PROCESSDONE." and s.status<100 and ad.state = '".$strState."' and cg.type = 6";
+		$numberInterstateProvide = Yii::app()->db->createCommand($intetstateReceiveSql)->queryAll();
+		$numReceiveInterstate = count($numberInterstateProvide);
+
+		$numberSql="SELECT count(1) as number,cg.type FROM `cargo_process` cg JOIN `shipment` s ON cg.shipment_id=s.id join `addr` ad on s.cnee_id = ad.id
+			 WHERE cg.status<".CargoProcess::PROCESSDONE." and s.status<100 and (cg.dpt_id = {$dpt_id} or json_value(cg.meta,'$.goods_state') = {$state}) {$this->getUserStr(true)} group by cg.type";
+		$numberProvide = Yii::app()->db->createCommand($numberSql)->queryAll();
+
+		$number = [1=>0,2=>0,4=>0,3=>0,5=>0,6=>0];
+		foreach ($numberProvide as $key => $value) {
+			$number[$value['type']] = $value["number"];
+		}
+		$bookings = CargoBooking::model()->findAllByAttributes(['status'=>2, 'depot'=>$dpt_id]);
+		$number[8] = count($bookings);
+		$provide3=Yii::app()->db->createCommand($sql)->queryAll();
+		$filteredData3=$filtersForm1->filter($provide3);
+		$dataprovider3=new CArrayDataProvider($filteredData3);
+		$dataprovider3->pagination=['pageSize' =>10,];
+		$sort=new CSort();
+		$sort->attributes=[
+			'number'=>[
+				'asc'=>'number ASC',
+				'desc'=>'number DESC',
+			],
+			'status'=>[
+				'asc'=>'status ASC',
+				'desc'=>'status DESC',
+			],
+		];
+		$sort->defaultOrder = "status ASC";
+		$dataprovider3->sort=$sort;
+		$provide=[];
+		$list=Org::dptList();
+		$name=isset($list[$dpt_id])?$list[$dpt_id]:"";
+		$provide[]=['id'=>5,'name'=>'Not Assign('.$number[5].")",'type'=>5,'url'=>'topCourierService/palletList','pod'=>$pod["pod"]];
+		$provide[]=['id'=>8,'name'=>'Booking('.$number[8].')','type'=>8,'url'=>'cargoBooking/admin','pod'=>$pod['pod']];
+		$provide[]=['id'=>1,'name'=>'Normal('.$number[1].")",'type'=>1,'url'=>'topCourierService/cargoList','pod'=>$pod["pod"]];
+		$provide[]=['id'=>2,'name'=>'FBA('.$number[2].")",'type'=>2,'url'=>'topCourierService/fbaList','pod'=>$pod["pod"]];
+		$provide[]=['id'=>4,'name'=>'B2B('.$number[4].")",'type'=>4,'url'=>'topCourierService/b2bList','pod'=>$pod["pod"]];
+		//$provide[]=['id'=>6,'name'=>'PRE B2B('.$number[7].")",'type'=>7,'url'=>'topCourierService/preB2bList','pod'=>$pod["pod"]];
+		$provide[]=['id'=>7,'name'=>'Interstate('.$number[6]."-".$numReceiveInterstate.")",'type'=>6,'url'=>'topCourierService/interstateList','pod'=>$pod["pod"]];
+		//$provide[]=['id'=>5,'name'=>'Pallet('.$number[5].")",'type'=>5,'url'=>'topCourierService/palletList','pod'=>$pod["pod"]];
+		//$provide[]=['id'=>3,'name'=>'pickup('.$number[3].")",'type'=>3,'url'=>'topCourierService/pickupList','pod'=>$pod["pod"]];
+
+		$filteredData=$filtersForm->filter($provide);
+		$dataprovider=new CArrayDataProvider($filteredData);
+		$dataprovider->pagination=['pageSize' =>10];
+		$sort=new CSort();
+		$sort->attributes=[
+			'number'=>[
+				'asc'=>'number ASC',
+				'desc'=>'number DESC',
+			],
+			'status'=>[
+				'asc'=>'status ASC',
+				'desc'=>'status DESC',
+			],
+		];
+		$sort->defaultOrder = "status ASC";
+		$dataprovider->sort=$sort;
+		$this->render('sub_type_list', ['dataProvider2'=>[$dataprovider,$filtersForm],'dataProvider3'=>[$dataprovider3,$filtersForm1],'name'=>$name]);
+	}
+
+	public function actionJobTypeList()
+	{
+		$filtersForm=new FiltersForm;
+		$filtersForm1=new FiltersForm1;
+		$dpt_id=isset($_GET['pod_id'])?$_GET['pod_id']:-1;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+		if (isset($_GET['FiltersForm1'])) {
+			$filtersForm1->filters=$_GET['FiltersForm1'];
+		}
+		$joinSql = $this->joinSql;
+		$sql="";
+		$provide=[];
+		$pod = SystemSetting::getCargoProcessPodSetting($dpt_id);
+		$sql ="";
+		$sql="SELECT (@i :=@i + 1) AS id,status,count(*) as number, (SELECT count(*) FROM `cargo_process_job` c WHERE DATEDIFF(NOW(),created)<=1 and c.status=cg.status {$this->getUserStr()} and dpt_id = {$dpt_id}) as day1
+			, (SELECT count(*) FROM `cargo_process_job` c WHERE DATEDIFF(NOW(),created)<3 and DATEDIFF(NOW(),created)>1 and c.status=cg.status {$this->getUserStr()} and dpt_id = {$dpt_id}) as day2
+			, (SELECT count(*) FROM `cargo_process_job` c WHERE DATEDIFF(NOW(),created)>=3 and c.status=cg.status {$this->getUserStr()} and dpt_id = {$dpt_id}) as day3
+			FROM `cargo_process_job` cg,
+			(SELECT @i := 0) AS it  WHERE  status<".CargoProcessJob::PROCESSDONE." {$this->getUserStr(true)} and dpt_id = {$dpt_id} group by status";
+
+		$intetstateReceiveSql = "SELECT * FROM `cargo_process_job` cg WHERE cg.status<".CargoProcessJob::PROCESSDONE." and json_value(cg.meta,'$.destination') = {$dpt_id}";
+		$numberInterstateProvide = Yii::app()->db->createCommand($intetstateReceiveSql)->queryAll();
+		$numReceiveInterstate = count($numberInterstateProvide);
+
+
+		$numberSql="SELECT count(1) as number,cg.type FROM `cargo_process_job` cg WHERE cg.status<".CargoProcessJob::PROCESSDONE." and cg.dpt_id = {$dpt_id} {$this->getUserStr(true)} group by cg.type";
+		$numberProvide = Yii::app()->db->createCommand($numberSql)->queryAll();
+		$number = [1=>0,2=>0,4=>0,3=>0,5=>0,6=>0];
+		foreach ($numberProvide as $key => $value) {
+			$number[$value['type']] = $value["number"];
+		}
+		$provide3=Yii::app()->db->createCommand($sql)->queryAll();
+		$filteredData3=$filtersForm1->filter($provide3);
+		$dataprovider3=new CArrayDataProvider($filteredData3);
+		$dataprovider3->pagination=['pageSize' =>10,];
+		$sort=new CSort();
+		$sort->attributes=[
+			'number'=>[
+				'asc'=>'number ASC',
+				'desc'=>'number DESC',
+			],
+			'status'=>[
+				'asc'=>'status ASC',
+				'desc'=>'status DESC',
+			],
+		];
+		$sort->defaultOrder = "status ASC";
+		$dataprovider3->sort=$sort;
+		$provide=[];
+		$list=Org::dptList();
+		$name=isset($list[$dpt_id])?$list[$dpt_id]:"";
+		$provide[]=['id'=>1,'name'=>'Normal('.$number[1].")",'type'=>1,'url'=>'topCourierService/cargoJobList','pod'=>$pod["pod"]];
+		$provide[]=['id'=>2,'name'=>'FBA('.$number[2].")",'type'=>2,'url'=>'topCourierService/fbaJobList','pod'=>$pod["pod"]];
+		$provide[]=['id'=>4,'name'=>'B2B('.$number[4].")",'type'=>4,'url'=>'topCourierService/b2bJobList','pod'=>$pod["pod"]];
+		$provide[]=['id'=>5,'name'=>'Pallet('.$number[5].")",'type'=>5,'url'=>'topCourierService/palletJobList','pod'=>$pod["pod"]];
+		$provide[]=['id'=>7,'name'=>'Interstate('.$number[6]."-".$numReceiveInterstate.")",'type'=>6,'url'=>'topCourierService/interstateJobList','pod'=>$pod["pod"]];
+		// $provide[]=['id'=>3,'name'=>'pickup('.$number[3].")",'type'=>3,'url'=>'topCourierService/pickupList','pod'=>$pod["pod"]];
+
+		$filteredData=$filtersForm->filter($provide);
+		$dataprovider=new CArrayDataProvider($filteredData);
+		$dataprovider->pagination=['pageSize' =>10];
+		$sort=new CSort();
+		$sort->attributes=[
+			'number'=>[
+				'asc'=>'number ASC',
+				'desc'=>'number DESC',
+			],
+			'status'=>[
+				'asc'=>'status ASC',
+				'desc'=>'status DESC',
+			],
+		];
+		$sort->defaultOrder = "status ASC";
+		$dataprovider->sort=$sort;
+		$this->render('sub_job_type_list', ['dataProvider2'=>[$dataprovider,$filtersForm],'dataProvider3'=>[$dataprovider3,$filtersForm1],'name'=>$name]);
+	}
+
+	
+	public function actionNotes($id)
+	{
+		$model = CargoProcess::model()->findByPk($id);
+		Log::add($model, Log::LOG_TYPE_NOTES, ['notes' => $_POST['notes']]);
+		$this->ajaxResult($model);
+	}
+		
+	/**
+		* Return a pdf of cargo receipt for Amazon usage;
+		* @param type $id the id of the shipment
+	*/
+	public function actionGenerateCargoReceipt($id)
+	{
+		$id = $_GET['id'];
+		$ids = explode(CargoProcess::IP_SEPERATOR,$id);
+		$sqlIds = implode($ids,",");
+		$cpModels = CargoProcess::model()->findAll(" id in ({$sqlIds}) ");
+		$shipmentIds = array_column($cpModels,'shipment_id');
+		$shipmentModels = [];
+		foreach ($cpModels as $key => $value) {
+			$shipment = $value->shipment;
+			if(!empty($value->mdata['caref']))
+			{
+				$shipment->ref = $value->mdata['caref'];
+				$shipment->weight = round(($value->shipment->weight*$value->mdata['left_packages'])/$value->shipment->pkg,2);
+				$shipment->pkg = $value->mdata['left_packages'];
+				$shipment->mdata['total_cbm'] = $shipment->cbm*$value->mdata['left_packages'];
+				$shipment->amazon_info = $value->amazon_info;
+			}
+			$shipmentModels[] = $shipment;
+		}
+		$fileName = "";
+		foreach ($shipmentModels as $key => $shipmentModel) {
+			$fileName .= $shipmentModel->ref.'_';
+		}
+		foreach ($cpModels as $key => $cpModel) {
+            $cpModel->cargo_receipt = true;
+            $cpModel->update('cargo_receipt');
+            
+        }
+        //$this->render('/_pdf/cargo_receipts', ['models' => $shipmentModels]);
+		if ($cpModels[0]->getCargoType()==CargoProcess::FBA_CARGO||$cpModels[0]->getCargoType()==CargoProcess::B2B_CARGO){
+			oPDF::renderPDF('cargo_receipts', ['models' => $shipmentModels,'cargoType'=>$cpModels[0]->getCargoType(),''], 1, $fileName.'.pdf');
+		} else {
+			oPDF::renderPDF('cargo_receipts_1', ['models' => $shipmentModels,'cargoType'=>$cpModels[0]->getCargoType()], 1, $fileName.'.pdf');
+		}
+	}
+
+	/**
+	* notice warehouse to prepare cargos;
+	* @param
+	*/
+	public function actionNoticeWarehouseToPrepare($id)
+	{
+		$id = $_GET["id"];
+		if(strpos($id,CargoProcess::IP_SEPERATOR))
+		{
+			$ids = explode(CargoProcess::IP_SEPERATOR,$id);
+			$result['ids'] = $id;
+			foreach ($ids as $key => $thisId) 
+			{
+				$model=$this->loadModel($thisId);
+				$model->noticeWarehouseToPrepare();
+			}
+		}else
+		{
+			$model=$this->loadModel($id);
+			$model->noticeWarehouseToPrepare();
+		}
+		echo "done";
+	}
+
+	public function actionPrintGatePass()
+    {
+    	$id = $_GET["id"];
+        $m = GatePass::model()->findByPk($id);
+        oPDF::renderPDF('gatepass', ['m' => $m]);
+    }
+
+	public function actionCollectInfoDone()
+	{
+		$id = $_GET['id'];
+		$ids = explode(CargoProcess::IP_SEPERATOR,$id);
+		foreach ($ids as $key => $thisId) 
+		{
+			$model=$this->loadModel($thisId);
+			if($model->status==CargoProcess::COLLECTINFO)
+			{
+				if($model->type==CargoProcess::PICKUP_CARGO)
+				{
+					if(!empty($_GET['outturn']))
+					{
+						$emailService = New EmailService();
+						if($emailService->sendPickupCargoOutturnEmail($model))
+						{
+							if(empty($model->shipment->mdata['amzon_pallet']))// for checking pallet info
+							{
+								echo "send DO success, but ".$model->shipment->ref." has not pallet info.";
+							}
+
+							if($model->shipment->status>=ImParcel::STATE_CLEAR||$model->shipment->status==ImParcel::STATE_LOCAL_ARRIVAL)
+							{
+								$model->mdata['outturn']=1;
+								$model->save();
+								$model->updateStatus(CargoProcess::WAITINGDELIVERY);
+							}else
+							{
+								$model->mdata['outturn']=1;
+								$model->save();
+								$model->updateStatus(CargoProcess::HELDSENTOUTTURN);
+							}
+						}
+					}else
+					{
+						if($model->shipment->status>=ImParcel::STATE_CLEAR||$model->shipment->status==ImParcel::STATE_LOCAL_ARRIVAL)
+						{
+							$model->updateStatus(CargoProcess::WAITINGDELIVERY);
+						}else
+						{
+							$model->updateStatus(CargoProcess::HELDSENTOUTTURN);
+						}
+					}
+				}else
+				{
+					//if it is winit
+					if($model->isWinit() || $model->is4PX() || $model->isGC())
+					{
+						if(empty($model->mdata['delivery_booking_time']))
+						{
+							echo "Empty Delivery Booking Time";
+							return;
+						}
+						$model->updateStatus(CargoProcess::WAITINGWINITBOOKING);
+						$model->noticeClientBookingWinit();
+					}
+					else
+					{
+						//else:
+						$model->updateStatus(CargoProcess::WAITINGASSIGNDRIVER);
+					}
+
+				}
+
+			}else if($model->status==CargoProcess::AGENTCOLLECTINFO)
+			{
+				$model->updateStatus(CargoProcess::AGENTWAITINGASSIGNDRIVER);
+				if($model->isSydney())
+				{
+					$model->noticeWarehouseToPrepare();
+				}else
+				{
+					$model->generateGatePass();
+				}
+			}
+		}
+		echo 'done';
+	}
+
+	public function actionConfirmJob()
+	{
+		$id = $_GET['id'];
+		$ids = explode(CargoProcess::IP_SEPERATOR,$id);
+		foreach ($ids as $key => $thisId) 
+		{
+			$topCourierService = new TopCourierService();
+			$topCourierService->updateJobStatus($id,CargoProcessJob::STATE_WAITING_WAREHOUSE_PREPARATION);
+		}
+		echo 'done';
+	}
+
+	public function actionJobWarehousePreparationDone()
+	{
+		$id = $_GET['id'];
+		$topCourierService = new TopCourierService();
+		$topCourierService->updateJobStatus($id,CargoProcessJob::STATE_WAITING_FOR_DELIVERY);
+		echo 'done';
+	}
+
+	public function actionJobProcessDone()
+	{
+		$id = $_GET['id'];
+		$topCourierService = new TopCourierService();
+		$topCourierService->updateJobStatus($id,CargoProcessJob::PROCESSDONE);
+		echo 'done';
+	}
+
+	public function actionSendDo()
+	{
+		$id = $_GET['id'];
+		$ids = explode(CargoProcess::IP_SEPERATOR,$id);
+		foreach ($ids as $key => $thisId) 
+		{
+			$model=$this->loadModel($thisId);
+			if($model->status==CargoProcess::COLLECTINFO)
+			{
+				$emailService = New EmailService();
+				if($emailService->sendPickupCargoSeaDOEmail($model))// for checking pallet info
+				{
+					$model->mdata['is_sendDo'] = 1;
+					$model->save();
+					if(empty($model->shipment->mdata['amzon_pallet']))
+					{
+						echo "send DO success, but ".$model->shipment->ref." has not pallet info.";
+					}
+				}
+			}
+
+		}
+		echo 'done';
+	}
+
+	public function actionWinitBookingDone()
+	{
+		$id = $_GET['id'];
+		$ids = explode(CargoProcess::IP_SEPERATOR,$id);
+		foreach ($ids as $key => $thisId) 
+		{
+			$model=$this->loadModel($thisId);
+			if($model->status==CargoProcess::WAITINGWINITBOOKING)
+			{
+				if(!empty($model->mdata['confirm_winit_booking']))
+				{
+					$model->updateStatus(CargoProcess::WAITINGASSIGNDRIVER);
+				}else
+				{
+					echo "Customer does not confirm in the link for winit/4PX/GC booking";
+					return;
+				}	
+				
+			}
+		}
+		echo 'done';
+	}
+
+	public function actionUpdateStatus()
+	{
+		$id = $_GET['id'];
+		$ids = explode(CargoProcess::IP_SEPERATOR,$id);
+		foreach ($ids as $key => $thisId) 
+		{
+				$model=$this->loadModel($thisId);
+				$model->updateStatus($_GET["status"]);
+		}
+		echo 'done';
+	}
+
+	public function actionUpdateJobStatus()
+	{
+		$id = $_GET['id'];
+		$topCourierService  = new TopCourierService();
+		$topCourierService->updateJobStatus($id,$_GET["status"]);
+		echo 'done';
+	}
+
+	public function actionupdateJobPallet(){
+		$id = $_POST['id'];
+		$numPallets = $_POST['numpallet'];
+		$numCost = $_POST['costforCjob'];
+		$num_P1 = $_POST['num_P1'];
+		$num_P2 = $_POST['num_P2'];
+		$num_14P = $_POST['num_14P'];
+		$num_SEMI = $_POST['num_SEMI'];
+		$num_BW = $_POST['num_BW'];
+		$jobInterstateCost = $_POST['interstate_cost'];
+		//$thirdLabelNo = $_POST['thirdpartlabel'];
+
+		$model= CargoProcessJob::model()->findByPk($id);
+		if(!empty($model)){
+			$model->mdata['total_job_pallet_no'] = $numPallets;
+			$model->mdata['total_job_input_cost'] = $numCost;
+			$model->mdata['num_P1'] = $num_P1;
+			$model->mdata['num_P2'] = $num_P2;
+			$model->mdata['num_14P'] = $num_14P;
+			$model->mdata['num_SEMI'] = $num_SEMI;
+			$model->mdata['num_BW'] = $num_BW;
+			$model->mdata['interstate_cost'] = $jobInterstateCost;
+			$model->save();
+			$service = new TopCourierService();
+			if (in_array($model->type, array(CargoProcessJob::FBA_JOB, CargoProcessJob::B2B_JOB, CargoProcessJob::INTERSTATE_JOB))) {
+				$service->splitCostByWeight($model);
+			}
+			//$model->mdata['third_part_label_no'] = $thirdLabelNo;
+			if($model->save()){
+				echo json_encode([
+					'isSuccess' => true,
+				]);
+				return;
+			}
+		}
+		echo json_encode([
+			'isSuccess' => false,
+		]);
+		return;
+	}
+	
+
+	public function actionAssignDriverDone()
+	{
+		$id = $_GET['id'];
+		$ids = explode(CargoProcess::IP_SEPERATOR,$id);
+		foreach ($ids as $key => $thisId) 
+		{
+			$model=$this->loadModel($thisId);
+			if($model->status==CargoProcess::WAITINGASSIGNDRIVER)
+			{
+				$model->updateStatus(CargoProcess::PAPERWORK);
+			}else if($model->status==CargoProcess::AGENTWAITINGASSIGNDRIVER)
+			{
+				$model->shipment->saveTracking(80, "Assigned driver", empty($model->shipment->ddepot) ? '' : $model->shipment->ddepot->suburb, date('Y-m-d h:i:s', time()));
+				$model->updateStatus(CargoProcess::WAITINGAGENTDELIVERY);
+			}
+		}
+		echo 'done';
+	}
+
+
+	public function actionPaperworkDone($id)
+	{
+		$id = $_GET['id'];
+		$ids = explode(CargoProcess::IP_SEPERATOR,$id);
+		foreach ($ids as $key => $thisId) 
+		{
+			$model=$this->loadModel($thisId);
+			$model->updateStatus(CargoProcess::WAITINGDELIVERY);
+			$model->addAmazonBookingTime();
+		}
+		echo 'done';
+	}
+
+
+	public function actionProcessDone($id)
+	{
+		$id = $_GET['id'];
+		$upload_consol = isset($_GET['upload_consol'])?1:0;
+		$ids = explode(CargoProcess::IP_SEPERATOR,$id);
+		if($upload_consol!=0)
+		{
+			if(count($ids)>1)
+			{
+				echo "upload_consol can only use in one shipment";
+				return;
+			}
+		}
+
+		foreach ($ids as $key => $thisId) 
+		{
+				$model=$this->loadModel($thisId);
+				$model->processDone($upload_consol);
+		}
+		echo 'done';
+	}
+
+	public function actionAddPreparetionTracking($id)
+	{
+		$id = $_GET['id'];
+		$upload_consol = isset($_GET['upload_consol'])?1:0;
+		$ids = explode(CargoProcess::IP_SEPERATOR,$id);
+		if($upload_consol!=0)
+		{
+			if(count($ids)>1)
+			{
+				echo "upload_consol can only use in one shipment";
+				return;
+			}
+		}
+
+		foreach ($ids as $key => $thisId) 
+		{
+				$model=$this->loadModel($thisId);
+				if($model->type ==CargoProcess::NORMAL_CARGO)
+				{
+					//$model->shipment->saveTracking(75, "Waiting for warehouse to prepare", empty($model->shipment->ddepot) ? '' : $model->shipment->ddepot->suburb, date('Y-m-d h:i:s', time()));
+				}
+		}
+		echo 'done';
+	}
+
+	private function uploadMultiFile($hash,$isUpdate=true)
+	{
+		$f = $_FILES['file'];
+		$filename = $f['tmp_name'];
+		$name = $f['name'];
+		if(!is_uploaded_file($filename)) return false;
+		$hashArray = explode(CargoProcess::IP_SEPERATOR,$hash);
+		$filesize = filesize($filename);
+		$date = date('Y-m-d H:i:s');
+		$fileHash = hash_file('crc32b', $filename).hash('crc32b', $filesize);
+		$finfo = finfo_open(FILEINFO_MIME_TYPE);
+		$mime = finfo_file($finfo, $filename);
+		$images = [];
+		foreach ($hashArray as $key => $thisHash) {
+			$fr =CargoProcess::updateUploadSingleFile($filesize,$date,$fileHash,$finfo,$mime,$filename,$name,$thisHash);
+			$images[] = $fr;
+			if($isUpdate)$this->updateAggPodId($fr);
+		}
+		return $images;
+	}
+
+
+	private function updateAggPodId($fr)
+	{
+		$cargoProcess = CargoProcess::Model()->findByPk($fr->fid);
+		$cargoProcess->agg_pod_id = $fr->id;
+		$cargoProcess->update(["agg_pod_id"]);
+	}
+
+	public function actionUploadSignatureFile($hash)
+	{
+		/*get signature file*/
+		$images = $this->uploadMultiFile($hash,false);
+
+		foreach ($images as $key => $image) {
+			$thisModel = $this->loadModel($image->fid);
+			$thisModel->log("uploadSignatureFile");
+			$shipmentModel = $thisModel->shipment;
+			$filename = $shipmentModel->id."pod";
+			$pdfPath = "";
+			/* combine the signature file to the template to be pdfs*/
+			if ($thisModel->type == CargoProcess::FBA_CARGO||$thisModel->type == CargoProcess::B2B_CARGO) {
+				$pdfPath = oPDF::renderPDF('cargo_receipt', ['model' => $shipmentModel,'image'=>$image], 2, $filename.'.pdf');
+			} else {
+				$pdfPath = oPDF::renderPDF('cargo_receipt_1', ['model' => $shipmentModel,'image'=>$image], 2, $filename.'.pdf');
+			}
+			echo Yii::app()->request->hostInfo.Yii::app()->baseUrl."/filerepo/".$image->hash."/".$image->name;
+
+			/*upload pdfs to every shipment*/
+			$uploadType = 25;
+			$pphash = FileRepo::uploadHash($shipmentModel, $uploadType);
+			$filesize = filesize($pdfPath);
+			$date = date('Y-m-d H:i:s');
+			$filename = $filename.".pdf";
+			$name= "pod.pdf";
+			$fileHash = hash_file('crc32b', $pdfPath).hash('crc32b', $filesize);
+			$finfo = finfo_open(FILEINFO_MIME_TYPE);
+			$mime = finfo_file($finfo, $pdfPath);
+			$cargoProcess =CargoProcess::model()->findByPk($image->fid);
+			if(!empty($cargoProcess->mdata['caref']))
+			{
+				echo $cargoProcess->id;
+				$fr = CargoProcess::updateUploadSingleFile($filesize,$date,$fileHash,$finfo,$mime,$pdfPath,$name,$pphash,true,false,$cargoProcess->id);
+			}else
+			{
+				$fr = CargoProcess::updateUploadSingleFile($filesize,$date,$fileHash,$finfo,$mime,$pdfPath,$name,$pphash,true);
+			}
+			$cargoProcess->mdata['sdate']=date('Y-m-d');
+			$cargoProcess->save();
+		}
+
+		echo 'DONE';
+	}
+
+	public function actionUploadSignatureFileForCargoJob($hash)
+	{
+		/*get signature file*/
+		$images = $this->uploadMultiFile($hash,false);
+		$image = $images[0];
+		$cargoJob = CargoProcessJob::model()->findByPk($image->fid);
+		$cargoProcesses = $cargoJob->getCargoProcess();
+		$myHash = [];
+		$uploadType = FileRepo::CARGOPROCESSJOBFILETYPE;
+		foreach ($cargoProcesses as $key => $cp) {
+			$thisModel = $cp;
+			$thisModel->log("uploadSignatureFile");
+			$shipmentModel = $thisModel->shipment;
+			$filename = $shipmentModel->id."pod";
+			$pdfPath = "";
+			/* combine the signature file to the template to be pdfs*/
+			if ($thisModel->type == CargoProcess::FBA_CARGO||$thisModel->type == CargoProcess::B2B_CARGO) {
+				$pdfPath = oPDF::renderPDF('cargo_receipt', ['model' => $shipmentModel,'image'=>$image], 2, $filename.'.pdf');
+			} else {
+				$pdfPath = oPDF::renderPDF('cargo_receipt_1', ['model' => $shipmentModel,'image'=>$image], 2, $filename.'.pdf');
+			}
+			echo Yii::app()->request->hostInfo.Yii::app()->baseUrl."/filerepo/".$image->hash."/".$image->name;
+
+			/*upload pdfs to every shipment*/
+			$uploadType = 25;
+			$pphash = FileRepo::uploadHash($shipmentModel, $uploadType);
+			$filesize = filesize($pdfPath);
+			$date = date('Y-m-d H:i:s');
+			$filename = $filename.".pdf";
+			$name= "pod.pdf";
+			$fileHash = hash_file('crc32b', $pdfPath).hash('crc32b', $filesize);
+			$finfo = finfo_open(FILEINFO_MIME_TYPE);
+			$mime = finfo_file($finfo, $pdfPath);
+			$cargoProcess = $cp;
+			if(!empty($cargoProcess->mdata['caref']))
+			{
+				echo $cargoProcess->id;
+				$fr = CargoProcess::updateUploadSingleFile($filesize,$date,$fileHash,$finfo,$mime,$pdfPath,$name,$pphash,true,false,$cargoProcess->id);
+			}else
+			{
+				$fr = CargoProcess::updateUploadSingleFile($filesize,$date,$fileHash,$finfo,$mime,$pdfPath,$name,$pphash,true);
+			}
+			$cargoProcess->mdata['sdate']=date('Y-m-d');
+			$cargoProcess->save();
+		}
+
+		echo 'DONE';
+	}
+
+	public function actionViewAllAgent()
+	{
+		$filtersForm=new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+
+
+		$truckUserList = User::getTruckUsers();
+		$dataproviders =[];
+
+		$dataprovider = $this->getOverviewReport($filtersForm);
+		$dataproviderFBA = $this->getOverviewReport($filtersForm,CargoProcess::FBA_CARGO);
+		$dataproviderB2B = $this->getOverviewReport($filtersForm,CargoProcess::B2B_CARGO);
+		$dataproviderNormal = $this->getOverviewReport($filtersForm,CargoProcess::NORMAL_CARGO);
+		$dataproviderPickup = $this->getOverviewReport($filtersForm,CargoProcess::PICKUP_CARGO);
+
+		$dataproviders[] = $dataprovider;
+
+		foreach ($truckUserList  as $key => $truckUser) 
+		{
+			$sql="SELECT (@i :=@i + 1) AS id,status,count(*) as number, (SELECT count(*) FROM `cargo_process` c WHERE DATEDIFF(NOW(),date)<=1 and c.status=cg.status {$this->getUserStr(false,$key)}) as day1
+			, (SELECT count(*) FROM `cargo_process` c WHERE DATEDIFF(NOW(),date)<3 and DATEDIFF(NOW(),date)>1 and c.status=cg.status {$this->getUserStr(false,$key)} ) as day2
+			, (SELECT count(*) FROM `cargo_process` c WHERE DATEDIFF(NOW(),date)>=3 and c.status=cg.status {$this->getUserStr(false,$key)} ) as day3
+			FROM `cargo_process` cg,
+			(SELECT @i := 0) AS it  WHERE status<".CargoProcess::PROCESSDONE." {$this->getUserStr(true,$key)} group by status";
+			$provide=[];
+			$provide=Yii::app()->db->createCommand($sql)->queryAll();
+			$filteredData=$filtersForm->filter($provide);
+			$dataprovider=new CArrayDataProvider($filteredData);
+			$dataprovider->pagination=['pageSize' =>10,];
+			$sort=new CSort();
+			$sort->attributes=[
+				'number'=>[
+					'asc'=>'number ASC',
+					'desc'=>'number DESC',
+				],
+				'status'=>[
+					'asc'=>'status ASC',
+					'desc'=>'status DESC',
+				],
+			];
+			$sort->defaultOrder = "status ASC";
+			$dataprovider->sort=$sort;
+			$dataproviders[$key] = $dataprovider;
+		}	
+
+		$this->render('viewAllAgent', ['dataProvider'=>[$dataproviders,$filtersForm],'dataProviderFBA'=>[$dataproviderFBA,$filtersForm],'dataProviderB2B'=>[$dataproviderB2B,$filtersForm],'dataProviderNormal'=>[$dataproviderNormal,$filtersForm],'dataProviderPickup'=>[$dataproviderPickup,$filtersForm],'truckUserList'=>$truckUserList]);
+	}
+
+
+	public function actionViewDriverJobs()
+	{
+		$filtersForm=new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+		$provide=[];
+		$sql="SELECT (@i :=@i + 1) AS id, cg.driver_id, o.name,count(*) as number, (SELECT count(*) FROM `cargo_process` c  join shipment s2  on c.shipment_id = s2.id
+             join org o2 on c.driver_id = o2.id WHERE DATEDIFF(NOW(),date)<=1 and c.driver_id=cg.driver_id and c.status= cg.status {$this->getUserStr()} ) as day1
+			, (SELECT count(*) FROM `cargo_process` c join shipment s2  on c.shipment_id = s2.id
+             join org o2 on c.driver_id = o2.id WHERE DATEDIFF(NOW(),date)<3 and DATEDIFF(NOW(),date)>1 and c.driver_id=cg.driver_id  and c.status= cg.status {$this->getUserStr()} ) as day2
+			, (SELECT count(*) FROM `cargo_process` c join shipment s2  on c.shipment_id = s2.id
+             join org o2 on c.driver_id = o2.id WHERE DATEDIFF(NOW(),date)>=3 and c.driver_id=cg.driver_id  and c.status= cg.status {$this->getUserStr()} ) as day3 from
+			(SELECT @i := 0) AS it,`cargo_process` cg
+             join shipment s  on cg.shipment_id = s.id
+             join org o on cg.driver_id = o.id
+            WHERE cg.status=".CargoProcess::WAITINGDELIVERY." or cg.status = ".CargoProcess::WAITINGAGENTDELIVERY." or cg.status =".CargoProcess::AGENTDELIVERYDONE." or cg.status =".CargoProcess::PROCESSDONE." {$this->getUserStr(true)} group by cg.driver_id order by id";
+
+		$provide=Yii::app()->db->createCommand($sql)->queryAll();
+		$filteredData=$filtersForm->filter($provide);
+		$dataprovider=new CArrayDataProvider($filteredData);
+		$dataprovider->pagination=['pageSize' =>10,];
+		$sort=new CSort();
+		$sort->attributes=[
+			'number'=>[
+				'asc'=>'number ASC',
+				'desc'=>'number DESC',
+			],
+			'name' => [
+				'asc' => 'name ASC',
+				'desc' => 'name DESC',
+			],
+		];
+		$sort->defaultOrder = "status ASC";
+		$dataprovider->sort=$sort;
+		$cargo=new CargoProcess('search');
+		$cargo->unsetAttributes();
+		if (isset($_GET['agent_id'])) {
+			if (!empty($_GET['agent_id'])) {
+				$cargo->setAgentId($_GET['agent_id']);
+			}
+		}
+
+		if(!empty($_GET['CargoProcess']['searchFrom']))
+		{
+			$cargo->searchFrom=$_GET['CargoProcess']['searchFrom'];
+		}
+		if(!empty($_GET['CargoProcess']['searchTo']))
+		{
+			$cargo->searchTo=$_GET['CargoProcess']['searchTo'];
+		}
+
+
+		if(!empty($_GET['CargoProcess']))
+		{
+			$cargo->setAttributes($_GET['CargoProcess']);
+			if(isset($_GET['CargoProcess']['assignedUser']))
+			{
+				$cargo->assignedUser = $_GET['CargoProcess']['assignedUser'];
+			}
+			if(isset($_GET['CargoProcess']['driver_id']))
+			{
+				$cargo->driver_id = $_GET['CargoProcess']['driver_id'];
+			}
+
+			if(!empty($_GET['CargoProcess']['export']))
+			{
+				$cargo->exportInvoiceList('all');
+				return "";
+			}
+
+			$this->renderPartial('driver_job_list', [
+				'cargo' => $cargo,
+				'name' => 'All',
+				'cargo_type' => CargoProcess::NORMAL_CARGO
+			]);
+		} else {
+			$cargo->setAttribute('id', -1);
+			$this->render('viewDriverJobs', ['dataProvider'=>[$dataprovider,$filtersForm],'cargo'=>$cargo]);
+		}
+	}
+
+	public function actionExport()
+	{
+		$cargo=new CargoProcess('search');
+		$cargo->unsetAttributes();
+
+		if(!empty($_GET['CargoProcess']))
+		{
+			$cargo->setAttributes($_GET['CargoProcess']);
+			if(isset($_GET['CargoProcess']['assignedUser']))
+			{
+				$cargo->assignedUser = $_GET['CargoProcess']['assignedUser'];
+			}
+			if(isset($_GET['CargoProcess']['driver_id']))
+			{
+				$cargo->driver_id = $_GET['CargoProcess']['driver_id'];
+			}
+			if(isset($_GET['ImParcel']['consol_no']))
+			{
+				$cargo->consol_no = $_GET['ImParcel']['consol_no'];
+			}
+		}
+
+		if(isset($_GET['status']))
+		{
+			$cargo->status = $_GET['status'];
+		}
+
+		$dp = $cargo->search(false, false,false,true,$_GET['pod_id'],$_GET['typ']);
+
+		$xls = new oExcel;
+		$i = 1;
+		$xls->addRow($i++, ['Connote', 'Ref', 'Agent Id', 'Consol No','ETA','Type', 'AWB', 'Memo', 'Assigned Agent', 'Process Status', 'Status', 'Delivery Booking Time','Booking Ref', 'Note', 'Org Name', 'First Process Time', 'Last Process Time', 'goods available address', 'Package', 'Quantity', 'Weight', 'CBM', 'Name', 'Tel', 'Address', 'Suburb', 'State', 'Postcode','Region','Amazon PO','FBA ID','Rack']);
+
+		foreach ($dp->data as $r) {
+			$myRegion = $r->getRegion($_GET['pod_id']);
+			$xls->addRow($i++, ['="'.$r->shipment->hbn.'"', '="'.$r->shipment->ref.'"', $r->shipment->agent_id, $r->shipment->consol->no,$r->shipment->consol->eta,$r->getConsolServiceType(), $r->shipment->consol->awb, $r->shipment->can, $r->mdata['assigned_user'], $r->getStatus(), $r->shipment->getStatus(), $r->deliveryBookingTime,@$r->amazon_info->booking_ref, $r->note, $r->driver->name, $r->getFirstProcessTime(), $r->getLastProcessTime(), @DmawbConsol::$available_address_name[$r->shipment->consol->mdata["goods_available_address"]], $r->shipment->pkg, $r->shipment->getQuantity(), $r->shipment->weight, $r->shipment->cbm, $r->shipment->cnee->name, $r->shipment->cnee->tel, $r->shipment->cnee->address, $r->shipment->cnee->suburb, $r->shipment->cnee->state, $r->shipment->cnee->postcode,$myRegion,@$r->shipment->mdata['amazon_po'],@$r->shipment->mdata['amazon_shipment_ids'],$r->shipment->getRackName(false,false)]);
+		}
+
+
+		$xls->output('cargo_process_export_'.time().'.xlsx');
+	}
+
+	public function actionExportFBAPlan(){
+		$xls = new oExcel;
+		$xls = TopCourierService::getFBAPlanBook();
+		$xls->output('FBA_Book_Plan'.time().'.xlsx');
+	}
+
+	public function actionExportCargoProcessJobReport(){
+		if (empty($_POST)) {
+			$this->render('cargo_process_time_pick',array('type'=>"cargoprocessjob"));
+		} else {
+			$startDate = $_POST['startdate'];
+			$endDate = $_POST['enddate'];
+
+			$objCargoProcessJobs = CargoProcessJob::model()->findAll(
+														array(
+															'condition'=>'created>=:startday and created <=:endday and dpt_id = 106 and type = 1',
+															'params' => array(":startday"=>$startDate,":endday"=>$endDate),
+															'order' => 'created',
+													));
+			$xls = new oExcel;
+			$i = 1;
+			$xls->setColWidth([20,20,10,15,15]);
+			$xls->addRow($i++, ['Job Name','Effective Date','Driver','Capacity[CBM]','Capacity[Count]']);
+			foreach($objCargoProcessJobs as $objCargoProcessJob){
+				if(!empty($objCargoProcessJob->job_relations)){
+					$objVehicle = CargoProcessVehicle::model()->findByPk($objCargoProcessJob->vehicle_id);
+					$xls->addRow($i++, [$objCargoProcessJob->job_name,$objCargoProcessJob->created,$objVehicle->vehicle_name,$objCargoProcessJob->getAvailableCBMString(),$objCargoProcessJob->getAvailableCountString()]);
+				}
+			}
+			$xls->output('CargoProcessJob Report ' . date("Y-m-d H:i:s") . '.xlsx');
+			
+		}
+	}
+
+	public function actionExportCargoProcessReport(){
+		if (empty($_POST)) {
+			$this->render('cargo_process_time_pick',array('type'=>"cargoprocess"));
+		} else {
+			$startDate = $_POST['startdate'];
+			$endDate = $_POST['enddate'];
+			//$dateNow = date("Y-m-d",strtotime("now"));
+			//$dateWeekDayOne = date('Y-m-d', (time() - ((date('w') == 0 ? 7 : date('w')) - 1) * 24 * 3600));
+	
+			$objCargoProcesses = CargoProcess::model()->findAll(
+													array(
+														'condition' => 'started >= :startday and started <= :endday and dpt_id = 106 and type = 1',
+														'params'    => array(":startday"=>$startDate,":endday"=>$endDate),
+														'order' => 'started',
+													));
+	
+			$xls = new oExcel;
+			$i = 1;
+			$isAdded=0;
+			foreach($objCargoProcesses as $objCargoProcess){
+				$numWeekday=date("w",strtotime($objCargoProcess->started));
+				if($numWeekday>$isAdded){
+					$isAdded = $numWeekday;
+					$xls->mergeCells('A'.$i.':I'.$i);
+					$xls->addRow($i++, [date("Y-m-d",strtotime($objCargoProcess->started))]);
+					$xls->addRow($i++, ['Connote','Ref','Region','Suburb','Postcode','Distance','Weight','CBM','Job Date','Time Difference']);
+				}
+	
+				if(!empty($objCargoProcess->shipment->status)&&$objCargoProcess->shipment->status!=100){
+					$dataConnote = $objCargoProcess->getHbn();
+					$dataRef = $objCargoProcess->getRef();
+					$dataRegion = $objCargoProcess->shipment->getRegion();
+					$dataSuburb = $objCargoProcess->shipment->cnee->suburb;
+					$dataPostcode = $objCargoProcess->shipment->cnee->postcode;
+					$dataDistance = $objCargoProcess->shipment->getDeliveryDistance();
+					$dataWeight = $objCargoProcess->shipment->weight;
+					$dataCbm = $objCargoProcess->shipment->cbm;
+					$dataJobCreated = "";
+					$dataDateDifference = "";
+					$dataCost = 0;
+					$dataRevenul = 0;
+					$costRate = OrgRate::model()->findByPk(70);
+					$dataCost = round(ImcoConsol::getCourierCostPrice($costRate, $dataPostcode, $dataWeight,1,"",$dataSuburb),2);
+					//$dataSurcharge = round(WmsTask::model()->deliveryTaskSurCharge(114,$wmsLength,$wmsWidth,$wmsHeight,$floatWeight),2);
+	
+					$objCargoProcessJobRelation = CargoProcessJobRelations::model()->find('cargo_process_id=:cId and active = 1',[":cId"=>$objCargoProcess->id]);
+					if(!empty($objCargoProcessJobRelation)){
+						$dataJobCreated = $objCargoProcessJobRelation->job->created;
+						$dataDateDifference = strtotime($objCargoProcessJobRelation->job->created) - strtotime($objCargoProcess->started);
+						$dataDateDifference = round($dataDateDifference / (60 * 60 * 24));
+					}
+					$xls->addRow($i++,[$dataConnote,$dataRef,$dataRegion,$dataSuburb,$dataPostcode,$dataDistance,$dataWeight,$dataCbm,$dataJobCreated,$dataDateDifference]);
+				}
+			}
+			$xls->output('CargoProcess Report ' . date("Y-m-d H:i:s") . '.xlsx');
+		}
+
+	}
+
+	public function actionExportWithFee()
+	{
+		$cargo=new CargoProcess('search');
+		$cargo->unsetAttributes();
+
+		if(!empty($_GET['CargoProcess']))
+		{
+			$cargo->setAttributes($_GET['CargoProcess']);
+			if(isset($_GET['CargoProcess']['assignedUser']))
+			{
+				$cargo->assignedUser = $_GET['CargoProcess']['assignedUser'];
+			}
+			if(isset($_GET['CargoProcess']['driver_id']))
+			{
+				$cargo->driver_id = $_GET['CargoProcess']['driver_id'];
+			}
+			if(isset($_GET['ImParcel']['consol_no']))
+			{
+				$cargo->consol_no = $_GET['ImParcel']['consol_no'];
+			}
+		}
+
+		if(isset($_GET['status']))
+		{
+			$cargo->status = $_GET['status'];
+		}
+
+		$dp = $cargo->search(false, false,false,true,$_GET['pod_id'],$_GET['typ']);
+		$sheets = [];
+		$allData = $dp->data;
+		$xls = new oExcel;
+		$i = 0;
+		$j = 1;
+		$xls->addRow($j++, ['序号', '柜号', 'SKP号码', 'postcode', '所属区域', '重量', '体积', '常规收费', '是否有oversize(任何单边超过1.2米)','chargecode','job_pallet_no']);
+		foreach ($allData as $key => $cargo) {
+			$p = $cargo->shipment;
+			$containerNo = empty($p->consol)?"":(empty($p->consol->mdata['container_no'])?$p->consol->awb:$p->consol->mdata['container_no']);
+			$result=$cargo->shipment->getChargeByChargecode('',false,null,true,false,true);
+			$zone = "";
+			if(!empty($result['rate'])&&is_object($result['rate']))
+			{
+				$zone = $result['rate']->zone;
+			}
+			$chargecode = @$p->mdata['chargecode'];
+			$index = $j;
+			$xls->addRow($j++, [$key+1,$containerNo,$p->ref,$p->postcode,$zone,$p->weight,$p->getTotalCBM(),$result['amount'],(empty($p->isOversize())?"No":"Yes"),$chargecode,@$cargo->mdata["job_pallet_no"]]);
+			$xls->setNumber('F'.$index.':H'.$index);
+		}
+
+		$xls->output('cargo_process_with_fee_export'.time().'.xlsx');
+	}
+
+	public function actionExportAgent()
+	{
+		$cargo=new CargoProcess('search');
+		$cargo->unsetAttributes();
+
+		if(!empty($_GET['CargoProcess']))
+		{
+			$cargo->setAttributes($_GET['CargoProcess']);
+			if(isset($_GET['CargoProcess']['assignedUser']))
+			{
+				$cargo->assignedUser = $_GET['CargoProcess']['assignedUser'];
+			}
+			if(isset($_GET['CargoProcess']['driver_id']))
+			{
+				$cargo->driver_id = $_GET['CargoProcess']['driver_id'];
+			}
+			if(isset($_GET['ImParcel']['consol_no']))
+			{
+				$cargo->consol_no = $_GET['ImParcel']['consol_no'];
+			}
+		}
+
+		if(isset($_GET['status']))
+		{
+			$cargo->status = $_GET['status'];
+		}
+
+		$dp = $cargo->search(false, false,false,true,$_GET['pod_id'],$_GET['typ']);
+		$sheets = [];
+		$allData = $dp->data;
+		foreach ($allData as $key => $data) {
+			$date = date("Y-m",strtotime($data->logs[0]->time));
+			if(!empty($sheets[$date]))
+			{
+				$sheets[$date][]=$data;
+			}else
+			{
+				$sheets[$date]=[$data];
+			}
+		}
+		$xls = new oExcel;
+		$i = 0;
+		foreach ($sheets as $key => $datas) {
+			if($i!=0)
+			{
+				$xls->createSheet($key);
+				$xls->goSheet($i);
+			}else
+			{
+				$xls->setTitle($key);
+			}
+			$xls->setColWidthString(['A'=>12,'B'=>12,'C'=>12,'D'=>24,'E'=>24,'F'=>12,'G'=>12,'H'=>12,'I'=>12,'J'=>12,'K'=>12,'L'=>12,'M'=>12,'N'=>24,'O'=>12,'P'=>12,'Q'=>12,'R'=>12,'S'=>12,'T'=>12,'U'=>12,'V'=>12,'W'=>12,'X'=>12,'Y'=>12]);
+			$j = 1;
+			$xls->addRow($j++, ['货物信息', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '派送信息', '','','']);
+			$xls->mergeCells('A1:U1');
+			$xls->mergeCells('V1:Y1');
+			$xls->addRow($j++, ['序号', '登记日期', '区域', '单号', '重量', '实际尺寸', '体积', 'size diff', '超尺寸备注', '件数', '托拍数量', '货主', '地址', 'Suburb', '邮编', '联系人', '电话', '距离km', 'region', '位置', '备注', '承运单位', '派送时间','Note','进度备注','Job Pallet No']);
+			foreach ($datas as $key => $cargo) {
+				$p = $cargo->shipment;
+				$myRegion = $cargo->getRegion($_GET['pod_id']);
+				$distance = GoogleMapAPI::getDistance($p);
+				if($distance<=30)
+				{
+					$region = $cargo->getPodName()."-"."1";
+				}else if($distance>30 and $distance<=60)
+				{
+					$region = $cargo->getPodName()."-"."2";
+				}elseif($distance>60 and $distance<=90)
+				{
+					$region = $cargo->getPodName()."-"."3";
+				}else
+				{
+					$region = $cargo->getPodName()."-"."other";
+				}
+				$xls->addRow($j++, [$key+1,$cargo->getFirstTime(),$cargo->getPodName(),$p->hbn,$p->weight,'',$p->getTotalCBM(),'','',$p->pkg,$p->mdata['amzon_pallet'],$p->agent->name,$p->cnee->address,$p->cnee->suburb,$p->cnee->postcode,$p->cnee->name,$p->cnee->tel,$distance,$region,$myRegion,'','','','','','',@$cargo->mdata["job_pallet_no"]]);
+			}
+			$xls->centerAlignment('A1:U1');
+			$xls->centerAlignment('V1:Y1');
+
+			$i++;
+		}
+		$xls->output('cargo_process_agent_export'.time().'.xlsx');
+	}
+
+	public function actionSendNormalCargoSmsEmail()
+	{
+		$id = $_GET["id"];
+		$model = $this->loadModel($id);
+		$emailService = new EmailService();
+		$result = $emailService->sendNormalCargoSmsEmail($model);
+		if($result===True)
+		{
+			echo "done";
+		}else
+		{
+			echo $result;
+		}
+		return;
+	}
+
+	public function actionExportAmazonInfo()
+	{
+		$id = $_GET["ids"];
+		if(strpos($id,CargoProcess::IP_SEPERATOR))
+		{
+			$xls = new oExcel;
+			$i = 1;
+			$xls->addRow($i++, ['Amazon PO#', 'Amazon Shipment Id']);
+			$ids = explode(CargoProcess::IP_SEPERATOR,$id);
+			$result['ids'] = $id;
+			$apos = [];
+			$aids = [];
+			foreach ($ids as $key => $thisId) 
+			{
+				$cargoProcess = CargoProcess::model()->findByPk($thisId);
+				$amazon_po = $cargoProcess->shipment->mdata['amazon_po'];
+				$thisPos = preg_split('/[.,;]+/', trim($amazon_po));
+				$apos = array_merge($apos,$thisPos);
+				$amazon_shipment_ids = $cargoProcess->shipment->mdata['amazon_shipment_ids'];
+				$thisIds = preg_split('/[.,;]+/', trim($amazon_shipment_ids));
+				$aids = array_merge($aids,$thisIds);
+			}
+			$xls->addRow($i++, [join(",",$apos),join(",",$aids)]);
+			$xls->output('imp_export_amazon_info'.time().'.xlsx');
+		}
+		echo "done";
+	}
+
+	public function actionFbaReport()
+	{
+		if(!empty($_GET['type']))
+		{
+			$type = $_GET['type'];
+			$ddptId = $_GET['wid'];
+			$swid =  $_GET['swid'];
+			$dateto = '';
+			if(!empty($_GET['dateto']))
+			{
+				$dateto = $_GET['dateto'];
+			}
+			if($type==4 &&!empty($_GET['datefrom']))
+			{
+				$datefrom = $_GET['datefrom'];
+			}else
+			{
+				$datefrom = date('Y-m-d');
+			}
+			$filtersForm = new FiltersForm();
+			$reportService = new ReportService();
+			if(!empty($_GET['export']))
+			{
+				if($type==1)
+				{
+					$extraTitle =[["Top Logistics Amazon Delivery Forecast"],["Till:".$dateto],[]];
+				}else if($type ==2)
+				{
+					$extraTitle =[["Top Logistics Amazon Delivery Ready To Despatch"],[]];
+				}else if($type ==3)
+				{
+					$extraTitle =[["Top Logistics Amazon Delivery Daily Report"],[]];
+				}
+				else if($type ==4)
+				{
+					$extraTitle =[["Top Logistics Amazon Delivery Weekly Report"],[]];
+				}
+				$report = $reportService->getFbaReport($ddptId,$type,$datefrom,$dateto,$filtersForm,1,$swid);
+				$reportService->exportReport($report,$extraTitle);
+				echo $this->createUrl('report/downloadFbaReport');
+				return;
+			}else
+			{
+				$report = $reportService->getFbaReport($ddptId,$type,$datefrom,$dateto,$filtersForm,false,$swid);
+				$this->render("fba_report_content",['dataProvider'=>$report[0],'filter'=>$report[1],'attributes'=>$report[2]]);
+			}
+		}else
+		{
+			$this->render("fba_report");
+		}
+	}
+
+	public function actionSplitShipment()
+	{
+		$model = new CargoProcess();
+		if(!empty($_POST))
+		{
+			if(empty($_POST['ref'])||empty($_POST['packages']))
+			{
+				$model->addError("Input ref and packages","Input ref and packages");
+				$this->ajaxResult($model);
+			}else
+			{
+				$ref = trim($_POST['ref']);
+				if($_POST['packages'])
+				{
+					$cargoProcess = CargoProcess::model()->with(["shipment"])->find("shipment.ref = :ref",[":ref"=>$ref]);
+					if(empty($cargoProcess))
+					{
+						$model->addError("Can't find the shipment","Can't find the shipment");
+						$this->ajaxResult($model);
+					}else
+					{
+
+						if(!empty($cargoProcess->mdata['sub_shipments']))
+						{
+							if($cargoProcess->mdata['left_packages']<=$_POST['packages'])
+							{
+								$model->addError("Only left ".$cargoProcess->mdata['left_packages']." packages","Only left ".$cargoProcess->mdata['left_packages']." packages");
+								$this->ajaxResult($model);
+							}
+
+							$ssn = count($cargoProcess->mdata['sub_shipments'])+1;
+							$suffix = AppHelper::ColNumnerToColCode($ssn);
+							$caref = $ref."-".$suffix;
+							$model = $cargoProcess->copyAttributes($model);
+							$model->gate_pass_id = 0;
+							$model->cargo_receipt = 0;
+							$model->mdata['left_packages'] = $_POST['packages'];
+							$model->mdata['sub_shipments'] = [];
+							$model->mdata['caref'] =$caref;
+							if($model->save())
+							{
+								$model->generateGatePass();
+								$cargoProcess->mdata['caref'] =$ref."-Main";
+								$cargoProcess->mdata['sub_shipments'][] = $caref;
+								$cargoProcess->mdata['left_packages'] = $cargoProcess->mdata['left_packages'] - $_POST['packages'];
+								$cargoProcess->save();
+							}
+						}else
+						{
+							if($cargoProcess->shipment->pkg<=$_POST['packages'])
+							{
+								$model->addError("Only left ".$cargoProcess->shipment->pkg." packages","Only left ".$cargoProcess->shipment->pkg." packages");
+								$this->ajaxResult($model);
+							}
+
+							$suffix = AppHelper::ColNumnerToColCode(1);
+							$caref = $ref."-".$suffix;
+							$model = $cargoProcess->copyAttributes($model);
+							$model->gate_pass_id = 0;
+							$model->cargo_receipt = 0;
+
+							$model->mdata['left_packages'] = $_POST['packages'];
+							$model->mdata['sub_shipments'] = [];
+							$model->mdata['caref'] =$caref;
+							if($model->save())
+							{
+								$model->generateGatePass();
+								$cargoProcess->mdata['caref'] =$ref."-Main";
+								$cargoProcess->mdata['sub_shipments'] = [$caref];
+								$cargoProcess->mdata['left_packages'] = $cargoProcess->shipment->pkg - $_POST['packages'];
+								$cargoProcess->save();
+							}
+						}
+						$this->ajaxResult($model);
+					}
+				}
+			}
+		}else
+		{
+			$this->render("split_shipment");
+		}
+	}
+	public function actionSubmitCargoJob()
+	{
+		$ids = explode(',',$_POST['ids']);
+		$cargoSequences = explode(',',$_POST['cargoSequence']);
+		$data = [];
+		$jobName = $_POST['jobName'];
+		$driverId = $_POST['driverId'];
+		$description = $_POST['description'];
+		$dptId =  $_POST['dptId'];	
+		$type =  $_POST['type'];
+		$vehicleId = $_POST['vehicleId'];
+		$created = $_POST['created'];
+		$jobInterstateCost = $_POST['interstate_cost'];
+		foreach ($ids as $key => $id) {
+			$data[] = [$id,$cargoSequences[$key]];
+		}
+		$region = $_POST['region'];
+		$directionforcustomer =  $_POST['directionforcustomer'];
+		$distance = $_POST['distance'];
+		$destination = $_POST['destination'];
+		$time = $_POST['time'];
+		$isa = !empty($_POST['isa']) ? $_POST['isa'] : '';
+		$amazonBookingTime = !empty($_POST['amazon_booking_time']) ? date('Y-m-d H:i:s', strtotime($_POST['amazon_booking_time'])) : '';
+		$topCourierService = new TopCourierService();
+		$model = $topCourierService->createCargoJob($data,$jobName,$driverId,$description,$dptId,$type,$vehicleId,$region,$directionforcustomer,$distance,$time,$created,$destination, false, $isa, $amazonBookingTime, $jobInterstateCost);
+		//$model = $topCourierService->createCargoJob($data,$jobName,$driverId,$description,$dptId,$type,$vehicleId);
+		if ($model->type == CargoProcessJob::INTERSTATE_JOB) {
+			$topCourierService->splitCostByWeight($model);
+		}
+		$this->ajaxResult($model);
+	}
+
+	public function actionSaveCargoJob()
+	{
+		$temp=$_GET['tab'];
+		$ids = explode(',',$_POST['ids']);
+		$cargoSequences = explode(',',$_POST['cargoSequence']);
+		$jobPalletNo = explode(',',$_POST['jobPalletNo']);
+		$data = [];
+		$vehicleId = $_POST['vehicleId'];
+		$jobName = $_POST['jobName'];
+		$driverId = $_POST['driverId'];
+		$description = $_POST['description'];
+		$created = $_POST['created'];
+		$directionforcustomer =  $_POST['directionforcustomer'];
+		$distance = $_POST['distance'];
+		$destination = $_POST['destination'];
+		$time = $_POST['time'];
+		$jobInterstateCost = $_POST['interstate_cost'];
+
+		$jobId =  $_POST['jobId'];
+		foreach ($ids as $key => $id) {
+			$data[] = [$id,$cargoSequences[$key],$jobPalletNo[$key]];
+		}
+		$isa = !empty($_POST['isa']) ? $_POST['isa'] : '';
+		$amazonBookingTime = !empty($_POST['amazon_booking_time']) ? date('Y-m-d H:i:s', strtotime($_POST['amazon_booking_time'])) : '';
+		//if no cargoprocesss be choosed. Only save cargo_job
+		if(empty($ids[0])){
+			$topCourierServiceJob = new TopCourierService();
+			$model = $topCourierServiceJob->modifyCargoJob($jobName,$driverId,$description,$jobId,$vehicleId,$directionforcustomer,$distance,$time,$created,$destination);
+
+		}else{
+			$topCourierService = new TopCourierService();
+			$model = $topCourierService->saveCargoJob($data,$jobName,$driverId,$description,$jobId,$vehicleId,$directionforcustomer,$distance,$time,$created,$destination, $isa, $amazonBookingTime, $jobInterstateCost);
+			if ($model->type == CargoProcessJob::INTERSTATE_JOB) {
+				$topCourierService->splitCostByWeight($model);
+			}
+		}
+
+		$this->ajaxResult($model);
+	}
+
+	public function actionAddCargosIntoJob($id)
+	{
+		$model = CargoProcessJob::model()->findByPk($id);
+		$filtersForm=new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+		$cargo=new CargoProcess('search');
+		$cargo->unsetAttributes();
+		$cargo->isCreateJob = 1;
+		if(!empty($_GET['CargoProcess']))
+		{
+			$cargo->setAttributes($_GET['CargoProcess']);
+			if(isset($_GET['CargoProcess']['assignedUser']))
+			{
+				$cargo->assignedUser = $_GET['CargoProcess']['assignedUser'];
+			}
+			if(isset($_GET['CargoProcess']['driver_id']))
+			{
+				$cargo->driver_id = $_GET['CargoProcess']['driver_id'];
+			}
+			if(isset($_GET['ImParcel']['consol_no']))
+			{
+				$cargo->consol_no = $_GET['ImParcel']['consol_no'];
+			}
+			if(isset($_GET['CargoProcess']['exInfo']))
+			{
+				$cargo->exInfo = $_GET['CargoProcess']['exInfo'];
+			}
+		}
+		$this->render('add_cargo_into_job', [
+				'model' => $model,
+				'cargo' => $cargo
+		]);
+	}
+
+	public function actionRemoveCargoJob()
+	{
+		$id = $_POST['id'];
+		$topCourierService = new TopCourierService();
+		$model = $topCourierService->removeCargoJob($id);
+		if (in_array($model->type, array(CargoProcessJob::FBA_JOB, CargoProcessJob::B2B_JOB, CargoProcessJob::INTERSTATE_JOB))) {
+			$topCourierService->splitCostByWeight($model);
+		}
+		$this->ajaxResult($model);
+	}
+
+	public function actionSaveCargoIntoJob()
+	{
+		$ids = explode(',',$_POST['ids']);
+		$jobId = $_POST['jobId'];
+		$topCourierService = new TopCourierService();
+		$model = $topCourierService->saveCargoIntoJob($ids,$jobId);
+		if (in_array($model->type, array(CargoProcessJob::FBA_JOB, CargoProcessJob::B2B_JOB, CargoProcessJob::INTERSTATE_JOB))) {
+			$topCourierService->splitCostByWeight($model);
+		}
+		$this->ajaxResult($model);
+	}
+
+	public function actionGenerateJob()
+	{
+		$topCourierService = new TopCourierService();
+		$topCourierService->generateCargoProcessJobAuto();
+		echo "done";
+	}
+
+	public function loadModel($id)
+	{
+		$model= CargoProcess::model()->findByPk($id);
+		if ($model===null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		return $model;
+
+	}
+
+	public function actionSendGoogleReviewEmail(){
+		$numId = $_POST['id'];
+		$objCGoogleReview = new CGoogleReview;
+		$lisrRecord = $objCGoogleReview->funcCreateListRecordByShipmentId([$numId]);
+		//$objCGoogleReview->funcSendEmial($lisrRecord);
+		$objCGoogleReview->funcSendSms($lisrRecord);
+
+		echo json_encode(['isSuccess'=>true]);
+
+	}
+
+	public function actionListCargoProcessVehicle(){
+		$this->render("cargo_process_vehicle_list");
+	}
+
+	public function actionViewVehicle(){
+		if(isset($_GET['id'])){
+			$objCargoProcessVehicle = CargoProcessVehicle::model()->findByPk($_GET['id']);
+			$this->render("cargo_process_vehicle_edit",['objCargoProcessVehicle'=>$objCargoProcessVehicle]);
+		}
+		else{
+			$objCargoProcessVehicle = new CargoProcessVehicle;
+			$this->render("cargo_process_vehicle_edit",['objCargoProcessVehicle'=>$objCargoProcessVehicle]);
+		}
+	}
+
+	public function actionEditVehicle(){
+		//check
+		$listError = [];
+		if(isset($_POST['plate_number'])){
+			$obj = CargoProcessVehicle::model()->find('plate_number=:plate_number',[':plate_number'=>$_POST['plate_number']]);
+			if($obj != null){
+				$listError[] = 'Plate number already exist.';
+			}
+
+		}
+		if(!is_numeric($_POST['min_cbm'])){
+			$listError[] = 'CBM is not a number.';
+		}
+		if(!is_numeric($_POST['top_width'])){
+			$listError[] = 'Width is not a number.';
+		}
+		if(!is_numeric($_POST['height'])){
+			$listError[] = 'Height is not a number.';
+		}
+		if(!is_numeric($_POST['length'])){
+			$listError[] = 'Length is not a number.';
+		}
+
+		if(!empty($listError)){
+			echo json_encode(['isSuccess'=>false,'listError'=>$listError]);
+			return;
+		}
+
+		if(isset($_POST['id'])){
+			$objTopCourierService = new TopCourierService();
+			$objTopCourierService->funcUpdateCargoProcessVehicle(
+				$_POST['id'],
+				$_POST['type'],
+				CargoProcessVehicle::dicEnum2Type[$_POST['type']],
+				$_POST['min_cbm'],
+				$_POST['min_cbm'],
+				$_POST['top_width'],
+				$_POST['top_width'],
+				$_POST['height'],
+				$_POST['length'],
+				$_POST['status'],
+				0,
+				0,
+				// $_POST['plate_number'],
+				0
+			);
+
+			echo json_encode(['isSuccess'=>true]);
+			return ;
+		}
+		else{
+			$objTopCourierService = new TopCourierService();
+			$objTopCourierService->funcAddCargoProcessVehicle(
+				$_POST['type'],
+				CargoProcessVehicle::dicEnum2Type[$_POST['type']],
+				$_POST['min_cbm'],
+				$_POST['min_cbm'],
+				$_POST['top_width'],
+				$_POST['top_width'],
+				$_POST['height'],
+				$_POST['length'],
+				$_POST['status'],
+				0,
+				0,
+				$_POST['plate_number'],
+				0
+			);
+
+			echo json_encode(['isSuccess'=>true]);
+			return ;
+		}
+	}
+
+	public function actionExportCitoExcel(){
+		$dicOtid2PickupFrom=[
+			0=>'CITO',
+			10=>'PDK',
+		];
+
+		$dicAddress = [
+			'CITO'=>[
+				'name'=>'cito',
+				'street'=>'22 sara grove',
+				'suburb'=>'Tottenham',
+				'postcode'=>'3012',
+				'state'=>'VIC',
+			],
+			'PDK'=>[
+				'name'=>'pdk',
+				'street'=>'3b/8 Judge Street',
+				'suburb'=>'Sunshine',
+				'postcode'=>'3020',
+				'state'=>'VIC',
+			],
+		];
+
+		$xls = new oExcel;
+		$xls->addRow(1, [
+			// 'customer id',  
+			'customer name',  
+			// 'manifest_reference',  
+			'Service Type',  
+			'consignment_type_name',  
+			// 'driver_name',  
+			// 'run_sheet_name',  
+			// 'run_sheet_date',  
+			// 'delivery_run_name',  
+			'consignment_reference',  
+			// 'consignment_data_custom_field_2',  
+			'pickup_name',  
+			'pickup_street',  
+			'pickup_suburb',  
+			'pickup_postcode',  
+			'pickup_state',  
+			'delivery_name',  
+			'delivery_street',  
+			'delivery_suburb',  
+			'delivery_postcode',  
+			'delivery_state',  
+			'special_instructions',  
+			'required_delivery_date',  
+			'deliver_by_time',//
+			// 'item_code',  
+			'description',  
+			'qty_item',  
+			'pal_item',  
+			'cubic_item',  
+			'weight_item',  
+			'space_item',  
+			'length_item',  
+			'width_item',  
+			'height_item',  
+			'value',  
+			// 'ci_custom_field_1',  
+			// 'ci_custom_field_2'
+	   ]);
+
+		$numId = $_GET['id'];
+		$listRelation = CargoProcessJobRelations::model()->findALL('job_id=:job_id and active = 1',[':job_id'=>$numId]);
+		$i = 2;
+		foreach($listRelation as $objRelation){
+			$objCargoProcess = $objRelation->cargo_process;
+			$objImparcel = $objCargoProcess->shipment;
+			$numWeight = $objImparcel->weight;
+			$numPkg = $objImparcel->pkg;
+			$numWeightAverage = $numWeight/$numPkg;
+			$numCBM = $objImparcel->getTotalCBM();
+
+			$length_item = '';
+			$width_item = '';
+			$height_item = '';
+			if(!empty($objImparcel->packs))
+			{
+				$length_item = $objImparcel->packs[0]['length'];
+				$width_item = $objImparcel->packs[0]['width'];
+				$height_item = $objImparcel->packs[0]['height'];
+			}
+
+			$strPickupFrom = $dicOtid2PickupFrom[$objImparcel->ot_id];
+
+			// Metro Pallets 3. 大包裹 立方数大于等于1，件数无限制
+			// Skid 2. 中包裹 重量250KG，立方数小于等于1，件数小于等于20，单件小于等于25KG，长度宽度小于等于1.2米
+			// Parcel 1. 小包裹 重量50KG，件数小于等于10，单件小于等于25KG，长度宽度小于等于1.2米
+			// Tailgate Pallet 需在shipment或者c-job流程上，加一个tailgate tick box， 当这个框勾上以后，则默认就用这个服务， 不管货物什么尺寸
+			$strServiceType = '';
+			if($numWeight<=50&&$numPkg<=10&&$numWeightAverage<=25){
+				$strServiceType = 'Parcel';
+			}
+			else if($numWeight<=250&&$numPkg<=20&&$numWeightAverage<=25&&$numCBM<=1){
+				$strServiceType = 'Skid';
+			}
+			if($numCBM>1){
+				$strServiceType = 'Metro Pallets';
+			}
+			if(isset($objImparcel->mdata['Tailgate_Pallet'])&& $objImparcel->mdata['Tailgate_Pallet']== true){
+				$strServiceType = 'Tailgate Pallet';
+			}
+
+			if($objImparcel->AmazonInfo != null){
+				$strTime = date('d-m-Y',strtotime($objImparcel->AmazonInfo->amazon_booking_time));
+			}
+
+
+			$strDescription='';
+			$numTotalValue = 0;
+			foreach($objImparcel->eitems['g'] as $j=>$g){
+				$strDescription.=$g.';';
+				$numTotalValue+=$objImparcel->eitems['v'][$j]*$objImparcel->eitems['q'][$j];
+			}
+
+			$objCnee = $objImparcel->cnee;
+			$xls->addRow($i, [
+				'Top Logistics',//'customer name',  
+				$strServiceType,//'Service Type',  
+				'Point to Point',//'consignment_type_name',  
+				$objImparcel->hbn,//'consignment_reference',   
+				$dicAddress[$strPickupFrom]['name'],// 'pickup_name',  
+				$dicAddress[$strPickupFrom]['street'],// 'pickup_street',  
+				$dicAddress[$strPickupFrom]['suburb'],// 'pickup_suburb',  
+				$dicAddress[$strPickupFrom]['postcode'],// 'pickup_postcode',  
+				$dicAddress[$strPickupFrom]['state'],// 'pickup_state',  
+				$objCnee->name,// 'delivery_name',  
+				$objCnee->address,// 'delivery_street',  
+				$objCnee->suburb,// 'delivery_suburb',  
+				$objCnee->postcode,// 'delivery_postcode',  
+				$objCnee->state,// 'delivery_state',  
+				$objImparcel->note,//'special_instructions',  
+				$strTime,//'required_delivery_date',  
+				$strTime,//'deliver_by_time',
+				$strDescription,//'description',  
+				$objImparcel->pkg,//'qty_item',  
+				$objImparcel->mdata['amzon_pallet'],//'pal_item',  
+				$objImparcel->mdata['total_cbm'],//'cubic_item',  
+				$objImparcel->weight,//'weight_item',  
+				$objImparcel->mdata['amzon_pallet'],//'space_item',  
+				$length_item,// 'length_item',  
+				$width_item,// 'width_item',  
+				$height_item,// 'height_item',  
+				$numTotalValue,//'value',  
+		   ]);
+
+			$i++;
+
+
+		}
+
+		$strFolder = Yii::app()->basePath . DIRECTORY_SEPARATOR . 'runtime' . DIRECTORY_SEPARATOR . 'temp';
+		if (!file_exists($strFolder)) {
+			mkdir($strFolder);
+		}
+
+		$numTime = time();
+		$strName = 'cito_'.$numTime.'.xlsx';
+		$strFile = $strFolder . DIRECTORY_SEPARATOR .$strName ;
+
+		$xls->output($strFile,null,false);
+
+		$numIdFileRepo = FileRepo::storeFile($strFile, $strName, FileRepo::CARGOPROCESSFILETYPE,$numId);
+		$objFileRepo = FileRepo::model()->findByPk($numIdFileRepo);
+
+		$strUrlPrefix = 'https://os.toplogistics.com.au';
+		if ($_SERVER['HTTP_HOST'] == 'localhost:82') {
+			$strUrlPrefix = 'http://localhost:82';
+		}
+		$strUrl = $strUrlPrefix . '/filerepo/' . $objFileRepo->hash . '/' . $objFileRepo->name;
+
+		$model = CargoProcessJob::model()->findByPk($numId);
+		Log::add($model, Log::LOG_TYPE_NOTES, ['notes' => $strUrl]);
+
+
+
+		$xls->output($strName);
+	}
+
+	public function actionSendToTony(){
+		$cJobId = $_GET['id'];
+		$tony = new TonyAPI();
+		$isError = $tony->postOrder($cJobId);
+		if($isError['code']==1){
+			$model = CargoProcessJob::model()->findByPk($cJobId);
+			$model->mdata['Post'] = 1;
+			$model->save();
+			
+			echo 'done';
+		}else{
+			echo 'error';
+		}
+	}
+
+	public function actionCreateInvoice($id,$type){
+
+		$modelCargo = $this->loadModel($id);
+
+		[$app_name, Yii::app()->name] = [Yii::app()->name, 'TLA'];
+
+		$modelInvoice = new Invoice('create');
+		$modelInvoice->type = 40;
+		$modelInvoice->currency = 1;
+		$modelInvoice->dpmt = 50;
+		if($type){
+			$to_id = $modelCargo->shipment->agent_id;
+		}else{
+			$to_id = 3494;//casual
+		}
+		$modelInvoice->to_id=$to_id;
+		$modelInvoice->dpt_id = $modelCargo->dpt_id;
+
+		if (isset($_POST['Invoice'])) {
+			$dpmt = isset($_POST['Invoice']['dpmt']) ? $_POST['Invoice']['dpmt'] : 0;
+			if ($dpmt <= 0) {
+				$modelInvoice->addError('dpmt        ', 'Invoice Department is mandatory!');
+				$this->ajaxResult($modelInvoice, ['id']);
+			}
+			$consoleNo = '';
+			if (isset($_POST['consolno'])) {
+				$consoleNo = trim($_POST['consolno']);
+			}
+
+			$modelInvoice->attributes = $_POST['Invoice'];
+			$modelInvoice->to_id =  $_POST['Invoice']['to_id'];
+			$modelInvoice->dpt_id = $_POST['Invoice']['dpt_id'];
+			$modelInvoice->dpmt = $_POST['Invoice']['dpmt'];
+			$modelInvoice->status = 1;
+
+			$awb = '';
+			if (!empty($consoleNo)) {
+				$console = Consol::model()->find('no = :no', [':no' => $consoleNo]);
+			}
+			if (!empty($console)) {
+				$modelInvoice->consol_id = $console->id;
+				$awb = $console->awb;
+			} else if (!empty($_POST['consolno'])) {
+				$modelInvoice->addError('dpmt', 'Consol No is incorrect!');
+				$this->ajaxResult($modelInvoice, ['id']);
+			}
+			$modelInvoice->save();
+			$total = 0;
+			$tgst = 0;
+			if (is_array($_POST['InvLine']['amount'])) {
+				foreach ($_POST['InvLine']['amount'] as $i => $a) {
+					if(!empty($a)){
+						$il = new InvLine;
+						$il->inv_id = $modelInvoice->id;
+						$il->ccode = $_POST['InvLine']['ccode'][$i];
+						$il->det = $_POST['InvLine']['det'][$i];
+						$il->tax = $_POST['InvLine']['tax'][$i];
+						$il->amount = $a;
+						$gst = 0;
+						if ($il->tax == 'OUTPUT') {
+							$gst = floatval($il->amount) * 10 / 100;
+						}
+						$il->amount += $gst;
+						$il->gst = $gst;
+						$il->qty = empty($_POST['InvLine']['qty'][$i]) ? 1 : $_POST['InvLine']['qty'][$i];
+
+						// linked invoice line with related console if needed
+						if (!empty($console)) {
+							$il->fid = $console->id;
+							$il->model = $console->getType();
+						}else{
+							$il->fid = $modelCargo->id;
+							$il->model = "CargoProcessPlanLine";
+						}
+						$il->save();
+						$total += $il->amount * $il->qty;
+						$tgst += $il->gst * $il->qty;
+					}
+				}
+			} else {
+					$il = new InvLine;
+					$il->inv_id = $modelInvoice->id;
+					$il->ccode = $_POST['InvLine']['ccode'];
+					$il->det = $_POST['InvLine']['det'];
+					$il->tax = $_POST['InvLine']['tax'];
+					$il->amount = $_POST['InvLine']['amount'];
+					$gst = 0;
+					if ($il->tax == 'OUTPUT') {
+						$gst = floatval($il->amount) * 10 / 100;
+					}
+					$il->amount += $gst;
+					$il->gst = $gst;
+					$il->qty = empty($_POST['InvLine']['qty']) ? 1 : $_POST['InvLine']['qty'];
+
+						// linked invoice line with related console if needed
+					if (!empty($console)) {
+						$il->fid = $console->id;
+						$il->model = $console->getType();
+					}else{
+						$il->fid = $modelCargo->id;
+						$il->model = "CargoProcessRTS";
+					}
+					$il->save();
+					$total += $il->amount * $il->qty;
+					$tgst += $il->gst * $il->qty;
+			}
+			$modelInvoice->total = number_format($total, 2, '.', '');
+			$modelInvoice->gst = number_format($tgst, 2, '.', '');
+			$modelInvoice->mdata['name'] = $modelInvoice->cust->name;
+			$modelInvoice->save();
+			Yii::app()->name = $app_name;
+
+			$modelCargo->mdata['system_invoice'] = $modelInvoice->id;
+			$modelCargo->save();
+			$this->ajaxResult($modelInvoice, ['id']);
+		}
+		$modelInvoice->date = date('Y-m-d');
+		$modelInvoice->due = date('Y-m-d');
+		$this->render('create_invoice', ['model' => $modelInvoice,'cargoplan'=>$modelCargo]);
+	}
+
+	public function actionApproveRedelivery(){
+		$boolApprove = $_POST['approve'];
+		$CargoProcessJobRelationId = explode(',',$_POST['id']);
+		$modelCargoProcessJobRelation = CargoProcessJobRelations::model()->findByPk($CargoProcessJobRelationId);
+		if(!empty($modelCargoProcessJobRelation)){
+			$modelCargoProcessJobRelation->isredelivery=$boolApprove;
+			$modelCargoProcessJobRelation->save();
+			echo json_encode([
+				'isSuccess' => true,
+			]);
+			return;
+		}
+		echo json_encode([
+			'isSuccess' => false,
+		]);
+		return;
+	}
+
+	public function actionDriverScheduleList(){
+		$model = new CargoProcessJob;
+		$filtersForm = new FiltersForm;
+		if (isset($_GET["CargoProcessJob"])) {
+			$model->driver_id = $_GET["CargoProcessJob"]['driver_id'];
+			$model->week = $_GET["CargoProcessJob"]['week'];
+			$provide = CargoProcessJobService::getDriverScheduleByWeek($_GET["CargoProcessJob"]['driver_id'],$_GET["CargoProcessJob"]['week']);
+		}else{
+			$model->driver_id =2622;
+			$model->week = 0;
+			$provide =[];
+		}
+		$filteredDataMonth = $filtersForm->filter($provide);
+		$provide = new CArrayDataProvider($filteredDataMonth);
+		$provide->pagination = ['pageSize' => 100,];
+		$this->render('driver_schedule_report', [
+			'model'=>$model,
+			'provide'=>$provide,
+			'pod_id'=>null,
+			//'modelType'=>'Cargo_Porcess',
+			//'isReCalculate' => $boolRe
+		]);
+	}
+
+	public function actionfulfillCargoProcess(){
+		$tonyApi = new TonyAPI();
+		$modelCJobs = CargoProcessJob::model()->findAllBySql('select * from cargo_process_job where created >= :created and JSON_EXTRACT(meta, "$.Post") = 1',[':created'=>date('Y-m-d',strtotime("-7 day"))]);
+		if(!empty($modelCJobs)){
+			foreach($modelCJobs as $modelCJob){
+				if(!empty($modelCJob)){
+					foreach($modelCJob->job_relations as $cargoRelation){
+						$modelCargoProcess = CargoProcess::model()->findByPk($cargoRelation->cargo_process_id);
+						if(!empty($modelCargoProcess)){
+							$tonyApi->fulfillmentCargoProcess($modelCargoProcess->shipment->hbn);
+						}
+					}
+				}
+			}
+		}
+		echo "done";
+	}
+
+	public function actionUpdatePallets()
+	{
+		if (!empty($_POST)) {
+			$shipment = ImParcel::model()->findByPk($_POST['shipment_id']);
+			$plts = $_POST['plts'];
+			if (!empty($shipment)) {
+				$shipment->mdata['amzon_pallet'] = $plts;
+				if (empty($shipment->mdata['amzon_pallet_type'])) {
+					$shipment->mdata['amzon_pallet_type'] = 'Plain';
+				}
+				$shipment->update(['meta']);
+				echo 'done';
+			} else {
+				echo 'Shipment does not exist.';
+			}
+		}
+	}
+}

@@ -1,0 +1,1610 @@
+<?php
+
+class ManifestController extends Controller
+{
+
+	// hard code eps manifest upload for the specified org
+	// TODO soon
+	// will be changed to 1206
+	const EPS_FOR_SPECIAL_ORG_ID = 1206;//1002;
+
+	protected $nonAjax=['export', 'convert', 'label', 'eps','fastway'];
+
+	/**
+	 * Displays a particular model.
+	 * @param integer $id the ID of the model to be displayed
+	 */
+	public function actionView($id)
+	{
+		$this->render('view', [
+			'model'=>$this->loadModel($id),
+		]);
+	}
+
+	/**
+	 * Creates a new model.
+	 * If creation is successful, the browser will be redirected to the 'view' page.
+	 */
+	public function actionCreate()
+	{
+		$model=new Manifest('create');
+
+		if (isset($_POST['Manifest'])) {
+			$model->attributes=$_POST['Manifest'];
+			if (empty($model->fwd_id)) {
+				$model->fwd_id = Yii::app()->user->org;
+			}
+			$model->save();
+			$this->ajaxResult($model, ['id', 'warns']);
+		}
+
+		$this->render('create', [
+			'model'=>$model,
+		]);
+	}
+
+	public function actionUpload()
+	{
+		$model=new Manifest('upload');
+		if (empty($model->fwd_id)) {
+			$model->fwd_id = Yii::app()->user->org;
+		}
+		
+		if (isset($_POST['Manifest'])) {
+			$model->attributes=$_POST['Manifest'];
+			if ($model->type == 111) {
+				$model->type = 110;
+
+				$data = oExcel::getAllData($_FILES['manifest']['tmp_name'], $_FILES['manifest']['name']);
+
+				$xls = new oExcel;
+				$xls->setColWidth([10,15,15,12,12,40,10,10,10,10,12,12,40,10,10,10,10,10,10,10,10,10,40,15,15,10,10,10,15,10,30]);
+				$i = 1;
+				$org = Org::model()->findByPk($model->fwd_id);
+				$sender = $org->name;
+				$sender_tel = $org->phone;
+				$xls->addRow($i++, ['序号','运单号','参考号','发货人','电话','地址','市/区','洲/省','邮编','国家','收货人','电话','地址','区','市','洲/省','邮编','国家','包裹数量','毛重(kg)','体积(m3)','分类','中文品名','品牌','规格','申报货币','申报单价','件数','HS编码','保费','备注','身份证号码','商品SKU']);
+				//map data
+				$map = ['序号' => -1, '网店单号' => 2, '商家名称' => 3, '店铺名称' => 3, '收件人' => 10, '收件地址' => 12, '收件人手机' => 11, '包裹重量' => 19, '快递单号' => 1, '货品名称' => 22, '货品数量' => 27, '收件省' => 15, '收件市' =>14, '收件区' => 13, '省' => 15, '市' => 14, '区' => 13, '地址' => 12, '手机' => 11, '货品重量' => -1, '身份证号码' => 31, '客服备注' => 30];
+				$mapped = [];
+				$kc = 0;
+				foreach ($data[1] as $c => $h) {
+					if (isset($map[$h])) {
+						$mapped[$c] = $map[$h];
+						if ($map[$h] == 1) {
+							$kc = $c;
+						}
+					} else {
+						$model->addError('id', $h." cannot be mapped");
+					}
+				}
+				unset($data[1]);
+				$pc = 1;
+				foreach ($data as $j => $r) {
+					$rr = ['', '','','','','','','','','','','','','','','','','','','','','','','','','','','','','','','',''];
+					foreach ($mapped as $k=>$t) {
+						if ($t < 0) {
+							continue;
+						}
+						$rr[$t] = in_array($t, [2,4,11,31])? '="'.$r[$k].'"' : $r[$k];
+					}
+					$rr[21] = 'O';
+					if (preg_match('/奶粉/', $rr[22])) {
+						$rr[21] = preg_match('/成人/', $rr[22])? 'M' : 'B';
+					}
+					if ($j == 2 || (!empty($data[$j][$kc]) && $data[$j][$kc] != $data[$j-1][$kc])) {
+						$rr[0] = $pc++;
+						if (empty($rr[3])) {
+							$rr[3] = $sender;
+						}
+						if (empty($rr[4])) {
+							$rr[4] = '="'.$sender_tel.'"';
+						}
+						$rr[19] = $rr[19] > 100 ? round($rr[19] / 100) / 10 : $rr[19];
+						$xls->addRow($i++, $rr);
+					} else {
+						$xls->addRow($i++, ['', '','','','','','','','','','','','','','','','','','','','', $rr[21], $rr[22],'','','','', $rr[27],'','','','','']);
+					}
+				}
+				$_FILES['manifest']['tmp_name'] = tempnam(Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR, 'ccm');
+				$_FILES['manifest']['name'] = preg_replace('/xls$/i', 'xlsx', $_FILES['manifest']['name']);
+				$xls->output($_FILES['manifest']['tmp_name'], null, false);
+			}
+			$model->imCover = empty($_POST['imCover'])?false:true;
+			$model->bagTagIdentify = empty($_POST['bagTagIdentify'])?false:true;
+			
+			// we save EDI cargo report select currency in meta field with key : edi_currency
+			// if not setting , we use default AUD
+			if (isset($_POST['currency'])) {
+				$model->mdata['edi_currency'] = $_POST['currency'];
+			} else {
+				$model->mdata['edi_currency'] = 1;
+			}
+
+			// save exchange rate for EDI cargo report SAC checking
+			// only save for USD/AUD exchange
+			if (isset($_POST['exchange_rate'])) {
+				$model->mdata['exchange_rate'] = $_POST['exchange_rate'];
+			} else {
+				$model->mdata['exchange_rate'] = 0.750; // if not setting just with default one
+			}
+
+			$model->save();
+			if (!empty($_FILES['manifest']) && is_file($_FILES['manifest']['tmp_name'])) {
+				unlink($_FILES['manifest']['tmp_name']);
+			}
+			$this->ajaxResult($model, ['id', 'warns']);
+		}
+
+		$this->render('upload', [
+			'model'=>$model,
+		]);
+	}
+
+	public function actionChangeLabel()
+	{
+		$model=new Manifest('upload');
+		if (empty($model->fwd_id)) {
+			$model->fwd_id = Yii::app()->user->org;
+		}
+		
+		if (isset($_FILES['change_label'])) {
+			$imparcelService = new ImParcelService();
+			$result = $imparcelService->changeLabel($_FILES['change_label'],$_POST['courier_id']);
+			echo json_encode($result);
+			return;
+		}
+
+		$this->render('change_label', [
+			'model'=>$model,
+		]);
+	}
+
+	/**
+	 * Updates a particular model.
+	 * If update is successful, the browser will be redirected to the 'view' page.
+	 * @param integer $id the ID of the model to be updated
+	 */
+	public function actionUpdate($id)
+	{
+		$model=$this->loadModel($id);
+
+		// Uncomment the following line if AJAX validation is needed
+		// $this->performAjaxValidation($model);
+
+		if (isset($_POST['Manifest'])) {
+			$model->attributes=$_POST['Manifest'];
+			$model->save();
+			$this->ajaxResult($model);
+		}
+
+		$this->render('update', [
+			'model'=>$model,
+		]);
+	}
+	
+	public function actionExport($id)
+	{
+		$model=$this->loadModel($id);
+		$csv = [];
+		$csv[] = 'TYPE,CONNOTE NO.,WEIGHT,CNEE,TEL,ADDRESS,SUBURB,STATE,P/C,DESTINATION,,PCS,COMMODITY,INNER ITEMS,UNIT VALUE,TTL VALUE,CMETER,SHIPPER,SHIPPER ADD,SHIPPER STATE,SHIPPER PC,SHIPPER COUNTRY CODE,SHIPPER CONTACT';
+		foreach ($model->man_shipments as $r) {
+			$csv[] = 'parcel,"'.$r->hbn.'",'.$r->weight.','.$r->cnee->name.','.$r->cnee->tel.',"'.$r->cnee->address.'",'.$r->cnee->suburb.','.$r->cnee->state.','.$r->cnee->postcode.','.$r->cnee->country.','.$r->cnee->country.','.$r->pkg.','.(empty($r->eitems['g'])? '' : implode('/', $r->eitems['g'])).','.(empty($r->eitems['q'])? '' : implode('/', $r->eitems['q'])).','.(empty($r->eitems['v'])? '' : implode('/', $r->eitems['v'])).','.$r->dvalue.','.$r->cbm.','.$r->cnor->address.','.$r->cnor->state.','.$r->cnor->postcode.','.$r->cnor->country.','.$r->cnor->tel;
+		}
+		header("Cache-Control: maxage=1");
+		header("Content-type: text/csv");
+		header("Content-Disposition: attachment; filename=manifest_".$model->id.".csv");
+		echo implode("\n", $csv);
+	}
+	
+	public function actionLabel($id)
+	{
+		$model=$this->loadModel($id);
+		if (!in_array($_GET['size'], ['A6','A4'])) {
+			throw new CHttpException(400, 'Bad Request, unknown print size.');
+		}
+		$rs = Shipment::model()->findAll('rec_id = :id OR man_id = :id', [':id' => $id]);
+		if ($_GET['type'] == 'eparcel') {
+			foreach ($rs as $r) {
+				if (empty($r->ref)) {
+					$r->ref = 'AMQ'.sprintf('%07s', substr($r->id, -7));
+					$r->save();
+				}
+			}
+		}
+		if (in_array($model->type, [110,120,130])) {
+			$_GET['type'] = 'ex';
+			foreach ($rs as $r) {
+				if (!empty($r->mdata['client_entry'])) {
+					$cltent = $r->mdata['client_entry'];
+					if (!empty($cltent['items'])) {
+						$r->eitems = $cltent['items'];
+					}
+				}
+			}
+		}
+
+		oPDF::renderPDF('label_'.$_GET['size'], ['tpl' => empty($_GET['type'])? '_label' : '_label-'.$_GET['type'], 'rs' =>$rs]);
+	}
+
+	public function actionConvert()
+	{
+		if (!empty($_GET['download'])) {
+			$of = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.$_GET['download'];
+			header("Cache-Control: maxage=1");
+			header("Content-Type: application/force-download");
+			header("Content-Type: application/octet-stream");
+			header("Content-Type: application/download");
+			header("Content-Disposition: attachment;filename=".$_GET['download']);
+			header("Content-Transfer-Encoding: binary ");
+			readfile($of);
+			unlink($of);
+		}
+		if (!empty($_POST)) {
+			$err = [];
+			$oxls = new oExcel;
+			$o = new StdClass;
+			$o->done = false;
+			$o->msg = '';
+			$o->warn = [];
+			if (!$oxls->supported($_FILES['manifest']['name'])) {
+				foreach ($oxls->getError() as $e) {
+					$err[] = $e;
+				}
+			} else {
+				$oxls->load($_FILES['manifest']['tmp_name']);
+				$data = $oxls->getAll();
+			}
+
+			$xls = new oExcel;
+			$mfn = 'Converted_manifest_'.date('Ymd').'.xlsx';
+			$i = 1;
+			$tmp = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR;
+			switch ($_POST['type']) {
+				case 10:
+				break;
+				case 20:
+					$xls->addRow($i++, ['TYPE', 'CONNOTE NO.', 'WEIGHT', 'CNEE', 'TEL', 'ADDRESS', 'SUBURB', 'STATE', 'P/C', 'DESTINATION', '', 'PCS', 'COMMODITY', 'INNER ITEMS', 'UNIT VALUE', 'TTL VALUE', 'CMETER', 'SHIPPER', 'SHIPPER ADD', 'SHIPPER STATE', 'SHIPPER PC', 'SHIPPER COUNTRY CODE', 'SHIPPER CONTACT']);
+					unset($data[1]);
+					foreach ($data as $r) {
+						if (empty($r[3])) {
+							break;
+						}
+						$sub = '';
+						$state = '';
+						$pc = '';
+						$addr = str_replace('\n', '', $r[3]);
+						$addr = preg_replace(['/[, ]+Australia/', '/Queensland/','/Victoria/'], ['','QLD','VIC'], $addr);
+						if (preg_match('/[^,]+[, ]+([^,]+)[, ]+(NSW|QLD|VIC|TAS|SA|WA|NT|ACT)[, ]+(\d{4})/i', $addr, $m) || preg_match('/P\.*O\.* BOX \d+[, ]+(.+)[, ]+(NSW|QLD|VIC|TAS|SA|WA|NT|ACT)[, ]+(\d{4})$/i', $addr, $m)) {
+							$sub = $m[1];
+							$state = $m[2];
+							$pc = $m[3];
+						} elseif (preg_match('/(\d{4})[, ]+(NSW|QLD|VIC|TAS|SA|WA|NT|ACT)[, ]+(.+)$/i', $addr, $m)) {
+							$sub = $m[3];
+							$state = $m[2];
+							$pc = $m[1];
+						} elseif (preg_match('/(\d{4})[, ]+(.+)[, ]+(NSW|QLD|VIC|TAS|SA|WA|NT|ACT)/i', $addr, $m)) {
+							$sub = $m[2];
+							$state = $m[3];
+							$pc = $m[1];
+						} elseif (preg_match('/(\d{4})$/', $addr, $m)) {
+							$pc = $m[1];
+						}
+
+						$xls->addRow($i++, ['parcel', $r[7], '', $r[2], '="'.$r[6].'"', $addr, $sub, $state, $pc, 'Australia', 'Australia', 1, 'catalogue', 1, 1, 1, '', 'Kevindale', '32 Slyde Street', 'NSW', '2116', 'AU', '']);
+					}
+					$o->convert_of = $mfn;
+					$o->done = true;
+					$o->msg = 'Conversion successful';
+					$xls->output($tmp.$mfn, null, false);
+				break;
+				case 30:
+				break;
+			}
+
+			echo json_encode($o);
+			Yii::app()->end();
+		}
+
+		$this->render('convert');
+	}
+
+	public function actionFastway()
+	{
+		if (!empty($_POST)) {
+			if (!isset($_POST['owner']) || empty($_POST['owner'])) {
+				echo 'Invalid Owner';
+			} else {
+				$xls = new oExcel;
+				if (!$xls->supported($_FILES['manifest']['name'])) {
+					echo 'File not supported';
+				} else {
+					$xls->load($_FILES['manifest']['tmp_name']);
+					$data = $xls->getAll();
+					if ($data[1][1] == 'TrackingNumber' && $data[1][2] == 'ProductItemNo') {
+				   
+
+					   // $bUpdateAgent = false;
+					   // if ( isset($_POST['ows']) && $_POST['ows'] == 1) $bUpdateAgent = true;
+						$bUpdateAgent = true; // always replace agent
+						$this->upload_fastway($data, $_POST['owner'], $bUpdateAgent);
+					} else {
+						echo "Manifest file unknown!";
+					}
+				}
+			}
+			Yii::app()->end();
+		}
+		$this->render('fastway');
+	}
+
+	public function actionEps()
+	{
+		if (!empty($_POST)) {
+			$xls = new oExcel;
+			if (!$xls->supported($_FILES['manifest']['name'])) {
+				echo 'File not supported';
+			} else {
+				$xls->load($_FILES['manifest']['tmp_name']);
+				$data = $xls->getAll();
+
+				/*
+				if ( isset($_POST['by_fastway']) ) {
+					$this->eps_fastway($data);
+				} else */
+				{
+					if ($data[1][1] == 'TrackingNumber' && $data[1][2] == 'ProductItemNo') { //eParcel
+						//$this->eps_eparcel($data);
+						// just remove hardcode from eps_eparcel function
+						$agentId = isset($_POST['agentid']) ? $_POST['agentid'] : '';
+						$this->eps_eparcel_pro($data, $agentId);
+					} elseif (!empty($data[8][10]) && $data[3][3] == 'Parcel post（0-5kgs）' && $data[8][10] == 'Letters within Australia') { //elms
+
+						$this->eps_elms($data);
+					} else {
+						echo "Manifest file unknown!";
+					}
+				}
+			}
+			Yii::app()->end();
+		}
+		$this->render('eps');
+	}
+
+
+	/**
+	 * process eps eparcle with specified setting , remove hardcode from eps_eparcel function
+	 * we create console and generate invoice for EPS as well
+	 * @param $data
+	 */
+	public function eps_eparcel_pro($data, $agentId = self::EPS_FOR_SPECIAL_ORG_ID)
+	{
+		$agent_id = $agentId;
+
+		unset($data[1]);
+		$err = [];
+		$ss = [];
+
+		// anyway create new console
+		// $con = ImcoConsol::model()->find("owner_id = self::EPS_FOR_SPECIAL_ORG_ID AND dpt_id = 106 AND pol = 'AUSYD' AND created = :d", [':d' => date('Y-m-d')]);
+		// if(empty($con)){
+		$con = new ImcoConsol;
+		$con->owner_id = $agent_id;
+		$con->pol = 'AUSYD';
+		$con->pod = 'AUSYD';
+		$con->dpt_id = 106;
+		$con->eta = date('Y-m-d');
+		$con->created = date('Y-m-d');
+		$con->save();
+		// }
+
+		foreach ($data as $d) {
+			$ref = trim($d[1]);
+			if (empty($ref)) {
+				continue;
+			}
+			$p = ImParcel::model()->find('ref = :r', [':r' => $ref]);
+
+			if (empty($p)) {
+				$err[] = $ref." not found";
+				continue;
+			}
+			$pc = trim($p->cnee->postcode);
+
+			if ($p->consol_id > 0 && $p->consol_id != $con->id) {
+				$err[] = $ref." already in other consol";
+				continue;
+			}
+
+			if (empty($pc)) {
+				$err[] = $ref." no postcode error";
+				continue;
+			}
+
+			$zm = ZoneMap::model()->find('org_id = 101 AND zone_id = 0 AND pc_lo <= :p AND pc_hi >= :p', [':p' => $pc]);
+			if (empty($zm)) {
+				$err[] = $ref.' Postcode '.$pc." has no Zone";
+				continue;
+			}
+			$p->cnee->checkPostcode();
+			if (preg_match('/^(AMQ|333UF|33MBQ)\d{7}/', $p->ref, $m)) {
+				$ss[$m[1]][]=$p;
+			}
+		}
+
+		if (!empty($err)) {
+			echo implode('<br />', $err);
+			return false;
+		}
+
+		$trans = Yii::app()->db->beginTransaction();
+		try {
+			foreach($ss as $k => $ps){
+				foreach($ps as $s){
+					$s->consol_id = $con->id;
+					$s->agent_id = $agent_id;  // update agent id
+					$s->save();
+				}
+			}
+			$trans->commit();
+		} catch (Exception $ex) {
+			$trans->rollback();
+			throw $ex;
+		}
+		$ref = $con->no;
+
+		/*
+		 * do the manifest based on different mild id;
+		 */
+		foreach($ss as $k => $ps){
+			$err=array_merge($err, $this->doAupostManifest($ps, $k, $ref));
+			// if($k == '33MBQ' && empty($err)){ //send manifest to ecof;
+			// 	$xls = new oExcel;
+			// 	$i = 1;
+			// 	$xls->addRow($i++, ['connote', 'weight', 'recipient_postcode', 'manifest_no']);
+			// 	$apa = new AusPostAPI('ecof');
+			// 	foreach($ps as $p){
+			// 		$wt = round($p->pkg * $apa->getBreakWeight($p->weight, $p->pkg), 2);
+			// 		$t = Tranship::model()->find('pid = :pid AND connote = :ref', [':pid' => $p->id, ':ref' => $p->ref]);
+			// 		$xls->addRow($i++, [$p->ref, $wt, $p->postcode, empty($t)? '' : $t->mdata['oid']]);
+			// 	}
+			// 	include_once('PHPMailer/class.phpmailer.php');
+			// 	$mail = new PHPMailer();
+			// 	$mail->CharSet = 'UTF-8';
+			// 	$mail->IsHTML(true);
+			// 	$mail->From     = 'imports@pcaexpress.com.au';
+			// 	$mail->FromName = 'PCA Express';
+			// 	$mail->Subject  = 'Manifest '.date('Y-m-d');
+			// 	$mail->Body = 'Please find attached AP lodgement manifest';
+			// 	$mail->AddStringAttachment($xls->output(null, null, false), 'Manifest_'.date('Ymd').'.xlsx', 'base64');
+			// 	$addrs = [
+			// 		'domestic1@ecof.com.au',
+			// 		'solo.wang@ecof.com.au',
+			// 		'mandy.liang@ecof.com.au',
+			// 	];
+			// 	foreach ($addrs as $add) {
+			// 		$mail->AddAddress($add);
+			// 	}
+			// 	$mail->AddCC('imports@pcaexpress.com.au');
+			// 	//$mail->AddAddress('test@orite.com');
+			// 	$mail->Send();
+			// }
+		}
+
+		if (!empty($err)) {
+			$con->status = 100;
+			$con->save();
+			echo implode('<br />', $err);
+			echo '<script type="text/javascript" src="/js/jquery.min.js"></script>
+			<script type="text/javascript">
+			$("a.tab_link").on("click", function(){
+				window.parent.myApp.tabs.CreateTab({
+					title: $(this).attr("title"),
+					url: $(this).attr("href"),
+					bg: false
+				});
+			});
+			</script>';
+			return false;
+		}
+
+		//invoice
+		$consol = ImcoConsol::model()->findByPk($con->id);
+		$owner = Org::model()->findByPk(self::EPS_FOR_SPECIAL_ORG_ID);
+		// in case invoice existing , we just update
+		$inv = Invoice::model()->find('consol_id = :cid', [':cid' => $consol->id]);
+
+		// in case invoice has been frozen, we can't change it again
+		$invoiceNo = '';
+		$oldPaymentLines = '';
+		if (!empty($inv)) {
+			if ($inv->isInvoiceClosed()) {
+				$inv->createCreditForMe();
+				$oldPaymentLines = $inv->payments;
+				$invoiceNo = $inv->no;
+				$inv = null;
+			}
+		}
+		if (empty($inv)) {
+			$inv = new Invoice;
+			$inv->type = 10;
+			$inv->dpmt = Invoice::DPMT_IMPORT;
+			$inv->to_id = 2791;
+			$inv->mdata['suborg'] = self::EPS_FOR_SPECIAL_ORG_ID;
+			$inv->dpt_id = Org::PCAE_DEPARTMENT_SYDNEY; // default set Sydney as warehouse
+			$inv->ref = 'ck1-ep' . date('Ymd', strtotime($consol->created));
+			$inv->currency = 1;
+			if (!empty($invoiceNo)) {
+				$inv->no = Invoice::genNewInvoiceNo($invoiceNo);
+			}               // $invoiceNo . '-1';
+			$inv->consol_id = $consol->id;
+			$inv->status = Invoice::INVOICE_STATUS_PENDING;
+		}
+		$inv->consol_id = $con->id;
+		$inv->date = date('Y-m-d', strtotime($consol->created));
+		$inv->due = $inv->date;
+		$inv->save();
+		$items = [];
+		$tot = 0;
+		foreach($ss as $k=>$ps){
+			$transaction = Yii::app()->db->beginTransaction();
+			try {
+				foreach ($ps as $i=>$p) {
+					$pc = trim($p->cnee->postcode);
+				
+					// currently we hardcode here , we always use charge code 5813
+					// so we create invoice by charge code now
+					$amt = $p->getChargeByChargecode(5813, true);
+					$p->mdata['charge_client_amount']= number_format($amt, 4, '.', '');
+					$p->mdata['charge_client_weight']= number_format($p->weight, 2, '.', '');
+					$p->updateMeta();
+					$zoneMap = ZoneMap::model()->find('chargecode_id = 15 AND zone_id = 1 AND pc_lo <= :p AND pc_hi >= :p', [':p' => $pc]);
+					$zoneCode = 'N1';
+					if (!empty($zoneMap) && !empty($zoneMap['z1'])) {
+						$zoneCode = $zoneMap['z1'];
+					}
+					if (!empty($p->tempChargeweight)) {
+						$p->weight=$p->tempChargeweight;
+					}  //to record the break weight
+					$items[] = [$p->ref, $p->getDesc().'    ' . $zoneCode, $p->pkg, $p->weight, $p->cbm, $amt,$p->cnee->postcode];
+					$tot += $amt;
+
+					// in case parcel with insurance
+					// we add insurance value to total value
+					if ($p->insurance > 0) {
+						$insuranceRatio = 1;
+						if (isset($owner->extra['insurance_invoice_ratio'])) {
+							$insuranceRatio = floatval($owner->extra['insurance_invoice_ratio']);
+						}
+						$invInsurance = round($p->insurance * ($insuranceRatio / 100), 2);
+						$p->mdata['insurance_charge_client']=$invInsurance;
+						$p->updateMeta();
+						$items[] = [$p->ref, 'Insurance Fee',0, 0, 0, $invInsurance];
+						$tot += $invInsurance;
+					}
+				}
+				$transaction->commit();
+			} catch (Exception $ex) {
+				$transaction->rollback();
+				Log::log2file("Manifest(1206) create Invoice".$con->no."=>".$ex->getMessage(), "transaction_err_log", "transaction");
+				throw $ex;
+			}
+		}
+
+		$inv->refresh();
+		$il = new InvLine;
+		$il->inv_id = $inv->id;
+		$il->ccode = 'EPA';
+		$il->mdata['items'] = $items;
+		$il->det = $consol->no;
+		$il->fid = $con->id;
+		$il->model = 'ImcoConsol'; // invoice connected with console directly
+		$il->amount = round($tot * 1000) / 1000;
+		$il->qty = 1;
+		$il->save();
+		$inv->refresh();
+		$inv->getTotal();
+
+		$inv->mdata['name'] = $owner->name;
+		$inv->mdata['address'] = $owner->getAddress();
+		$inv->mdata['payterm'] = empty($owner->extra['payterm'])? 'COD' : $owner->extra['payterm'].' days';
+
+		if (!empty($oldPaymentList)) {
+			$inv->applyPayments($oldPaymentList);
+			$inv->getTotal();
+			$inv->checkPaid();
+		}
+
+		$inv->save();
+
+		// update console related aupost courier cost
+		ImcoConsol::updateImportConsoleBilling([$con->id]);
+
+		// check to see if something wrong when create invoice or invoice line
+		$errorsInv = $inv->getErrors();
+		$errorsInvLine = $il->getErrors();
+		$error = implode('<br/>', array_merge($errorsInv, $errorsInvLine));
+		if (!empty($error)) {
+			echo 'Failed to create invoice : ' . $error . ' <br/>';
+		} else {
+			echo 'Invoice ' . $inv->no . " issued<br />";
+		}
+	}
+
+	public function doAupostManifest($sst, $mlid, $ref)
+	{
+		$acc = AusPostAPI::mlid2acc($mlid);
+		if(empty($acc)) return false;
+		$apa = new AusPostAPI($acc);
+		$err=[];
+		$shipment_created = in_array($mlid, ['33MBQ']);
+		$chargeCode = AusPostAPI::CHARGE_CODE_POD;
+		$cnno = $sst[0]->consol->no;
+
+		if (!empty($sst)) {
+			$max_ppg = 1000;
+			$pgs = ceil(count($sst) / $max_ppg);
+			for($pg = 0; $pg < $pgs; $pg++){
+				$ss = array_slice($sst, $pg * $max_ppg, $max_ppg);
+				$transaction = Yii::app()->db->beginTransaction();
+				try {
+					if($shipment_created){
+						$r = $apa->createOrderFromShipments($ss, $cnno.($pgs>1? '-'.$pg : ''), $chargeCode);
+					}else{
+						$r = $apa->createOrderIncludingShipments($ss, $cnno.($pgs>1? '-'.$pg : ''), $chargeCode);
+					}
+					if (!empty($r->order)) {
+						$oid = $r->order->order_id;
+						foreach ($ss as $i => $s) {
+							$ts = new Tranship;
+							$ts->pid = $s->id;
+							$ts->org_id = 101;
+							$ts->type = 80;
+							$ts->status = 19;
+							$ts->connote = $s->ref;
+							$ts->time = date('Y-m-d H:i:s');
+							$ts->mdata['oid'] = $oid;
+							if($shipment_created){
+								$aushipment = $auPostShipments[$s->mdata['ap_sid']];
+							}else{
+								$aushipment = $auPostShipments[$s->hbn];
+							}
+							$ts->mdata['sid'] = $aushipment->shipment_id;
+							$costValue = floatval($aushipment->shipment_summary->total_cost - $aushipment->shipment_summary->total_gst);
+							$ts->cost = number_format(round($costValue, 2), 2);
+							$ts->save();
+						}
+					} else {
+						// sometimes email wrong but still post to AuPost ok
+						// so in this case , we can't delete console
+						// send aupost error
+						// we delete the new created console and disconnect with shipments as well
+						foreach ($ss as $s) {
+							$s->consol_id = 0;
+							$s->save();
+						}
+						//$con->delete();
+						foreach ($apa->err as $e) {
+							$msg = $e->message;
+							if (!empty($e->field) && preg_match('/shipments\[(\d+)\]/', $e->field, $m)) {
+								$msg .= ': <a class="tab_link" href="/imParcel/update/'.$ss[$m[1]]->id.'" title="'.$ss[$m[1]]->hbn.'">'.$ss[$m[1]]->hbn.'</a>';
+							}
+							$err[] = $msg;
+						}
+					}
+					$transaction->commit();
+				} catch (Exception $ex) {
+					$transaction->rollback();
+					Log::log2file("Aus Manifest(1206)".$ref."=>".$ex->getMessage(), "transaction_err_log", "transaction");
+					throw $ex;
+				}
+			}
+		}
+		return $err;
+	}
+
+	/**
+	 * send by fastway
+	 * @param $data
+	 */
+	public function upload_fastway($data, $ownerId, $updateAgent = false)
+	{
+		unset($data[1]);
+		$err = [];
+		$ss = [];
+
+		// always create a new import console now
+		//  $con = ImcoConsol::model()->find("owner_id = :oid AND dpt_id = 106 AND pol = 'AUSYD' AND created = :d", [':oid' => $ownerId ,':d' => date('Y-m-d')]);
+		//  if(empty($con)){
+		$con = new ImcoConsol;
+		$con->owner_id = $ownerId;
+		$con->pol = 'AUSYD';
+		$con->pod = 'AUSYD';
+		$con->dpt_id = 106;
+		$con->eta = date('Y-m-d');
+		$con->created = date('Y-m-d');
+		$con->save();
+		// }
+
+		$fwManifestIds = [];
+		foreach ($data as $d) {
+			$ref = $d[1];
+			if (empty($ref)) {
+				continue;
+			}
+			$p = ImParcel::model()->find('ref = :r', [':r' => $ref]);
+
+			if (empty($p)) {
+				$err[] = $ref." not found";
+				continue;
+			}
+			$pc = trim($p->cnee->postcode);
+			if ($p->consol_id > 0 && $p->consol_id != $con->id) {
+				$err[] = $ref." already in other consol";
+				continue;
+			}
+			if (empty($pc)) {
+				$err[] = $ref." no postcode error";
+				continue;
+			}
+
+			$zm = ZoneMap::model()->find('org_id = 100 AND pc_lo <= :p AND pc_hi >= :p', [':p' => $pc]);
+			if (empty($zm)) {
+				$err[] = $ref.' Postcode '.$pc." has no Zone";
+				continue;
+			}
+			$p->cnee->checkPostcode();
+
+			if (isset($p->mdata['fw_manifest_id'])) {
+				$fwManifestIds[$p->mdata['fw_manifest_id']] = $p->mdata['fw_manifest_id'];
+			}
+			$ss[] = $p;
+		}
+
+		if (!empty($err)) {
+			echo implode('<br />', $err);
+			return false;
+		}
+		$transaction=Yii::app()->db->beginTransaction();
+		try {
+			foreach ($ss as $s) {
+				$s->consol_id = $con->id;
+				if ($updateAgent) {
+					$s->agent_id = $ownerId;
+				}
+				$s->save();
+			}
+			$transaction->commit();
+		} catch (Exception $ex) {
+			$transaction->rollback();
+		}
+
+		// close all related manifest in shipments
+		// TODO soon we should close manifest in Fastway
+		// but not for all parcels in manifest , here is a problem????
+		//......
+		if (!empty($fwManifestIds)) {
+			$fastApi = new FastwayAPI();
+			foreach ($fwManifestIds as $k => $mid) {
+				$rt = $fastApi->closeManifest($mid);
+			}
+		}
+		// create invoice
+		$consol = ImcoConsol::model()->findByPk($con->id);
+		$owner = Org::model()->findByPk($ownerId);
+		$inv = new Invoice;
+		$inv->consol_id = $consol->id;
+		$inv->type = 10;
+		$inv->dpmt = Invoice::DPMT_IMPORT;
+		$owner = Org::model()->findByPk($ownerId);
+		if($owner->by > 1){
+			$inv->to_id = $owner->by;
+			$inv->mdata['suborg'] = $ownerId;
+		}else{
+			$inv->to_id = $ownerId;
+		}
+		$inv->to_id = $ownerId;
+		$inv->dpt_id = Org::PCAE_DEPARTMENT_SYDNEY; // default set Sydney as warehouse
+		$inv->ref = 'fw'.date('Ymd', strtotime($consol->created));
+		$inv->currency = 1;
+		$inv->status = 1;
+		$inv->date = date('Y-m-d', strtotime($consol->created));
+		$inv->due = $inv->date;
+		$inv->save();
+
+		$items = [];
+		$tot = 0;
+
+		// for special org 1206 client , we use special charge code
+		// to calculate the voice
+		$chargeCode = '';
+		if ($ownerId == self::EPS_FOR_SPECIAL_ORG_ID) {
+			$chargeCode = 8271;
+		}
+		$transaction = Yii::app()->db->beginTransaction();
+		try {
+			foreach ($ss as $i => $p) {
+				$amt = $p->getChargeByChargecode($chargeCode, true);  // fastway with special charge code
+				$p->mdata['charge_client_amount']= number_format($amt, 4, '.', '');
+				$p->mdata['charge_client_weight']= number_format($p->weight, 2, '.', '');
+				$p->updateMeta();
+				if (!empty($p->tempChargeweight)) {
+					$p->weight=$p->tempChargeweight;
+				}
+				$desc = $p->getDesc();
+				if (empty($desc)) $desc = 'null';
+				else $desc = str_replace('"', '', json_encode($desc));
+				$items[] = [$p->ref, $desc, $p->pkg, $p->weight, $p->cbm, $amt,$p->cnee->postcode];
+				$tot += $amt;
+			}
+			$transaction->commit();
+		} catch (Exception $ex) {
+			$transaction->rollback();
+			Log::log2file("1206 Manifest Creating Invoice".$consol->no."=>".$ex->getMessage(), "transaction_err_log", "transaction");
+			throw $ex;
+		}
+		if ($consol->isTLA()) [$app_name, Yii::app()->name] = [Yii::app()->name, 'TLA'];
+		$inv = Invoice::model()->findByPk($inv->id);
+		$il = new InvLine;
+		$il->inv_id = $inv->id;
+		$il->ccode = 'EPA';
+		$il->mdata['items'] = $items;
+		$il->det = $consol->no;
+		$il->fid = $consol->id;
+		$il->model = 'ImcoConsol'; // invoice connected with console directly
+		$il->amount = number_format(round(round($tot * 1000)/1000,3), 3, '.', '');
+		$il->qty = 1;
+		$il->gst = 0;
+		$il->det = '';
+		$il->tax = '';
+		$il->save();
+		Log::log2file("1206 Manifest Creating Invoice".$consol->no."=>".json_encode($il), "transaction_err_log", "transaction");
+		Log::log2file("1206 Manifest Creating Invoice".$consol->no."=>".json_encode($il->getErrors()).json_encode($inv->getErrors()), "transaction_err_log", "transaction");
+
+		$inv->refresh();
+		$inv->getTotal();
+
+		$inv->mdata['name'] = $owner->name;
+		$inv->mdata['address'] = $owner->getAddress();
+		$inv->mdata['payterm'] = empty($owner->extra['payterm'])? 'COD' : $owner->extra['payterm'].' days';
+		$inv->no = 'FW'.$inv->id;
+		$inv->save();
+
+		// update console's fastway cost billing
+		ImcoConsol::updateImportConsoleBilling([$consol->id]);
+
+		echo 'Invoice '.$inv->no." issued<br />";
+	}
+
+	public function eps_elms($data)
+	{
+		$URLBase = 'https://elms.auspost.com.au/';
+		$trace = [];
+		$cookie_file = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR.'elms_cookie.txt';
+
+		//login
+		$c = new curl($URLBase.'login.do');
+		$c->setopt(CURLOPT_REFERER, $URLBase);
+		$c->setopt(CURLOPT_FOLLOWLOCATION, true);
+		$c->setopt(CURLOPT_REFERER, $URLBase);
+		$c->setopt(CURLOPT_SSL_VERIFYHOST, 0);
+		$c->setopt(CURLOPT_SSL_VERIFYPEER, 0);
+		$c->setopt(CURLOPT_POST, true);
+		$c->setopt(CURLOPT_COOKIEJAR, $cookie_file);
+		$c->setopt(CURLOPT_COOKIEFILE, $cookie_file);
+		$postr = $c->asPostString([
+			'username' => 'xiep',
+			'password' => 'welcome2016',
+			'forgottenPasswordInput' => '',
+		]);
+		$c->setopt(CURLOPT_POSTFIELDS, $postr);
+		if (!$c->exec()) {
+			die("Problem logging in");
+		}
+		$trace[] = "Done login";
+		// $cookie = empty($c->header['Set-Cookie'])? '' : $c->header['Set-Cookie'];
+		// $c->setopt(CURLOPT_COOKIE, 'elmsLoggedInCookie=1;'.$cookie);
+		
+		//new elms
+		$uid = empty($data[1][4])? 'ck1'.date('ymd') : $data[1][4];
+		$ref = empty($data[1][2])? '' : $data[1][2];
+		$lpid = empty($data[1][3])? '0000773636' : $data[1][3];//0000709078
+
+		// $lpid = '0000708783'; //Alexandria
+		// $lpid = '0000709078'; //Chullora
+		// $lpid = '0000708137'; //Kingsgrove
+
+		$c->setopt(CURLOPT_URL, $URLBase.'prepCreateMSAccount.do');
+		$c->setopt(CURLOPT_REFERER, $URLBase.'prepCreateMSAccount.do?scrolly=0');
+		$postr = $c->asPostString([
+			'actionType' => 'continue',
+			'progressiveMsId' => '-1',
+			'accountCode' => '6081844',
+			'originatingCustomerName' => 'Target Media Australia P/L',
+			'jobNumber' => '',
+			'jobName' => '',
+			'uniqueId' => $uid,
+			'invoiceRefDetails' => $ref,
+			//'lodgementPointCode' => '0000708783', //Alexandria
+			//'lodgementPointCode' => '0000709078', //Chullora
+			'lodgementPointCode' => $lpid,
+		]);
+
+		$c->setopt(CURLOPT_POSTFIELDS, $postr);
+		$c->exec();
+		$c->setopt(CURLOPT_URL, $URLBase.'handleCreateMSAccount.do');
+		if (!$c->exec()) {
+			die("Problem create eLMS");
+		}
+		$trace[] = "Creating eLMS";
+
+		//articles
+		$map = [
+			//BPA < 500g
+			['g_desc' => 'Parcels', 'g_code' => 3, 'g_id' => 3, 'type' => 'B30', 'desc' => 'Parcel Post Parcels < 500g', 'c_name' => '', 'c_code' => '0003361388', 'data' => [
+				'WT029D_.500_DZ001D_LC_QTY' => ['cell', 5, 4],
+				'WT029D_.500_DZ001D_RA_QTY' => ['cell', 8, 4],
+				/*'WT029D_.500_DZ159D_N1_QTY' => ['cell', 5, 4],
+					'WT029D_.500_DZ159D_N2_QTY' => ['cell', 8, 4],
+					'WT029D_.500_DZ159D_V2_QTY' => '',
+					'WT029D_.500_DZ159D_Q1_QTY' => '',
+					'WT029D_.500_DZ159D_Q2_QTY' => '',
+					'WT029D_.500_DZ159D_Q3_QTY' => '',
+					'WT029D_.500_DZ159D_S1_QTY' => '',
+					'WT029D_.500_DZ159D_S2_QTY' => '',
+					'WT029D_.500_DZ159D_W1_QTY' => '',
+					'WT029D_.500_DZ159D_W2_QTY' => '',
+					'WT029D_.500_DZ159D_W3_QTY' => '',
+					'WT029D_.500_DZ159D_W4_QTY' => '',
+					'WT029D_.500_DZ159D_T1_QTY' => '',
+					'WT029D_.500_DZ159D_NT1_QTY' => '',
+					'WT029D_.500_DZ159D_NT2_QTY' => '',
+					'WT029D_.500_DZ159D_NF_QTY' => '',
+					'WT029D_.500_DZ159D_AAT_QTY' => '',*/
+			]],
+
+			//BPA > 500g
+			['g_desc' => 'Parcels', 'g_code' => 3, 'g_id' => 3, 'type' => 'B31', 'desc' => 'Parcel Post Parcels > 500g (Basic Item)', 'c_name' => '', 'c_code' => '0003361388', 'items' => [
+				['DZ010D_N1_QTY' => ['cell', 6, 4], 'DZ010D_N1_WT002D' => 1],
+
+				/*
+					// < 5kg
+					['DZ159D' => 'N1', 'ST033D' => 'U', 'WC110D' => 3, 'WT002D' => 1, 'quantity' => ['cell', 6, 4]],
+					['DZ159D' => 'N2', 'ST033D' => 'U', 'WC110D' => 1, 'WT002D' => 1, 'quantity' => ['cell', 9, 4]],
+					['DZ159D' => 'N2', 'ST033D' => 'U', 'WC110D' => 2, 'WT002D' => 1, 'quantity' => ['cell', 10, 4]],
+					['DZ159D' => 'N2', 'ST033D' => 'U', 'WC110D' => 3, 'WT002D' => 1, 'quantity' => ['cell', 11, 4]],
+					['DZ159D' => 'N2', 'ST033D' => 'U', 'WC110D' => 5, 'WT002D' => 1, 'quantity' => ['cell', 12, 4]],
+					// > 5kg
+					['DZ159D' => 'AAT', 'ST033D' => 'O', 'WC110D' => 5, 'WT002D' => 1, 'quantity' => ['cell', 5, 7]],
+					['DZ159D' => 'N1', 'ST033D' => 'O', 'WC110D' => 5, 'WT002D' => 1, 'quantity' => ['cell', 6, 7]],
+					['DZ159D' => 'N2', 'ST033D' => 'O', 'WC110D' => 5, 'WT002D' => 1, 'quantity' => ['cell', 7, 7]],
+					['DZ159D' => 'NF', 'ST033D' => 'O', 'WC110D' => 5, 'WT002D' => 1, 'quantity' => ['cell', 8, 7]],
+					['DZ159D' => 'NT1', 'ST033D' => 'O', 'WC110D' => 5, 'WT002D' => 1, 'quantity' => ['cell', 9, 7]],
+					['DZ159D' => 'NT2', 'ST033D' => 'O', 'WC110D' => 5, 'WT002D' => 1, 'quantity' => ['cell', 10, 7]],
+					['DZ159D' => 'NT2', 'ST033D' => 'O', 'WC110D' => 5, 'WT002D' => 1, 'quantity' => ['cell', 10, 7]],
+					['DZ159D' => 'Q1', 'ST033D' => 'O', 'WC110D' => 5, 'WT002D' => 1, 'quantity' => ['cell', 11, 7]],
+					['DZ159D' => 'Q2', 'ST033D' => 'O', 'WC110D' => 5, 'WT002D' => 1, 'quantity' => ['cell', 12, 7]],
+					['DZ159D' => 'Q3', 'ST033D' => 'O', 'WC110D' => 5, 'WT002D' => 1, 'quantity' => ['cell', 13, 7]],
+					['DZ159D' => 'S1', 'ST033D' => 'O', 'WC110D' => 5, 'WT002D' => 1, 'quantity' => ['cell', 14, 7]],
+					['DZ159D' => 'S1', 'ST033D' => 'O', 'WC110D' => 5, 'WT002D' => 1, 'quantity' => ['cell', 15, 7]],
+					['DZ159D' => 'T1', 'ST033D' => 'O', 'WC110D' => 5, 'WT002D' => 1, 'quantity' => ['cell', 16, 7]],
+					['DZ159D' => 'V1', 'ST033D' => 'O', 'WC110D' => 5, 'WT002D' => 1, 'quantity' => ['cell', 17, 7]],
+					['DZ159D' => 'V2', 'ST033D' => 'O', 'WC110D' => 5, 'WT002D' => 1, 'quantity' => ['cell', 18, 7]],
+					['DZ159D' => 'W1', 'ST033D' => 'O', 'WC110D' => 5, 'WT002D' => 1, 'quantity' => ['cell', 19, 7]],
+					['DZ159D' => 'W2', 'ST033D' => 'O', 'WC110D' => 5, 'WT002D' => 1, 'quantity' => ['cell', 20, 7]],
+					['DZ159D' => 'W3', 'ST033D' => 'O', 'WC110D' => 5, 'WT002D' => 1, 'quantity' => ['cell', 21, 7]],
+					['DZ159D' => 'W4', 'ST033D	' => 'O', 'WC110D' => 5, 'WT002D' => 1, 'quantity' => ['cell', 22, 7]],
+					*/
+			]],
+
+			//receipted
+			['g_desc' => 'Parcels', 'g_code' => 3, 'g_id' => 3, 'type' => 'B40', 'desc' => 'Receipted Delivery', 'c_name' => '', 'c_code' => '0003361388', 'data' => [
+				'SV001D_RD_QTY' => ['cell', 5, 11],
+				'SV001D_XTRD_QTY' => '',
+				'SV001D_CPYSIG_QTY' => '',
+			]],
+			//small letter
+			['g_desc' => 'Letters Regular', 'g_code' => 2, 'g_id' => 2, 'type' => 'B01', 'desc' => 'Imprint Small Charge Letter Regular', 'c_name' => 'Full Rate', 'c_code' => '', 'data' => [
+				'DZ002D_A_QTY' => ['cell', 9, 11],
+			]],
+			//large letter
+			['g_desc' => 'Letters Regular', 'g_code' => 2, 'g_id' => 2, 'type' => 'B03', 'desc' => 'Imprint Large Charge Letters Regular', 'c_name' => 'Full Rate', 'c_code' => '', 'data' => [
+				'DZ003D_A_WT001D_.125_QTY' => ['cell', 10, 11],
+				'DZ003D_A_WT001D_.250_QTY' => ['cell', 11, 11],
+				'DZ003D_A_WT001D_.500_QTY' => ['cell', 12, 11],
+			]],
+		];
+		$ic = 0;
+		$addItem = function ($a, $pdi, $ii = 0) use ($URLBase, $c, $ic, &$trace) {
+			$pd = [
+				'actionType'=> 'selectProduct',
+				'productGroupDesc'=> $a['g_desc'],
+				'productGroupCode'=> $a['g_code'],
+				'productGroupIdVal'=> $a['g_id'],
+				'productCode'=> $a['type'],
+				'productDesc'=> $a['desc'],
+				'productTypeVal'=> $a['type'],
+				'comments'=> '',
+			];
+
+			//select product
+			$c->setopt(CURLOPT_URL, $URLBase.'handleCreateMSSelectProduct.do?scrolly=0');
+			$c->setopt(CURLOPT_REFERER, $URLBase.'handleCreateMSAccount.do');
+			$c->setopt(CURLOPT_POSTFIELDS, $c->asPostString($pd));
+			$c->exec();
+
+			//add product
+			$pd['contractDesc'] = $a['c_name'];
+			$pd['contractCode'] = $a['c_code'];
+			$pd['quantity'] = '';
+
+			$c->setopt(CURLOPT_URL, $URLBase.'msCreateAddLineItemsSubmit.do');
+			$c->setopt(CURLOPT_REFERER, $URLBase.'handleCreateMSSelectProduct.do?scrolly=0');
+			foreach ($pdi as $k=>$v) {
+				$pd[$k] = empty($v)? '' : $v;
+			}
+
+			$c->setopt(CURLOPT_POSTFIELDS, $c->asPostString($pd));
+			if (!$c->exec()) {
+				die("Problem add article ".$a['type']."[".$ii."]");
+			}
+			$trace[] = "Added ".$a['type']."[".$ii."]";
+			$ic++;
+		};
+
+		foreach ($map as $a) {
+			if (!empty($a['items'])) {
+				foreach ($a['items'] as $ii => $itm) {
+					$pdi = [];
+					$act = true;
+					foreach ($itm as $k => $v) {
+						if (is_array($v) && $v[0] == 'cell') {
+							$v = $data[$v[1]][$v[2]];
+							if (empty($v)) {
+								$act = false;
+								break;
+							}
+						}
+						$pdi[$k] = $v;
+					}
+					if ($act) {
+						$addItem($a, $pdi, $ii);
+					}
+				}
+			} elseif (!empty($a['data'])) {
+				$pdi = [];
+				foreach ($a['data'] as $k => $v) {
+					if (empty($v)) {
+						$pdi[$k] = '';
+					} elseif (is_array($v) && $v[0] == 'cell') {
+						$pdi[$k] = $data[$v[1]][$v[2]];
+						if (!empty($pdi[$k])) {
+							$ic++;
+						}
+					}
+				}
+				$addItem($a, $pdi);
+			}
+		}
+
+		//confirm
+		$c->setopt(CURLOPT_URL, $URLBase.'msCreateAddLineItemsContinue.do');
+		$postr = $c->asPostString([
+			'actionType' => 'continue',
+			'productGroupDesc' => '',
+			'productGroupCode' => '',
+			'contractDesc' => '',
+			'quantity' => '',
+			'comments' => '',
+		]);
+		$c->setopt(CURLOPT_POSTFIELDS, $postr);
+		$c->exec();
+		//file_put_contents('a.html', $c->result);
+
+		//submit
+		$c->setopt(CURLOPT_URL, $URLBase.'handleCreateMSConfirm.do');
+		$c->setopt(CURLOPT_REFERER, $URLBase.'prepCreateMSConfirm.do?actionType=continue');
+		$pd = ['actionType'=> 'continue'];
+		for ($i = 1; $i <= $ic; $i++) {
+			$pd['altLineItemId[]'][] = sprintf('%03d', $i);
+		}
+		$c->setopt(CURLOPT_POSTFIELDS, $c->asPostString($pd));
+		$c->exec();
+		$res = str_replace('"/', '"https://elms.auspost.com.au/', $c->result).'<script type="text/javascript">printable();</script>';
+		// file_put_contents(Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR.'elms-ck1-'.date('Ymd'), $res);
+		$msn = '';
+		if (preg_match('/Your Mailing Statement Reference Number is:\s*<b>(\d+)<\/b>/', $res, $m)) {
+			$msn = $m[1];
+		}
+		$trace[] = "eLMS Submitted";
+		$c->close();
+		unlink($cookie_file);
+		if(empty($msn)){
+			die($r->result);
+		}
+		//invoice
+		$map = [
+			[5, 4, 'BPA Sydney Metro 0-500g', '3.70'],
+			[6, 4, 'BPA Sydney Metro 0.5-5kg', '3.70'],
+			[8, 4, 'BPA Rest of AU 0-500g', '4.6'],
+			[9, 4, 'BPA Rest of AU 0.5-1kg', '4.67'],
+			[10, 4, 'BPA Rest of AU 1-2kg', '4.73'],
+			[11, 4, 'BPA Rest of AU 2-3kg', '4.93'],
+			[12, 4, 'BPA Rest of AU 3-5kg', '5.25'],
+			[5, 7, 'BPA AAT 5-22kg', 'B+KG', '9.21', '1.33'],
+			[6, 7, 'BPA N1 5-22kg', 'B+KG', '4.6', '0'],
+			[7, 7, 'BPA N2 5-22kg', 'B+KG', '8.84', '0.32'],
+			[8, 7, 'BPA NF 5-22kg', 'B+KG', '9.27', '2.84'],
+			[9, 7, 'BPA NT1 5-22kg', 'B+KG', '7.65', '2.25'],
+			[10, 7, 'BPA NT2 5-22kg', 'B+KG', '9.27', '2.25'],
+			[11, 7, 'BPA Q1 5-22kg', 'B+KG', '7.65', '0.36'],
+			[12, 7, 'BPA Q2 5-22kg', 'B+KG', '9.27', '0.63'],
+			[13, 7, 'BPA Q3 5-22kg', 'B+KG', '9.27', '1.16'],
+			[14, 7, 'BPA S1 5-22kg', 'B+KG', '7.65', '0.51'],
+			[15, 7, 'BPA S2 5-22kg', 'B+KG', '9.27', '0.71'],
+			[16, 7, 'BPA T1 5-22kg', 'B+KG', '9.27', '1.33'],
+			[17, 7, 'BPA V1 5-22kg', 'B+KG', '7.65', '0.36'],
+			[18, 7, 'BPA V2 5-22kg', 'B+KG', '9.27', '0.51'],
+			[19, 7, 'BPA W1 5-22kg', 'B+KG', '7.65', '1.42'],
+			[20, 7, 'BPA W2 5-22kg', 'B+KG', '9.27', '1.81'],
+			[21, 7, 'BPA W3 5-22kg', 'B+KG', '9.27', '2.43'],
+			[22, 7, 'BPA W4 5-22kg', 'B+KG', '9.27', '2.43'],
+			[5, 11, 'BPA Receipted Delivery', '1.80'],
+
+			/*
+			[9, 11, 'Small Letters', '0.95'],
+			[10, 11, 'Large Letters up to 125g', '1.75'],
+			[11, 11, 'Large Letters 125-250g', '2.85'],
+			[12, 11, 'Large Letters 250-500g', '4.75'],
+*/
+
+			// TODO soon
+			// the above will be changed the following rates
+			// new rate from 01.Sep.2017
+			// [9, 11, 'Small Letters', '0.95'],
+			// [10, 11, 'Large Letters up to 125g', '1.85'],
+			// [11, 11, 'Large Letters 125-250g', '2.94'],
+			// [12, 11, 'Large Letters 250-500g', '4.89'],
+			// [9, 11, 'Small Letters', '1.06'],
+			// [10, 11, 'Large Letters up to 125g', '2.11'],
+			// [11, 11, 'Large Letters 125-250g', '3.165'],
+			// [12, 11, 'Large Letters 250-500g', '5.275'],
+
+			
+			[9, 11, 'Small Letters', '1.09'],
+			[10, 11, 'Large Letters up to 125g', '2.18'],
+			[11, 11, 'Large Letters 125-250g', '3.270'],
+			[12, 11, 'Large Letters 250-500g', '5.450'],
+					
+
+		];
+
+		$owner = Org::model()->findByPk(self::EPS_FOR_SPECIAL_ORG_ID);
+
+		// create a dummy eml consol
+		// in order to bind cost and revenue
+		$con = new ElmsConsol();
+		$con->owner_id = $owner->id;
+		$con->pol = 'AUSYD';
+		$con->pod = 'AUSYD';
+		$con->dpt_id = Org::PCAE_DEPARTMENT_SYDNEY;
+		$con->eta = date('Y-m-d');
+		$con->awb = $msn;
+		$con->created = date('Y-m-d');
+		$con->save();
+		if ($con->isTLA()) [$app_name, Yii::app()->name] = [Yii::app()->name, 'TLA'];
+		$inv = new Invoice;
+		$inv->type = Invoice::INVOICE_TYPE_OTHERS;
+		$inv->dpmt = Invoice::DPMT_IMPORT;
+		$inv->to_id = 2791;
+		$inv->mdata['suborg'] = self::EPS_FOR_SPECIAL_ORG_ID; // for EPS client
+		$inv->dpt_id = Org::PCAE_DEPARTMENT_SYDNEY; // default set Sydney as warehouse
+		$inv->consol_id = $con->id;
+		$inv->ref = 'ck1-'.date('Ymd');
+		$inv->currency = 1;
+		$inv->status = 1;
+		$inv->date = date('Y-m-d');
+		$inv->due = $inv->date;
+		$inv->save();
+		foreach ($map as $i=>$a) {
+			$qty = $data[$a[0]][$a[1]];
+			if (empty($qty)) {
+				continue;
+			}
+			if ($a[3] == 'B+KG') {
+				if ($a[4] > 0) {
+					$il = new InvLine;
+					$il->inv_id = $inv->id;
+					$il->ccode = 'BPA';
+					$il->det = $a[2].' Base';
+					$il->amount = $a[4];
+					$il->qty = $qty;
+					$il->save();
+				}
+				if ($a[5] > 0) {
+					$il = new InvLine;
+					$il->inv_id = $inv->id;
+					$il->ccode = 'BPA';
+					$il->det = $a[2].' per KG';
+					$il->amount = $a[5];
+					$il->qty = $data[$a[0]][$a[1]+1];
+					$il->save();
+				}
+			} else {
+				$il = new InvLine;
+				$il->inv_id = $inv->id;
+				$il->ccode = 'BPA';
+				$il->det = $a[2];
+				$il->amount = $a[3];
+				$il->qty = $qty;
+				$il->save();
+			}
+		}
+		$inv->getTotal();
+		$inv->mdata['name'] = $owner->name;
+		$inv->mdata['address'] = $owner->getAddress();
+		$inv->mdata['payterm'] = empty($owner->extra['payterm'])? 'COD' : $owner->extra['payterm'].' days';
+		$inv->save();
+		$trace[] = $inv->no." issued";
+
+		$errors = $inv->getErrors();
+		if (empty($errors)) {
+			// $vcost = round($inv->total * 96 / 100, 2);
+			$orgRate_small = OrgRate::model()->find("org_id=:org_id AND name = 'Small Letter'", [':org_id'=>ORg::ORGID_COURIER_AUSLETTER]);
+			$orgRate_big = OrgRate::model()->find("org_id=:org_id AND name = 'Big Letter'", [':org_id'=>ORg::ORGID_COURIER_AUSLETTER]);
+			$ratesmall250 = ImcoConsol::getCourierCostPrice($orgRate_small, 2000, 0.249);
+			$ratelarge125 = ImcoConsol::getCourierCostPrice($orgRate_big, 2000, 0.120);
+			$ratelarge250 = ImcoConsol::getCourierCostPrice($orgRate_big, 2000, 0.249);
+			$ratelarge500 = ImcoConsol::getCourierCostPrice($orgRate_big, 2000, 0.499);
+
+			$small250 = InvLine::model()->with('invoice')->find('invoice.consol_id = :cid AND invoice.type = 40 AND det = "Small Letters"', [':cid' => $con->id]);
+			$small250 = intval(@$small250->qty);
+			$large125 = InvLine::model()->with('invoice')->find('invoice.consol_id = :cid AND invoice.type = 40 AND det = "Large Letters up to 125g"', [':cid' => $con->id]);
+			$large125 = intval(@$large125->qty);
+			$large250 = InvLine::model()->with('invoice')->find('invoice.consol_id = :cid AND invoice.type = 40 AND det = "Large Letters 125-250g"', [':cid' => $con->id]);
+			$large250 = intval(@$large250->qty);
+			$large500 = InvLine::model()->with('invoice')->find('invoice.consol_id = :cid AND invoice.type = 40 AND det = "Large Letters 250-500g"', [':cid' => $con->id]);
+			$large500 = intval(@$large500->qty);
+
+			$totalCost = $small250*$ratesmall250+$large125*$ratelarge125+$large250*$ratelarge250+$large500*$ratelarge500;
+
+			$vcost = round($totalCost, 2);
+			// create related billing
+			// create a related cost as well for the elms parcel
+			$billing = BillingLine::model()->find('billing_ref = :cref AND org_id = :oid AND charge_code = :ccode', [':cref' => $con->no, ':oid' => Org::ORGID_COURIER_AUPOST, ':ccode' => Consol::AU_LOCAL_DELIVERY_COST_GL_CODE]);
+			if (empty($billing)) {
+				$billing = new BillingLine();
+				$billing->type = BillingLine::BILLING_TYPE_IMPORT;
+				$billing->status = 1; // initial pending status
+				$billing->link_id = 0;
+				$billing->org_id = Org::ORGID_COURIER_AUPOST;
+				$billing->charge_code = Consol::AU_LOCAL_DELIVERY_COST_GL_CODE;
+				$billing->billing_cref = $con->no;
+				$billing->currency = 1; // AUD default
+				$billing->weight = 0;
+				$billing->charge_weight =  0;
+
+				// normally billing reference will be awb no , if not set we set job ID as reference
+				$billing->billing_ref = $con->no;
+				$billing->awb = '';
+				$billing->dpt_id = Org::PCAE_DEPARTMENT_SYDNEY;
+				$billing->date = date('Y-m-d');
+				$billing->created = date('Y-m-d');
+				$billing->transaction_date = $billing->date;
+				$billing->due = $billing->date;
+				$billing->type = BillingLine::BILLING_TYPE_IMPORT; // for import type
+				$billing->dpmt = Invoice::DPMT_IMPORT;
+				$billing->actual_amount = 0;
+				$billing->gst = 'EXEMPTEXPENSES';
+			}
+			$billing->accrual_amount = $vcost;
+			$billing->save();
+
+			// push cost to pl ledger table
+			$d = [
+				'gl' => 29,
+				'fid' => $billing->id,
+				'model' => 'BillingLine',
+				'dpt_id' => $billing->dpt_id,
+				'lid' => 0,
+				'org_id' => $billing->org_id,
+				'dpmt' => $billing->dpmt,
+				'grp1' => $con->id,
+				'date' => $con->eta,
+				'amt' => $billing->accrual_amount,
+				'gst' => 0,
+			];
+			//PlLedger::add($d, true, ['org_id', 'dpmt', 'date', 'grp1', 'grp2']);
+		}
+
+		header('Content-Disposition: attachment; filename="eLMS_'.$uid.'.pdf"');
+		oPDF::html2pdf($res, 1);
+	}
+
+	public function eps_eparcel($data)
+	{
+		unset($data[1]);
+		$err = [];
+		$ss = [];
+
+		// anyway create new console
+		//$con = ImcoConsol::model()->find("owner_id = self::EPS_FOR_SPECIAL_ORG_ID AND dpt_id = 106 AND pol = 'AUSYD' AND created = :d", [':d' => date('Y-m-d')]);
+		//if(empty($con)){
+		$con = new ImcoConsol;
+		$con->owner_id = self::EPS_FOR_SPECIAL_ORG_ID;
+		$con->pol = 'AUSYD';
+		$con->pod = 'AUSYD';
+		$con->dpt_id = 106;
+		$con->eta = date('Y-m-d');
+		$con->created = date('Y-m-d');
+		$con->save();
+		//	}
+		if ($con->isTLA()) [$app_name, Yii::app()->name] = [Yii::app()->name, 'TLA'];
+		foreach ($data as $d) {
+			$ref = substr($d[1], 0, 10);
+			if (empty($ref)) {
+				continue;
+			}
+			$p = ImParcel::model()->find('ref = :r', [':r' => $ref]);
+			
+			if (empty($p)) {
+				$err[] = $ref." not found";
+				continue;
+			}
+			$pc = trim($p->cnee->postcode);
+
+			if ($p->consol_id > 0 && $p->consol_id != $con->id) {
+				$err[] = $ref." already in other consol";
+				continue;
+			}
+
+			if (empty($pc)) {
+				$err[] = $ref." no postcode error";
+				continue;
+			}
+
+			$zm = ZoneMap::model()->find('org_id = 100 AND pc_lo <= :p AND pc_hi >= :p', [':p' => $pc]);
+			if (empty($zm)) {
+				$err[] = $ref.' Postcode '.$pc." has no Zone";
+				continue;
+			}
+			$p->cnee->checkPostcode();
+			$ss[] = $p;
+		}
+
+		if (!empty($err)) {
+			echo implode('<br />', $err);
+			return false;
+		}
+
+		$ref = 'ck1_ep'.date('Ymd');
+		foreach ($ss as $s) {
+			$s->consol_id = $con->id;
+			$s->save();
+		}
+		$ref = $con->no;
+		
+		$apa = new AusPostAPI('syd');
+		$r = $apa->createOrderIncludingShipments($ss, $ref, AusPostAPI::CHARGE_CODE_POD);
+
+		if (!empty($r->order)) {
+			$oid = $r->order->order_id;
+			foreach ($ss as $i => $s) {
+				$ts = new Tranship;
+				$ts->pid = $s->id;
+				$ts->org_id = 101;
+				$ts->type = 80;
+				$ts->status = 19;
+				$ts->connote = $s->ref;
+				$ts->time = date('Y-m-d H:i:s');
+				$ts->mdata['oid'] = $oid;
+				$ts->mdata['sid'] = $r->order->shipments[$i]->shipment_id;
+				$costValue = floatval($r->order->shipments[$i]->shipment_summary->total_cost - $r->order->shipments[$i]->shipment_summary->total_gst);
+				$ts->cost = round($costValue, 2);
+				$ts->save();
+			}
+		} else {
+			foreach ($apa->err as $e) {
+				$msg = $e->message;
+				if (!empty($e->field) && preg_match('/shipments\[(\d+)\]/', $e->field, $m)) {
+					$msg .= ': <a class="tab_link" href="/imParcel/update/'.$ss[$m[1]]->id.'" title="'.$ss[$m[1]]->hbn.'">'.$ss[$m[1]]->hbn.'</a>';
+				}
+				$err[] = $msg;
+			}
+			echo implode('<br />', $err);
+			echo '<script type="text/javascript" src="/js/jquery.min.js"></script>
+			<script type="text/javascript">
+			$("a.tab_link").on("click", function(){
+				window.parent.myApp.tabs.CreateTab({
+					title: $(this).attr("title"),
+					url: $(this).attr("href"),
+					bg: false
+				});
+			});
+			</script>';
+			return false;
+		}
+
+		//invoice
+		$rates = [
+			'N0' => [4.73, 4.73, 0],
+			'N1' => [5.90, 5.90, 0],
+			'GF' => [6.18, 6.48, 0.19],
+			'WG' => [6.18, 6.48, 0.19],
+			'NC' => [6.18, 7.32, 0.24],
+			'CB' => [6.18, 7.32, 0.24],
+			'N3' => [6.18, 8.07, 0.51],
+			'N4' => [6.18, 8.07, 0.51],
+			'N2' => [6.18, 8.07, 0.51],
+			'V0' => [5.90, 6.39, 0.34],
+			'V1' => [5.90, 6.39, 0.34],
+			'GL' => [6.18, 8.00, 0.49],
+			'BR' => [6.18, 9.06, 0.66],
+			'V3' => [6.18, 7.14, 0.47],
+			'V2' => [6.18, 9.06, 0.66],
+			'Q0' => [5.90, 6.39, 0.34],
+			'Q1' => [6.18, 6.39, 0.34],
+			'IP' => [6.18, 8.00, 0.62],
+			'GC' => [6.18, 6.70, 0.59],
+			'Q5' => [6.18, 7.14, 0.47],
+			'SC' => [6.18, 8.00, 0.62],
+			'Q2' => [6.18, 9.06, 0.84],
+			'Q3' => [6.18, 9.06, 1.30],
+			'Q4' => [6.18, 9.06, 1.49],
+			'S0' => [5.90, 6.39, 0.45],
+			'S1' => [5.90, 6.39, 0.45],
+			'S2' => [6.18, 9.06, 1.15],
+			'W0' => [5.90, 7.63, 1.05],
+			'W1' => [5.90, 7.63, 1.05],
+			'W2' => [6.18, 9.06, 2.45],
+			'W3' => [6.18, 9.06, 2.52],
+			'T0' => [6.18, 8.00, 0.83],
+			'T1' => [6.18, 8.00, 0.83],
+			'NT1' => [6.18, 9.06, 2.50],
+			'NT2' => [6.18, 9.06, 2.50],
+			'NF' => [6.18, 8.29, 1.74],
+			'W4' => [6.18, 9.06, 2.30],
+			'AAT' => [6.18, 8.29, 1.02],
+		];
+
+		$consol = ImcoConsol::model()->findByPk($con->id);
+		$owner = Org::model()->findByPk(self::EPS_FOR_SPECIAL_ORG_ID);
+		$inv = new Invoice;
+		$inv->type = 10;
+		$inv->dpmt = Invoice::DPMT_IMPORT;
+		$inv->to_id = 2791;
+		$inv->mdata['suborg'] = self::EPS_FOR_SPECIAL_ORG_ID; // for EPS client
+		$inv->dpt_id = Org::PCAE_DEPARTMENT_SYDNEY; // default set Sydney as warehouse
+		$inv->ref = 'ck1-ep'.date('Ymd', strtotime($consol->created));
+		$inv->currency = 1;
+		$inv->status = 1;
+		$inv->date = date('Y-m-d', strtotime($consol->created));
+		$inv->due = $inv->date;
+		$inv->save();
+		$items = [];
+		$tot = 0;
+		foreach ($ss as $i=>$p) {
+			$pc = trim($p->cnee->postcode);
+			$zm = ZoneMap::model()->find('org_id = 100 AND pc_lo <= :p AND pc_hi >= :p', [':p' => $pc]);
+			if (!empty($rates[$zm->z2])) {
+				$z = $zm->z2;
+			} elseif (!empty($rates[$zm->z1])) {
+				$z = $zm->z1;
+			} else {
+				echo $zm->z1.'/'.$zm->z2." has no rate<br />";
+				continue;
+			}
+			$wt = $p->chargeWeight();
+			$amt = $wt > 0.5? $rates[$z][1] + $rates[$z][2] * $wt : $rates[$z][0];
+			$items[] = [$p->ref, $p->getDesc().'    '.$z, $p->pkg, $wt, $p->cbm, $amt];
+			$tot += $amt;
+		}
+		$inv = Invoice::model()->findByPk($inv->id);
+		$il = new InvLine;
+		$il->inv_id = $inv->id;
+		$il->ccode = 'EPA';
+		$il->mdata['items'] = $items;
+		$il->det = $consol->no;
+		$il->fid = $con->id;
+		$il->model = 'ImcoConsol'; // invoice connected with console directly
+		$il->amount = round($tot * 100) / 100;
+		$il->qty = 1;
+		$il->save();
+		$inv->getTotal();
+		$inv->consol_id = $con->id;
+
+		$inv->mdata['name'] = $owner->name;
+		$inv->mdata['address'] = $owner->getAddress();
+		$inv->mdata['payterm'] = empty($owner->extra['payterm'])? 'COD' : $owner->extra['payterm'].' days';
+		$inv->save();
+		echo 'Invoice '.$inv->no." issued<br />";
+	}
+	
+	
+	/**
+	 * Deletes a particular model.
+	 * If deletion is successful, the browser will be redirected to the 'admin' page.
+	 * @param integer $id the ID of the model to be deleted
+	 */
+	public function actionDelete($id)
+	{
+		if (Yii::app()->request->isPostRequest) {
+			// we only allow deletion via POST request
+			$this->loadModel($id)->delete();
+
+			// if AJAX request (triggered by deletion via admin grid view), we should not redirect the browser
+			if (!isset($_GET['ajax'])) {
+				$this->redirect(isset($_POST['returnUrl']) ? $_POST['returnUrl'] : ['admin']);
+			}
+		} else {
+			throw new CHttpException(400, 'Invalid request. Please do not repeat this request again.');
+		}
+	}
+
+	/**
+	 * Lists and search.
+	 */
+	public function actionList()
+	{
+		$model=new Manifest('search');
+		$model->unsetAttributes();  // clear any default values
+		if (isset($_GET['Manifest'])) {
+			$model->attributes=$_GET['Manifest'];
+		}
+
+		$this->render('list', [
+			'model'=>$model,
+		]);
+	}
+		
+	/*
+	 * List the currecny change log
+	 *
+	 */
+	public function actionCurrencyLog()
+	{
+		$model=new Currency;
+		$model->unsetAttributes();
+		if (!empty($_GET['Currency'])) {
+			$model->attributes=$_GET['Currency'];
+		}
+		$this->render('currency_log', ['model'=>$model]);
+	}
+
+	/**
+	 * Returns the data model based on the primary key given in the GET variable.
+	 * If the data model is not found, an HTTP exception will be raised.
+	 * @param integer the ID of the model to be loaded
+	 */
+	public function loadModel($id)
+	{
+		$model=Manifest::model()->findByPk($id);
+		if ($model===null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		return $model;
+	}
+
+	/**
+	 * Performs the AJAX validation.
+	 * @param CModel the model to be validated
+	 */
+	protected function performAjaxValidation($model)
+	{
+		if (isset($_POST['ajax']) && $_POST['ajax']==='manifest-form') {
+			echo CActiveForm::validate($model);
+			Yii::app()->end();
+		}
+	}
+	/// log to figure out the problem
+	public function log($l)
+	{
+		$tmp = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR . 'shipmentapi' . DIRECTORY_SEPARATOR ;
+		file_put_contents($tmp.'shipment_mani_log_err'  . date('Y-m-d') . '.log', date('Y-m-d H:i:s').' '.$l."\n", FILE_APPEND);
+	}
+
+	public function actionUpdateShipment()
+	{
+		$this->render('update_shipment');
+	}
+}

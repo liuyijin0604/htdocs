@@ -1,0 +1,347 @@
+<?php
+class CargoProcessService extends Service
+{
+    public static function getSumCargoProcessCreateTodayPeriod($depot)
+    {
+        $result = [];
+        $totalCbm = $totalWeight = $totalPkgs = $total = 0;
+        $fbaTotalCbm = $fbaTotalWeight = $fbaTotalPkgs = $fbatotal = 0;
+        $btbTotalCbm = $btbTotalWeight = $btbTotalPkgs = $btbtotal = 0;
+        $norTotalCbm = $norTotalWeight = $norTotalPkgs = $nortotal = 0;
+        $perTotalCbm = $perTotalWeight = $perTotalPkgs = $pertotal = 0;
+        $toDay = date("Y-m-d");
+        $yesterDay = date("Y-m-d", strtotime("-1 day"));
+        $models = CargoProcess::model()->findAllBySql('select * from cargo_process where dpt_id = '.$depot.' and status < 97 and type in (1,2,4) and started >= "' . $yesterDay . ' 17:00:00" and started <= "' . $toDay . ' 16:59:59"');
+        if (!empty($models)) {
+            $result['pkgtotals'] = 0;
+            $result['cbmtotals'] = 0;
+            $result['weighttotals'] = 0;
+            foreach ($models as $model) {
+                if ($model->shipment->status != 100) {
+                    $total++;
+                    $perTotalPkgs = $model->getPackages();
+                    $result['pkgs'][] = $perTotalPkgs;
+                    $totalPkgs += $perTotalPkgs;
+
+                    $perTotalCbm = number_format($model->getTotalCBM(), 3, '.', '');
+                    $result['cbm'][] = $perTotalCbm;
+                    $totalCbm += $perTotalCbm;
+
+                    $perTotalWeight = number_format($model->getWeight(), 3, '.', '');
+                    $result['weight'][] = $perTotalWeight;
+                    $totalWeight += $perTotalWeight;
+
+                    if ($model->type == 1) {
+                        $norTotalPkgs += $perTotalPkgs;
+                        $norTotalCbm += $perTotalCbm;
+                        $norTotalWeight += $perTotalWeight;
+                        $nortotal++;
+                    } elseif ($model->type == 2) {
+                        $fbaTotalPkgs += $perTotalPkgs;
+                        $fbaTotalCbm += $perTotalCbm;
+                        $fbaTotalWeight += $perTotalWeight;
+                        $fbatotal++;
+                    } elseif ($model->type == 4) {
+                        $btbTotalPkgs += $perTotalPkgs;
+                        $btbTotalCbm += $perTotalCbm;
+                        $btbTotalWeight += $perTotalWeight;
+                        $btbtotal++;
+                    }
+                }
+            }
+            $result['total'] = $total;
+            $result['pkgtotals'] = $totalPkgs;
+            $result['cbmtotals'] = number_format($totalCbm, 3, '.', '');
+            $result['weighttotals'] = number_format($totalWeight, 3, '.', '');
+
+            $result['fbatotal'] = $fbatotal;
+            $result['fbapkgtotals'] = $fbaTotalPkgs;
+            $result['fbacbmtotals'] = number_format($fbaTotalCbm, 3, '.', '');
+            $result['fbaweighttotals'] = number_format($fbaTotalWeight, 3, '.', '');
+
+            $result['btbtotal'] = $btbtotal;
+            $result['btbpkgtotals'] = $btbTotalPkgs;
+            $result['btbcbmtotals'] = number_format($btbTotalCbm, 3, '.', '');
+            $result['btbweighttotals'] = number_format($btbTotalWeight, 3, '.', '');
+
+            $result['nortotal'] = $nortotal;
+            $result['norpkgtotals'] = $norTotalPkgs;
+            $result['norcbmtotals'] = number_format($norTotalCbm, 3, '.', '');
+            $result['norweighttotals'] = number_format($norTotalWeight, 3, '.', '');
+        }
+        return $result;
+    }
+
+    public static function getSumCargoProcessDoneTodayPeriod($depot)
+    {
+        $result = [];
+        $totalCbm = $totalWeight = $totalPkgs = $total =  0;
+        $fbaTotalCbm = $fbaTotalWeight = $fbaTotalPkgs = $fbatotal = 0;
+        $btbTotalCbm = $btbTotalWeight = $btbTotalPkgs = $btbtotal = 0;
+        $norTotalCbm = $norTotalWeight = $norTotalPkgs = $nortotal = 0;
+        $perTotalCbm = $perTotalWeight = $perTotalPkgs = $pertotal = 0;
+        $toDay = date("Y-m-d");
+        $yesterDay = date("Y-m-d", strtotime("-1 day"));
+        $models = CargoProcess::model()->findAllBySql('select * from cargo_process where dpt_id = '.$depot.' and status = 100 and type in (1,2,4) and comp_date >= "' . $yesterDay . ' 17:00:00" and comp_date <= "' . $toDay . ' 16:59:59"');
+        if (!empty($models)) {
+            $result['pkgtotals'] = 0;
+            $result['cbmtotals'] = 0;
+            $result['weighttotals'] = 0;
+            foreach ($models as $model) {
+                if ($model->shipment->status != 100) {
+                    $total++;
+                    $perTotalPkgs = $model->getPackages();
+                    $result['pkgs'][] = $perTotalPkgs;
+                    $totalPkgs += $perTotalPkgs;
+
+                    $perTotalCbm = number_format($model->getTotalCBM(), 3, '.', '');
+                    $result['cbm'][] = $perTotalCbm;
+                    $totalCbm += $perTotalCbm;
+
+                    $perTotalWeight = number_format($model->getWeight(), 3, '.', '');
+                    $result['weight'][] = $perTotalWeight;
+                    $totalWeight += $perTotalWeight;
+
+                    if ($model->type == 1) {
+                        $norTotalPkgs += $perTotalPkgs;
+                        $norTotalCbm += $perTotalCbm;
+                        $norTotalWeight += $perTotalWeight;
+                        $nortotal++;
+                    } elseif ($model->type == 2) {
+                        $fbaTotalPkgs += $perTotalPkgs;
+                        $fbaTotalCbm += $perTotalCbm;
+                        $fbaTotalWeight += $perTotalWeight;
+                        $fbatotal++;
+                    } elseif ($model->type == 4) {
+                        $btbTotalPkgs += $perTotalPkgs;
+                        $btbTotalCbm += $perTotalCbm;
+                        $btbTotalWeight += $perTotalWeight;
+                        $btbtotal++;
+                    }
+                }
+            }
+            $result['total'] = $total;
+            $result['pkgtotals'] = $totalPkgs;
+            $result['cbmtotals'] = number_format($totalCbm, 3, '.', '');
+            $result['weighttotals'] = number_format($totalWeight, 3, '.', '');
+
+            $result['fbatotal'] = $fbatotal;
+            $result['fbapkgtotals'] = $fbaTotalPkgs;
+            $result['fbacbmtotals'] = number_format($fbaTotalCbm, 3, '.', '');
+            $result['fbaweighttotals'] = number_format($fbaTotalWeight, 3, '.', '');
+
+            $result['btbtotal'] = $btbtotal;
+            $result['btbpkgtotals'] = $btbTotalPkgs;
+            $result['btbcbmtotals'] = number_format($btbTotalCbm, 3, '.', '');
+            $result['btbweighttotals'] = number_format($btbTotalWeight, 3, '.', '');
+
+            $result['nortotal'] = $nortotal;
+            $result['norpkgtotals'] = $norTotalPkgs;
+            $result['norcbmtotals'] = number_format($norTotalCbm, 3, '.', '');
+            $result['norweighttotals'] = number_format($norTotalWeight, 3, '.', '');
+        }
+        return $result;
+    }
+
+    public static function getSumCargoProcessLeft($depot)
+    {
+        $result = [];
+        $totalCbm = $totalWeight = $totalPkgs = $total = 0;
+        $fbaTotalCbm = $fbaTotalWeight = $fbaTotalPkgs = $fbatotal = 0;
+        $btbTotalCbm = $btbTotalWeight = $btbTotalPkgs = $btbtotal = 0;
+        $norTotalCbm = $norTotalWeight = $norTotalPkgs = $nortotal = 0;
+        $perTotalCbm = $perTotalWeight = $perTotalPkgs = $pertotal = 0;
+        //$models = CargoProcess::model()->findAllBySql('select * from cargo_process left join shipment on cargo_process.shipment_id = shipment.id where cargo_process.dpt_id = '.$depot.' and cargo_process.status < 100 and cargo_process.type in (1,2,4) and shipment.status !=100');
+        $models = CargoProcess::model()->findAllBySql('select * from cargo_process where dpt_id = '.$depot.' and status < 97 and type in (1,2,4)');
+        if (!empty($models)) {
+            //$result['total'] = 0;
+            $result['pkgtotals'] = 0;
+            $result['cbmtotals'] = 0;
+            $result['weighttotals'] = 0;
+            foreach ($models as $model) {
+                if ($model->shipment->status < 100 && !empty($model->shipment->status)) {
+                    $total++;
+
+                    $perTotalPkgs = $model->getPackages();
+                    $result['pkgs'][] = $perTotalPkgs;
+                    $totalPkgs += $perTotalPkgs;
+
+                    $perTotalCbm = number_format($model->getTotalCBM(), 3, '.', '');
+                    $result['cbm'][] = $perTotalCbm;
+                    $totalCbm += $perTotalCbm;
+
+                    $perTotalWeight = number_format($model->getWeight(), 3, '.', '');
+                    $result['weight'][] = $perTotalWeight;
+                    $totalWeight += $perTotalWeight;
+
+                    if ($model->type == 1) {
+                        $norTotalPkgs += $perTotalPkgs;
+                        $norTotalCbm += $perTotalCbm;
+                        $norTotalWeight += $perTotalWeight;
+                        $nortotal++;
+                    } elseif ($model->type == 2) {
+                        $fbaTotalPkgs += $perTotalPkgs;
+                        $fbaTotalCbm += $perTotalCbm;
+                        $fbaTotalWeight += $perTotalWeight;
+                        $fbatotal++;
+                    } elseif ($model->type == 4) {
+                        $btbTotalPkgs += $perTotalPkgs;
+                        $btbTotalCbm += $perTotalCbm;
+                        $btbTotalWeight += $perTotalWeight;
+                        $btbtotal++;
+                    }
+                }
+            }
+            $result['total'] = $total;
+            $result['pkgtotals'] = $totalPkgs;
+            $result['cbmtotals'] = number_format($totalCbm, 3, '.', '');
+            $result['weighttotals'] = number_format($totalWeight, 3, '.', '');
+
+            $result['fbatotal'] = $fbatotal;
+            $result['fbapkgtotals'] = $fbaTotalPkgs;
+            $result['fbacbmtotals'] = number_format($fbaTotalCbm, 3, '.', '');
+            $result['fbaweighttotals'] = number_format($fbaTotalWeight, 3, '.', '');
+
+            $result['btbtotal'] = $btbtotal;
+            $result['btbpkgtotals'] = $btbTotalPkgs;
+            $result['btbcbmtotals'] = number_format($btbTotalCbm, 3, '.', '');
+            $result['btbweighttotals'] = number_format($btbTotalWeight, 3, '.', '');
+
+            $result['nortotal'] = $nortotal;
+            $result['norpkgtotals'] = $norTotalPkgs;
+            $result['norcbmtotals'] = number_format($norTotalCbm, 3, '.', '');
+            $result['norweighttotals'] = number_format($norTotalWeight, 3, '.', '');
+        }
+        return $result;
+    }
+
+    public static function getYesterdayLeft($depot)
+    {
+        if($depot==106){
+            $type=2;
+        }elseif($depot==218){
+            $type=3;
+        }elseif($depot==530){
+            $type=18;
+        }
+        $result = [];
+        $yesterDay = date("Y-m-d", strtotime("-1 day"));
+        $model = ReportCache::model()->findBySql('select * from report_cache where type = '.$type.' and status = 1 and create_time = "' . $yesterDay . '"');
+        if (!empty($model->mdata['todayLeft'])) {
+            $result = $model->mdata['todayLeft'];
+        }
+        return $result;
+    }
+
+    public static function getDeliveryDaysDiff($depot){
+        $result = [];
+        $numTotalCount = $numEffecticeCount = $numGoodDelivery = 0;
+        $beginDate = date('Y-m-01',strtotime(date("Y-m-d")));
+        $models = CargoProcess::model()->findAllBySql('select * from cargo_process where dpt_id = '.$depot.' and status = 100 and type in (1) and comp_date >= "' . $beginDate . ' 00:00:00" and JSON_EXTRACT(meta, "$.approveuser") is null');
+        if(!empty($models)){
+            foreach($models as $model){
+                $numTotalCount++;
+                if($model->getDateDiff()<4){
+                    $numEffecticeCount++;
+                }
+                if($model->isUploadPodOnTime()){
+                    $numGoodDelivery++;
+                }
+            }
+            $result['diffb2ctotal'] = $numTotalCount;
+            $result['diffb2ceffecttotal'] = $numEffecticeCount;
+            $result['diffb2cgooddelivery'] = $numGoodDelivery;
+        }
+        return $result;
+    }
+
+    public static function getDeliveryDaysDiffB2B($depot){
+        $result = [];
+        $numTotalCount = $numEffecticeCount = $numGoodDelivery = 0;
+        $beginDate = date('Y-m-01',strtotime(date("Y-m-d")));
+        $models = CargoProcess::model()->findAllBySql('select * from cargo_process where dpt_id = '.$depot.' and status = 100 and type in (4) and comp_date >= "' . $beginDate . ' 00:00:00" and JSON_EXTRACT(meta, "$.approveuser") is null');
+        if(!empty($models)){
+            foreach($models as $model){
+                $numTotalCount++;
+                if($model->getDateDiff()<6){
+                    $numEffecticeCount++;
+                }
+                if($model->isUploadPodOnTime()){
+                    $numGoodDelivery++;
+                }
+            }
+            $result['diffb2btotal'] = $numTotalCount;
+            $result['diffb2beffecttotal'] = $numEffecticeCount;
+            $result['diffb2bgooddelivery'] = $numGoodDelivery;
+        }
+        return $result;
+    }
+
+    public static function getDeliveryDaysDiffFBA($depot){
+        $result = [];
+        $numTotalCount = $numEffecticeCount = $numGoodDelivery = 0;
+        $beginDate = date('Y-m-01',strtotime(date("Y-m-d")));
+        $models = CargoProcess::model()->findAllBySql('select * from cargo_process where dpt_id = '.$depot.' and status = 100 and type in (2) and comp_date >= "' . $beginDate . ' 00:00:00" and JSON_EXTRACT(meta, "$.approveuser") is null');
+        if(!empty($models)){
+            foreach($models as $model){
+                $numTotalCount++;
+                if($model->getDateDiff()<6){
+                    $numEffecticeCount++;
+                }
+                if($model->isUploadPodOnTime()){
+                    $numGoodDelivery++;
+                }
+            }
+            $result['difffbatotal'] = $numTotalCount;
+            $result['difffbaeffecttotal'] = $numEffecticeCount;
+            $result['difffbagooddelivery'] = $numGoodDelivery;
+        }
+        return $result;
+    }
+
+    public static function getCargoPorcessDailyReport($depot)
+    {
+        $result = [];
+        $yesterdayLeft = self::getYesterdayLeft($depot);
+        $todayNew = self::getSumCargoProcessCreateTodayPeriod($depot);
+        $todayClose = self::getSumCargoProcessDoneTodayPeriod($depot);
+        $todayLeft = self::getSumCargoProcessLeft($depot);
+        $effectiveToday = self::getDeliveryDaysDiff($depot);
+        $effectiveTodayB2B = self::getDeliveryDaysDiffB2B($depot);
+        $effectiveTodayFBA = self::getDeliveryDaysDiffFBA($depot);
+        $result['yesterdayLeft'] = $yesterdayLeft;
+        $result['todayNew'] = $todayNew;
+        $result['todayClose'] = $todayClose;
+        $result['todayLeft'] = $todayLeft;
+        $result['effective'] = $effectiveToday;
+        $result['effectiveb2b'] = $effectiveTodayB2B;
+        $result['effectivefba'] = $effectiveTodayFBA;
+        return $result;
+    }
+
+    public static function getShipmentCargoProcessCost($model)
+    {
+        $orgRateService = new OrgRateService();
+        $cost1 = 0;
+        //for cargoprocess cost and costzone
+        $modelCargoPorcesses = CargoProcess::model()->findAll('shipment_id = :shipment_id and status !=:status',[':shipment_id'=>$model->id,':status'=>CargoProcess::DELETED]);
+        $sysInterstateCost=$sysBaseCost=0;
+        if(!empty($modelCargoPorcesses)){
+            foreach($modelCargoPorcesses as $modelCargoPorcess){
+                $numOTInvoice = $modelCargoPorcess->getRelatedOTFee();
+                $cargoProcessFee = $modelCargoPorcess->getCargoProcessFeeReCal();
+                $sysInterstateCost = $modelCargoPorcess->getSystemInterstateCost();
+                $sysBaseCost = $modelCargoPorcess->getSystemBaseCost();
+                if($cargoProcessFee!="n/a")
+                {
+                    $cost1+=$cargoProcessFee;
+                }
+                $numOrgRate = !empty($modelCargoPorcess->mdata['orgRateId'])? $modelCargoPorcess->mdata['orgRateId']:0;
+                $costZone = $orgRateService->getShipmentCostZone($numOrgRate,$model);
+            }
+        }
+		return $cost1;
+    }
+
+
+}

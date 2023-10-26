@@ -1,0 +1,319 @@
+<?php
+
+/**
+ * This is the model class for table "report_cache".
+ *
+ * The followings are the available columns in table 'report_cache':
+ * @property integer $id
+ * @property integer $name
+ * @property string $meta
+ * @property string $create_time
+ * @property integer $creater
+ * @property string $modify_time
+ * @property integer $modifyer
+ */
+class ReportCache extends CActiveRecord
+{
+	public $mdata = [];
+
+	const Active = 1;
+	const Inactive = 0;
+	const CustomDoneReportSumTotalByDaily = 1;
+	const CargoProcessSumTotalByDaily = 2;
+	const CargoProcessSumTotalByDailyMel = 3;
+	const ConsolProcessSumTotalByDailySyd = 4;
+	const ConsolProcessSumTotalByDailyMel = 5;
+	const ConsolProcessSumTotalByDailyBne = 6;
+	const PutAwayReminder = 7;
+	const PutAwayLeftReminder = 8;
+	const TplSumTotalSyd = 9;
+	const TplSumTotalMel = 10;
+
+	const GoogleReviewStatistics = 11;
+	const ImportsMailKPIDashboardDaily = 12;
+	const KpiReportMonthly = 13;
+	const CheckInReportMonthly = 14;
+	const InspectionReportMonthly = 15;
+	const PutawayReportMonthly = 16;
+	const PreparationReportMonthly = 17;
+	const CargoProcessSumTotalByDailyBne = 18;
+	
+	const IMPORTS_MAIL_FEEDBACK_REPORT = 19;
+	const CBMLimitSYDNormal = 20;
+	const CBMLimitSYDFBA = 21;
+	const CBMLimitSYDB2B = 22;
+	const GatepassReportMonthly = 23;
+	const TodayHeldReportMonthly = 24;
+
+	const CheckInReportDaily = 25;
+	const InspectionReportDaily = 26;
+	const PutawayReportDaily = 27;
+	const PreparationReportDaily = 28;
+	const GatepassReportDaily = 29;
+	const TodayHeldReportDaily = 30;
+	const UBReportMonthly = 31;
+	const SCRACRReportMonthly = 32;
+	const TODAY_UB_DAILY = 33;
+	const TODAY_SCR_ACR_DAILY = 34;
+	const TodayShipmentScanReportAir = 35;
+	const TodayShipmentScanReportSea = 36;
+	const ACCOUNTING_AP_REPORT_MONTHLY = 37;
+	const CheckInDashDaily = 38;
+	const CheckInDashDetailDaily = 39;
+	const DoNotMoveSumMailTotalByDaily = 40;
+	const CustomAttHtmlMailTotalByDaily = 41;
+	const ReleasedDirectionMailTotalByDaily = 42;
+	const TLD_REPORT = 43;
+
+	public $reportType = [
+		1 => "Custom Done Report (Sum Total By Daily)",
+		2 => "CargoProcess Report (Sum Total By Daily)"
+	];
+
+	public static $status = [
+		1 => 'Active',
+		0 => 'Inactive',
+	];
+
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName()
+	{
+		return 'report_cache';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('type, status, creater, modifyer', 'numerical', 'integerOnly' => true),
+			array('meta, create_time, modify_time', 'safe'),
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, name, meta,,status, create_time, creater, modify_time, modifyer', 'safe', 'on' => 'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array();
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return array(
+			'id' => 'ID',
+			'type' => 'Type',
+			'status' => 'Status',
+			'meta' => 'Meta',
+			'create_time' => 'Create Time',
+			'creater' => 'Creater',
+			'modify_time' => 'Modify Time',
+			'modifyer' => 'Modifyer',
+			'dpt_id'=>'warehouse id'
+		);
+	}
+
+	public function beforeSave()
+	{
+		if (!empty($this->mdata)) $this->meta = json_encode($this->mdata);
+		return parent::beforeSave();
+	}
+
+	public function afterFind()
+	{
+		if (!empty($this->meta)) $this->mdata = json_decode($this->meta, true);
+		return parent::afterFind();
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search($pgn = true, $ps = 30, $ec = false)
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria = new CDbCriteria;
+
+		$criteria->compare('id', $this->id);
+		$criteria->compare('type', $this->type);
+		$criteria->compare('status', $this->status);
+		$criteria->compare('meta', $this->meta, true);
+		$criteria->compare('create_time', $this->create_time, true);
+		$criteria->compare('creater', $this->creater);
+		$criteria->compare('modify_time', $this->modify_time, true);
+		$criteria->compare('modifyer', $this->modifyer);
+
+		return new CActiveDataProvider($this, array(
+			'criteria' => $criteria,
+			'sort' => array(
+				'defaultOrder' => 't.id DESC',
+			),
+			'pagination' => $pgn ? array(
+				'pageSize' => $ps,
+			) : false,
+		));
+	}
+
+	public function getGoogleReviewStatistics()
+	{
+		$criteria = new CDbCriteria;
+		$criteria->compare('id', $this->id);
+		$criteria->compare('type', 11);
+		$criteria->compare('status', $this->status);
+		$criteria->compare('meta', $this->meta, true);
+		$criteria->compare('create_time', $this->create_time, true);
+		$criteria->compare('creater', $this->creater);
+		$criteria->compare('modify_time', $this->modify_time, true);
+		$criteria->compare('modifyer', $this->modifyer);
+		return new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+			'pagination'=>array(
+				'pageSize'=>5,
+			),
+		));
+	}
+
+	public function getTotalTodayNew(){
+		return number_format($this->mdata["todayNew"]["total"],0,'.',',')."-".number_format($this->mdata["todayNew"]["cbmtotals"],0,'.',',')."M³-".number_format($this->mdata["todayNew"]["weighttotals"],0,'.',',')."kg";
+	}
+
+	public function getTotalTodayClose(){
+		return number_format($this->mdata["todayClose"]["total"],0,'.',',')."-".number_format($this->mdata["todayClose"]["cbmtotals"],0,'.',',')."M³-".number_format($this->mdata["todayClose"]["weighttotals"],0,'.',',')."kg";
+	}
+
+	public function getTotalTodayLeft(){
+		return number_format($this->mdata["todayLeft"]["total"],0,'.',',')."-".number_format($this->mdata["todayLeft"]["cbmtotals"],0,'.',',')."M³-".number_format($this->mdata["todayLeft"]["weighttotals"],0,'.',',')."kg";
+	}
+
+
+	public function getFBATodayNew(){
+		return number_format($this->mdata["todayNew"]["fbatotal"],0,'.',',')."-".number_format($this->mdata["todayNew"]["fbacbmtotals"],0,'.',',')."M³-".number_format($this->mdata["todayNew"]["fbaweighttotals"],0,'.',',')."kg";
+	}
+
+	public function getFBATodayClose(){
+		return number_format($this->mdata["todayClose"]["fbatotal"],0,'.',',')."-".number_format($this->mdata["todayClose"]["fbacbmtotals"],0,'.',',')."M³-".number_format($this->mdata["todayClose"]["fbaweighttotals"],0,'.',',')."kg";
+	}
+
+	public function getFBATodayLeft(){
+		return number_format($this->mdata["todayLeft"]["fbatotal"],0,'.',',')."-".number_format($this->mdata["todayLeft"]["fbacbmtotals"],0,'.',',')."M³-".number_format($this->mdata["todayLeft"]["fbaweighttotals"],0,'.',',')."kg";
+	}
+
+
+	public function getB2BTodayNew(){
+		return number_format($this->mdata["todayNew"]["btbtotal"],0,'.',',')."-".number_format($this->mdata["todayNew"]["btbcbmtotals"],0,'.',',')."M³-".number_format($this->mdata["todayNew"]["btbweighttotals"],0,'.',',')."kg";
+	}
+
+	public function getB2BTodayClose(){
+		return number_format($this->mdata["todayClose"]["btbtotal"],0,'.',',')."-".number_format($this->mdata["todayClose"]["btbcbmtotals"],0,'.',',')."M³-".number_format($this->mdata["todayClose"]["btbweighttotals"],0,'.',',')."kg";
+	}
+
+	public function getB2BTodayLeft(){
+		return number_format($this->mdata["todayLeft"]["btbtotal"],0,'.',',')."-".number_format($this->mdata["todayLeft"]["btbcbmtotals"],0,'.',',')."M³-".number_format($this->mdata["todayLeft"]["btbweighttotals"],0,'.',',')."kg";
+	}
+
+
+	public function getB2CTodayNew(){
+		return number_format($this->mdata["todayNew"]["nortotal"],0,'.',',')."-".number_format($this->mdata["todayNew"]["norcbmtotals"],0,'.',',')."M³-".number_format($this->mdata["todayNew"]["norweighttotals"],0,'.',',')."kg";
+	}
+
+	public function getB2CTodayClose(){
+		return number_format($this->mdata["todayClose"]["nortotal"],0,'.',',')."-".number_format($this->mdata["todayClose"]["norcbmtotals"],0,'.',',')."M³-".number_format($this->mdata["todayClose"]["norweighttotals"],0,'.',',')."kg";
+	}
+
+	public function getB2CTodayLeft(){
+		return number_format($this->mdata["todayLeft"]["nortotal"],0,'.',',')."-".number_format($this->mdata["todayLeft"]["norcbmtotals"],0,'.',',')."M³-".number_format($this->mdata["todayLeft"]["norweighttotals"],0,'.',',')."kg";
+	}
+
+	public function getConsolTodayNew(){
+		return number_format($this->mdata["todayNew"]["totalCount"],0,'.',',')."-".number_format($this->mdata["todayNew"]["totalCBM"],0,'.',',')."M³-".number_format($this->mdata["todayNew"]["totalWeight"],0,'.',',')."kg";
+	}
+
+	public function getConsolTodayDone(){
+		return number_format($this->mdata["todayDone"]["totalCount"],0,'.',',')."-".number_format($this->mdata["todayDone"]["totalCBM"],0,'.',',')."M³-".number_format($this->mdata["todayDone"]["totalWeight"],0,'.',',')."kg";
+	}
+
+	public function getConsolTodayLeft(){
+		return number_format($this->mdata["todayLeft"]["totalCount"],0,'.',',')."-".number_format($this->mdata["todayLeft"]["totalCBM"],0,'.',',')."M³-".number_format($this->mdata["todayLeft"]["totalWeight"],0,'.',',')."kg";
+	}
+
+	public function getConsolAirTodayNew(){
+		return number_format($this->mdata["todayNew"]["airCount"],0,'.',',')."-".number_format($this->mdata["todayNew"]["airCBM"],0,'.',',')."M³-".number_format($this->mdata["todayNew"]["airWeight"],0,'.',',')."kg";
+	}
+
+	public function getConsolAirTodayDone(){
+		return number_format($this->mdata["todayDone"]["airCount"],0,'.',',')."-".number_format($this->mdata["todayDone"]["airCBM"],0,'.',',')."M³-".number_format($this->mdata["todayDone"]["airWeight"],0,'.',',')."kg";
+	}
+
+	public function getConsolAirTodayLeft(){
+		return number_format($this->mdata["todayLeft"]["airCount"],0,'.',',')."-".number_format($this->mdata["todayLeft"]["airCBM"],0,'.',',')."M³-".number_format($this->mdata["todayLeft"]["airWeight"],0,'.',',')."kg";
+	}
+
+	public function getConsolSeaTodayNew(){
+		return number_format($this->mdata["todayNew"]["seaCount"],0,'.',',')."-".number_format($this->mdata["todayNew"]["seaCBM"],0,'.',',')."M³-".number_format($this->mdata["todayNew"]["seaWeight"],0,'.',',')."kg";
+	}
+
+	public function getConsolSeaTodayDone(){
+		return number_format($this->mdata["todayDone"]["seaCount"],0,'.',',')."-".number_format($this->mdata["todayDone"]["seaCBM"],0,'.',',')."M³-".number_format($this->mdata["todayDone"]["seaWeight"],0,'.',',')."kg";
+	}
+
+	public function getConsolSeaTodayLeft(){
+		return number_format($this->mdata["todayLeft"]["seaCount"],0,'.',',')."-".number_format($this->mdata["todayLeft"]["seaCBM"],0,'.',',')."M³-".number_format($this->mdata["todayLeft"]["seaWeight"],0,'.',',')."kg";
+	}
+
+	public function getCompletion(){
+			$todayNew = $this->mdata['todayNew']['totalcount'];
+			$todayCost = number_format($this->mdata['todayNew']['totalcostcount'],2);
+			$todayLeft = $this->mdata['todayLeft']['totalcount'];
+			$todayDone = $this->mdata['todayDone']['totalcount'];
+			if($todayNew+$todayLeft>0){
+				$preFinished = $todayDone."/".($todayNew+$todayLeft)." ".round($todayDone/($todayNew+$todayLeft)*100,2)."%";
+			}else{
+				$preFinished = $todayDone."/".($todayNew+$todayLeft)." 0.00%";
+			}
+			
+		return $preFinished;
+	}
+
+	public function getInvoice(){
+		return $todayInvoice = "$".number_format($this->mdata['todayNew']['totalinvcount'],2);
+	}
+
+	public function getGP(){
+		$todayInvoice = $this->mdata['todayNew']['totalinvcount'];
+		$todayCost = $this->mdata['todayNew']['totalcostcount'];
+		return "$".number_format($todayInvoice-$todayCost,2);
+	}
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return ReportCache the static model class
+	 */
+	public static function model($className = __CLASS__)
+	{
+		return parent::model($className);
+	}
+}

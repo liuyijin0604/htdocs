@@ -1,0 +1,663 @@
+<?php
+
+	class ImsService extends Service
+	{
+		public $orgId = null;
+		public $chargecode = null;
+		public $currency = null;
+		function __construct($orgId,$chargecode,$currency="AUD")
+		{
+			$this->orgId = $orgId;
+			$this->chargecode = $chargecode;
+			$this->currency = $currency;
+		}
+
+		public function prepareData($d,$packagesInfo=[],$checkShipment=false)
+		{
+			$o=new stdClass();
+			$o->status=1;
+			$o->msg='';
+			$o->shipmentData='';
+
+
+			$shipmentData = new stdClass();
+			$shipmentData->no = empty($d[2]) ? '' : trim($d[2]);
+			$shipmentData->cust_ref = empty($d[1]) ? '' : trim($d[1]);
+
+			if(!empty($shipmentData->no))
+			{
+				$check = ImParcel::model()->count(['condition'=>'hbn =:hbn and status !=100','params'=>[':hbn'=>$shipmentData->no],'order'=>'id desc']);
+	            if($check>0&&$checkShipment)
+	            {
+	            	$o->status = 0;
+	                $o->msg = '[90003] - '.$shipmentData->no." HBN is existed";
+					return $o;
+	            }
+        	}
+
+			$check = ImParcel::model()->count(['condition'=>'(cref = :cref or hbn =:cref) and status !=100','params'=>[':cref'=>$shipmentData->cust_ref],'order'=>'id desc']);
+            if($check>0&&$checkShipment)
+            {
+            	$o->status = 0;
+                $o->msg = '[90003] - '.$shipmentData->cust_ref." cref  is existed";
+				return $o;
+            }
+
+
+
+
+
+			$shipmentData->type = 10;
+			$shipmentData->weight = empty($d[3]) ? 0 : floatval($d[3]);
+			$shipmentData->packs = empty($d[12]) ? 1 : intval($d[12]);
+			if(preg_match('/[;,]+/', $d[17])){
+				$dim = preg_split('/[;,\s]+/', $d[17]);
+				$shipmentData->dim = ['w' => 0, 'h' => 0, 'd' => 0];
+				$i = 0;
+				foreach($shipmentData->dim as $k => $v){
+					$shipmentData->dim[$k] = empty($dim[$i])? 0 : $dim[$i];
+					$i++;
+				}
+				$shipmentData->cbm = number_format(array_product($shipmentData->dim) / 1000000, 6);
+			}else{
+				$shipmentData->cbm = number_format((empty($d[17])?0:$d[17]), 6);
+			}
+			// $shipmentData->cbm = empty($d[17]) ? 0 : floatval($d[17]);
+			$shipmentData->currency = 'AUD';
+			$shipmentData->insurance = floatval(empty($d[25]) ? 0 : $d[25]);
+			$shipmentData->shipper = (object) [
+				'name' => empty($d[18]) ? '' : $d[18],
+				'address' => empty($d[19]) ? '' : $d[19],
+				'state' => empty($d[21]) ? '' : $d[21],
+				'city' => empty($d[20]) ? '' : $d[20],
+				'postcode' => empty($d[22]) ? '' : $d[22],
+				'country' => empty($d[23]) ? 'CHINA' : $d[23],
+				'phone' => empty($d[24]) ? '' : $d[24],
+			];
+			$shipmentData->consignee = (object) [
+				'name' => empty($d[4]) ? '' : $d[4],
+				'company' => empty($d[5]) ? '' : $d[5],
+				'address' => empty($d[7]) ? '' : $d[7],
+				'state' => strtoupper(empty($d[9]) ? '' : $d[9]),
+				'city' => empty($d[8]) ? '' : $d[8],
+				'suburb' => empty($d[8]) ? '' : $d[8],
+				'postcode' => empty($d[10]) ? '' : $d[10],
+				'country' => empty($d[11]) ? 'Australia' : $d[11],
+				'phone' => empty($d[6]) ? '' : $d[6],
+				'email' => empty($d[43]) ? '' : $d[43],
+			];
+			if (!empty($d[26])) {
+				$shipmentData->receiver = (object) [
+					'name' => empty($d[26]) ? '':$d[26],
+					'phone' => empty($d[27])?'':$d[27],
+					'address' => empty($d[28])?'':$d[28],
+					'suburb' => empty($d[29])?'':$d[29],
+					'state' => empty($d[30])?'':$d[30],
+					'postcode' => empty($d[31])?'':$d[31],
+				];
+			}
+			if (!empty($d[32]))	$shipmentData->clear = trim($d[32]);
+			if (!empty($d[33]))	$shipmentData->amazon_po = trim($d[33]);
+			// if (!empty($d[34]))	$shipmentData->amazon_sid = trim($d[34]);
+			if (!empty($d[34])) $shipmentData->amazon_shipment_ids = trim($d[34]);
+			if (!empty($d[35]))	$shipmentData->cust_invoice_ref =  substr(trim($d[35]), 0, 20);
+			if (!empty($d[36]))	$shipmentData->importer_abn = trim($d[36]);
+			if (!empty($d[37]))	$shipmentData->vendor_id = trim($d[37]);
+			if (!empty($d[38]))	$shipmentData->consignor_tin = trim($d[38]);
+			if (!empty($d[39]))	$shipmentData->dg = trim($d[39]);
+			if (!empty($d[40]))	$shipmentData->direct = trim($d[40]);
+			if (!empty($d[42]))	$shipmentData->pe_number = trim($d[42]);
+			if (!empty($d[41]))	$packages = trim($d[41]);
+			if (!empty($d[44]))	$shipmentData->marks_and_numbers = trim($d[44]);
+			if (!empty($d[46])) $shipmentData->wooden_box = trim($d[46]);
+			if (!empty($d[47])) $shipmentData->has_forklift = trim($d[47]);
+			if(!empty(trim($this->currency)))
+			{
+				$shipmentData->currency = trim($this->currency);
+			}
+
+
+			if(!empty($d[45])&&!empty(trim($d[45])))
+			{
+				$shipmentData->currency = trim($d[45]);
+			}
+
+			if (!empty($shipmentData->consignee)) {
+				$imParcelService = new ImParcelService();
+				if (!$imParcelService->checkCneeInBlackList($shipmentData->consignee->name)) {
+					$o->status = 0;
+					$o->msg = '[90005] - This consignee name can not create shipment.Please contact our account manager.';
+					return $o;
+				}
+			}
+
+			if(!empty($packages))
+			{
+				try
+				{
+					$packArr = [];
+					$pas = explode('_', $packages);
+					foreach ($pas as $pObjk => $pObj) {
+						$myWeight = explode('&', $pObj)[0];
+						$myDims = explode('&', $pObj)[1];
+						$myQty = empty(explode('*', $myDims)[1])?1: explode('*', $myDims)[1];
+						$myDims = explode('*', $myDims)[0];
+						$myDepth = explode(':', $myDims)[0];
+						$myWidth = explode(':', $myDims)[1];
+						$myHeight = explode(':', $myDims)[2];
+						for ($i=0; $i < $myQty; $i++) {
+							$packObj = new stdClass();
+							$packObj->weight = $myWeight;
+							$packObj->width = $myWidth;
+							$packObj->height = $myHeight;
+							$packObj->depth = $myDepth;
+							$packArr[] = $packObj;
+						}
+					}
+					$shipmentData->packages = $packArr;
+
+				}catch(Exception $ex)
+				{
+					$o->status = 0;
+					$o->msg = '[90003] - packages format-> weight&length:width:height*qty_weight:length&width:height_weight&length:width:height*qty';
+					return $o;
+				}
+			}
+
+			$numericAttribute = ['weight', 'packs', 'dg', 'direct'];
+			$noNumericAttribute = ['clear', 'wooden_box', 'has_forklift', 'currency'];
+			foreach($numericAttribute as $i => $k){
+				if (empty($shipmentData->{$k})) {
+					continue;
+				}
+				if (!is_numeric($shipmentData->{$k})) {
+				 	$o->error[] = '[90006] - Shipment '.$shipmentData->cust_invoice_ref.' '.($k).' can only be numbers';
+				 } 
+			}
+
+			foreach($noNumericAttribute as $i => $k1){
+				if (empty($shipmentData->{$k1})) {
+					continue;
+				}
+				if (is_numeric($shipmentData->{$k1})) {
+				 	$o->error[] = '[90006] - Shipment '.$shipmentData->cust_invoice_ref.' '.($k1).' can not only be numbers';
+				 } 
+			}
+
+			if(!empty($o->error)){
+				$o->success = false;
+				return $o;
+			}
+
+			if(!empty($packagesInfo[$shipmentData->cust_ref]))
+			{
+				$shipmentData->packages = $packagesInfo[$shipmentData->cust_ref];
+			}
+
+			if(empty($shipmentData->packages))
+			{
+				$sp = ShipmentPackage::model()->find('cref =:cref',[":cref"=>$shipmentData->cust_ref]);
+				if(!empty($sp))
+				{
+					$thisPackages = json_decode($sp->packages);
+					$shipmentData->packages = $thisPackages;
+				}
+			}
+
+			$total=0;
+			if (!empty($shipmentData->amazon_po)) {
+				$amazonMsg = '[90005] - Number of amazon po must equals the number of amazon shipment id';
+				if (!empty($shipmentData->amazon_shipment_ids)) {
+					$amazonPoSperateNumber = preg_match_all('/[.,;]/', trim($shipmentData->amazon_po));
+					$amazonIdsSperateNumber = preg_match_all('/[.,;]/', trim($shipmentData->amazon_shipment_ids));
+					$amazonPoArr = preg_split('/[.,;]/', trim($shipmentData->amazon_po));
+					$amazonShipmentIds = preg_split('/[.,;]/', trim($shipmentData->amazon_shipment_ids));
+					if(count($amazonPoArr)!=count($amazonShipmentIds))
+					{
+						$o->status = 0;
+						$o->msg = $amazonMsg;
+						return $o;
+					}
+				}else
+				{
+					$o->status = 0;
+					$o->msg = $amazonMsg;
+					return $o;
+				}
+			}else if(empty($shipmentData->amazon_po)&&!empty($shipmentData->amazon_shipment_ids))
+			{
+				$o->status = 0;
+				$o->msg = '[90005] - Number of amazon po must equals the number of amazon shipment id';
+				return $o;
+			}
+
+			if (!empty($d[13])) {
+				$names = explode(';', $d[13]);
+				$values = explode(';', $d[15]);
+				$qtys = explode(';', $d[14]);
+				if (sizeof($names) != sizeof($values) || sizeof($names) != sizeof($qtys)) {
+					$o->status = 0;
+					$o->msg = '[90003] - Shipment items(name,quantity,value) do not have the same numbers';
+					return $o;
+				}
+				$shipmentData->items=[];
+				foreach ($names as $k => $name) {
+					$shipmentData->items[$k] = (object) ['type' => 'O', 'name' => trim($name), 'qty' => trim($qtys[$k]), 'price' => trim($values[$k])];
+					$total+=floatval($values[$k])*floatval($qtys[$k]);
+				}
+				if (empty($d[16]) || floatval($d[16]) == 0) {
+					$o->status = 0;
+					$o->msg = '[90013] - Shipment should include total values';
+					return $o;
+				}
+				if ($total/ floatval($d[16])>1.1||$total/ floatval($d[16])<0.9) {
+					$o->status = 0;
+					$o->msg = '[90013] - Shipment items values not equal to total values';
+					return $o;
+				}
+			}
+			$shipmentData->agent_id= $this->orgId;
+			$shipmentData->chargecode = $this->chargecode;
+			$o->shipmentData=$shipmentData;
+			return  $o;
+		}
+
+		public function importShipmentWithoutChecking($d,$testOnly=true)
+		{
+			if(isset($d->cref))
+			{
+				$d->cust_ref = $d->cref;
+			}
+			$o = new stdClass;
+			$o->success = false;
+			$o->error = [];
+			$o->msg = '';
+			$p = new ImParcel;
+			$p->weight =empty($d->weight)? 0 : max(number_format(floatval($d->weight), 4, '.', ''), 0.01);
+			$p->pkg = empty($d->packs)? 1 : $d->packs;
+			$p->agent_id = $d->agent_id;
+			$p->cbm = empty($d->cbm)? 0 : number_format($d->cbm,6,'.','');
+			//check number
+			if(!empty($d->no)){
+				$p->hbn = $d->no;
+			}
+
+
+			//check address
+			if(empty($d->consignee->suburb) && !empty($d->consignee->city)) $d->consignee->suburb = $d->consignee->city;
+			$d->consignee->state = Addr::checkAuState($d->consignee->state);
+			foreach(['consignee' => true, 'receiver' => false, 'shipper' => false] as $k=>$req){
+				if(!$req && empty($d->{$k})) continue;
+				${$k} = new Addr;
+				foreach ($d->{$k} as $k2 => $v){
+					if($k2 == 'phone') $k2 = 'tel';
+					${$k}->{$k2} = AppHelper::semiAngle(trim($v));
+				}
+				if($k == 'shipper'){
+					foreach(['name', 'address'] as $i => $k2){
+						if(!isset(${$k}->{$k2})) ${$k}->{$k2} = '';
+					}
+
+					foreach(['suburb', 'state', 'postcode','company'] as $i => $k2){
+						if(!isset(${$k}->{$k2})) ${$k}->{$k2} = '';
+					}
+
+					continue;
+				}
+
+				foreach(['name', 'address', 'suburb', 'state', 'postcode','company'] as $i => $k2){
+					if(!isset(${$k}->{$k2})) ${$k}->{$k2} = '';
+				}
+			}
+
+			if(!preg_match('/[A-z]+/', $d->shipper->address)){
+				$o->error[] = '[20001] - Shipment '.$d->shipper->name.' shipper address is not valid';
+			}
+
+			if(!preg_match('/[A-z]+/', $d->consignee->address)){
+				$o->error[] = '[20001] - Shipment '.$d->consignee->name.' consignee address is not valid';
+			}
+
+			if(preg_match('/^\d+$/', $d->shipper->name)){
+				$o->error[] = '[20001] - Shipment '.$d->shipper->name.' shipper name is not valid';
+			}
+
+			if(preg_match('/^\d+$/', $d->consignee->name)){
+				$o->error[] = '[20001] - Shipment '.$d->consignee->name.' consignee name is not valid';
+			}
+
+			if(!empty($o->error)){
+				$o->success = false;
+				return $o;
+			}
+
+			// for filtering space in suburb
+			$suburbArr = explode(" ",$consignee->suburb);
+			$thisSubArr=[];
+			foreach ($suburbArr as $key => $value) {
+				if($value!="")
+				{
+					$thisSubArr[] = $value;
+				}
+			}
+
+			$consignee->suburb = join(" ",$thisSubArr);
+			$consignee->country = 'AU';
+
+			$p->cnor = $shipper;
+			$p->cnee = $consignee;
+			$p->status = 10;
+			$p->cref = isset($d->cust_ref)?$d->cust_ref:'';
+			$p->insurance = isset($d->insurance)?floatval($d->insurance):0;
+			$p->note = '';
+			$p->currency = 2;
+			if(!empty($receiver)) $p->receiver = $receiver;
+			if(!empty($fids['consol_id'])) $p->consol_id = $fids['consol_id'];
+			if(!empty($fids['man_id'])) $p->man_id = $fids['man_id'];
+			if(!empty($fids['man_id'])) $p->mdata['was_man_id'] = $fids['man_id'];
+
+			if(!empty($d->cust_invoice_ref)) $p->mdata['cust_invoice_ref'] = $d->cust_invoice_ref;
+			if(!empty($d->amazon_sid)) $p->mdata['amazon_shipment_ids'] = $d->amazon_sid;
+			if(!empty($d->importer_abn)) $p->mdata['importer_abn'] = $d->importer_abn;
+			if(!empty($d->vendor_id))    $p->mdata['vendor_id'] = $d->vendor_id;	
+			if(!empty($d->marks_and_numbers))    $p->mdata['sea_mark_number'] = $d->marks_and_numbers;	
+			if(!empty($d->chargecode)) $p->mdata['chargecode'] = $d->chargecode;
+			if(!empty($d->cust_ref1)) $p->mdata['cust_ref1']=$d->cust_ref1;
+			if(!empty($d->show_sku)) $p->mdata['show_sku']=1;
+			if(!empty($d->cust_ref2)){
+				if(is_array($d->cust_ref2)){
+					$p->mdata['cust_ref2'] = implode(" ", $d->cust_ref2);
+				} else {
+					$p->mdata['cust_ref2']=$d->cust_ref2;
+				}
+			}
+
+			if(!empty($d->consignor_tin)){
+				if(strlen($d->consignor_tin) > 50){
+					$o->error[] = '[90008] - Shipment '.$d->cust_ref.' consignor TIN must be less than 50 characters';
+				}
+				$p->mdata['consignor_tin'] = $d->consignor_tin;
+			}
+
+			$p->currency = Currency::$currency_type_re[strtoupper($d->currency)];
+			
+			if(!empty($d->clear)){
+				if(preg_match('/DDP/i', $d->clear)){
+					$p->bwf = $p->bwf | 64;
+					$p->bwf = $p->bwf & ~128;
+				} elseif(preg_match('/DDU/i', $d->clear)){
+					$p->bwf = $p->bwf | 128;
+					$p->bwf = $p->bwf & ~64;
+				}
+			}
+
+			//check item
+			if(!empty($d->items)){
+				foreach ($d->items as $i => $itm){
+					if(is_array($itm)){
+						$itm = (object) [
+							'type' => $itm[0],
+							'name' => $itm[1],
+							'name_zh' => $itm[2],
+							'brand' => $itm[3],
+							'model' => $itm[4],
+							'qty' => $itm[5],
+							'price' => sprintf('%0.2f', $itm[6]),
+							'hs' => empty($itm[7])? '' : $itm[7],
+							'sku' => empty($itm[8])? '' : $itm[8], 
+						];
+					}
+					$p->eitems['type'][$i] = "O";
+					$p->eitems['g'][$i] = (!empty($itm->name)) ? $itm->name : '';
+					$p->eitems['q'][$i] = $itm->qty;
+					if(!empty($itm->name_zh)) $p->eitems['g_zh'][$i] = $itm->name_zh;
+					if(!empty($itm->hs)) $p->eitems['hs'][$i] = $itm->hs;
+					$p->eitems['v'][$i] = !empty($itm->price) ? sprintf('%0.2f', $itm->price) : 0;
+					$p->eitems['v'][$i] = number_format($p->eitems['v'][$i] / Currency::getExrate('',$p->currency)[0],4);
+					if(!empty($itm->sku)) $p->eitems['sku'][$i] = $itm->sku;
+					if (strlen($p->eitems['g'][$i]) < 3){
+						$p->eitems['g'][$i] = $p->eitems['g'][$i]."...";
+					}
+					
+					if ((!empty($itm->name) && AppHelper::hasUniChinese($itm->name)&&($p->cbwf & ImParcel::CBWF_FOR_3PL)==0)||preg_match('/[’]/', $itm->name)) {
+						$o->error[] = '[90003] - item name should only contain english characters';
+					}
+
+					// for import parcel , items : name , quantity and value are mandatory
+					if(empty($p->eitems['g'][$i]) || empty( $itm->qty) || empty($itm->price) || $itm->price == 0){
+						$o->error[] = '[90003] - Shipment items(name, quantity, value) are mandatory';
+					}
+
+				}
+				$p->mdata['client_entry'] = ['items' => $p->eitems];
+			}else{
+				$o->error[] = '[90002] - Shipment items are mandatory';
+			}
+
+			$p->currency = Currency::AUD;
+
+			if(empty($o->error)){
+				$o->success = true;
+				if(!$testOnly){
+					// edit address to be corrected
+					$addArr = explode(',',$p->cnee->address);
+					foreach ($addArr as $key => $value) {
+						$addArr[$key] = trim($value);
+					}
+					$p->cnee->address = join(", ",$addArr);
+
+					$p->cnor->save();
+					$p->cnee->save();
+					$p->cnor_id = $p->cnor->id;
+					$p->cnee_id = $p->cnee->id;
+					if(!empty($p->receiver)){
+						$p->receiver->save();
+						$p->receiver_id = $p->receiver->id;
+					}
+					if(empty($p->hbn))	$p->hbn = $p->genHbn();
+
+					if($p->save()){
+						$o->success = true;
+						$o->shipment = $p;
+					}else{
+						$o->success = false;
+						$msg = '';
+						foreach ($p->getErrors() as $e){
+							$msg .= implode('; ', $e);
+						}
+						$o->error[] = '[50001] - Failed to save parcel : '.$msg;
+					}
+				}
+			}else{
+				$o->success = false;
+			}
+			return $o;
+		}
+
+		public function importImsManifestWithFile($fullFilename,$filename,$importType,$action="")
+		{
+			$errors = [];
+			$successes = [];
+			$isSkipError = !empty($action) && $action == 'createAndSkip';
+			if($isSkipError&&$importType!=1)
+			{
+				$errors[] = "Skip Error Only For import shipment;只有整单导入可以使用Skip Error功能";
+				return [$errors,$successes];
+			}
+
+			if(!empty($importType)&&$importType==3)
+			{
+				$imParcelService = new ImParcelService();
+				[$errors,$successes] =$imParcelService->importAustwayPackagesData($filename,$fullFilepath,true);
+				if(empty($errors))
+				{
+					[$errors,$successes] =$imParcelService->importAustwayPackagesData($filename,$fullFilepath,false);
+					foreach ($errors as $key => $er) {
+						$errors[$key] = $er;
+					}
+					foreach ($successes as $key => $su) {
+						$successes[$key] = $su;
+					}
+				}else
+				{
+					foreach ($errors as $key => $er) {
+						$errors[$key] = $er;
+					}
+				}
+				return [$errors,$successes];
+			}
+
+			$xls = new oExcel;
+			$xls->supported($filename);
+			$xls->load($fullFilename);
+			$data = $xls->getAll();
+			if (!isset($data[1][3])||!isset($data[1][4])||$data[1][3]!='WEIGHT'||$data[1][4]!='CNEE') {
+				$errors[]= 'Wrong Template Supplied';
+			}
+
+			$r=ImportChargeCode::model()->find("chargecode=:chargecode AND status=1", [":chargecode"=>$this->chargecode]);
+			if (empty($r)) {
+				$errors[]='The Chargecode is not valid!';
+			} else {
+				if ($r->org_id!=$this->orgId) {
+					$errors[]='The Charge code not belong to your Orgnization!';
+				}
+			}
+
+			if (!empty($errors)) {
+				return [$errors,$successes];
+			}
+			unset($data[1]);
+			$checkArray=[];
+			foreach ($data as $index=> $d) {
+				if (empty($d[1])) {
+					continue;
+				}
+
+				if (!empty($d[2])) {
+					if (in_array($d[2], $checkArray)) {
+						$errors[]=  'Line '.$index.": connote ".$d[2]. " duplicate";
+					}
+					$checkArray[]=$d[2];
+				}
+
+				// check name and unit value and weight
+				if (empty($d[15])) {
+					$errors[]= 'Line ' . $index . ': UNIT VALUE is empty';
+				} else if ($d[15] < 0.01) {
+					$data[$index][15] = 0.01;
+				}
+				if (preg_match('/[\x{4e00}-\x{9fa5}·]+/u', $d[13])) {
+					$errors[]= 'Line ' . $index . ': COMMODITY cannot contain chinese character';
+				}
+				if (empty($d[3])) {
+					$errors[]= 'Line ' . $index . ': WEIGHT is empty';
+				}
+			}
+			if(!empty($errors))
+			{
+				return [$errors,$successes];
+			}
+			
+			$imParcelService = new ImParcelService();
+			$packagesInfo = $imParcelService->getAustwayPackagesData($filename,$fullFilename,true);
+
+			if(!$isSkipError)
+			{
+				foreach ($data as $index=>$d) {
+					if (empty($d[3]) || empty($d[4])) {
+						continue;
+					}
+					$o=$this->prepareData($d,$packagesInfo);
+					if ($o->status) {
+						if($importType==2)
+							{
+								if(!empty($o->shipmentData->cust_ref))
+								{
+									$check = ImParcel::model()->count(['condition'=>'cref = :cref and status !=100','params'=>[':cref'=>$o->shipmentData->cust_ref],'order'=>'id desc']);
+									if($check>0)
+									{
+										if($check>0)
+						                {
+						                   $errors[]='line '.($index) .': '.$o->shipmentData->cust_ref.' is existed';
+						                    continue;
+						                }
+									}
+								}
+							}
+							$reply=ChooseShipment::newShipmentWithChargeCode($o->shipmentData, true);
+						if (!$reply->success) {
+							$errors[]='line '.($index) .': '.implode('; ', $reply->error);
+						}
+					} else {
+						$errors[]='line '.($index). ': '.$o->msg;
+					}
+				}
+			}
+
+			if (!empty($errors)) {
+				return [$errors,$successes];
+			} else {
+				$os=[];//success_result_result message;
+				$manifest=new Manifest();
+				$manifest->type=10;
+				$manifest->fwd_id= $this->orgId;
+				$manifest->mdata['chargecode'] = $this->chargecode;
+				$manifest->save();
+				FileRepo::storeFile($fullFilename, $filename, 10, $manifest->id);
+				foreach ($data as $index=>$d) {
+					if (empty($d[3]) || empty($d[4])) {
+						continue;
+					}
+					// Log::log2file(json_encode($d), "shipment_upload_excel", "manishipment");
+					$o=$this->prepareData($d,$packagesInfo);
+					if ($o->status) {
+						$trans = Yii::app()->db->beginTransaction();
+						try 
+						{
+							$reply=ChooseShipment::newShipmentWithChargeCode($o->shipmentData, false, ['man_id' => $manifest->id]);
+							$trans->commit();
+						} catch (Exception $ex) {
+							$trans->rollback();
+							throw $ex;
+						}
+						if (!$reply->success) {
+							$errors[]='line '.($index) .': '.implode('; ', $reply->error);
+						} else {
+							$os[]='line '.($index) .': '.$reply->msg;
+						}
+					} else {
+						$errors[]='line '.($index). ': '.$o->msg;
+					}
+				}
+				if(!empty($errors))
+				{
+					return [$errors,$os];
+				}
+
+				if($importType==2)
+				{
+					$imParcelService = new ImParcelService();
+					[$subShipmentErrors,$successes] = $imParcelService->import3PLSubShipments($file,true,0);
+					if(empty($subShipmentErrors))
+					{
+						$manifest=new Manifest();
+						$manifest->type=10;
+						$manifest->fwd_id= $this->orgId;
+						$manifest->mdata['chargecode'] = $this->chargecode;
+						$manifest->save();
+						FileRepo::storeFile($fullFilename, $filename, 10, $manifest->id);
+						[$subShipmentErrors,$successes] = $imParcelService->import3PLSubShipments($file,false,$manifest->id);
+						$errors = array_merge($exits,$subShipmentErrors,$successes);
+						return [$errors,$successes];
+					}else
+					{
+						return [$subShipmentErrors,$successes];
+					}
+				}
+			}
+
+			return [$errors,$successes];
+		}
+	}
+?>

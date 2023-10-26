@@ -1,0 +1,273 @@
+<?php
+
+class CargoBookingController extends Controller
+{
+	/**
+	 * @var string the default layout for the views. Defaults to '//layouts/column2', meaning
+	 * using two-column layout. See 'protected/views/layouts/column2.php'.
+	 */
+	public $layout = '//layouts/column2';
+
+	/**
+	 * @return array action filters
+	 */
+	public function filters()
+	{
+		return array(
+			'accessControl', // perform access control for CRUD operations
+			'postOnly + delete', // we only allow deletion via POST request
+		);
+	}
+
+	/**
+	 * Specifies the access control rules.
+	 * This method is used by the 'accessControl' filter.
+	 * @return array access control rules
+	 */
+	public function accessRules()
+	{
+		return array(
+			array(
+				'allow',  // allow all users to perform 'index' and 'view' actions
+				'actions' => array('index', 'view'),
+				'users' => array('*'),
+			),
+			array(
+				'allow', // allow authenticated user to perform 'create' and 'update' actions
+				'actions' => array('create', 'update'),
+				'users' => array('@'),
+			),
+			array(
+				'allow', // allow admin user to perform 'admin' and 'delete' actions
+				'actions' => array('admin', 'delete'),
+				'users' => array('admin'),
+			),
+			array(
+				'deny',  // deny all users
+				'users' => array('*'),
+			),
+		);
+	}
+
+	/**
+	 * Displays a particular model.
+	 * @param integer $id the ID of the model to be displayed
+	 */
+	public function actionView($id)
+	{
+		$this->render('view', array(
+			'model' => $this->loadModel($id),
+		));
+	}
+
+	/**
+	 * Creates a new model.
+	 * If creation is successful, the browser will be redirected to the 'view' page.
+	 */
+	public function actionCreate()
+	{
+		$model = new CargoBooking;
+
+		// Uncomment the following line if AJAX validation is needed
+		// $this->performAjaxValidation($model);
+
+		if (isset($_POST['CargoBooking'])) {
+			$model->attributes = $_POST['CargoBooking'];
+			if ($model->save())
+				$this->redirect(array('view', 'id' => $model->id));
+		}
+
+		$this->render('create', array(
+			'model' => $model,
+		));
+	}
+
+	/**
+	 * Updates a particular model.
+	 * If update is successful, the browser will be redirected to the 'view' page.
+	 * @param integer $id the ID of the model to be updated
+	 */
+	public function actionUpdate($id)
+	{
+		$model = $this->loadModel($id);
+		$cnee = Addr::model()->findByPk($model->destination);
+		// Uncomment the following line if AJAX validation is needed
+		// $this->performAjaxValidation($model);
+		if (!empty($_POST)) {
+			if (!empty($_POST['confirmed_date'])) {
+				$model->confirmed_date = $_POST['confirmed_date'];
+			} elseif (!empty($_POST['CargoBooking']['confirmed_date'])) {
+				$model->confirmed_date = $_POST['CargoBooking']['confirmed_date'];
+			}
+			if (!empty($_POST['CargoBooking'])) {
+				$model->delivery_period = $_POST['CargoBooking']['delivery_period'];
+				//$model->fee = $_POST['CargoBooking']['fee'];
+			}
+
+			$model->mdata['base_price'] = @$_POST['base_price'];
+			$model->mdata['oversize_fee'] = $_POST['oversize_fee'];
+			$model->mdata['time_deliver_fee'] = $_POST['time_deliver_fee'];
+			$model->mdata['unloading_fee'] = $_POST['unloading_fee'];
+			$model->fee = round(floatval($model->mdata['base_price'])+floatval($model->mdata['oversize_fee'])+floatval($model->mdata['time_deliver_fee'])+floatval($model->mdata['unloading_fee']), 2);
+			if (!empty($model->confirmed_date) && $model->status != CargoBooking::REJECTED) {
+				$model->status = CargoBooking::CONFIRMED;
+				$invoiceService = new InvoiceService();
+				$invoiceId = $invoiceService->createCargoBookingInvoice($model);
+			}
+			$model->save();
+			if(!empty($invoiceId)){
+				$model->mdata['invoiceId'] = $invoiceId;
+				$model->save();
+				$invoiceLineService = new InvLineService();
+				$basePrice = floatval($model->mdata['base_price']);
+				$overSizeFee = floatval($model->mdata['oversize_fee']);
+				$timedDeliveryFee = floatval($model->mdata['time_deliver_fee']);
+				$unloadingFee = floatval($model->mdata['unloading_fee']);
+				$description = $model->hbn . ' ' . $model->other_ref;
+				$invoiceLineService->createCargoBookingInvoiceLine($model, $invoiceId, '#Base Price', $basePrice, $basePrice*0.1, $description, 1, '');
+				if ($overSizeFee > 0) {
+					$invoiceLineService->createCargoBookingInvoiceLine($model, $invoiceId, '#Oversize Surcharge', $overSizeFee, $overSizeFee*0.1, $description, 1, '');
+				}
+				if ($timedDeliveryFee > 0) {
+					$invoiceLineService->createCargoBookingInvoiceLine($model, $invoiceId, '#Timed Delivery', $timedDeliveryFee, $timedDeliveryFee*0.1, $description, 1, 'OUTPUT');
+				}
+				if ($unloadingFee > 0) {
+					$invoiceLineService->createCargoBookingInvoiceLine($model, $invoiceId, '#Unloading', $unloadingFee, $unloadingFee*0.1, $description, 1, 'OUTPUT');
+				}
+			}
+
+			$shipment = ImParcel::model()->findByPk($model->shipment_id);
+			$shipment->receiver->name = $shipment->cnee->name;
+			$shipment->receiver->company = $shipment->cnee->company;
+			$shipment->receiver->address = $shipment->cnee->address;
+			$shipment->receiver->suburb = $shipment->cnee->suburb;
+			$shipment->receiver->city = $shipment->cnee->city;
+			$shipment->receiver->state = $shipment->cnee->state;
+			$shipment->receiver->postcode = $shipment->cnee->postcode;
+			$shipment->receiver->tel = $shipment->cnee->tel;
+			$shipment->receiver->email = $shipment->cnee->email;
+			$shipment->receiver->save();
+			$cnee->name = @$_POST['cnee_name'];
+			$cnee->company = @$_POST['cnee_company'];
+			$cnee->address = @$_POST['cnee_address'];
+			$cnee->suburb = @$_POST['cnee_suburb'];
+			$cnee->city = @$_POST['cnee_city'];
+			$cnee->state = @$_POST['cnee_state'];
+			$cnee->postcode = @$_POST['cnee_postcode'];
+			$cnee->tel = @$_POST['cnee_tel'];
+			$cnee->email = @$_POST['cnee_email'];
+			$cnee->save();
+			$shipment->mdata['cargo_delivery'] = "1";
+			unset($shipment->mdata['cargo_pickup']);
+			$shipment->mdata['cargo_ignore_scan'] = "1";
+			$oldCargoProcess = CargoProcess::model()->findByAttributes(['shipment_id' => $model->shipment_id]);
+			if (!empty($oldCargoProcess)) {
+				$oldCargoProcess->status = CargoProcess::DELETED;
+				$oldCargoProcess->save();
+			}
+			$shipment->save();
+			$cargoProcess = CargoProcess::model()->findByAttributes(['shipment_id' => $shipment->id], 'status != '. CargoProcess::DELETED);
+			if(!empty($cargoProcess)){
+				if($model->mdata['need_unloading'] == "No") {
+					$cargoProcess->mdata['custconfirmforklift'] = 1;
+				} else {
+					$cargoProcess->mdata['custconfirmforklift'] = 0;
+				}
+				$model->cargo_process_id = $cargoProcess->id;
+				$cargoProcess->save();
+				$model->save();
+				$emailService = new EmailService();
+				$emailService->sendCargoBookingConfirmationEmail($model);
+			}
+		}
+
+		$this->render('update', array(
+			'model' => $model,
+			'cnee' => $cnee,
+		));
+	}
+
+	public function actionReject()
+	{
+		if (!empty($_POST['reject']) && $_POST['reject'] == true) {
+			if (!empty($_POST['id'])) {
+				$model = $this->loadModel($_POST['id']);
+				if (!empty($model)) {
+					$model->status = CargoBooking::REJECTED;
+					$model->comment = $_POST['comments'];
+					$model->save();
+					echo $model->booking_number;
+				}
+			}
+		}
+	}
+
+	/**
+	 * Deletes a particular model.
+	 * If deletion is successful, the browser will be redirected to the 'admin' page.
+	 * @param integer $id the ID of the model to be deleted
+	 */
+	public function actionDelete($id)
+	{
+		$this->loadModel($id)->delete();
+
+		// if AJAX request (triggered by deletion via admin grid view), we should not redirect the browser
+		if (!isset($_GET['ajax']))
+			$this->redirect(isset($_POST['returnUrl']) ? $_POST['returnUrl'] : array('admin'));
+	}
+
+	/**
+	 * Lists all models.
+	 */
+	public function actionIndex()
+	{
+		$dataProvider = new CActiveDataProvider('CargoBooking');
+		$this->render('index', array(
+			'dataProvider' => $dataProvider,
+		));
+	}
+
+	/**
+	 * Manages all models.
+	 */
+	public function actionAdmin()
+	{
+		$model = new CargoBooking('search');
+		$model->unsetAttributes();  // clear any default values
+		$model->status = 2;
+		$model->depot = $_GET['pod_id'];
+		if (isset($_GET['CargoBooking']))
+			$model->attributes = $_GET['CargoBooking'];
+
+		$this->render('admin', array(
+			'model' => $model,
+		));
+	}
+
+	/**
+	 * Returns the data model based on the primary key given in the GET variable.
+	 * If the data model is not found, an HTTP exception will be raised.
+	 * @param integer $id the ID of the model to be loaded
+	 * @return CargoBooking the loaded model
+	 * @throws CHttpException
+	 */
+	public function loadModel($id)
+	{
+		$model = CargoBooking::model()->findByPk($id);
+		if ($model === null)
+			throw new CHttpException(404, 'The requested page does not exist.');
+		return $model;
+	}
+
+	/**
+	 * Performs the AJAX validation.
+	 * @param CargoBooking $model the model to be validated
+	 */
+	protected function performAjaxValidation($model)
+	{
+		if (isset($_POST['ajax']) && $_POST['ajax'] === 'cargo-booking-form') {
+			echo CActiveForm::validate($model);
+			Yii::app()->end();
+		}
+	}
+}

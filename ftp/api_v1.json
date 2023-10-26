@@ -1,0 +1,487 @@
+{
+  "openapi": "3.0.2",
+  "info": {
+    "title": "FTP Documentation",
+    "description":"The FTP documentation is an instructional document that guides customers on how to use FTP (File Transfer Protocol) for file upload and download. In this document, we will provide detailed instructions on how to upload two specific forms: Manifest and Tracking forms.\n\nThe Manifest form is used to record shipment information, including details such as Shipment and Packages. The second form is the Tracking form, which is used to track the location and status of goods. To ensure data consistency and standardization, customers are requested to upload the forms according to our specified format requirements.",
+  },
+ "tags": [
+    {
+      "name": "Manifest",},
+    {
+      "name": "Tracking",
+      "description": "Tracking forms are usually Excel spreadsheets that clients need to upload. Any errors or inaccuracies can result in delays and disruptions in the shipping and delivery process. Therefore, it is crucial to ensure that tracking forms are complete, accurate, and updated in a timely manner."
+    }
+  ],
+  "paths": {
+    "Tracking/": {
+      "get": {
+         "tags": [
+          "Tracking"
+        ],
+        "summary": "The required format for the tracking spreadsheet",
+        "description": "<table><tr><th>Attribute</th><th>Description</th></tr><tr><td>Tracking #</td><td>A unique reference number assigned to each shipment. The tracking number should be alphanumeric and no more than 20 characters in length.</td></tr><tr><td>Location</td><td>The city or town where the shipment is currently located. The location should be specified in text format and not exceed 50 characters.</td></tr><tr><td>Event State</td><td>The state where the shipment is currently located. The state should be specified using a two-letter abbreviation (e.g., NSW for New South Wales).</td></tr><tr><td>Event Status</td><td>The current status of the shipment. The status should be a unique and specific code representing a particular action during the transportation process. Here are some status codes and their respective descriptions:<br><br>Create: A new shipment has been created and is awaiting processing.<br><br>Receive: The shipment has been received by the carrier or logistics provider.<br><br>Manifested: The shipment has been included in a manifest or shipping list.<br><br>Enroute: The shipment is in transit and may be on a flight or sea vessel. This status code should be further broken down into the following sub-codes:<br>- Flight Despatch: The shipment has been loaded onto a flight and is in transit.<br>- Flight Arrivals: The shipment has arrived at the destination airport.<br>- Sea Vessael Despatch: The shipment has been loaded onto a sea vessel and is in transit.<br>- Sea Vessels Arrivals: The shipment has arrived at the destination port.<br>- Held: The shipment is being held, possibly for customs inspection or payment of duties.<br>- Cleared: The shipment has been approved by customs and is ready for delivery.<br>- Deconsolidation: The shipment has been broken down into smaller units for delivery.<br>- Hand Over: The shipment has been handed over to a local delivery agent.<br>- Ascan: The local delivery agent has scanned the shipment.<br>- Courier: The shipment is being delivered by a courier.<br>- Courier Problem: There is an issue with the delivery, such as an incorrect address or unavailable recipient.<br>- Delivered: The shipment has been delivered to the recipient.<br>- RTS: The shipment has been returned to the sender.</td></tr><tr><td>Event Detail</td><td>Additional information about the event that triggered a status change. For example, if the status is Enroute, the event details may include the flight number, departure and arrival airports, and estimated arrival time.</td></tr></table>\n\nSample\n\n<table>\n  <tr>\n    <th>Tracking #</th>\n    <th>Location</th>\n    <th>Event State</th>\n    <th>Event Status</th>\n    <th>Event Detail</th>\n  </tr>\n  <tr>\n    <td>ABC123</td>\n    <td>Sydney</td>\n    <td>NSW</td>\n    <td>Create</td>\n    <td>New shipment created</td>\n  </tr>\n  <tr>\n    <td>DEF456</td>\n    <td>Melbourne</td>\n    <td>VIC</td>\n    <td>Receive</td>\n    <td>Shipment received by carrier</td>\n  </tr>\n  <tr>\n    <td>GHI789</td>\n    <td>Brisbane</td>\n    <td>QLD</td>\n    <td>Enroute</td>\n    <td>Shipment in transit</td>\n  </tr>\n  <tr>\n    <td>JKL012</td>\n    <td>Perth</td>\n    <td>WA</td>\n    <td>Delivered</td>\n    <td>Shipment delivered to recipient</td>\n  </tr>\n</table>"
+          },
+      "redoc": {
+          "hideDownloadButton": true
+        }
+    },
+    "Manifest/shipment": {
+      "post": {
+        "tags": [
+          "Manifest"
+        ],
+        "summary": "Shipment",
+        "parameters":[
+          {
+            "in": "query",
+            "name": "Customer_ref",
+            "schema": {
+              "type": "string"
+            },
+            "required": "true",
+            "description": "Original tracking number eg.TEST001"
+          },
+          {
+            "in": "query",
+            "name": "CONNOTE NO",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "It is best not to fill in this number as our system will generate it automatically. If you need to provide a number, please fill it in the customer_ref field."
+          },
+           {
+            "in": "query",
+            "name": "WEIGHT",
+            "schema": {
+              "type": "int",
+            },
+            "required": "true",
+            "description": "total weight"
+          },
+          {
+            "in": "query",
+            "name": "CNEE",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "Recipient's Name eg.zhang san"
+          },
+          {
+            "in": "query",
+            "name": "CNEE COMPANY",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "Recipient Company Name"
+          },
+          {
+            "in": "query",
+            "name": "TEL",
+            "schema": {
+              "type": "int",
+            },
+            "required": "true",
+            "description": "Receiving Phone Number"
+          },
+          {
+            "in": "query",
+            "name": "ADDRESS",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "Mailing address"
+          },
+          {
+            "in": "query",
+            "name": "SUBURB",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "Shipping City"
+          },
+          {
+            "in": "query",
+            "name": "STATE",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "Recipient State"
+          },
+          {
+            "in": "query",
+            "name": "P/C",
+            "schema": {
+              "type": "int",
+            },
+            "required": "true",
+            "description": "post"
+          },
+          {
+            "in": "query",
+            "name": "DESTINATION",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "country"
+          },
+          {
+            "in": "query",
+            "name": "PCS",
+            "schema": {
+              "type": "int",
+            },
+            "required": "true",
+            "description": "Number of items (number of labels)"
+          },
+          {
+            "in": "query",
+            "name": "COMMODITY",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "items name"
+          },
+          {
+            "in": "query",
+            "name": "INNER ITEMS",
+            "schema": {
+              "type": "int",
+            },
+            "required": "true",
+            "description": "Product Quantity"
+          },
+          {
+            "in": "query",
+            "name": "UNIT VALUE",
+            "schema": {
+              "type": "int",
+            },
+            "required": "true",
+            "description": "unit value"
+          },
+          {
+            "in": "query",
+            "name": "CMETER",
+            "schema": {
+              "type": "int",
+            },
+            "required": "true",
+            "description": "This volume is the average volume per box, not the total volume. For example, if there are 2 boxes in the same shipment with volumes of 0.05 and 0.03 cubic meters respectively, then you would enter 0.04 here."
+          },
+          {
+            "in": "query",
+            "name": "SHIPPER",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "Export Company/Individual"
+          },
+          {
+            "in": "query",
+            "name": "SHIPPER ADD",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "Export Company Address"
+          },
+          {
+            "in": "query",
+            "name": "SHIPPER CITY",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "Export Company City"
+          },
+          {
+            "in": "query",
+            "name": "SHIPPER STATE",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "state"
+          },
+          {
+            "in": "query",
+            "name": "SHIPPER PC",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": "post"
+          },
+          {
+            "in": "query",
+            "name": "SHIPPER COUNTRY CODE",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": ""
+          },
+          {
+            "in": "query",
+            "name": "SHIPPER CONTACT",
+            "schema": {
+              "type": "string",
+            },
+            "required": "true",
+            "description": ""
+          },
+          {
+            "in": "query",
+            "name": "receiver",
+            "schema": {
+              "type": "string",
+            },
+            "description":"Receiver Information is not mandatory unless it differs from the consignee information provided to customs. The Receiver Information is the importer's header provided to customs, while the CNEE Information refers to the actual recipient information on the waybill."
+          },
+          {
+            "in": "query",
+            "name": "receiver TEL",
+            "schema": {
+              "type": "string",
+            },
+            "required":"true",
+            "description":""
+          },
+          {
+            "in": "query",
+            "name": "receiver ADDRESS",
+            "schema": {
+              "type": "string",
+            },
+            "required":"true",
+            "description":""
+          },
+          {
+            "in": "query",
+            "name": "receiver SUBURB",
+            "schema": {
+              "type": "string",
+            },
+            "required":"true",
+            "description":""
+          },
+          {
+            "in": "query",
+            "name": "reciever STATE",
+            "schema": {
+              "type": "string",
+            },
+            "required":"true",
+            "description":""
+          },
+          {
+            "in": "query",
+            "name": "receiver P/C",
+            "schema": {
+              "type": "int ",
+            },
+            "required":"true",
+            "description":"receiver postcode"
+          },
+          {
+            "in": "query",
+            "name": "Clear",
+            "schema": {
+              "type": "int",
+            },
+            "required":"false",
+            "description":"When the value exceeds AUD 1000, it is necessary to fill in the DDP or DDU value. DDP stands for Delivered Duty Paid, which means that the sender pays the customs duties. DDU stands for Delivered Duty Unpaid, indicating that the recipient is responsible for paying the customs duties."
+          },
+          {
+            "in": "query",
+            "name": "FBA PO",
+            "schema": {
+              "type": "string",
+            },
+            "description":"Fill in the FBA PO number for FBA shipments"
+          },
+          {
+            "in": "query",
+            "name": "FBA shipment ID",
+            "schema": {
+              "type": "string",
+            },
+            "description":"Fill in the FBA shipment ID for FBA shipments"
+          },
+          {
+            "in": "query",
+            "name": "Invoice_ref",
+            "schema": {
+              "type": "string",
+            },
+            "required":"false",
+            "description":"Reference number for shipment on the invoice for easy reconciliation. This information will be displayed on the invoice and is limited to a maximum length of 20 characters."
+          },
+          {
+            "in": "query",
+            "name": "importer_abn",
+            "schema": {
+              "type": "string",
+            },
+            "required":"false",
+            "description":"Australian Tax File Number (TFN) for the importer"
+          },
+          {
+            "in": "query",
+            "name": "vendor_id",
+            "schema": {
+              "type": "string",
+            },
+            "required":"false",
+            "description":" "
+          },
+          {
+            "in": "query",
+            "name": "consignor_tin",
+            "schema": {
+              "type": "string",
+            },
+            "required":"false",
+            "description":"Seller's transaction number"
+          },
+          {
+            "in": "query",
+            "name": "dg",
+            "schema": {
+              "type": "int",
+            },
+            "required":"false",
+            "description":"1：dangerous good, 0：non-dangerous good, empty：indicates not set or unspecified."
+          },
+          {
+            "in": "query",
+            "name": "direct_lodge",
+            "schema": {
+              "type": "int",
+            },
+            "required":"false",
+            "description":"0/null: No action required. 1: Submit parcel manifest to Australia Post/Fastway as per schedule, incurring fees upon submission. 2: Cancel manifest before we submit it."
+          },
+          {
+            "in": "query",
+            "name": "packages",
+            "schema": {
+              "type": "string",
+            },
+            "required":"false",
+            "description":"weight&length:width:height*qty_weight&length:width:height*qty"
+          },
+          {
+            "in": "query",
+            "name": "PE number",
+            "schema": {
+              "type": "string",
+            },
+            "required":"false",
+            "description":" "
+          },
+          {
+            "in": "query",
+            "name": "CNEE Email",
+            "schema": {
+              "type": "string",
+            },
+            "required":"false",
+            "description":" "
+          }
+        ]
+      }
+    },
+      "Manifest/packages": {
+      "post": {
+        "tags": [
+          "Manifest"
+        ],
+        "summary":"packages",
+        "description":"",
+        "parameters":[
+          {
+            "in": "query",
+            "name": "Cref",
+            "schema": {
+              "type": "string"
+            },
+            "required": "true",
+            "description":" "
+          },
+          {
+            "in": "query",
+            "name": "Number of items",
+            "schema": {
+              "type": "int"
+            },
+            "required": "true",
+            "description":" "
+          },
+          {
+            "in": "query",
+            "name": "Amount",
+            "schema": {
+              "type": "int"
+            },
+            "description":"This column can be left blank."
+          },
+          {
+            "in": "query",
+            "name": "Actual weight of the shipment",
+            "schema": {
+              "type": "string"
+            },
+            "required": "true",
+            "description":""
+          },
+          {
+            "in": "query",
+            "name": "Volumetric weight",
+            "schema": {
+              "type": "int"
+            },
+            "required": "true",
+            "description":"Leave it blank if empty."
+          },
+          {
+            "in": "query",
+            "name": "Length",
+            "schema": {
+              "type": "int"
+            },
+            "required": "true",
+            "description":""
+          },
+          {
+            "in": "query",
+            "name": "width",
+            "schema": {
+              "type": "int"
+            },
+            "required": "true",
+            "description":""
+          },
+          {
+            "in": "query",
+            "name": "height",
+            "schema": {
+              "type": "string"
+            },
+            "required": "true",
+            "description":""
+          }
+        ]
+       }
+     }
+  }
+}

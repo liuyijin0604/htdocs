@@ -1,0 +1,612 @@
+<?php
+class ExcoConsol extends Consol{
+
+	public static $my_type = 25;
+
+	public static $states = array(
+		10 => 'New',
+		20 => 'Confirmed',
+		30 => 'Reported',
+		40 => 'Acknowledged',
+		50 => 'Withdrawn',
+		70 => 'Dispatched',
+		72 => 'Arrived',
+		75 => 'Clearance',
+		80 => 'Completed',
+		90 => 'Cancelled',
+	);
+
+	public static $pols = ['106' => 'AUSYD', '218' => 'AUMEL', '530' => 'AUBNE', '788' => 'AUME2'];
+
+	public static $chargeItems = [
+		'channel_clear_cost' => 'Clearance Cost',
+		'channel_delivery_cost' => 'Delivery Cost',
+		'channel_duty_cost' => 'Duty',
+		'channel_others_cost' => 'Channel Others',
+	];
+
+	public $ocpd;
+
+	public function rules(){
+		$rules = array(
+			array('dpt_id, pol, pod, poc, exrate', 'required'),
+			array('ocpd', 'safe', 'on'=>'search'),
+		);
+		return array_merge(parent::rules(), $rules);
+	}
+
+	public function relations(){
+		$r = parent::relations();
+		$r['shipments'] = array(self::HAS_MANY, 'ExParcel', 'consol_id');
+		return $r;
+	}
+
+	public static function totAccrualMissing(){
+		//$sql = "select count(id) from consol where type = 25 AND created >= '2017-07-01' AND created <= '". date('Y-m-d',strtotime('-30 days')) ."' and `no` not  in ( select billing_ref from billing_line where type = "  . BillingLine::BILLING_TYPE_EXPORT  .")";
+		$sql = "select count(id) from consol where type = 25 AND created >= '2017-07-01' and `no` not  in ( select billing_ref from billing_line where type = "  . BillingLine::BILLING_TYPE_EXPORT  .")";
+		$c = Yii::app()->db->createCommand($sql);
+		return  floatval($c->queryScalar());
+	}
+
+	public function getPoc(){
+		return Yii::t(strtolower(__CLASS__), ExChannel::getName($this->poc));
+	}
+
+	public function getPno(){
+		if(!empty($p->mdata['pno'])) return $p->mdata['pno'];
+		$this->mdata['pno'] = 'P'.(self::model()->count('poc = :poc AND status > 20 AND awb !="" AND id != :id AND etd < :etd', [':poc' => $this->poc, ':id' => $this->id, ':etd' => $this->etd]) + self::model()->count('poc = :poc AND status > 20 AND awb !="" AND id < :id AND etd = :etd', [':poc' => $this->poc, ':id' => $this->id, ':etd' => $this->etd]) + 1);
+		$this->save();
+		return $this->mdata['pno'];
+	}
+
+	public function saveAccrualAirfreightCost(){
+		// currently we fix the priority cargo as our ORG
+		$fixedOrgId = 954;
+
+		// for export small parcel
+		// air freight cost will be separated as three parts
+		// `1.  Export documentation fee
+		//  2.  Export security fee
+		//  3.  Air Freight fee
+		//  how to calculate as below:
+		/*
+		 * doc是固定的$50，security是$0.135/kg，空运是每个港口/kg的报价
+		 */
+
+		// save doc fee , if existing just update
+		// try to find old one
+		$type = 'GL5'; // for doc fee
+		$billing = BillingLine::model()->find('billing_ref = :bref AND item_code = :type AND link_id = :lid',[
+			':bref' => $this->no,':type' => $type, ':lid' => $this->id
+		]);
+		if ( empty($billing) ) {
+			$citemType = ChargeItemType::model()->find('code = :type' , [':type' => $type]);
+			$desc = empty($citemType) ? '' : $citemType->name;
+			$billing = new BillingLine();
+		   // $org = Org::model()->find('code = :code',[':code' => $this->poc]);
+		   // $orgId = empty($org) ? 0 : $org->id;
+			$billing->org_id = $fixedOrgId;
+			$billing->billing_ref = $this->no;
+			$billing->item_code = $type;
+			$billing->link_id = $this->id;
+			$billing->currency = 1;
+			$billing->dpt_id = Org::PCAE_DEPARTMENT_SYDNEY;
+			$billing->dpmt = Invoice::DPMT_EXPORT;
+			$billing->type = BillingLine::BILLING_TYPE_EXPORT;
+			$billing->desc = $desc;
+			$billing->gst = 'EXEMPTEXPENSES';
+			$billing->price = 0;
+			$billing->qty = 1;
+			// get related supplier cost gl code
+			$billing->charge_code = '91002';
+			$billing->op_id =  isset(Yii::app()->user) ? Yii::app()->user->id : 0;
+		}
+		$billing->org_id = $fixedOrgId;
+		$billing->accrual_amount = 50;
+		$billing->save();
+		$exc = $billing->accrual_amount;
+
+		// save to pl ledger table
+
+
+
+		$totWeight = $this->totWeight();
+		// save security fee
+		$type = 'GL11'; // for security fee
+		$billing = BillingLine::model()->find('billing_ref = :bref AND item_code = :type AND link_id = :lid',[
+			':bref' => $this->no,':type' => $type, ':lid' => $this->id
+		]);
+		if ( empty($billing) ) {
+			$citemType = ChargeItemType::model()->find('code = :type' , [':type' => $type]);
+			$desc = empty($citemType) ? '' : $citemType->name;
+			$billing = new BillingLine();
+			//$org = Org::model()->find('code = :code',[':code' => $this->poc]);
+		   // $orgId = empty($org) ? 0 : $org->id;
+			$billing->org_id = $fixedOrgId;
+			$billing->billing_ref = $this->no;
+			$billing->item_code = $type;
+			$billing->link_id = $this->id;
+			$billing->currency = 1;
+			$billing->dpt_id = Org::PCAE_DEPARTMENT_SYDNEY;
+			$billing->dpmt = Invoice::DPMT_EXPORT;
+			$billing->type = BillingLine::BILLING_TYPE_EXPORT;
+			$billing->desc = $desc;
+			$billing->gst = 'EXEMPTEXPENSES';
+			$billing->price = 0;
+			$billing->qty = 1;
+			// get related supplier cost gl code
+			$billing->charge_code = '91002';
+			$billing->op_id =  isset(Yii::app()->user) ? Yii::app()->user->id : 0;
+		}
+		$billing->org_id = $fixedOrgId;
+		$billing->accrual_amount = number_format(0.135  * $totWeight, 2,'.','');
+		$billing->save();
+		$exc += $billing->accrual_amount;
+
+		// for air freight fee
+		$type = 'GL1'; // for air freight fee
+		$billing = BillingLine::model()->find('billing_ref = :bref AND item_code = :type AND link_id = :lid',[
+			':bref' => $this->no,':type' => $type, ':lid' => $this->id
+		]);
+		if ( empty($billing) ) {
+			$citemType = ChargeItemType::model()->find('code = :type' , [':type' => $type]);
+			$desc = empty($citemType) ? '' : $citemType->name;
+			$billing = new BillingLine();
+		   // $org = Org::model()->find('code = :code',[':code' => $this->poc]);
+		 //   $orgId = empty($org) ? 0 : $org->id;
+			$billing->org_id = $fixedOrgId;
+			$billing->billing_ref = $this->no;
+			$billing->item_code = $type;
+			$billing->link_id = $this->id;
+			$billing->currency = 1;
+			$billing->dpt_id = Org::PCAE_DEPARTMENT_SYDNEY;
+			$billing->dpmt = Invoice::DPMT_EXPORT;
+			$billing->type = BillingLine::BILLING_TYPE_EXPORT;
+			$billing->desc = $desc;
+			$billing->gst = 'EXEMPTEXPENSES';
+			$billing->price = 0;
+			$billing->qty = 1;
+			// get related supplier cost gl code
+			$billing->charge_code = '91002';
+			$billing->op_id =  isset(Yii::app()->user) ? Yii::app()->user->id : 0;
+		}
+		$rateTag = 'af_'. $this->pol . '_' .$this->pod;
+		$rate = 0;
+		if ( isset(Yii::app()->params['settings'][$rateTag]['value']) ) {
+			$rate = Yii::app()->params['settings'][$rateTag]['value'];
+		}
+		$billing->org_id = $fixedOrgId;
+		$billing->accrual_amount = number_format($rate  * $totWeight,2,'.','') - $exc;
+		$billing->save();
+
+	}
+
+
+	/**
+	 * @param $amount
+	 */
+	public function saveAccrualClearanceCostAmount($amount){
+		$this->saveAccrualCostAmount('channel_clear_cost',$amount);
+	}
+
+	/**
+	 * @param $amount
+	 */
+	public function saveAccrualDeliveryCostAmount($amount){
+		$this->saveAccrualCostAmount('channel_delivery_cost',$amount);
+	}
+
+	/**
+	 * @param $amount
+	 */
+	public function saveAccrualDutyCostAmount($amount){
+		$this->saveAccrualCostAmount('channel_duty_cost',$amount);
+	}
+
+	/**
+	 * @param $amount
+	 */
+	public function saveAccrualOthersCostAmount($amount){
+		$this->saveAccrualCostAmount('channel_others_cost',$amount);
+	}
+
+	private function saveAccrualCostAmount($type, $amount){
+		// try to find old one
+		$billing = BillingLine::model()->find('billing_ref = :bref AND item_code = :type AND link_id = :lid',[
+		   ':bref' => $this->no,':type' => $type, ':lid' => $this->id
+		]);
+		if ( empty($billing) ) {
+			$billing = new BillingLine();
+			$org = Org::model()->find('code = :code',[':code' => $this->poc]);
+			$orgId = empty($org) ? 0 : $org->id;
+			$billing->org_id = $orgId;
+			$billing->billing_ref = $this->no;
+			$billing->item_code = $type;
+			$billing->link_id = $this->id;
+			$billing->currency = 1;
+			$billing->dpt_id = Org::PCAE_DEPARTMENT_SYDNEY;
+			$billing->dpmt = Invoice::DPMT_EXPORT;
+			$billing->type = BillingLine::BILLING_TYPE_EXPORT;
+			$billing->desc = $type;
+			$billing->gst = 'EXEMPTEXPENSES';
+			$billing->price = 0;
+			$billing->qty = 1;
+			// get related supplier cost gl code
+			$billing->charge_code = '91002';
+			$billing->op_id =  isset(Yii::app()->user) ? Yii::app()->user->id : 0;
+		}
+		$billing->accrual_amount = $amount;
+		$billing->save();
+	}
+
+	public function genNo(){
+		$ndf = date('ymd');
+		$sn = self::model()->count('no LIKE :n', array(':n' => 'EP'.$ndf.'%')) + 1;
+		return 'EP'.$ndf.sprintf('%02s', $sn).ExChannel::getSuffix($this->poc);
+	}
+
+	public function getLabelTpl(){
+		if(in_array($this->poc, ['HKHKG'])){
+			$tpl = 'label_hkg';
+		}elseif(in_array($this->poc, ['CNKMG', 'CNCHQ'])){
+			$tpl = 'label_ems2';
+		}/*elseif(in_array($this->poc, ['CNCT2'])){
+			$tpl = 'label_sino';
+		}elseif(in_array($this->poc, ['CNTA2'])){
+			$tpl = 'label_ems4';
+		}*/elseif(in_array($this->poc, ['CNTAO', 'CNTA2'])){
+			$tpl = 'label_ems4';
+		}elseif(in_array($this->poc, ['CNCSX'])){
+			$tpl = 'label_ems7';
+		}elseif(in_array($this->poc, ['CNCS2'])){
+			$tpl = 'label_ems5';
+		}elseif(in_array($this->poc, ['CNCTU', 'CNTSN'])){
+			$tpl = 'label_yto';
+		}elseif(in_array($this->poc, ['CNJMN','CNJM2'])){
+			$tpl = 'label_yto2';
+		}elseif(in_array($this->poc, ['CNHFI'])){
+			$tpl = 'label_ems10';
+		}elseif(in_array($this->poc, ['CNFZH'])){
+			$tpl = 'label_ems11';
+		}elseif(in_array($this->poc, ['CNMHN'])){
+			$tpl = 'label_ems12';
+		}elseif(in_array($this->poc, ['CNHAK', 'CNHA2'])){
+			// $tpl = 'label_ems13';
+			$tpl = 'label_yto2';
+		}elseif(in_array($this->poc, ['CNCAN'])){
+			$tpl = 'label_ems14';
+		}elseif(in_array($this->poc, ['CNXIA'])){
+			//$tpl = 'label_yto3';
+			$tpl = 'label_ems8';
+		}elseif(in_array($this->poc, ['CNXI2'])){
+			//$tpl = 'label_yto3';
+			$tpl = 'label_ems9';
+		}elseif(in_array($this->poc, ['CNXMN', 'CNXM2'])){
+			//$tpl = 'label_dg';
+			$tpl = 'label_ems3';
+		}elseif(in_array($this->poc, ['CNXMN3'])){
+			$tpl = 'label_sf2';
+		}elseif(in_array($this->poc, ['CNSJA'])){
+			$tpl = 'label_yh';
+		}elseif(in_array($this->poc, ['CNCA3', 'CNCA2'])){
+			$tpl = 'label_zh';
+		}elseif(in_array($this->poc, ['CNJJI'])){
+			//$tpl = 'label_yse';
+			$tpl = 'label_dg';
+		}elseif(in_array($this->poc, ['CNFZ2'])){
+			$tpl = 'label_ems15';
+		}elseif(in_array($this->poc, ['CNNSA'])){
+			$tpl = 'label_topex';
+		}else{
+			$tpl = 'label_ems';
+		}
+
+		return $tpl;
+	}
+
+
+	/**
+	 * get total revenue by console ID with raw query SQL
+	 */
+	public function totRevenueByRaw(){
+		$tt = 0;
+		$allShipments = Shipment::model()->findAll('consol_id = :cid' , [':cid' => $this->id]);
+		foreach ( $allShipments as $p){
+			$r = $p->getAgentRate();
+			if ( isset($r[2]) ) {
+				$tt += $r[2];
+			}
+		}
+
+		return $tt;
+	}
+
+
+	public function totRevenue($ms = false, $wid = 0, $dbg = false){
+		$tt = 0;
+		$awnr = [];
+		if(!$ms){
+			foreach($this->shipments as $p){
+				if(!empty($wid) && $p->odpt_id != $wid) continue;
+				$r = $p->getAgentRate();
+				$tt += $r[2];
+				if($dbg && empty($r[1]) && !in_array($p->agent_id, $awnr)){
+					echo 'Agent '.$p->agent_id.' '.$p->agent->name." has no rate!\n";
+					$awnr[] = $p->agent_id;
+				}
+			}
+		}else{//sub consol
+			foreach($ms as $m){
+				foreach($m->lines as $l){
+					$p = $l->mm();
+					if(!empty($wid) && $p->odpt_id != $wid) continue;
+					$r = $p->getAgentRate();
+					$tt += $r[2];
+					if($dbg && empty($r[1]) && !in_array($p->agent_id, $awnr)){
+						echo 'Agent '.$p->agent_id.' '.$p->agent->name." has no rate!\n";
+						$awnr[] = $p->agent_id;
+					}
+				}
+			}
+		}
+		return $tt;
+	}
+
+	public function isOccupied(){
+		$sql = "SELECT COUNT(*) FROM storage_log WHERE out_dt IS NULL AND fid IN (SELECT id FROM shipment WHERE consol_id = ".$this->id.")";
+		$c = Yii::app()->db->createCommand($sql);
+		return $c->queryScalar() > 0;
+	}
+
+	public static function pol2dpt($p){
+		foreach(self::$pols as $k => $v){
+			if($p == $v) return $k;
+		}
+		return false;
+	}
+
+	public function weightDist($ms=false){
+		$tw = ['B' => 0, 'M' => 0, 'O' => 0, 'X' => 0];
+		if(!$ms){
+			foreach($this->shipments as $p){
+				$typ = $p->goodsType();
+				$tw[$typ] += $p->weight;
+			}
+		}else{//sub consol
+			foreach($ms as $m){
+				foreach($m->lines as $l){
+					$p = $l->mm();
+					$typ = $p->goodsType();
+					$tw[$typ] += $p->weight;
+				}
+			}
+		}
+		return $tw;
+	}
+
+	public function newESM($sub=-1){
+		$em = new Edimsg;
+		$em->dt = date('Y-m-d H:i:s');
+		$em->type = 'ESM';
+		$em->sender = Yii::app()->params['ics']['testing']? Yii::app()->params['ics']['test_site'] : Yii::app()->params['ics']['prod_site'];
+		$em->receiver = Yii::app()->params['ics']['customs_id'];
+		$em->status = 19;
+		$em->fid = $this->id;
+		if(empty($this->etd) || $this->etd == '0000-00-00') $em->addError('msg', 'ETD missing');
+		$ils = '';
+		$ss = [];
+		if($sub > -1){
+			$rs = Manifest::model()->findAll('id IN ('.$this->mdata['subc'][$sub]['pids'].')');
+			foreach($rs as $r){
+				foreach($r->lines as $l){
+					$ss[] = $l->fid;
+				}
+			}
+		}
+		$j = 1;
+		foreach($this->shipments as $i=>$p){
+			if(!empty($ss) && !in_array($p->id, $ss)) continue;
+			$goods = Edimsg::strEscape(AppHelper::semiAngle($p->getGoods(true)));
+			if(empty($goods)) $goods = 'Health Product';
+			$goods = rtrim(substr($goods, 0, 128), '?');
+			if(empty($goods)) $em->addError('msg', $p->hbn.': goods detail missing');
+			if(AppHelper::hasUniChinese($goods))  $em->addError('msg', $p->hbn.': goods detail has Chinese');
+		$ils .= "CNI+".$j++."'
+CNT+11:".$p->pkg."'
+RFF+TL:".(empty($p->exm)? 'EXLV' : $p->exm)."'
+LOC+28+CN::5'
+NAD+GO+++".substr(Edimsg::strEscape('Top Logistics'), 0, 35)."'
+GID+1'
+FTX+AAA+++".$goods."'
+";
+			//$p->status = 50;
+			//$p->save();
+		}
+		$addF = Yii::app()->basePath.DIRECTORY_SEPARATOR.'ESM_'.$this->no.'.xlsx';
+		if(is_file($addF)){
+			$xls = new oExcel;
+			if($xls->supported($addF)){
+				$xls->load($addF);
+				$data = $xls->getAll();
+				unset($data[1]);
+				foreach($data as $i => $r){
+					if(empty($r[1])) continue;
+					$goods = 'Health Product';
+					$ils .= "CNI+".$j++."'
+CNT+11:1'
+RFF+TL:EXLV'
+LOC+28+CN::5'
+NAD+GO+++".substr(Edimsg::strEscape('Top Logistics'), 0, 35)."'
+GID+1'
+FTX+AAA+++".$goods."'
+";
+				}
+			}
+		}
+
+		if($em->hasErrors()) return $em;
+		$em->save();
+		$em->mid = sprintf('%06s', substr($em->id, -6));
+		$vn = Edimsg::model()->count('type = :t AND fid = :fid', [':t' => 'ESM', ':fid' => $this->id]) + 1;
+		
+		$msg = "UNH+".$em->mid."+CUSCAR:D:99B:UN'
+BGM+87:::ESM+".$this->no.($sub > -1? '-S'.$sub : '')."-".$vn.":".$vn."+9'
+TDT+20+++6'
+DTM+136:".date("Ymd", strtotime($this->etd)).":102'
+GIS+C:121:95'
+CNT+11:".($j-1)."'
+";
+		$msg .= $ils;
+		$mc = substr_count($msg, "\n")+1;
+		$msg .= "UNT+".$mc."+".$em->mid."'";
+		$em->msg = $msg;
+		$em->status = 20;
+		if(Yii::app()->params['ics']['testing']) $em->mdata['test'] = 1;
+		$em->save();
+		
+		return $em;
+	}
+	
+	public function withdrawESM(){
+		$em = new Edimsg;
+		$em->dt = date('Y-m-d H:i:s');
+		$em->type = 'ESM';
+		$em->sender = Yii::app()->params['ics']['testing']? Yii::app()->params['ics']['test_site'] : Yii::app()->params['ics']['prod_site'];
+		$em->receiver = Yii::app()->params['ics']['customs_id'];
+		$em->status = 20;
+		$em->fid = $this->id;
+		$em->save();
+		$em->mid = sprintf('%06s',  substr($em->id,-6));
+		$vn = Edimsg::model()->count('type = :t AND fid = :fid', [':t' => 'ESM', ':fid' => $this->id]) + 1;
+		
+		$msg = "UNH+".$em->mid."+CUSCAR:D:99B:UN'
+BGM+87:::ESM+".$this->no.":".$vn."+50'
+RFF+AIZ:".$this->mdata['aiz']."'
+TDT+20+++6'
+DTM+136:".date("Ymd", strtotime($this->etd)).":102'
+GIS+C:121:95'
+CNT+11:".$this->totPacks()."'
+";
+		$mc = substr_count($msg, "\n")+1;
+		$msg .= "UNT+".$mc."+".$em->mid."'";
+		$em->msg = $msg;
+		if(Yii::app()->params['ics']['testing']) $em->mdata['test'] = 1;
+		$em->save();
+		
+		return $em;	
+	}
+
+	public function totShipWeight(){
+		return parent::totWeight();
+	}
+
+	public function addBillingAccrual(){
+		$jobCostLines = BillingLine::model()->findAll('billing_ref = :bref',[':bref' => $this->no]);
+		$ttc = ['GL1' => 0, 'GL5' => 0, 'GL11' => 0, 'channel_clear_cost' => 0, 'channel_delivery_cost' => 0];
+		foreach($jobCostLines as $line){
+			if(!empty($line->item_code) && isset($ttc[$line->item_code])) unset($ttc[$line->item_code]);
+		}
+		
+		if(empty($ttc)) return;
+
+		$totWeight = $this->totWeight();
+
+		if(isset($ttc['GL5'])) $ttc['GL5'] = 52.55;
+		if(isset($ttc['GL11'])) $ttc['GL11'] = $totWeight * 0.145;
+		if(isset($ttc['GL1'])){
+			$ttc['GL1'] = $totWeight * Yii::app()->params['settings']['af_'.$this->pol.'_'.$this->pod]['value'] - $ttc['GL5'] - $ttc['GL11'];
+		}
+
+		foreach($this->shipments as $p){
+			if(isset($ttc['channel_clear_cost'])){
+				$ttc['channel_clear_cost'] += $p->cost_dc($this->poc, $this->exrate);
+
+			}
+
+			if(isset($ttc['channel_delivery_cost'])){
+				$ttc['channel_delivery_cost'] += $p->cost_courier($this->poc, $this->exrate);
+			}
+		}
+
+		$org = Org::model()->find('code = :code',[':code' => $this->poc]);
+
+		foreach($ttc as $gl => $v){
+			$billing = new BillingLine();
+			$billing->org_id = in_array($gl, ['channel_clear_cost', 'channel_delivery_cost'])? @$org->id : 954;
+			$billing->billing_ref = $this->no;
+			$billing->item_code = $gl;
+			$billing->link_id = $this->id;
+			$billing->currency = in_array($gl, ['channel_clear_cost', 'channel_delivery_cost'])? 3 : 1;
+			$billing->dpt_id = Org::PCAE_DEPARTMENT_SYDNEY;
+			$billing->dpmt = Invoice::DPMT_EXPORT;
+			$billing->type = BillingLine::BILLING_TYPE_EXPORT;
+			$billing->desc = $gl;
+			$billing->gst = 'EXEMPTEXPENSES';
+			$billing->price = 0;
+			$billing->qty = 1;
+			$billing->charge_code = '91002';
+			$billing->op_id =  isset(Yii::app()->user) ? Yii::app()->user->id : 0;
+			$billing->accrual_amount = $v;
+			$billing->actual_amount = 0;
+			$billing->save();
+		}
+	}
+
+	public function fixBillingAccrual() {
+		$jobCostLines = BillingLine::model()->findAll('billing_ref = :bref',[':bref' => $this->no]);
+		$ttc = ['GL1' => 0, 'GL5' => 0, 'GL11' => 0, 'channel_clear_cost' => 0, 'channel_delivery_cost' => 0];
+		$totWeight = $this->totWeight();
+
+		if(isset($ttc['GL5'])) $ttc['GL5'] = 52.55;
+		if(isset($ttc['GL11'])) $ttc['GL11'] = $totWeight * 0.145;
+		if(isset($ttc['GL1'])){
+			$ttc['GL1'] = $totWeight * Yii::app()->params['settings']['af_'.$this->pol.'_'.$this->pod]['value'] - $ttc['GL5'] - $ttc['GL11'];
+		}
+
+		foreach($this->shipments as $p){
+			if(isset($ttc['channel_clear_cost'])){
+				$ttc['channel_clear_cost'] += $p->cost_dc($this->poc, $this->exrate);
+
+			}
+
+			if(isset($ttc['channel_delivery_cost'])){
+				$ttc['channel_delivery_cost'] += $p->cost_courier($this->poc, $this->exrate);
+			}
+		}
+
+		$org = Org::model()->find('code = :code',[':code' => $this->poc]);
+
+		foreach ($jobCostLines as $line) {
+			if (isset($ttc[$line->item_code])) {
+				$line->accrual_amount = $ttc[$line->item_code];
+				$line->update(['accrual_amount']);
+			}
+		}
+	}
+
+	public function afterSave(){
+		if($this->status >= 70) $this->addBillingAccrual();
+		return parent::afterSave();
+	}
+
+	public function search($pgn=true, $ps = 30, $ec = false, $forgp = false, $bydate = false){
+		if(!empty($this->ocpd)){
+			if(empty($ec)) $ec = new CDbCriteria;
+			if(is_array($ec->with)){
+				$ec->with[] = 'shipments.location';
+			}else{
+				$ec->with = empty($ec->with)? ['shipments.location'] : [$ec->with, 'shipments.location'];
+			}
+			$ec->together = true;
+			$ec->group = 't.id';
+			$ec->addCondition('location.id > 0');
+		}
+		if(empty($this->status)) $this->status = '<90';
+
+		if(Yii::app()->user->grp == 40 && !Acl::hasAccess('B:Export/AllDepots')){
+			$this->pol = self::$pols[Yii::app()->user->org];
+		}
+
+		return parent::search($pgn, $ps, $ec);
+	}
+}

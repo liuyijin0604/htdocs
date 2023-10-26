@@ -1,0 +1,976 @@
+<?php
+class azCommand extends CConsoleCommand
+{
+	private $db, $args, $tmp, $parent;
+	private $debug = false;
+
+	public function run($args)
+	{
+		$this->db = Yii::app()->getDb();
+		$this->args = $args;
+		$this->tmp = Yii::app()->basePath . DIRECTORY_SEPARATOR . 'runtime' . DIRECTORY_SEPARATOR;
+
+		foreach ($this->args as $ag) {
+			if ($ag == '-d') $this->debug = true;
+		}
+		if (!empty($args[0]) && method_exists($this, $args[0])) {
+			$this->{$args[0]}();
+		}
+	}
+
+	public function sendNoticeEmail()
+	{
+		//$email = $this->prompt('email ');
+		$emailLog = new Emailog();
+		$emailLog->fid = 0;
+
+		$cargoTest = CargoProcess::model()->findByPk(71176);
+		$cargoTest->noticeClientBookingWinit();
+
+
+
+		echo "Done.\n";
+	}
+
+	public function TestSMSNotice()
+	{
+		/* $phoneNumber = '0447533482';
+		$messageContent = 'gg';
+		$sender = new Sms();
+		$sender->sendMessageLocal($phoneNumber, $messageContent); */
+		/* $shipmentProcessTest = ShipmentProcess::model()->findByPk(2);
+		$shipmentTest = Shipment::model()->findByPk(20926900);
+		$shipmentProcessTest->sendRequireEmailSMS($shipmentTest);
+		echo "Done."; */
+		$sp = new ShipmentProcess();
+		$s = Shipment::model()->findByPk(20926900);
+		$sp->sendRequireEmailSMS($s);
+		echo "done.";
+	}
+
+	public function CheckShipmentProcessStatus()
+	{
+		$id = '20926900';
+		$model = ImParcel::model()->findByPk($id);
+		echo ($model->process->status);
+		echo "\n";
+	}
+
+	public function TestMyTollApi()
+	{
+		/* $myTollAPI = new MyTollAPI('syd', $testing=true);
+		$tracking = new trackingCommand('test', 'me');
+		$tracking->_updateImportTracking(); */
+		$s = Shipment::model()->findByPk(20926900);
+		$result = $s->trackingInfo();
+		echo '<pre>';
+		print_r($result);
+		echo '</pre>';
+		echo "Done.\n";
+	}
+
+
+
+	public function TrackingTollShipment()
+	{
+		$request = new stdClass();
+		$request->TollMessage = new stdClass;
+		$request->TollMessage->Header = $this->GetTrackingHeader();
+
+		$shipment = Shipment::model()->findByPk('10874999');
+		$request->TollMessage->TrackAndTrace = $this->GetTrackAndTrace($shipment);
+
+
+		$jsonRequest = json_encode($request);
+		$response = $this->CallTollApi($jsonRequest);
+		//file_put_contents("D:/TLA/toll/response/response.json", $result);
+
+		$result = json_decode($response);
+		$tollShipments = $result->TollMessage->TrackAndTrace->Response->Shipments->Shipment;
+		$prevActivity = '';
+		foreach ($tollShipments as $key => $tollShipment) {
+			$eventArr = $tollShipment->Events->Event;
+			foreach ($eventArr as $event) {
+				if ($event->Codes->Code[0]->Description == $prevActivity) {
+					continue;
+				}
+				$pid = $shipment->id;
+				$dt = $event->DatePeriodCollection->DatePeriod[0]->DateTime;
+				$dt = explode(' ', $dt)[0];
+				$dt = str_replace('T', ' ', $dt);
+				$dt = str_replace('.000', '', $dt);
+				$type = 69;
+				$activity = $event->Codes->Code[0]->Description;
+				$depot = $event->Locations->Location[0]->PhysicalAddress->Suburb;
+				$this->AddTrackingRecord($pid, $dt, $type, $activity, $depot);
+				$prevActivity = $activity;
+			}
+		}
+		echo "Done.\n";
+	}
+
+	private function GetTrackingHeader()
+	{
+		$guid = $this->guid();
+		$guid = str_replace('{', '', $guid);
+		$guid = str_replace('}', '', $guid);
+		$dateStr = date("Y-m-d") . "T" . date("H:i:s+10:00");
+		$header = new stdClass();
+		$header->MessageVersion = "1.0";
+		$header->MessageIdentifier = $guid;
+		$header->CreateTimestamp = $dateStr;
+		$header->DocumentType = "TrackAndTrace";
+		$header->Environment = "MYT_SIT1";
+		$header->SourceSystemCode = "TE79";
+		$header->MessageSender = "TOPLOGISTICS";
+		$header->MessageReceiver = "TOLL";
+		return $header;
+	}
+
+	private function Guid()
+	{
+		if (function_exists('com_create_guid')) {
+			return com_create_guid();
+		} else {
+			mt_srand((float)microtime() * 10000);
+			$charid = strtoupper(md5(uniqid(rand(), true)));
+			$hyphen = chr(45);
+			$uuid = chr(123) . substr($charid, 0, 8) . $hyphen . substr($charid, 8, 4) . $hyphen . substr($charid, 12, 4) . $hyphen . substr($charid, 16, 4) . $hyphen . substr($charid, 20, 12) . chr(125);
+			return $uuid;
+		}
+	}
+
+	public function GetTrackAndTrace($shipment)
+	{
+		$traceBody = new stdClass();
+		$traceBody->Request = new stdClass();
+		$traceBody->Request->SearchTexts = new stdClass();
+		$traceBody->Request->SearchTexts->SearchText = [];
+		$traceBody->Request->SearchTexts->SearchText[0]["Value"] = $shipment->ref;
+		$traceBody->Request->SearchTexts->SearchText[0]["BusinessID"] = "IPEC";
+		return $traceBody;
+	}
+
+	private function CallTollApi($json)
+	{
+		$curl = curl_init();
+
+		curl_setopt_array($curl, array(
+			CURLOPT_URL => 'https://api.tollgroup.com:6930/ws/TollMessageTrackAndTraceRestService/1.0/tom/enquireTrackTrace',
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_ENCODING => '',
+			CURLOPT_MAXREDIRS => 10,
+			CURLOPT_TIMEOUT => 0,
+			CURLOPT_FOLLOWLOCATION => true,
+			CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+			CURLOPT_CUSTOMREQUEST => 'POST',
+			CURLOPT_POSTFIELDS => $json,
+			CURLOPT_HTTPHEADER => array(
+				'Authorization: Basic bWljaGVsbGVAdG9wbG9naXN0aWNzLmNvbTpRVDlhRjh3azZC',
+				'Content-Type: application/json'
+			),
+		));
+
+		$response = curl_exec($curl);
+
+		curl_close($curl);
+		return $response;
+	}
+
+	private function AddTrackingRecord($pid, $dt, $type, $activity, $depot)
+	{
+		$trackingRecord = new Tracking();
+		$trackingRecord->pid = $pid;
+		$trackingRecord->dt = $dt;
+		$trackingRecord->type = $type;
+		$trackingRecord->activity = $activity . " - " . $depot;
+		$trackingRecord->depot = $depot;
+		$trackingRecord->save();
+	}
+
+	public function TestFindShipment()
+	{
+		$ref = '8865980000528';
+		$objImParcel = ImParcel::model()->find('(ref=:ref or hbn=:ref or cref=:ref) and status !=:status', [':ref' => $ref, ':status' => ImParcel::STATE_CANCELLED]);
+		if (empty($objImParcel)) {
+			$csl = ChangeShipmentLabel::model()->find(['condition' => 'pref=:pref OR phbn = :pref', 'params' => [':pref' => $ref], 'order' => 'id desc']);
+			if (!empty($csl)) {
+				$objImParcel = $csl->shipment;
+			}
+		}
+		echo $objImParcel->id;
+	}
+
+	public function TestTrackingRecord()
+	{
+		include_once(Yii::app()->basePath . DIRECTORY_SEPARATOR . 'commands' . DIRECTORY_SEPARATOR . 'trackingCommand.php');
+		$tc = new trackingCommand('tracking', 'run');
+		$tc->run(['-d']);
+	}
+
+	public function test()
+	{
+		$timestamp = strtotime("25-05-2022");
+		echo date('D', $timestamp);
+		//echo $marketingEmail->mdata['Group'];
+	}
+
+	public function subArray()
+	{
+		$objMarketingEmail = MarketingEmail::model()->findByPk(54);
+		$listMarketingAddress = MarketingAddress::model()->findAll('status=' . MarketingAddress::status_active);
+		$filteredEmails = [];
+		$emailSubGroups = [];
+
+		foreach ($listMarketingAddress as $objMarketingAddress) {
+			foreach ($objMarketingEmail->mdata['Group'] as $group) {
+				if ($objMarketingAddress->group == $group) {
+					array_push($filteredEmails, $objMarketingAddress);
+				}
+			}
+		}
+		$totalEmails = sizeof($filteredEmails);
+		if ($totalEmails % 40 == 0) {
+			$numOfGroups = $totalEmails / 40;
+		} else {
+			$numOfGroups = floor($totalEmails / 40 + 1);
+		}
+		for ($i = 0; $i < $numOfGroups; $i++) {
+			array_push($emailSubGroups, array_slice($filteredEmails, $i * 40, 40));
+		}
+		foreach ($emailSubGroups as $emailSubGroup) {
+			$strAddress = '';
+			foreach ($emailSubGroup as $emailAddress) {
+				$strAddress .= $emailAddress->email . ';';
+			}
+			echo "Group: \n";
+			echo $strAddress;
+			echo "\n";
+		}
+	}
+
+	public function regExpTest()
+	{
+		$phone = readline('Enter a phone number: ');
+		$regExp = '/^(\d)\1+$/';
+		while ($phone != 'q') {
+			if (preg_match($regExp, $phone) == 1) {
+				echo "Invalid.\n";
+			} else {
+				echo "Valid.\n";
+			}
+			$phone = readline('Enter a phone number: ');
+		}
+		echo "Done.";
+	}
+
+	public function feedbackEmail()
+	{
+		$fromTime = '2022-06-22 00:00:00';
+		$toTime = '2022-06-22 23:59:59';
+		$sql = "SELECT * FROM imports_mail WHERE 
+		ticket != '' 
+		AND `date` >= '" . $fromTime . "'
+		AND `date` <= '" . $toTime . "'
+		AND subject NOT LIKE '%Re:%' 
+		AND id NOT IN (SELECT id FROM imports_mail WHERE from_email LIKE '%@toplogistics.com.au%' AND to_email LIKE '%@toplogistics.com.au%' AND `date` >= '" . $fromTime . "' AND `date` <= '" . $toTime . "')
+		AND from_email NOT LIKE '%@fastway.com.au%'
+		AND from_email NOT LIKE '%@tollgroup.com%'
+		AND from_email NOT LIKE '%@au.gotoubi.com%'
+		AND to_email NOT LIKE '%@fastway.com.au%'
+		AND to_email NOT LIKE '%@tollgroup.com%'
+		AND to_email NOT LIKE '%@au.gotoubi.com%'
+		ORDER BY to_email";
+
+		$emailList = ImportsMail::model()->findAllBySql($sql);	// emailList is ordered by to_email attribute for further use
+		$addr1 = '7@ac-logistics.cn';
+		$addr2 = '7@ac-logistics.cn;';
+		$count = 1;			// default count value of each email address
+		$total = 0;
+		$prevTo = '';		// store the last email address
+		foreach ($emailList as $email) {
+			if ($email->date > $email->getDeadline()) {
+				//continue;
+			}
+			if ($prevTo == $email->to_email) {
+				$count++;
+				// for each duplicated email address, only keep top 10 to send feedback email
+				if ($count > 10) {
+					continue;
+				}
+			} else {
+				$count = 1;
+			}
+			echo "From: " . $email->from_email . "\tTo: " . $email->to_email . "\tSubject: " . $email->subject . "\tDeadline: " . $email->getDeadline();
+			echo "\n";
+			$service = new EmailService();
+			$service->sendImportsMailFeedbackEmail($email);
+
+			$email->status = ImportsMail::STATE_FEEDBACK_SENT;
+			$email->save();
+			// update previous email address
+			$prevTo = $email->to_email;
+			$total++;
+		}
+		echo $total;
+		echo "\n";
+		echo "Done!";
+	}
+
+	public function apiKey()
+	{
+		$key = implode('-', str_split(substr(strtolower(md5(microtime() . rand(1000, 9999))), 0, 30), 6));
+		echo $key;
+	}
+
+	public function updateImportsMail()
+	{
+		$sql = "SELECT * FROM imports_mail 
+				WHERE ticket != '' 
+				AND `subject` NOT LIKE '%Re:%' 
+				AND id NOT IN (SELECT id FROM imports_mail WHERE from_email LIKE '%@toplogistics.com.au%' AND to_email LIKE '%@toplogistics.com.au%')
+				AND from_email NOT LIKE '%@fastway.com.au%'
+				AND from_email NOT LIKE '%@tollgroup.com%'
+				AND from_email NOT LIKE '%@au.gotoubi.com%'
+				AND to_email NOT LIKE '%@fastway.com.au%'
+				AND to_email NOT LIKE '%@tollgroup.com%'
+				AND to_email NOT LIKE '%@au.gotoubi.com%'";
+
+		$emailList = ImportsMail::model()->findAllBySql($sql);
+
+		foreach ($emailList as $email) {
+			$email->rating = rand(1, 5);
+			$email->status = ImportsMail::STATE_FEEDBACK_RATED;
+			$email->save();
+		}
+	}
+
+	public function showRating()
+	{
+		$sql = "SELECT DISTINCT op_id FROM imports_mail WHERE `status`=111 AND op_id != 0";
+		$res = Yii::app()->db->createCommand($sql)->queryAll();
+		$users = [];
+		foreach ($res as $r) {
+			array_push($users, $r['op_id']);
+		}
+		//print_r($users);
+		$result = [];
+		$date = date('Y-m-01 00:00:00');
+		foreach ($users as $user) {
+			$sql = "SELECT meta FROM imports_mail WHERE `status`=111 AND op_id=" . $user;
+			$res = Yii::app()->db->createCommand($sql)->queryAll();
+			$mtdSql = "SELECT meta FROM imports_mail WHERE `status`=111 AND op_id=" . $user . " AND `date`>='" . $date . "'";
+			$mtdRes = Yii::app()->db->createCommand($mtdSql)->queryAll();
+			$sql = "SELECT fname, lname FROM user WHERE id = " . $user;
+			$userName = Yii::app()->db->createCommand($sql)->queryAll();
+			//print_r($userName);
+			$result[$user]['name'] = $userName[0]['fname'] . " " . $userName[0]['lname'];
+			$count = 0;
+			$total = 0;
+			foreach ($res as $r) {
+				$count++;
+				$mdata = json_decode($r['meta']);
+				$total += $mdata->rating;
+			}
+			if ($count != 0) {
+				$result[$user]['overall_rating'] = $total / $count;
+			}
+			$mtdCount = 0;
+			$mtdTotal = 0;
+			foreach ($mtdRes as $mtd) {
+				$mtdCount++;
+				$mtdmdata = json_decode($mtd['meta']);
+				$mtdTotal += $mtdmdata->rating;
+			}
+			if ($mtdCount != 0) {
+				$result[$user]['mtd_rating'] = $mtdTotal / $mtdCount;
+			}
+		}
+
+		/* foreach($users as $user) {
+			$sql = "SELECT meta FROM imports_mail WHERE `status`=111 AND op_id=".$user." AND `date`>='".$date. "'";
+			$res = Yii::app()->db->createCommand($sql)->queryAll();
+			$count = 0;
+			$total = 0;
+			foreach($res as $r) {
+				$count++;
+				$mdata = json_decode($r['meta']);
+				$total += $mdata->rating;
+			}
+			if($count == 0) {
+				continue;
+			} else {
+				$result[$user]['mtd_rating'] = $total/$count;
+			}
+		} */
+		//print_r(date('Y-m-d h:i:s', time()));
+		$result = json_encode($result);
+		$sql = "SELECT * FROM report_cache WHERE `type` = 14 AND `status` = 1";
+		$oldReportCache = ReportCache::model()->findAllBySql($sql);
+		foreach ($oldReportCache as $old) {
+			$old->status = 0;
+			$old->save();
+		}
+		$reportCache = new ReportCache();
+		$reportCache->type = ReportCache::IMPORTS_MAIL_FEEDBACK_REPORT;
+		$reportCache->status = 1;
+		$reportCache->meta = $result;
+		$reportCache->create_time = date('Y-m-d h:i:s', time());
+		$reportCache->creater = 1;
+		$reportCache->modify_time = date('Y-m-d h:i:s', time());
+		$reportCache->modifyer = 1;
+		$reportCache->save();
+
+		/* $sql = "SELECT op_id, meta FROM imports_mail WHERE `status` = 111";
+		$result = Yii::app()->db->createCommand($sql)->queryAll();
+		foreach ($result as $r) {
+			echo $r['op_id'] . "\t" . $r['meta'] . "\n";
+		} */
+	}
+
+	public function readReport()
+	{
+		$sql = "SELECT * FROM report_cache WHERE `type`=14 AND `status`=1";
+		$report = ReportCache::model()->findBySql($sql);
+		print_r($report->mdata);
+	}
+
+	public function setImportsMailFeedbackReport()
+	{
+		$feedbackAttributes = ['type' => 19, 'status' => 1];
+		$feedback = ReportCache::model()->findByAttributes($feedbackAttributes);
+		$rs = $feedback->mdata;
+		foreach ($rs as $uid => $r) {
+			echo $uid . "\t" . $r['name'] . "\t" . $r['overall_rating'] . "\t" . $r['mtd_rating'] . "\n";
+		}
+	}
+
+	public function showImportsMailByOp()
+	{
+		$sql = "SELECT * FROM imports_mail WHERE op_id = 3589 AND `status` = 111 ORDER BY `date` DESC";
+		$model = ImportsMail::model()->findAllBySql($sql);
+		print_r($model);
+	}
+
+	public function recordFeedback()
+	{
+		$service = new ImportsMailService();
+		$service->setImportsMailFeedbackReport();
+	}
+
+	public function tableCopy()
+	{
+		$tableName = 'wms_stock_location';
+		$sql = "INSERT INTO tlb_db.`$tableName` SELECT * FROM hvlv_db.`$tableName`";
+		Yii::app()->db->createCommand($sql)->execute();
+	}
+
+	public function trackingTest()
+	{
+		$driverId = 100;
+		$longitude = 111.22222;
+		$latitude = 222.33333;
+		if (!empty($driverId)) {
+			$attributes = ['driver_id' => $driverId, 'type' => DriverTracking::TRACKING_REALTIME];
+			$model = DriverTracking::model()->findByAttributes($attributes);
+			if (!empty($model)) {
+				$model->tracking_time = date('Y-m-d H:i:s');
+				$model->longitude = $longitude;
+				$model->latitude = $latitude;
+				$model->save();
+			} else {
+				$model = new DriverTracking();
+				$model->driver_id = 100;
+				$model->tracking_time = date('Y-m-d H:i:s');
+				$model->longitude = $longitude;
+				$model->latitude = $latitude;
+				$model->type = DriverTracking::TRACKING_REALTIME;
+				$model->save();
+			}
+		}
+	}
+
+	public function getContainer()
+	{
+		$containerNo = 'SUDU1120519';
+		$consols = Consol::model()->findAllByAttributes(['container_no' => $containerNo]);
+		foreach ($consols as $consol) {
+			echo "Container Number: " . $consol->container_no . "\nVessel: " . $consol->airline . "\nVoyage: " . $consol->flight . "\nEstimate Arrival: " . $consol->eta . "\nAvailable Date: " . $consol->mdata['available_date'];
+			if (!empty($consol->mdata['input_storage_date'])) {
+				echo "\nStorage Date: " . $consol->mdata['input_storage_date'];
+			} else {
+
+				echo "\nStorage Date: " . $this->addWorkingDays($consol->mdata['available_date'], 3)->format('Y-m-d');
+			}
+		}
+	}
+
+	public function addWorkingDays($date, $day)
+	{
+		if (!($date instanceof \DateTime) || is_string($date)) {
+			$date = new \DateTime($date);
+		}
+		if ($date instanceof \DateTime) {
+			$newDate = clone $date;
+		}
+		if ($day == 0) {
+			return $newDate;
+		}
+		$i = 1;
+		while ($i <= abs($day)) {
+			$newDate->modify(($day > 0 ? ' +' : ' -') . '1 day');
+			$next_day_number = $newDate->format('N');
+			if (!in_array($next_day_number, [6, 7])) {
+				$i++;
+			}
+		}
+		return $newDate;
+	}
+
+	public function testDate()
+	{
+		$timestamp = new DateTime('today');
+		$today = date('Y-m-d');
+		$availableDate = date('Y-m-d H:i:s', strtotime('today'));
+		$bookingDate = explode(" ", $availableDate)[0];
+		$bookingTime = explode(" ", $availableDate)[1];
+		$days = [];
+		for ($i = 0; $i < 8; $i++) {
+			array_push($days, date('Y-m-d', strtotime($availableDate . '+' . $i . ' day')));
+		}
+		$availableSlot = [];
+		foreach ($days as $day) {
+			$availableSlot[$day] = [4, 4, 4, 2, 2, 2, 1, 1, 4, 4, 2];
+		}
+		//print_r($availableSlot);
+		print_r($bookingDate);
+		echo "\n";
+		print_r($bookingTime);
+	}
+
+	public function testArray()
+	{
+		$container_no = "SUDU1120519";
+		$connote = "TPN1474037827";
+		$sql = 'SELECT * FROM shipment WHERE `hbn` = "' . $connote . '" AND `consol_id` IN (SELECT `id` FROM consol WHERE `container_no` = "' . $container_no . '")';
+		$model = ImParcel::model()->findBySql($sql);
+		$availableDate = null;
+
+		if (!empty($model)) {
+			if (!empty($model->consol->mdata['available_date'])) {
+				$availableDate = date('Y-m-d H:i:s', strtotime($model->consol->mdata['available_date']));
+				$today = date('Y-m-d H:i:s', strtotime('today'));
+				if ($availableDate < $today) {
+					$availableDate = $today;
+				}
+				$endDate = date('Y-m-d H:i:s', strtotime($availableDate . '+8 day'));
+				$sql = 'SELECT * FROM delivery_record WHERE `booking_time` >= "' . $availableDate . '" AND `booking_time` < "' . $endDate . '"';
+				$bookings = DeliveryRecord::model()->findAllBySql($sql);
+				$days = [];
+				for ($i = 0; $i < 8; $i++) {
+					array_push($days, date('Y-m-d', strtotime($availableDate . '+' . $i . ' day')));
+				}
+				$availableSlots = [];
+				foreach ($days as $day) {
+					$availableSlots[$day] = [4, 4, 4, 2, 2, 2, 1, 1, 4, 4, 2];
+				}
+
+				$occupiedSlots = [];
+				if (!empty($bookings)) {
+					foreach ($bookings as $booking) {
+						$bookingDate = explode(" ", $booking->booking_time)[0];
+						$bookingTime = explode(" ", $booking->booking_time)[1];
+						if (empty($occupiedSlots[$bookingDate])) {
+							$occupiedSlots[$bookingDate] = [$bookingTime];
+						} else {
+							array_push($occupiedSlots[$bookingDate], $bookingTime);
+						}
+					}
+					if (in_array("12:15:00", $occupiedSlots["2022-08-17"])) {
+						echo "occupied";
+					}
+				}
+			}
+		}
+	}
+
+	public function testString()
+	{
+		//Yii::app()->cache->flush();
+		/* $dependency = new CDbCacheDependency('SELECT MAX(booking_time) FROM pickup_booking');
+		$slotCheck = PickupBooking::model()->cache(54321, $dependency)->findAll();
+		print_r($slotCheck); */
+		$str = 'SBK1661738400418';
+		echo base64_encode($str);
+	}
+
+	public function deactivateOverdueBooking()
+	{
+		$due = Date('Y-m-d H:i:s', strtotime("-30 minutes"));
+		$bookings = PickupBooking::model()->findAllBySql('SELECT * FROM pickup_booking WHERE `status` = 1 AND `create_date` < "' . $due . '"');
+		if (!empty($bookings)) {
+			foreach ($bookings as $booking) {
+				$booking->status = 3;
+				$booking->save();
+			}
+		}
+	}
+
+	public function testBookingEmail()
+	{
+		$booking = PickupBooking::model()->findByPk(80);
+		$emailService = new EmailService();
+		$emailService->sendBookingConfirmationEmail($booking, 2);
+		echo "Done.";
+	}
+
+	public function testPng()
+	{
+		Yii::import('application.libs.tcpdf.tcpdf_barcodes_1d', true);
+		Yii::import('application.libs.tcpdf.tcpdf_barcodes_2d', true);
+		$bc = new TCPDFBarcode('SBK1661814900616', 'C128');
+		$barcode = $bc->getBarcodeSVG(2, 125);
+	}
+
+	public function testRegex()
+	{
+		if (strpos(CargoProcess::FBAPOSTCODE, '2178') !== false) {
+			echo "true";
+		} else {
+			echo "false";
+		}
+	}
+
+	public function testStarShipitApi()
+	{
+		$curl = curl_init();
+
+		curl_setopt_array($curl, array(
+			CURLOPT_URL => 'https://api.starshipit.com/api/orders/unshipped?since_order_date=2020-10-12T07:20:50.52Z&since_last_updated=2020-10-12T07:20:50.52Z&ids_only=false&limit=50&page=1',
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_ENCODING => '',
+			CURLOPT_MAXREDIRS => 10,
+			CURLOPT_TIMEOUT => 0,
+			CURLOPT_FOLLOWLOCATION => true,
+			CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+			CURLOPT_CUSTOMREQUEST => 'GET',
+			CURLOPT_HTTPHEADER => array(
+				'Content-Type: application/json',
+				'StarShipIT-Api-Key: ',
+				'Ocp-Apim-Subscription-Key: '
+			),
+		));
+
+		$response = curl_exec($curl);
+
+		curl_close($curl);
+		echo $response;
+	}
+
+	public function testDearGetSaleList()
+	{
+		$ch = curl_init();
+
+		curl_setopt($ch, CURLOPT_URL, "https://inventory.dearsystems.com/ExternalApi/v2/saleList?Page=1&Limit=100&CreatedSince=2022-09-15T00:00:00");
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
+		curl_setopt($ch, CURLOPT_HEADER, FALSE);
+
+		curl_setopt($ch, CURLOPT_HTTPHEADER, array(
+			"Content-Type: application/json",
+			"api-auth-accountid: 30eb56dc-b33f-4ba5-91c0-2ec4186d9bab",
+			"api-auth-applicationkey: 82ddc7c9-1c0e-8df3-7d5a-078e55c1bc64"
+		));
+
+		$response = curl_exec($ch);
+		curl_close($ch);
+
+		var_dump($response);
+	}
+
+	public function testDearGetInvoice()
+	{
+		$ch = curl_init();
+
+		curl_setopt($ch, CURLOPT_URL, "https://inventory.dearsystems.com/ExternalApi/v2/sale/attachment?SaleID=7c5a1598-4781-4dc1-8058-9e3c4b805455");
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
+		curl_setopt($ch, CURLOPT_HEADER, FALSE);
+
+		curl_setopt($ch, CURLOPT_HTTPHEADER, array(
+			"Content-Type: application/json",
+			"api-auth-accountid: 30eb56dc-b33f-4ba5-91c0-2ec4186d9bab",
+			"api-auth-applicationkey: 82ddc7c9-1c0e-8df3-7d5a-078e55c1bc64"
+		));
+
+		$response = curl_exec($ch);
+		curl_close($ch);
+
+		var_dump($response);
+	}
+
+	public function testDearSaleAttachments()
+	{
+		$ch = curl_init();
+
+		curl_setopt($ch, CURLOPT_URL, "https://inventory.dearsystems.com/ExternalApi/v2/sale/attachment?SaleID=530628c7-d8b9-4f85-bfb4-0359114af4de");
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
+		curl_setopt($ch, CURLOPT_HEADER, FALSE);
+
+		curl_setopt($ch, CURLOPT_HTTPHEADER, array(
+			"Content-Type: application/json",
+			"api-auth-accountid: 30eb56dc-b33f-4ba5-91c0-2ec4186d9bab",
+			"api-auth-applicationkey: 82ddc7c9-1c0e-8df3-7d5a-078e55c1bc64"
+		));
+
+		$response = curl_exec($ch);
+		curl_close($ch);
+
+		var_dump($response);
+	}
+
+	public function testDearStockAdjustmentList()
+	{
+		$ch = curl_init();
+
+		curl_setopt($ch, CURLOPT_URL, "https://inventory.dearsystems.com/ExternalApi/v2/stockadjustmentList?Page=1&Limit=500");
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
+		curl_setopt($ch, CURLOPT_HEADER, FALSE);
+
+		curl_setopt($ch, CURLOPT_HTTPHEADER, array(
+			"Content-Type: application/json",
+			"api-auth-accountid: 30eb56dc-b33f-4ba5-91c0-2ec4186d9bab",
+			"api-auth-applicationkey: 82ddc7c9-1c0e-8df3-7d5a-078e55c1bc64"
+		));
+
+		$response = curl_exec($ch);
+		curl_close($ch);
+
+		var_dump($response);
+	}
+
+	public function testDearPutStockAdjustment()
+	{
+		$ch = curl_init();
+
+		curl_setopt($ch, CURLOPT_URL, "https://inventory.dearsystems.com/ExternalApi/v2/stockadjustment");
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
+		curl_setopt($ch, CURLOPT_HEADER, FALSE);
+
+		curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "PUT");
+
+		curl_setopt($ch, CURLOPT_POSTFIELDS, "{
+			\"TaskID\": \"f9b1f5a6-37bc-4f7a-8dcd-176534a90eae\",
+			\"EffectiveDate\": \"2022-09-16T00:00:00\",
+			\"StocktakeNumber\": \"ST00446\",
+			\"Status\": \"COMPLETED\",
+			\"Account\": \"310\",
+			\"Reference\": \"Alex test\",
+			\"Lines\": [
+				{
+				\"ProductID\": \"713800b9-190d-4e5d-abaa-0c2f4666d143\",
+				\"SKU\": \"Apex-Shorts---Grey-Large\",
+				\"ProductName\": \"Apex Shorts - Grey Large\",
+				\"Quantity\": 2,
+				\"UnitCost\": 1,
+				\"LocationID\": \"561a6566-2b0c-4980-b625-f520f1e1c334\",
+				\"Location\": \"Office\",
+				\"Comments\": \"Alex Test\",
+				}
+			]
+			}");
+
+		curl_setopt($ch, CURLOPT_HTTPHEADER, array(
+			"Content-Type: application/json",
+			"api-auth-accountid: 30eb56dc-b33f-4ba5-91c0-2ec4186d9bab",
+			"api-auth-applicationkey: 82ddc7c9-1c0e-8df3-7d5a-078e55c1bc64"
+		));
+
+		$response = curl_exec($ch);
+		curl_close($ch);
+
+		var_dump($response);
+	}
+
+	public function testStockTakeList()
+	{
+		$ch = curl_init();
+
+		curl_setopt($ch, CURLOPT_URL, "https://inventory.dearsystems.com/ExternalApi/v2/stockTakeList?Page=1&Limit=1000");
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
+		curl_setopt($ch, CURLOPT_HEADER, FALSE);
+
+		curl_setopt($ch, CURLOPT_HTTPHEADER, array(
+			"Content-Type: application/json",
+			"api-auth-accountid: 30eb56dc-b33f-4ba5-91c0-2ec4186d9bab",
+			"api-auth-applicationkey: 82ddc7c9-1c0e-8df3-7d5a-078e55c1bc64"
+		));
+
+		$response = curl_exec($ch);
+		curl_close($ch);
+
+		var_dump($response);
+	}
+
+	public function testStockAdjustment()
+	{
+		$ch = curl_init();
+
+		curl_setopt($ch, CURLOPT_URL, "https://inventory.dearsystems.com/ExternalApi/v2/stockadjustment?TaskID=f9b1f5a6-37bc-4f7a-8dcd-176534a90eae");
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
+		curl_setopt($ch, CURLOPT_HEADER, FALSE);
+
+		curl_setopt($ch, CURLOPT_HTTPHEADER, array(
+			"Content-Type: application/json",
+			"api-auth-accountid: 30eb56dc-b33f-4ba5-91c0-2ec4186d9bab",
+			"api-auth-applicationkey: 82ddc7c9-1c0e-8df3-7d5a-078e55c1bc64"
+		));
+
+		$response = curl_exec($ch);
+		curl_close($ch);
+
+		var_dump($response);
+	}
+
+	public function testGetProduct()
+	{
+		$ch = curl_init();
+
+		curl_setopt($ch, CURLOPT_URL, "https://inventory.dearsystems.com/ExternalApi/v2/product?ID=713800b9-190d-4e5d-abaa-0c2f4666d143");
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
+		curl_setopt($ch, CURLOPT_HEADER, FALSE);
+
+		curl_setopt($ch, CURLOPT_HTTPHEADER, array(
+			"Content-Type: application/json",
+			"api-auth-accountid: 30eb56dc-b33f-4ba5-91c0-2ec4186d9bab",
+			"api-auth-applicationkey: 82ddc7c9-1c0e-8df3-7d5a-078e55c1bc64"
+		));
+
+		$response = curl_exec($ch);
+		curl_close($ch);
+
+		var_dump($response);
+	}
+
+	public function testGetProductAvailability()
+	{
+		$ch = curl_init();
+
+		curl_setopt($ch, CURLOPT_URL, "https://inventory.dearsystems.com/ExternalApi/v2/ref/productavailability?Page=1&Limit=2&Sku=S20RBBL-M");
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
+		curl_setopt($ch, CURLOPT_HEADER, FALSE);
+
+		curl_setopt($ch, CURLOPT_HTTPHEADER, array(
+			"Content-Type: application/json",
+			"api-auth-accountid: 30eb56dc-b33f-4ba5-91c0-2ec4186d9bab",
+			"api-auth-applicationkey: 82ddc7c9-1c0e-8df3-7d5a-078e55c1bc64"
+		));
+
+		$response = curl_exec($ch);
+		curl_close($ch);
+
+		var_dump($response);
+	}
+
+	public function fuck4()
+	{
+		$bookingNumber = "TLS2301307AC0";
+		/* if (preg_match("/AC[0-9]+/", $bookingNumber)) {
+			echo "Hey!\n";
+		} else {
+			echo "Yo!\n";
+		} */
+		echo preg_replace("/AC[0-9]+/", '', $bookingNumber);
+	}
+
+	public function countShipment()
+	{
+		$shipments = ImParcel::model()->findAllByAttributes(array('consol_id' => 108730));
+		echo count($shipments);
+	}
+
+	public function extract_australian_phone_numbers($string)
+	{
+		// Regular expression pattern to match Australian phone numbers without spaces, country code, or hyphens
+		$pattern = '/(?:\+?61|0)?[2-478](?:[ -]?[0-9]){5}[ -]?[0-9]{3}/';
+
+		// Match the pattern in the string and store the results in $matches
+		preg_match_all($pattern, $string, $matches);
+
+		// Replace any spaces, country code, or hyphens in the matched phone numbers with an empty string
+		$phone_numbers = array_map(function ($number) {
+			return preg_replace('/\+?61|[-\s]/', '', $number);
+		}, $matches[0]);
+
+		$phone_number = @$phone_numbers[0];
+
+		// Return the cleaned phone numbers as an array
+		return $phone_number;
+	}
+
+	function testPhone()
+	{
+		$phone_number = "111111";
+		$phone = $this->extract_australian_phone_numbers($phone_number);
+		if (strlen($phone) == 9) {
+			$phone = '0' . $phone;
+		}
+		print_r($phone);
+	}
+
+	function testPhone2()
+	{
+		$tel = '0061-296441851';
+		$realTel = Addr::auPhoneValid($tel);
+		echo $realTel;
+	}
+
+	public function testChargeCode()
+	{
+		$chargeCode = ImportChargeCode::model()->findByAttributes(['chargecode' => '6687']);
+		if ($chargeCode->description == '私人卡派') {
+			echo 'Yes';
+		} else {
+			echo 'No';
+		}
+	}
+
+	public function testSMSNotice2()
+	{
+		$sms = OrmSmsNotice::model()->findAllBySql('SELECT * FROM sms_notice WHERE is_processed IN (1, 2)');
+		echo count($sms);
+	}
+
+	public function changeSystemSetting()
+	{
+		$setting = SystemSetting::model()->findByAttributes(['key' => 'TLDChargecode']);
+		$chargeCodes = [];
+		$chargeCodes['syd'] = [];
+		$chargeCodes['syd']['2619']['sea'] = '5066';
+		$chargeCodes['syd']['2619']['air'] = '4880';
+		$chargeCodes['syd']['3551']['air'] = '3889';
+		$chargeCodes['syd']['3551']['sea'] = '3889';
+		$chargeCodes['mel']['3551']['air'] = '3889';
+		$chargeCodes['mel']['3551']['sea'] = '3889';
+		$chargeCodes['mel']['4501']['air'] = '2608';
+		$chargeCodes['mel']['4501']['sea'] = '2608';
+		$chargeCodes['mel']['3390']['air'] = '2224';
+		$chargeCodes['mel']['3390']['sea'] = '2224';
+		//$chargeCodes['mel']['4432'] = '3889';
+		$chargeCodes['syd']['4321']['air'] = '8780';
+		$chargeCodes['syd']['4321']['sea'] = '8780';
+		$chargeCodes['syd']['4117']['air'] = '0592';
+		$chargeCodes['syd']['4117']['sea'] = '0592';
+		$chargeCodes['mel']['2740']['air'] = '3401';
+		$chargeCodes['mel']['2740']['sea'] = '3401';
+		$chargeCodes['mel']['4483']['air'] = '4964';
+		$chargeCodes['mel']['4483']['sea'] = '4964';
+		$setting->mdata['pallet_request_chargecode'] = $chargeCodes;
+		$setting->save();
+	}
+
+	public function testTel()
+	{
+		$tel = '0061-296441851';
+		$res = Addr::auPhoneValid($tel);
+		echo $res;
+	}
+}

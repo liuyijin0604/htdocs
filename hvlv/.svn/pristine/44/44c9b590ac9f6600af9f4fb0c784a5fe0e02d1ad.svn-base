@@ -1,0 +1,121 @@
+<?php
+
+/**
+ * This is the model class for table "cargo_address_book".
+ *
+ * The followings are the available columns in table 'cargo_address_book':
+ * @property integer $id
+ * @property string $tel
+ * @property integer $type
+ * @property string $meta
+ * @property integer $status
+ */
+class CargoAddressBook extends MetaModel
+{
+	const ADDRESS_TYPE_APARTMENT = 1;
+	const ADDRESS_TYPE_HOUSE = 2;
+	const ADDRESS_TYPE_WAREHOUSE = 3;
+	const ADDRESS_TYPE_SHOP_ROADSIDE = 4;
+	const ADDRESS_TYPE_SHOP_SHOPPING_CENTRE = 5;
+	const ADDRESS_TYPE_OFFICE_BUILDING = 6;
+
+	const ADDRESS_TYPES_MAP = array(
+		self::ADDRESS_TYPE_APARTMENT => 'Apartment',
+		self::ADDRESS_TYPE_HOUSE => 'House / Townhouse',
+		self::ADDRESS_TYPE_WAREHOUSE => 'Warehouse / Logistic Centre / Storage Centre',
+		self::ADDRESS_TYPE_SHOP_ROADSIDE => 'Shop (Roadside)',
+		self::ADDRESS_TYPE_SHOP_SHOPPING_CENTRE => 'Shop (Inside Shopping Centre)',
+		self::ADDRESS_TYPE_OFFICE_BUILDING => 'Office Building'
+	);
+
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName()
+	{
+		return 'cargo_address_book';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('tel, type, status', 'required'),
+			array('type, status', 'numerical', 'integerOnly'=>true),
+			array('tel', 'length', 'max'=>50),
+			array('meta', 'safe'),
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, tel, type, meta, status', 'safe', 'on'=>'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+		);
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return array(
+			'id' => 'ID',
+			'tel' => 'Tel',
+			'type' => 'Type',
+			'meta' => 'Meta',
+			'status' => 'Status',
+		);
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search()
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('id',$this->id);
+		$criteria->compare('tel',$this->tel,true);
+		$criteria->compare('type',$this->type);
+		$criteria->compare('meta',$this->meta,true);
+		$criteria->compare('status',$this->status);
+
+		return new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+		));
+	}
+
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return CargoAddressBook the static model class
+	 */
+	public static function model($className=__CLASS__)
+	{
+		return parent::model($className);
+	}
+}

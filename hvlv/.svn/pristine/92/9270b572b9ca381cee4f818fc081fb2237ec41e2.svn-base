@@ -1,0 +1,1702 @@
+<?php
+
+/*
+ * To change this license header, choose License Headers in Project Properties.
+ * To change this template file, choose Tools | Templates
+ * and open the template in the editor.
+ */
+
+
+/**
+ * Description of CustomProcess
+ *
+ * @author peter
+ */
+class CustomProcessController extends Controller
+{
+	//put your code here
+	protected $nonAjax = ['houseWaybill', 'export','exportHistoryCustomKPIReport','exportHistoryCustomKPIDetailReport'];
+
+	/*
+	 * list the shipments that the value is over 1,000, which would need t oreport to custom
+	 */
+
+	public function actionCustomList()
+	{
+		$agentId = 0;
+		$value = 1000 * Currency::getExrate()[0];
+		$modelShipment = new ImParcel('search');
+		$modelShipment->isCustomSearching = 1;
+		$modelShipment->unsetAttributes();
+		if (isset($_GET['ImParcel'])) {
+			$modelShipment->setAttributes($_GET['ImParcel']);
+		}
+		$modelShipment->process_not_status = [24,200];
+		$list = AppHelper::setting2List('pods'); ksort($list);
+
+		if (Yii::app()->user->grp == 72) {
+			$modelShipment->setAttribute('process_broker', Yii::app()->user->org);
+			//4,10,12,14
+			$modelShipment->process_not_status = array_merge([1, 2, 5, 6, 15, 16, 23, 24],array_keys(ShipmentProcess::$aqisStates));
+		}
+		if (isset($_POST['agent_id']) || isset($_GET['agent_id'])) {
+			if (isset($_POST['agent_id'])) {
+				if (!empty($_POST['agent_id'])) {
+					$modelShipment->setAttribute('agent_id', $_POST['agent_id']);
+				}
+				$agentId = $_POST['agent_id'];
+			} else {
+				if (!empty($_GET['agent_id'])) {
+					if ($_GET['agent_id'] == 1401) {
+						$modelShipment->setAttribute('agent_id', 1002);
+						$modelShipment->bwf = 2;
+					} else {
+						$modelShipment->setAttribute('agent_id', $_GET['agent_id']);
+						if ($_GET['agent_id'] == 1002) {
+							$modelShipment->not_bwf = 2;
+						}
+					}
+				}
+				$agentId = $_GET['agent_id'];
+			}
+			$this->renderPartial('_sub_shipments', [
+				'shipment_model' => $modelShipment,
+				'agentId' => $agentId,
+				'value' => $value,
+				'list' => $list
+			]);
+		} else {
+
+		$filtersForm = new FiltersForm;
+		$filtersForm1 = new FiltersForm1;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters = $_GET['FiltersForm'];
+		}
+		if (isset($_GET['FiltersForm1'])) {
+			$filtersForm1->filters = $_GET['FiltersForm1'];
+		}
+		$provide = [];
+		$sql = "SELECT count(id) as c, case when DATEDIFF(NOW(),date) between 0 and 2 then 'n1' when DATEDIFF(NOW(),date) between 3 and 4 then 'n3' else 'n5' end as dr, case when status between 2 and 3 then 1 when status = 4 then 2 when status = 10 then 3 when status = 12 then 4 when status = 14 or status = 16 then 5 when status = 18 then 6 when status = 20 then 7 when status = 22 then 8 else 0 end as sr FROM `shipment_process` t WHERE status not IN (1,5,6,15,23,24) group by sr, dr";
+		$rs = Yii::app()->db->createCommand($sql)->queryAll();
+		$anotherProvide = [];
+		$kvs = [];
+		foreach ($rs as $r) {
+			if(!isset($anotherProvide[$r['sr']])){
+				if(empty($r['sr'])) continue;
+				$anotherProvide[$r['sr']] = [
+					'id' => $r['sr'], 
+					'name' => ShipmentProcess::$processTypesMap[$r['sr']], 
+					'type' => $r['sr']
+				];
+			}
+			$anotherProvide[$r['sr']][$r['dr']] = $r['c'];
+		}
+		$filteredData1 = $filtersForm1->filter($anotherProvide);
+		$dataprovider1 = new CArrayDataProvider($filteredData1);
+
+		//pre the top table data:
+		$returnStatics = $this->getStaticOnDayRange();
+		$provide = $returnStatics['provide'];
+
+		$info = Service::getCacheData('CustomProcessInfo');
+		if(empty($info))
+		{
+			$tableTwoInfo = [];
+
+			$sql = 'SELECT COUNT(*) as number, user_id, type FROM `process_log` WHERE time<=SUBDATE(CURDATE(),INTERVAL -1080 MINUTE) AND time>=SUBDATE(CURDATE(),INTERVAL 360 MINUTE) AND status=1 GROUP BY user_id,type';
+			$open_info = Yii::app()->db->createCommand($sql)->queryAll();
+			foreach ($open_info as $oneOpenInfo) {
+				$tableTwoInfo[$oneOpenInfo['user_id']][$oneOpenInfo['type']] = ['type' => $oneOpenInfo['type'], 'open' => $oneOpenInfo['number'], 'close' => 0, 'total' => 0, 'close_avg' => 0, 'close_avg_percent' => 0];
+			}
+			$sql = 'SELECT COUNT(*) as number,p.type,p.user_id FROM `shipment_process` t INNER JOIN `process_log` p ON t.id=p.fid  WHERE date<=SUBDATE(CURDATE(),INTERVAL -1080 MINUTE) AND date>=SUBDATE(CURDATE(),INTERVAL 360 MINUTE) AND t.status=24 GROUP by p.type,p.user_id';
+			$close_info = Yii::app()->db->createCommand($sql)->queryAll();
+			foreach ($close_info as $oneCloseInfo) {
+				$tableTwoInfo[$oneCloseInfo['user_id']][$oneCloseInfo['type']]['close'] = $oneCloseInfo['number'];
+			}
+			$sql = "SELECT count(*) as number, p.user_id,p.type FROM `shipment_process` t INNER JOIN `process_log` p ON t.id=p.fid WHERE t.status<24 AND p.status=1 GROUP by p.user_id , p.type";
+			$totalHeldInfo = Yii::app()->db->createCommand($sql)->queryAll();
+			$totalHelshipments = 0;
+			foreach ($totalHeldInfo as $oneHeldInfo) {
+				$totalHelshipments += intval($oneHeldInfo['number']);
+				$tableTwoInfo[$oneHeldInfo['user_id']][$oneHeldInfo['type']]['total'] = $oneHeldInfo['number'];
+			}
+
+			$sql = 'SELECT MAX(number) FROM (SELECT COUNT(*)/DAY(LAST_DAY(`date`)) * 1.4 as number FROM `shipment_process` WHERE type&4>0 AND status=24 AND `date` > DATE_SUB(DATE_FORMAT(NOW() ,"%Y-%m-01"), INTERVAL 6 MONTH) GROUP BY MONTH(`date`) LIMIT 6) t';
+			${'4' . 'close_avg'} = 12;
+			ceil(Yii::app()->db->createCommand($sql)->queryScalar());
+			$sql = 'SELECT MAX(number) FROM (SELECT COUNT(*)/DAY(LAST_DAY(`date`)) * 1.4 as number FROM `shipment_process` WHERE type&1>0 AND status=24 AND `date` > DATE_SUB(DATE_FORMAT(NOW() ,"%Y-%m-01"), INTERVAL 6 MONTH) GROUP BY MONTH(`date`) LIMIT 6) t';
+			${'1' . 'close_avg'} = 3; //ceil(Yii::app()->db->createCommand($sql)->queryScalar());
+			$sql = 'SELECT MAX(number) FROM (SELECT COUNT(*)/DAY(LAST_DAY(`date`)) * 1.4 as number FROM `shipment_process` WHERE type&2>0 AND status=24 AND `date` > DATE_SUB(DATE_FORMAT(NOW() ,"%Y-%m-01"), INTERVAL 6 MONTH) GROUP BY MONTH(`date`) LIMIT 6) t';
+			${'2' . 'close_avg'} = 3; //ceil(Yii::app()->db->createCommand($sql)->queryScalar());
+			$sql = 'SELECT MAX(number) FROM (SELECT COUNT(*)/DAY(LAST_DAY(`date`)) * 1.4 as number FROM `shipment_process` WHERE type&8>0 AND status=24 AND `date` > DATE_SUB(DATE_FORMAT(NOW() ,"%Y-%m-01"), INTERVAL 6 MONTH) GROUP BY MONTH(`date`) LIMIT 6) t';
+			${'8' . 'close_avg'} = ceil(Yii::app()->db->createCommand($sql)->queryScalar());
+			${'16' . 'close_avg'} = ceil(Yii::app()->db->createCommand($sql)->queryScalar());
+			$sql = 'SELECT COUNT(*) FROM `consol` t INNER JOIN `shipment` s ON t.id=s.consol_id WHERE t.eta>=SUBDATE(CURDATE(),INTERVAL 29 DAY) AND t.eta<=CURDATE()';
+			$totalShipment = Yii::app()->db->createCommand($sql)->queryScalar();
+			$totalShipment = ceil($totalShipment / 30);
+
+			foreach ($tableTwoInfo as $user_id => $typeInfo) {
+				foreach (ShipmentProcess::$the_types as $key => $name) {
+					if (key_exists($key, $typeInfo)) {
+						$tableTwoInfo[$user_id][$key]['close_avg'] = ${$key . 'close_avg'};
+						$tableTwoInfo[$user_id][$key]['close_avg_percent'] = (${$key . 'close_avg'} > 0 ? number_format(@intval($tableTwoInfo[$user_id][$key]['close']) / ${$key . 'close_avg'} * 100, 2, '.', '') : 0);
+						$tableTwoInfo[$user_id][$key]['totalPercent'] = ($totalShipment > 0 ? number_format(@$tableTwoInfo[$user_id][$key]['total'] / $totalShipment * 100, 2, '.', '') : 0);
+						$tableTwoInfo[$user_id][$key]['percent'] = ($totalHelshipments > 0 ? number_format(@$tableTwoInfo[$user_id][$key]['total'] / $totalHelshipments * 100, 2, '.', '') : 0);
+					}
+				}
+			}
+			$info = ['tableTwoInfo' => $tableTwoInfo, 'totalShipment' => $totalShipment];
+			Service::setCacheData('CustomProcessInfo',$info);
+		}
+		$filteredData = $filtersForm->filter($provide);
+		$dataprovider = new CArrayDataProvider($filteredData);
+		$dataprovider->pagination = ['pageSize' => 15];
+		$sort = new CSort();
+		$sort->attributes = [
+			'number' => [
+				'asc' => 'number ASC',
+				'desc' => 'number DESC',
+			],
+			'owner' => [
+				'asc' => 'owner ASC',
+				'desc' => 'owner DESC',
+			],
+		];
+		$sort->defaultOrder = "number DESC";
+		$dataprovider->sort = $sort;
+			// $modelShipment->setAttribute('id', -1);
+			$modelShipment->setAttribute('agent_id', 0);
+
+			$eta=[];
+			$eta[]=CustomsProcessService::getCustomProcessKPIPeriodZeroRecord();
+			$eta[]=CustomsProcessService::getCustomProcessKPIPeriodOneRecord();
+			$eta[]=CustomsProcessService::getCustomProcessKPIPeriodTwoRecord();
+			$eta[]=CustomsProcessService::getCustomProcessKPIPeriodThreeRecord();
+			$eta[]=CustomsProcessService::getCustomProcessKPIPeriodFourRecord();
+			$provide = CustomsProcessService::convertCustomKPIArr($eta);
+			//$dailyDone = CustomsProcessService::getCountTotalCustomProcessDoneCurrentDay();
+			$dailyDone = ['EMPPClose'=>0,"AQISClose"=>0,'HVClose'=>0,'EMPPOpen'=>0,"AQISOpen"=>0,'HVOpen'=>0];
+			$monthlyRecord = ['EMPPClose'=>0,"AQISClose"=>0,'HVClose'=>0,'EMPPOpen'=>0,"AQISOpen"=>0,'HVOpen'=>0];
+			$models = ReportCache::model()->findAll(['condition' => 'type = 1 and status = 1 and DATE_FORMAT(create_time, "%Y%m") = DATE_FORMAT(CURDATE(), "%Y%m")','order'=>'create_time desc']);
+			//$model = ReportCache::model()->find('type = 1 and status = 1','order'=>'create_time desc');
+			if(!empty($models)){
+				$dataModel = json_decode($models[0]->meta);
+				$dailyDone['EMPPClose'] = $dataModel->EMPPClose;
+				$dailyDone['AQISClose'] = $dataModel->AQISClose;
+				$dailyDone['HVClose'] = $dataModel->HVClose;
+				foreach($models as $model){
+					 $dataMonthlyModel = json_decode($model->meta);
+					 $monthlyRecord['EMPPClose'] += $dataMonthlyModel->EMPPClose;
+					 $monthlyRecord['AQISClose'] += $dataMonthlyModel->AQISClose;
+					 $monthlyRecord['HVClose'] += $dataMonthlyModel->HVClose;
+					 $monthlyRecord['EMPPOpen'] += $dataMonthlyModel->EMPPOpen;
+					 $monthlyRecord['AQISOpen'] += $dataMonthlyModel->AQISOpen;
+					 $monthlyRecord['HVOpen'] += $dataMonthlyModel->HVOpen;
+				}
+			}
+	
+			$this->render('custom_list', ['dataProvider' => [$dataprovider, $filtersForm], 'dataProvider1' => [$dataprovider1, $filtersForm1], 'modelShipment' => $modelShipment, 'agentId' => $agentId, 'value' => $value, 'info' => $info, 'eta'=>$provide,'dailydone'=>$dailyDone,'monthlyRecord'=>$monthlyRecord,'list'=>$list]);
+		}
+	}
+
+	public function getStaticOnDayRange()
+	{
+		return ShipmentProcess::getStaticOnDayRange();
+	}
+
+	/**
+	 * the report of the custom process, which include average closing tickets on EMPP, HV ,AQIS during the select Period.
+	 * @_POST   start_date, end_date;
+	 */
+	public function actionReport()
+	{
+		$filtersForm = new FiltersForm;
+		$provide = [];
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters = $_GET['FiltersForm'];
+		}
+		if (!empty($_GET['start_date']) && !empty($_GET['end_date'])) {
+			$start_time = $_GET['start_date'];
+			$end_time = $_GET['end_date'];
+			$end_time = date('Y-m-d', strtotime('+1 day', strtotime($end_time)));
+			$show_type = $_GET['show_type'];
+			$start_date = new DateTime($start_time, new DateTimeZone('Australia/Sydney'));
+			$end_date = new DateTime($end_time, new DateTimeZone('Australia/Sydney'));
+			if ($show_type == 0) {
+				$groupInfo = [];
+				$during = $end_date->diff($start_date)->format('%a');
+				$sql = 'SELECT COUNT(*) FROM `consol` t INNER JOIN `shipment` s ON t.id=s.consol_id WHERE t.eta>=SUBDATE(:start,INTERVAL 29 DAY) AND t.eta<=:end';
+				$totalShipment = ceil(Yii::app()->db->createCommand($sql)->bindValues([':start' => $start_time, ':end' => $end_time])->queryScalar() / (30 + $during));
+				$provide = $this->preReportBaseOnDay($start_time, $end_time, $totalShipment, $during);
+			} elseif ($show_type == 2) {
+				$start_time = $start_time;
+				$end_time = $end_time;
+				$during = ceil((strtotime($end_time) - strtotime($start_time)) / 86400);
+				$sql = 'SELECT COUNT(*) FROM `consol` t INNER JOIN `shipment` s ON t.id=s.consol_id WHERE t.eta>=SUBDATE(:start,INTERVAL 29 DAY) AND t.eta<=:end';
+				$totalShipment = ceil(Yii::app()->db->createCommand($sql)->bindValues([':start' => $start_time, ':end' => $end_time])->queryScalar() / (30 + $during));
+				while ($start_time < $end_time) {
+					$start_day = date('Y-m-' . "01", strtotime($start_time));
+					$end_day = date('Y-m-d', strtotime('+1 Month', strtotime($start_day)));
+					$monthDuring = AppHelper::getWorkingDays($start_day, $end_day);
+					if ($end_day > date('Y-m-d')) {
+						$monthDuring = AppHelper::getWorkingDays($start_day, date('Y-m-d'));
+						$end_day = date('Y-m-d', strtotime('+1 day', strtotime(date('Y-m-d'))));
+					}
+					$tempProvice = $this->preReportBaseOnDay($start_day, $end_day, $totalShipment, $monthDuring);
+					foreach ($tempProvice as $oneProvide) {
+						$oneProvide['date'] = date('Y-m', strtotime($start_time));
+						$provide[] = $oneProvide;
+					}
+					$start_time = date('Y-m-d', strtotime('+1 Month', strtotime($start_time)));
+				}
+			} else {
+				$sql = "SELECT COUNT(*) as number,date_format(date,'%Y-%m-%d') as day FROM `shipment_process` WHERE type&4>0 AND date<=:end AND date>=:start AND status=24 GROUP by day";
+				$hvCloseGroup = Yii::app()->db->createCommand($sql)->bindValues([':start' => $start_time, ':end' => $end_time])->queryAll();
+				$sql = "SELECT COUNT(*) as number,date_format(date,'%Y-%m-%d') as day FROM `shipment_process` WHERE type&1>0 AND date<=:end AND date>=:start AND status=24 GROUP by day";
+				$emppCloseGroup = Yii::app()->db->createCommand($sql)->bindValues([':start' => $start_time, ':end' => $end_time])->queryAll();
+				$sql = "SELECT COUNT(*) as number,date_format(date,'%Y-%m-%d') as day FROM `shipment_process` WHERE type&2>0 AND date<=:end AND date>=:start AND status=24 GROUP by day";
+				$aqisCloseGroup = Yii::app()->db->createCommand($sql)->bindValues([':start' => $start_time, ':end' => $end_time])->queryAll();
+				$time = $start_time;
+				//last month percent
+				$duringDay = 30;
+				$index = 0;
+				$preHvAvgExist = $preEmppAvgExist = $preAqisAvgExist = 0;
+				while ($index < $duringDay) {
+					$time_end = $time;
+					$time = date('Y-m-d', strtotime('-1 day', strtotime($time_end)));
+					$sql = "SELECT COUNT(*) FROM `shipment_process` WHERE type&4>0 AND ((`started`>=:start AND `started`<:end) OR (`date`>=:start AND `date`<:end) OR ( `started`<:start AND `date`>:end) OR (`started`<:start and status!=24))";
+					$preHvAvgExist += intval(Yii::app()->db->createCommand($sql)->bindValues([':start' => $time, ':end' => $time_end])->queryScalar());
+					$sql = "SELECT COUNT(*) FROM `shipment_process` WHERE type&1>0 AND ((`started`>=:start AND `started`<:end) OR (`date`>=:start AND `date`<:end) OR ( `started`<:start AND `date`>:end) OR (`started`<:start and status!=24))";
+					$preEmppAvgExist += intval(Yii::app()->db->createCommand($sql)->bindValues([':start' => $time, ':end' => $time_end])->queryScalar());
+					$sql = "SELECT COUNT(*) FROM `shipment_process` WHERE type&2>0 AND ((`started`>=:start AND `started`<:end) OR (`date`>=:start AND `date`<:end) OR ( `started`<:start AND `date`>:end) OR (`started`<:start and status!=24))";
+					$preAqisAvgExist += intval(Yii::app()->db->createCommand($sql)->bindValues([':start' => $time, ':end' => $time_end])->queryScalar());
+					$index++;
+				}
+				$sql = 'SELECT COUNT(*) FROM `consol` t INNER JOIN `shipment` s ON t.id=s.consol_id WHERE t.eta>=SUBDATE(:start,INTERVAL 29 DAY) AND t.eta<=:start';
+				$totalShipment = ceil(Yii::app()->db->createCommand($sql)->bindValues([':start' => $start_time])->queryScalar() / 30);
+				$preHvAvgExist = ceil($preHvAvgExist / $duringDay) - $bestHvAvgClose;
+				$preEmppAvgExist = ceil($preEmppAvgExist / $duringDay) - $bestEmppAvgClose;
+				$preAqisAvgExist = ceil($preAqisAvgExist / $duringDay) - $bestAqisAvgClose;
+				$preHvAvgExistPercent = $totalShipment > 0 ? sprintf("%.2f", $preHvAvgExist / $totalShipment * 100) : 0;
+				$preEmppAvgExistPercent = $totalShipment > 0 ? sprintf("%.2f", $preEmppAvgExist / $totalShipment * 100) : 0;
+				$preAqisAvgExistPercent = $totalShipment > 0 ? sprintf("%.2f", $preAqisAvgExist / $totalShipment * 100) : 0;
+
+				$sql = 'SELECT MAX(number) FROM (SELECT CEIL(COUNT(*)/DAY(LAST_DAY(date(date)))) as number FROM `shipment_process` WHERE type&4>0 AND status=24 AND YEAR(date)="2018"  GROUP BY  MONTH(date)) t';
+				$bestHvAvgClose = intval(Yii::app()->db->createCommand($sql)->queryScalar());
+				$sql = 'SELECT MAX(number) FROM (SELECT CEIL(COUNT(*)/DAY(LAST_DAY(date(date)))) as number FROM `shipment_process` WHERE type&1>0 AND status=24 AND YEAR(date)="2018"  GROUP BY  MONTH(date)) t';
+				$bestEmppAvgClose = intval(Yii::app()->db->createCommand($sql)->queryScalar());
+				$sql = 'SELECT MAX(number) FROM (SELECT CEIL(COUNT(*)/DAY(LAST_DAY(date(date)))) as number FROM `shipment_process` WHERE type&2>0 AND status=24 AND YEAR(date)="2018"  GROUP BY  MONTH(date)) t';
+				$bestAqisAvgClose = intval(Yii::app()->db->createCommand($sql)->queryScalar());
+				$id = 1;
+				$time = $start_time;
+				while ($time < $end_time) {
+					$time_end = date('Y-m-d', strtotime('+1 day', strtotime($time)));
+					$sql = "SELECT COUNT(*) FROM `shipment_process` WHERE type&4>0 AND ((`started`>=:start AND `started`<:end) OR (`date`>=:start AND `date`<:end) OR ( `started`<:start AND `date`>:end) OR (`started`<:start and status!=24))";
+					$hvDailyExist = intval(Yii::app()->db->createCommand($sql)->bindValues([':start' => $time, ':end' => $time_end])->queryScalar());
+					$sql = "SELECT COUNT(*) FROM `shipment_process` WHERE type&1>0 AND ((`started`>=:start AND `started`<:end) OR (`date`>=:start AND `date`<:end) OR ( `started`<:start AND `date`>:end) OR (`started`<:start and status!=24))";
+					$emppDailyExist = intval(Yii::app()->db->createCommand($sql)->bindValues([':start' => $time, ':end' => $time_end])->queryScalar());
+					$sql = "SELECT COUNT(*) FROM `shipment_process` WHERE type&2>0 AND ((`started`>=:start AND `started`<:end) OR (`date`>=:start AND `date`<:end) OR ( `started`<:start AND `date`>:end) OR (`started`<:start and status!=24))";
+					$aqisDailyExist = intval(Yii::app()->db->createCommand($sql)->bindValues([':start' => $time, ':end' => $time_end])->queryScalar());
+
+					$hvClose = $emppClose = $aqisClose = 0;
+					foreach ($hvCloseGroup as $tempHvClose) {
+						if ($tempHvClose['day'] == $time) {
+							$hvClose = $tempHvClose['number'];
+							break;
+						}
+					}
+					$hvDailyExist -= $hvClose;
+					foreach ($emppCloseGroup as $tempEmppClose) {
+						if ($tempEmppClose['day'] == $time) {
+							$emppClose = $tempEmppClose['number'];
+							break;
+						}
+					}
+					$emppDailyExist -= $emppClose;
+					foreach ($aqisCloseGroup as $tempAqisClose) {
+						if ($tempAqisClose['day'] == $time) {
+							$aqisClose = $tempAqisClose['number'];
+							break;
+						}
+					}
+					$aqisDailyExist -= $aqisClose;
+					$hvAvgExistPercent = $totalShipment > 0 ? sprintf("%.2f", $hvDailyExist / $totalShipment * 100) : 0;
+					$emppAvgExistPercent = $totalShipment > 0 ? sprintf("%.2f", $emppDailyExist / $totalShipment * 100) : 0;
+					$aqisAvgExistPercent = $totalShipment > 0 ? sprintf("%.2f", $aqisDailyExist / $totalShipment * 100) : 0;
+					$hvClosePercent = sprintf("%.2f", $bestHvAvgClose > 0 ? $hvClose / $bestHvAvgClose * 100 : 0);
+					$emppClosePercent = sprintf("%.2f", $bestEmppAvgClose > 0 ? $emppClose / $bestEmppAvgClose * 100 : 0);
+					$aqisClosePercent = sprintf("%.2f", $bestAqisAvgClose > 0 ? $aqisClose / $bestAqisAvgClose * 100 : 0);
+					if ($hvClose != 0 || $emppClose != 0 || $aqisClose != 0) {
+						$provide[] = ['id' => $id++, 'date' => $time, 'type' => 'HV', 'daily_close' => $hvClose, 'best_month_avg_close' => $bestHvAvgClose, 'close_percent' => $hvClosePercent, 'dailyExist' => $hvDailyExist, 'existPercent' => $hvAvgExistPercent, 'preExist' => $preHvAvgExist, 'preExistPercent' => $preHvAvgExistPercent];
+						$provide[] = ['id' => $id++, 'date' => $time, 'type' => 'EMPP', 'daily_close' => $emppClose, 'best_month_avg_close' => $bestEmppAvgClose, 'close_percent' => $emppClosePercent, 'dailyExist' => $emppDailyExist, 'existPercent' => $emppAvgExistPercent, 'preExist' => $preEmppAvgExist, 'preExistPercent' => $preEmppAvgExistPercent];
+						$provide[] = ['id' => $id++, 'date' => $time, 'type' => 'AQIS', 'daily_close' => $aqisClose, 'best_month_avg_close' => $bestAqisAvgClose, 'close_percent' => $aqisClosePercent, 'dailyExist' => $aqisDailyExist, 'existPercent' => $aqisAvgExistPercent, 'preExist' => $preAqisAvgExist, 'preExistPercent' => $preAqisAvgExistPercent];
+					}
+					$time = date('Y-m-d', strtotime('+1 day', strtotime($time)));
+				}
+			}
+		}
+		$filteredData = $filtersForm->filter($provide);
+		$dataprovider = new CArrayDataProvider($filteredData);
+		$dataprovider->pagination = ['pageSize' => 30];
+		if (!empty($_GET['partial'])) {
+			$this->renderPartial('report_search', [
+				'dataProvider' => [$dataprovider, $filtersForm], 'totalShipment' => $totalShipment,
+			]);
+			return;
+		}
+
+		$this->render('report', ['dataProvider' => [$dataprovider, $filtersForm], 'totalShipment' => 0]);
+	}
+
+	public function preReportBaseOnDay($start_time, $end_time, $totalShipment, $during)
+	{
+		$totDuring = ceil((strtotime($end_time) - strtotime($start_time)) / 86400);
+		if ($totDuring <= 0) {
+			$totDuring = 1;
+		}
+		$provide = [];
+		$groupInfo = [];
+		$sql = 'SELECT COUNT(*) as number,p.user_id, p.type FROM `shipment_process` t INNER JOIN `process_log` p ON t.id=p.fid WHERE t.date<=:end AND t.date>=:start AND t.status=24 AND p.type!=8 GROUP BY user_id,type';
+		$closeInfo = Yii::app()->db->createCommand($sql)->bindValues([':start' => $start_time, ':end' => $end_time])->queryAll();
+		foreach ($closeInfo as $oneCloseInfo) {
+			$groupInfo[$oneCloseInfo['user_id']][$oneCloseInfo['type']] = ['close' => ceil($oneCloseInfo['number'] / $during)];
+		}
+		$time = $start_time;
+		while ($time < $end_time) {
+			$next_day = date('Y-m-d', strtotime('+1 day', strtotime($time)));
+			$sql = "SELECT COUNT(*) as number, p.user_id,p.type FROM `shipment_process` s INNER JOIN `process_log` p ON s.id=p.fid  WHERE p.type!=8 AND ((s.`started`>=:start AND  s.`started`<:end) OR ( s.`date`>=:start AND s.`date`<:end) OR ( s.`started`<:start AND s.`date`>:end) OR (s.`started`<:start and s.status!=24)) GROUP BY p.type, p.user_id";
+			$result = Yii::app()->db->createCommand($sql)->bindValues([':start' => $time, ':end' => $next_day])->queryAll();
+			//            echo $time."==>"; var_dump($result); echo "<br/>";
+			foreach ($result as $oneRow) {
+				if (isset($groupInfo[$oneRow['user_id']][$oneRow['type']]['exist'])) {
+					$groupInfo[$oneRow['user_id']][$oneRow['type']]['exist'] += $oneRow['number'];
+				} else {
+					$groupInfo[$oneRow['user_id']][$oneRow['type']]['exist'] = $oneRow['number'];
+				}
+			}
+
+			$time = date('Y-m-d', strtotime('+1 day', strtotime($time)));
+		}
+		$sql = 'SELECT MAX(number) FROM (SELECT CEIL(COUNT(*)/DAY(LAST_DAY(date(date)))) as number FROM `shipment_process` WHERE type&4>0 AND status=24 AND YEAR(date)="2018"  GROUP BY  MONTH(date)) t';
+		${'4' . 'best'} = intval(Yii::app()->db->createCommand($sql)->queryScalar());
+		$sql = 'SELECT MAX(number) FROM (SELECT CEIL(COUNT(*)/DAY(LAST_DAY(date(date)))) as number FROM `shipment_process` WHERE type&1>0 AND status=24 AND YEAR(date)="2018"  GROUP BY  MONTH(date)) t';
+		${'1' . 'best'} = intval(Yii::app()->db->createCommand($sql)->queryScalar());
+		$sql = 'SELECT MAX(number) FROM (SELECT CEIL(COUNT(*)/DAY(LAST_DAY(date(date)))) as number FROM `shipment_process` WHERE type&2>0 AND status=24 AND YEAR(date)="2018"  GROUP BY  MONTH(date)) t';
+		${'2' . 'best'} = intval(Yii::app()->db->createCommand($sql)->queryScalar());
+		$id = 1;
+		foreach ($groupInfo as $user_id => $userGroupInfo) {
+			foreach ($userGroupInfo as $type_id => $typeGroupInfo) {
+				$groupInfo[$user_id][$type_id]['best'] = ${$type_id . 'best'};
+				$groupInfo[$user_id][$type_id]['close_percent'] = ${$type_id . 'best'} > 0 ? number_format(@$groupInfo[$user_id][$type_id]['close'] / ${$type_id . 'best'} * 100, 2, '.', '') : 0;
+				$groupInfo[$user_id][$type_id]['exist'] = intval(@$groupInfo[$user_id][$type_id]['exist'] / $totDuring)-@$groupInfo[$user_id][$type_id]['close'];
+				$groupInfo[$user_id][$type_id]['exist_percent'] = $totalShipment > 0 ? number_format(intval($groupInfo[$user_id][$type_id]['exist']) / $totalShipment * 100, 2, '.', '') : 0;
+				$provide[] = ['id' => $id++, 'user_id' => $user_id, 'user_name' => User::getUserName($user_id), 'daily_close' => intval(@$groupInfo[$user_id][$type_id]['close']), 'type' => ShipmentProcess::$the_types[$type_id],
+					'best_month_avg_close' => intval(@$groupInfo[$user_id][$type_id]['best']), 'close_percent' => floatval(@$groupInfo[$user_id][$type_id]['close_percent']),
+					'dailyExist' => intval(@$groupInfo[$user_id][$type_id]['exist']), 'existPercent' => floatval(@$groupInfo[$user_id][$type_id]['exist_percent']),
+				];
+			}
+		}
+		return $provide;
+	}
+
+	public function actionGetCustomsListByStatus()
+	{
+		$model = new ImParcel('search');
+		$model->unsetAttributes();
+		if (isset($_GET['ImParcel'])) {
+			$model->setAttributes($_GET['ImParcel']);
+		}
+		$model->process_statuses = [$_GET['status']];
+		$name = ShipmentProcess::$states[$_GET['status']];
+		$list = AppHelper::setting2List('pods'); ksort($list);
+		$this->render('shipment_list', ['model' => $model, 'name' => $name,'status'=>$_GET['status'],'list'=>$list]);
+	}
+
+	public function actionMsgSend()
+	{
+		$model = new ImParcel('search');
+		$model->unsetAttributes();
+		if (isset($_GET['ImParcel'])) {
+			$model->setAttributes($_GET['ImParcel']);
+		}
+		$model->process_statuses = [2, 3];
+		$name = 'Customs-Message Send';
+		$list = AppHelper::setting2List('pods'); ksort($list);
+		$this->render('shipment_list', ['model' => $model, 'name' => $name,'list'=>$list]);
+	}
+	public function actionAqisMessageCustom()
+	{
+		$model = new ImParcel('search');
+		$model->unsetAttributes();
+		if (isset($_GET['ImParcel'])) {
+			$model->setAttributes($_GET['ImParcel']);
+		}
+		$model->process_statuses = [ShipmentProcess::STATE_AQIS_CUSTOM];
+		$name = 'Customs-AQIS Message Send to Custom';
+		$list = AppHelper::setting2List('pods'); ksort($list);
+		$this->render('shipment_list', ['model' => $model, 'name' => $name, 'list' => $list]);
+	}
+
+	public function actionEmppMessageCustom()
+	{
+		$model = new ImParcel('search');
+		$model->unsetAttributes();
+		if (isset($_GET['ImParcel'])) {
+			$model->setAttributes($_GET['ImParcel']);
+		}
+		$model->process_statuses = [ShipmentProcess::STATE_EMPP_CUSTOM];
+		$name = 'Customs-EMPP Message Send to Custom';
+		$list = AppHelper::setting2List('pods'); ksort($list);
+		$this->render('shipment_list', ['model' => $model, 'name' => $name, 'list'=>$list]);
+	}
+
+	public function actionWaitingConfirm()
+	{
+		$model = new ImParcel('search');
+		$model->unsetAttributes();
+		if (isset($_GET['ImParcel'])) {
+			$model->setAttributes($_GET['ImParcel']);
+		}
+		$model->process_status = 4;
+		$name = 'Customs-Document Waiting Confirm';
+		$list = AppHelper::setting2List('pods'); ksort($list);
+		$this->render('waiting_confirm', ['model' => $model, 'name' => $name, 'list'=>$list]);
+	}
+	public function actionWaitingDeclaration()
+	{
+		$model = new ImParcel('search');
+		$model->unsetAttributes();
+		if (isset($_GET['ImParcel'])) {
+			$model->setAttributes($_GET['ImParcel']);
+		}
+		$model->process_status = ShipmentProcess::MSG_BROKER;
+		$name = 'Customs-Waiting Broker Declaration';
+		$list = AppHelper::setting2List('pods'); ksort($list);
+		$this->render('shipment_list', ['model' => $model, 'name' => $name, 'list'=>$list]);
+	}
+
+	public function actionWaitingEntryConfirm()
+	{
+		$model = new ImParcel('search');
+		$model->unsetAttributes();
+		if (isset($_GET['ImParcel'])) {
+			$model->setAttributes($_GET['ImParcel']);
+		}
+		$name = 'Customs-Waiting Entry Confirm';
+		$model->process_status = ShipmentProcess::ENTRY_SEND;
+		$list = AppHelper::setting2List('pods'); ksort($list);
+		$this->render('shipment_list', ['model' => $model, 'name' => $name,'list'=>$list]);
+	}
+
+	public function actionEntryConfirmed()
+	{
+		$model = new ImParcel('search');
+		$model->unsetAttributes();
+		if (isset($_GET['ImParcel'])) {
+			$model->setAttributes($_GET['ImParcel']);
+		}
+		$name = 'Customs-Entry Confirmed';
+		$model->process_statuses = [ShipmentProcess::ENTRY_CONFIRM, ShipmentProcess::WAIT_BROKER_FINAL_ENTRY];
+		$list = AppHelper::setting2List('pods'); ksort($list);
+		$this->render('shipment_list', ['model' => $model, 'name' => $name, 'list'=>$list]);
+	}
+	public function actionWaitingPayment()
+	{
+		$model = new ImParcel('search');
+		$model->unsetAttributes();
+		if (isset($_GET['ImParcel'])) {
+			$model->setAttributes($_GET['ImParcel']);
+		}
+		$name = 'Customs-Watinging For Payment
+';
+		$model->process_status = ShipmentProcess::INFROM_CUSTOMER_PAY;
+		$list = AppHelper::setting2List('pods'); ksort($list);
+		$this->render('shipment_list', ['model' => $model, 'name' => $name, 'list'=>$list]);
+	}
+
+	public function actionBrokerPaymentConfirmed()
+	{
+		$model = new ImParcel('search');
+		$model->unsetAttributes();
+		if (isset($_GET['ImParcel'])) {
+			$model->setAttributes($_GET['ImParcel']);
+		}
+		$name = 'Broker Paid';
+		$model->process_status = ShipmentProcess::BROKER_PAID;
+		$list = AppHelper::setting2List('pods'); ksort($list);
+		$this->render('shipment_list', ['model' => $model, 'name' => $name, 'list'=>$list]);
+	}
+
+	public function actionPaymentReceived()
+	{
+		$model = new ImParcel('search');
+		$model->unsetAttributes();
+		if (isset($_GET['ImParcel'])) {
+			$model->setAttributes($_GET['ImParcel']);
+		}
+		$name = 'Customs-Payment Received';
+		$model->process_status = ShipmentProcess::PAYMENT_RECEIVED;
+		$list = AppHelper::setting2List('pods'); ksort($list);
+		$this->render('shipment_list', ['model' => $model, 'name' => $name, 'list'=>$list]);
+	}
+
+	public function actionPaymentConfirmed()
+	{
+		$model = new ImParcel('search');
+		$model->unsetAttributes();
+		if (isset($_GET['ImParcel'])) {
+			$model->setAttributes($_GET['ImParcel']);
+		}
+		$model->process_statuses = [ShipmentProcess::CONFIRM_PAYMENT, ShipmentProcess::INFORM_BROKER_PAY];
+		$name = 'Customs-Payment Confirmed';
+		$list = AppHelper::setting2List('pods'); ksort($list);
+		$this->render('shipment_list', ['model' => $model, 'name' => $name, 'list'=>$list]);
+	}
+	public function actionCustomsDone()
+	{
+		$model = new ImParcel('search');
+		$model->unsetAttributes();
+		if (isset($_GET['ImParcel'])) {
+			$model->setAttributes($_GET['ImParcel']);
+		}
+		$name = 'Customs-Done';
+		$model->process_status = ShipmentProcess::CUSTOM_DONE;
+		if(empty($model->ref)&&empty($model->hbn))
+		{
+			$model->ref="searching";
+		}
+		$list = AppHelper::setting2List('pods'); ksort($list);
+		$this->render('shipment_list', ['model' => $model, 'name' => $name, 'list'=>$list]);
+	}
+
+	public function actionUpdateFile($id)
+	{
+		$model = ImParcel::model()->findByPk($id);
+
+		// calculate week no
+		$inTime = new DateTime(@$model->process->mdata['ssdate'], new DateTimeZone('Australia/Sydney'));
+		$outTime = new DateTime('now', new DateTimeZone('Australia/Sydney'));
+		$storedDays = $outTime->diff($inTime)->format("%a");
+		$weekendDays = !(empty($model->process->mdata['ssdate']))?HolidayHelper::getWeekendDaysBetweenTwoDays($model->process->mdata['ssdate'],date('Y-m-d'),$model->consol->pod):0;
+		// calculate week no
+		$model->process->mdata['fw'] = floor($storedDays / 7) + 1;
+		$model->process->mdata['fd'] = (($storedDays-$weekendDays)+1)>0?($storedDays-$weekendDays)+1:0;
+		$model->process->update('meta');
+
+		if ($model === null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		$otype = $model->process->type;
+
+		if((($model->bwf&512)>0)&&($model->process->type&ShipmentProcess::TYPE_EMPP)==0)
+		{
+			$model->process->type  = $model->process->type|ShipmentProcess::TYPE_EMPP;
+		}
+
+		if((($model->bwf&32)>0)&&($model->process->type&ShipmentProcess::TYPE_AQIS)==0)
+		{
+			$model->process->type  = $model->process->type|ShipmentProcess::TYPE_AQIS;
+		}
+
+		if((($model->bwf&4)>0)&&($model->process->type&ShipmentProcess::TYPE_HV)==0)
+		{
+			$model->process->type  = $model->process->type|ShipmentProcess::TYPE_HV;
+		}
+
+		if((($model->bwf&8)>0)&&($model->process->type&ShipmentProcess::TYPE_SAC)==0)
+		{
+			$model->process->type  = $model->process->type|ShipmentProcess::TYPE_SAC;
+		}
+
+		if($otype!=$model->process->type)
+		{
+			$model->process->update('type');
+		}
+
+		$this->render('tab_files', ['model' => $model,'parentTab'=>$_GET['parentTab']]);
+	}
+
+	public function actionSendMessage($id)
+	{
+		$msg = '';
+		$model = $this->loadModel($id);
+		if (($model->bwf & 64) == 0 && ($model->bwf & 128) == 0 && ($model->bwf & 4) == 0) {
+			echo 'Shipment is not DDP OR DDU, Please Check';
+			return;
+		}
+		ShipmentProcess::sendDocumentNotice($model);
+		if (($model->bwf & 128) > 0) {
+			$r = ShipmentProcess::model()->find('pid=:pid AND status=2 AND date<DATE_SUB(NOW(), INTERVAL 1 DAY)', [':pid' => $model->id]);
+			if (!empty($r)) {
+				ShipmentProcess::sendDocumentNoticeToCustomer($model);
+			}
+		}
+		echo 'done';
+	}
+
+	public function actionRequireLoa($id)
+	{
+		$msg = '';
+		$model = $this->loadModel($id);
+		ShipmentProcess::requireLoa($model);
+		echo 'done';
+	}
+
+	/**
+	 * Send a SMS message to customer ask for their email address
+	 */
+	public function actionRequireEmail($id)
+	{
+		$model = $this->loadModel($id);
+		SMSService::sendRequireEmailSMS($model); 
+		echo 'done';
+	}
+
+	/*
+	 * send to broker to ask them for declartion
+	 */
+	public function actionSendtoBrokerFirst($id)
+	{
+		$model = $this->loadModel($id);
+		$process = ShipmentProcess::model()->find('pid=:pid', [':pid' => $model->id]);
+		if (empty($process)) {
+			$model->newShipmentProcess(8);
+		}
+		if (empty($process->broker_id)) {
+			echo 'false';
+			return;
+		}
+		ShipmentProcess::sendToBroker($model);
+		echo 'done';
+	}
+
+	public function actionEntrytoCheck($id)
+	{
+		$model = $this->loadModel($id);
+		$process = ShipmentProcess::model()->find('pid=:pid', [':pid' => $model->id]);
+		if (empty($process)) {
+			$model->newShipmentProcess(11);
+		}
+
+		$result = ShipmentProcess::sendEntryToConfirm($model);
+		echo $result;
+	}
+	/**
+	 *  for some declaration agent, we need to add Request Final Entry Step
+	 * @param type $id
+	 */
+
+	public function actionRequestFinalEntry($id)
+	{
+		$process = ShipmentProcess::model()->find('pid=:pid', [':pid' => $id]);
+		$model = ImParcel::model()->findByPk($id);
+		ShipmentProcess::sendToBrokerRequestFinalEntry($model);
+		echo 'done';
+	}
+
+	public function actionBrokertopay($id)
+	{
+		$model = $this->loadModel($id);
+		$stayHere = empty($_GET['stay_here'])?false:true;
+		$process = ShipmentProcess::model()->find('pid=:pid', [':pid' => $model->id]);
+		if (empty($process)) {
+			$model->newShipmentProcess(16);
+		}
+		ShipmentProcess::sendToBrokerToPay($model,$stayHere);
+		echo 'done';
+	}
+
+	public function actionBrokerpaid($id)
+	{
+		$model = $this->loadModel($id);
+		$stayHere = empty($_GET['stay_here'])?false:true;
+		$process = ShipmentProcess::model()->find('pid = :pid', [':pid' => $model->id]);
+		if (empty($process)) {
+			$model->newShipmentProcess(23);
+		} else {
+			if($stayHere)
+			{
+				$process->mdata['stay_here'] = $stayHere;
+				$process->save();
+			}else
+			{
+				$process->mdata['stay_here'] = $stayHere;
+				$process->save();
+				$process->changeStatus(ShipmentProcess::BROKER_PAID);
+			}
+		}
+		echo 'done';
+	}
+
+	public function actionSendAqsiToCustom($id)
+	{
+		$model = $this->loadModel($id);
+		$process = ShipmentProcess::model()->find('pid=:pid', [':pid' => $model->id]);
+		$o = ShipmentProcess::sendAqisToCustom($model);
+		if ($o['status']) {
+			echo 'done';
+		} else {
+			echo $o['msg'];
+		}
+	}
+
+	public function actionCreateCasualInvoice($id)
+	{
+		$model = $this->loadModel($id);
+		if (empty($model) || ($model->cbwf & 512) > 0) {
+			echo 'invoice already created!';
+			return;
+		}
+		if (!isset($model->mdata['custom_inv'])) {
+			echo 'please input the invoice amount';
+			return;
+		}
+		
+		if (!empty($_POST['ssdate'])) {
+			$model->process->mdata['ssdate'] = $_POST['ssdate'];
+			$model->process->update('meta');
+		}
+
+		$result = $model->genCasualInvoice();
+		// use cron regularly generate storage invoice
+		$model->createStorageInvoiceWhenDdu();//if DDU the storage fees is paid by consignee.
+		if ($result['status'] == 1) {
+			// Log::log2file($model->ref . "== create Casual Invoice.", "casual_invoice", "account");
+			$model->cbwf = $model->cbwf | 512;
+			$model->update('cbwf');
+
+			echo 'done';
+		} else {
+			echo $result['msg'];
+		}
+	}
+	public function actionSendInvoiceToCasual($id)
+	{
+		$model = $this->loadModel($id);
+		if(strtotime($model->consol->eta) >= strtotime('2020-08-01')){
+			Yii::app()->name = 'TLA';
+		}
+		$process = ShipmentProcess::model()->find('pid=:pid', [':pid' => $model->id]);
+		if (empty($process)) {
+			$model->newShipmentProcess(16);
+		}
+		// ||($model->cbwf&512)==0
+		if (empty($model) || Invoice::model()->count(
+			'dpmt = 10 AND type IN (41,45) AND pid = :pid AND status NOT IN (10,11,9,8,7)', [':pid' => $model->id]) == 0) {
+			echo 'invoice not created yet!';
+			return;
+		}
+
+		// if DDP and credit not exceed then payment confirmed, else waiting for payment
+		if(!in_array($model->process,array_keys(ShipmentProcess::$aqisStates)))
+		{
+			if (($model->bwf & ImParcel::CUSTOM_DDP) > 0 && !$model->agent->overCreditLimit()) {
+				$model->process->changeStatus(ShipmentProcess::CONFIRM_PAYMENT);
+			} else {
+				$model->process->changeStatus(ShipmentProcess::INFROM_CUSTOMER_PAY);
+			}
+		}
+
+		ShipmentProcess::sendInvoiceToInform($model);
+		echo 'done';
+	}
+	public function actionLog($id)
+	{
+		$model = ShipmentProcess::model()->find('pid=:pid', [':pid' => $id]);
+		if ($model == null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		$this->render('log', [
+			'model' => $model,
+		]);
+	}
+
+	/* confirm payment received from customer
+	 * 1: change Process status to Confirm_payment
+	 * change shipment status to clear (only when duty held);
+	 *
+	 */
+	public function actionPaymentConfirm($id)
+	{
+		$process = ShipmentProcess::model()->find('pid=:pid', [':pid' => $id]);
+		$model = ImParcel::model()->findByPk($id);
+		if (empty($process)) {
+			$model->newShipmentProcess(ShipmentProcess::CONFIRM_PAYMENT);
+		} else {
+			$process->status = ShipmentProcess::CONFIRM_PAYMENT;
+			$process->update('status');
+		}
+		if ($model->status == 57) {
+//duty held
+			$model->status = 58; //change to clear
+			$model->update('status');
+		}
+		echo 'done';
+	}
+
+	/* confirm payment received from customer
+	 * 1: change Process status to Confirm_payment
+	 * change shipment status to clear (only when duty held);
+	 *
+	 */
+	public function actionEmppCustom($id)
+	{
+
+		echo json_encode(FileRepo::model()->count('type IN (18,19,20) AND status = 30 AND fid = :fid', [':fid' => $id]) > 0);
+
+		return;
+		// $process = ShipmentProcess::model()->find('pid=:pid', [':pid'=>$id]);
+		// $model= ImParcel::model()->findByPk($id);
+		// if (empty($process)) {
+		//     $model->newShipmentProcess(ShipmentProcess::CUSTOM_DONE, ShipmentProcess::TYPE_EMPP);
+		// } else {
+		//     $process->status= ShipmentProcess::STATE_EMPP_CUSTOM;
+		//     $process->update('status');
+		// }
+		// echo  'done';
+	}
+
+	/* send an email  to told the customer that the goods will be delivery soon.
+	 *
+	 */
+	public function actionNoticeDelivery($id)
+	{
+		$o = $this->checkSendNotice($id);
+		if ($o['status']) {
+			echo 'done';
+		} else {
+			echo $o['msg'];
+		}
+	}
+
+	public function actionEditNoticeContent()
+	{
+		if(empty($_POST))
+		{
+			$id = $_GET["id"];
+			$model = $this->loadModel($id);
+			$process = ShipmentProcess::model()->find('pid=:pid', [':pid' => $model->id]);
+			if (empty($process)) {
+				$model->newShipmentProcess(ShipmentProcess::CONFIRM_PAYMENT);
+			}
+			$emailTpl = ShipmentProcess::getNoticeContent($model);
+			if(!empty($process->notice_content))
+			{
+				$emailTpl->body = $process->notice_content;
+			}
+			$this->render("notice_content",["model"=>$model,"emailTpl"=>$emailTpl]);
+		}else
+		{
+			$id = $_POST["id"];
+			$model=$this->loadModel($id);
+			$process = ShipmentProcess::model()->find('pid=:pid', [':pid' => $model->id]);
+			if (!empty($process)) {
+				$process->notice_content = $_POST['Emailog']['body'];
+				$process->update(['notice_content']);
+			}
+			$this->ajaxResult($model);
+		}
+	}
+
+	private function checkSendNotice($id)
+	{
+		$model = $this->loadModel($id);
+		$process = ShipmentProcess::model()->find('pid=:pid', [':pid' => $model->id]);
+		if (empty($process)) {
+			$model->newShipmentProcess(ShipmentProcess::CONFIRM_PAYMENT);
+		}
+		if(in_array($model->status,[ImParcel::STATE_CLEAR,ImParcel::STATE_CLEAR_WAIT])&&$model->scanCount()>0)
+		{
+			$o = ShipmentProcess::noticeDelivery($model);
+		}else
+		{
+			$model->mdata['preprared_notice'] = 1;
+			$model->updateMeta();
+			return ["status"=>false,"msg"=>"prepared"];
+		}
+		return $o;
+	}
+	/*require documents  from sender when the parcel is EMPP;
+	 *
+	 */
+	public function actionRequireEmppDocument($id)
+	{
+		$model = $this->loadModel($id);
+		$process = ShipmentProcess::model()->find('pid=:pid', [':pid' => $model->id]);
+		if (empty($process)) {
+			$model->newShipmentProcess(ShipmentProcess::MSG_NEW, ShipmentProcess::TYPE_EMPP);
+		}
+		$o = ShipmentProcess::requireEmppDocument($model);
+		if ($o['status']) {
+			echo 'done';
+		} else {
+			echo $o['msg'];
+		}
+	}
+
+	public function actionCreateEmailM($id, $type)
+	{
+		$model = new Emailog();
+		$email = '';
+		$from = Yii::app()->user->grp == 72 ? Yii::app()->user->email : 'imports@toplogistics.com.au';
+		$cc = Yii::app()->user->grp == 72 ? Yii::app()->user->email : 'imports@toplogistics.com.au';
+		// $cc = '';
+		$shipment = $this->loadModel($id);
+		$model->type = $type;
+		switch ($type) {
+			case Emailog::EMPP_DOCUMENT:
+				$model->to_id = $shipment->agent_id;
+				$org = Org::model()->findByPk($shipment->agent_id);
+				if (!empty($org->extra['outturn_email'])) {
+					$email = trim($org->extra['outturn_email']);
+				}
+				break;
+			case Emailog::CUST_DOCUMENT_CUSTOMER2:
+				$model->to_id = $shipment->agent_id;
+				$email = $shipment->cnee->email;
+				break;
+			case Emailog::CUST_DOCUMENT_SENDER:
+				$model->to_id = $shipment->agent_id;
+				$org = Org::model()->findByPk($shipment->agent_id);
+				if (!empty($org->extra['outturn_email'])) {
+					$email = trim($org->extra['outturn_email']);
+				}
+				break;
+			case Emailog::CUST_DOCUMENT_BROKER:
+				$model->to_id = $shipment->process->broker_id;
+				$org = Org::model()->findByPk($model->to_id);
+				if (!empty($org->extra['outturn_email'])) {
+					$email = trim($org->extra['outturn_email']);
+				}
+				break;
+			case Emailog::AQIS_DOCUMENT:
+				$model->to_id = $shipment->agent_id;
+				$org = Org::model()->findByPk($shipment->agent_id);
+				if (!empty($org->extra['outturn_email'])) {
+					$email = trim($org->extra['outturn_email']);
+				}
+				break;
+			case Emailog::EMPP2CUSTOMS:
+				$model->to_id = 0;
+				$from = Yii::app()->user->email;
+				break;
+		}
+
+		$model->fid = $id;
+		if (isset($_POST['Emailog'])) {
+			$model->attributes = $_POST['Emailog'];
+			foreach ($_POST['extra'] as $k => $v) {
+				$model->mdata[$k] = $v;
+			}
+			$model->status = 10;
+			$model->save();
+			if (!empty(Yii::app()->session['uploads'][$_POST['ppupload']][2])) {
+				foreach (Yii::app()->session['uploads'][$_POST['ppupload']][2] as $fid) {
+					$fr = FileRepo::model()->findByPk($fid);
+					$fr->fid = $model->id;
+					$fr->save();
+				}
+			}
+			$files = [];
+			$tempDirectory = Yii::app()->basePath . DIRECTORY_SEPARATOR . "runtime" . DIRECTORY_SEPARATOR . 'zip' . time();
+			if (!file_exists($tempDirectory)) {
+				mkdir($tempDirectory);
+			}
+			//prepare files
+			switch ($type) {
+				case Emailog::CUST_DOCUMENT_CUSTOMER2:
+					$fs = FileRepo::model()->findAll('fid=:fid and type in (19,20) and status in (20,30)', [':fid' => $shipment->id]);
+					foreach ($fs as $f) {
+						$files[] = [$f->getFile(), $f->name];
+					}
+					if($shipment->isTLA())
+					{
+						$files[] = [$file = Yii::app()->basePath . DIRECTORY_SEPARATOR . 'consignee_authorization_letter_template_top.docx', 'consignee_authorization_letter_template_top.docx'];
+					}else
+					{
+						$files[] = [$file = Yii::app()->basePath . DIRECTORY_SEPARATOR . 'consignee_authorization_letter_template.docx', 'consignee_authorization_letter_template.docx'];
+					}
+					break;
+				case Emailog::CUST_DOCUMENT_BROKER:
+					$fs = FileRepo::model()->findAll('fid=:fid and type in (19,18,20) and status=30', [':fid' => $shipment->id]);
+					foreach ($fs as $f) {
+						$files[] = [$f->getFile(), $f->name];
+					}
+					$fileName = $tempDirectory . DIRECTORY_SEPARATOR . 'house_bill_' . $shipment->hbn . '.pdf';
+					if (!preg_match('/^DW\d{8}\w{3}$/', $shipment->hbn)) {
+						oPDF::renderPDF('custom_airwaybill', ['model' => $shipment], 2, $fileName);
+						$files[] = [$fileName, 'house_bill_' . $shipment->hbn . '.pdf'];
+					}
+					break;
+				case Emailog::EMPP2CUSTOMS:
+					$fs = FileRepo::model()->findAll('fid=:fid and type in (19,18,20) and status=30', [':fid' => $shipment->id]);
+					foreach ($fs as $f) {
+						$files[] = [$f->getFile(), $f->name];
+					}
+					break;
+			}
+
+			$d = $model->sendEmail($files);
+			if ($d['status']) {
+				switch ($type) {
+					case Emailog::EMPP_DOCUMENT:
+						$shipment->process->changeStatus(ShipmentProcess::MSG_SENDER);
+						break;
+					case Emailog::AQIS_DOCUMENT:
+						$shipment->process->changeStatus(ShipmentProcess::MSG_SENDER);
+						break;
+					case Emailog::CUST_DOCUMENT_SENDER:
+						$shipment->process->changeStatus(ShipmentProcess::MSG_SENDER);
+						break;
+					case Emailog::CUST_DOCUMENT_CUSTOMER2:
+						$shipment->process->changeStatus(ShipmentProcess::MSG_CONSIGNEE);
+						if ((isset($shipment->cnee->tel) && preg_match('/^04\d{8}$/', ($shipment->cnee->auTel())))) {
+							$no = $shipment->cnee->auTel();
+							$msg = 'This Top Logistics, we just send a notice to your email:' . $shipment->cnee->email . ' for your Parcel ' . $shipment->ref . ' Please reply via the email as ASAP! tel: 02-99257111';
+							if (Sms::sendCustomsMessageLocal($no, $msg)) {
+								// Log::log2file($shipment->ref . ' no=>' . $no . ' msg:=>' . $msg, 'msg_notice_doucument_send', 'custom');
+							}
+						}
+						break;
+					case Emailog::CUST_DOCUMENT_BROKER:
+						$shipment->process->changeStatus(ShipmentProcess::MSG_BROKER);
+						break;
+					case Emailog::AQIS_DOCUMENT:
+						$shipment->process->changeStatus(ShipmentProcess::MSG_SENDER);
+						break;
+					case Emailog::EMPP2CUSTOMS:
+						$shipment->process->changeStatus(ShipmentProcess::STATE_EMPP_CUSTOM);
+						break;
+				}
+			} else {
+				$model->addErrors([$d['msg']]);
+			}
+			AppHelper::unlinkRecursive($tempDirectory);
+			$this->ajaxResult($model, ['id'], 'Email Sent Successfully');
+		}
+
+		$model->prepTemplate();
+		$model->subject = $model->tpl->subject;
+		$model->body = $model->tpl->getContent();
+
+		$model->mdata['to'] = $email;
+		$model->mdata['from'] = $from;
+		$model->mdata['cc'] = $cc;
+		$this->render('create_email_m', [
+			'model' => $model,
+		]);
+	}
+	/*require documents  from sender when the parcel is EMPP;
+	 *
+	 */
+	public function actionRequireAqisDocument($id)
+	{
+		$model = $this->loadModel($id);
+		$process = ShipmentProcess::model()->find('pid=:pid', [':pid' => $model->id]);
+		$o = ShipmentProcess::requireAqisDocument($model);
+		if ($o['status']) {
+			echo 'done';
+		} else {
+			echo $o['msg'];
+		}
+	}
+	/*ceate email for edit and sending to
+	 *customer with invoice
+	 */
+	public function actionCreateEmail($id)
+	{
+		$model = new Emailog();
+
+		$model->fid = $id;
+		// 2020-08-05
+		$shipment = $this->loadModel($id);
+		if (!empty($shipment->consol) && strtotime($shipment->consol->eta) >= strtotime('2020-08-01')) [$app_name, Yii::app()->name] = [Yii::app()->name, 'TLA'];
+		if (isset($_POST['Emailog'])) {
+			$model->attributes = $_POST['Emailog'];
+			foreach ($_POST['extra'] as $k => $v) {
+				$model->mdata[$k] = $v;
+			}
+			$model->mdata['from'] = Yii::app()->user->grp == 72 ? Yii::app()->user->email : 'donotreply@toplogistics.com.au';
+			$model->mdata['fromName'] = 'TLA Imports';
+			$model->status = 10;
+			$model->save();
+			if (!empty(Yii::app()->session['uploads'][$_POST['ppupload']][2])) {
+				foreach (Yii::app()->session['uploads'][$_POST['ppupload']][2] as $fid) {
+					$fr = FileRepo::model()->findByPk($fid);
+					$fr->fid = $model->id;
+					$fr->save();
+				}
+			}
+
+			$files = [];
+			$tempDirectory = Yii::app()->basePath . DIRECTORY_SEPARATOR . "runtime" . DIRECTORY_SEPARATOR . 'zip' . time();
+			if (!file_exists($tempDirectory)) {
+				mkdir($tempDirectory);
+			}
+			$invs = Invoice::model()->findAll('dpmt=10 AND type IN(41,45) AND pid=:pid AND status not in (11,10,9,8) ORDER BY id DESC', [':pid' => $model->fid]);
+			if (empty($invs)) {
+				$model->addError('invoice', 'invoice not created');
+				$this->ajaxResult($model);
+			}
+			if (empty($model->mdata['to'])) {
+				$model->addError('to', 'to email address need!');
+				$this->ajaxResult($model);
+			}
+			foreach ($invs as $invoice) {
+				$fileName = $tempDirectory . DIRECTORY_SEPARATOR . 'Invoice_' . $invoice->no . '.pdf';
+				oPDF::renderPDF('invoice', ['inv' => $invoice], 2, $fileName);
+				$files[] = [$fileName, 'Invoice_' . $invoice->no . '.pdf'];
+			}
+			$fileTaxs = FileRepo::model()->findAll("type = 19 AND status in (20,30) AND fid=:fid AND name LIKE '%entryprint%'",[":fid"=>$shipment->id]);
+			foreach ($fileTaxs as $key => $ft) {
+				$files[] = [$ft->getFile(), $ft->name];
+			}
+
+			// if($shipment->agent_id!=Org::ORGID_COURIER_4PX)
+			// {
+			// 	$o = $model->sendEmail($files);
+			// }else
+			// {
+				$o = $model->sendEmail($files);
+				// $org = Org::model()->findByPk($shipment->agent_id);
+				// $email = '';
+				// $ccList = [];
+				// if (!empty($org->extra['client_billing_email']))
+				// {
+				// 	foreach (preg_split('/[,;]+/i', trim($org->extra['client_billing_email'])) as $k=>$to) {
+				// 		if($k==0)
+				// 		{
+				// 			$email = $to;
+				// 		}else
+				// 		{
+				// 			$ccList[] = $to;
+				// 		}
+				// 	}
+				// }
+				// $model->mdata['to'] = $email;
+				// $model->mdata['cc'] = join(';',$ccList);
+				// $o = $model->sendEmail();
+			// }
+			if ($o['status']) {
+				$invoice->status = Invoice::INVOICE_STATUS_POSTED;
+				$invoice->update('status');
+				$process = ShipmentProcess::model()->find('pid=:pid', [':pid' => $model->fid]);
+				$process->changeStatus(ShipmentProcess::INFROM_CUSTOMER_PAY);
+			}
+			AppHelper::unlinkRecursive($tempDirectory);
+			$this->ajaxResult($model, ['id'], 'Email Sent Successfully');
+		}
+		$email = '';
+		$ccList = [];
+		$shipment = $this->loadModel($id);
+		if (($shipment->bwf & ImParcel::CUSTOM_DDP) > 0) {
+			$org = Org::model()->findByPk($shipment->agent_id);
+			// if($shipment->agent_id==Org::ORGID_COURIER_4PX)
+			// {
+			// 	$email = 'ar_syd@4px.com;';
+			// 	$ccList[] = 'jessiejj@4px.com';
+			// }else
+			// {
+			// 	if (!empty($org->extra['outturn_email'])) {
+			// 		foreach (preg_split('/[,;]+/i', trim($org->extra['outturn_email'])) as $to) {
+			// 			$email = $to;
+			// 			break;
+			// 		}
+			// 	}
+			// }
+			if (!empty($org->extra['outturn_email'])) {
+					foreach (preg_split('/[,;]+/i', trim($org->extra['outturn_email'])) as $to) {
+						$email = $to;
+						break;
+					}
+			}
+			$model->type = Emailog::CUSTOM_INVOICE_AGENT;
+		} elseif (($shipment->bwf & ImParcel::CUSTOM_DDU) > 0) {
+			$email = isset($shipment->cnee->email) ? $shipment->cnee->email : '';
+			$model->type = Emailog::CUST_INVOICE_INFORM;
+			if($shipment->agent_id==Org::ORGID_COURIER_4PX)
+			{
+				$org = Org::model()->findByPk($shipment->agent_id);
+				if (!empty($org->extra['outturn_email'])) {
+						foreach (preg_split('/[,;]+/i', trim($org->extra['outturn_email'])) as $ck =>$to) {
+							if($ck==0)
+							{
+								$email = $to;
+							}else
+							{
+								$ccList[] = $to;
+							}
+						}
+				}
+			}
+		}
+		$model->prepTemplate();
+		$model->subject = $model->tpl->subject;
+		$model->body = $model->tpl->getContent();
+
+		$model->mdata['to'] = $email;
+		if(!empty(Yii::app()->name)&&Yii::app()->name=='TLA')
+		{
+			$ccList[] = Yii::app()->user->grp == 72 ? Yii::app()->user->email : 'imports@toplogistics.com.au';
+			$model->mdata['cc'] = join(';',$ccList);
+		}else
+		{
+			$ccList[] = Yii::app()->user->grp == 72 ? Yii::app()->user->email : 'imports@toplogistics.com.au';
+			$model->mdata['cc'] = join(';',$ccList);
+		}
+		$this->render('create_email', [
+			'model' => $model,
+		]);
+	}
+
+	/*
+	 * change the shipmentProcess status
+	 */
+	public function actionProcess($id)
+	{
+		if (empty($id) || empty($_POST['custom_status'])) {
+			return false;
+		} else {
+			$process = ShipmentProcess::model()->find('pid=:pid', [':pid' => $id]);
+			if (empty($process)) {
+				$model = ImParcel::model()->findByPk($id);
+				$model->newShipmentProcess($_POST['custom_status']);
+			} else {
+				$transaction = Yii::app()->db->beginTransaction();
+				try {
+					$process->changeStatus($_POST['custom_status']);
+					if (isset($_POST['broker_id'])) {
+						if (!empty($_POST['broker_id']) && $process->broker_id != $_POST['broker_id']) {
+							$org = Org::model()->findByPk($_POST['broker_id']);
+							if (!empty($org) && preg_match('/04\d{8}/', $org->phone)) {
+								Sms::sendCustomsMessageLocal($org->phone, 'Top Logistics ' . $process->shipment->hbn . ' has been assigned to you for customs clearance');
+							}
+
+						}
+						$process->broker_id = $_POST['broker_id'];
+						$process->update('broker_id');
+					}
+					$process->mdata['inv_terms'] = isset($_POST['inv_terms']) ? $_POST['inv_terms'] : [];
+					if (isset($_POST['ssdate'])) {
+						$process->mdata['ssdate'] = empty($_POST['ssdate']) ? '' : $_POST['ssdate'];
+					}
+
+					if (isset($_POST['direction_due_date'])) {
+						$process->mdata['direction_due_date'] = empty($_POST['direction_due_date']) ? '' : $_POST['direction_due_date'];
+					}
+
+					if (isset($_POST['cabill_name'])) {
+						$process->mdata['cabill_name'] = trim($_POST['cabill_name']);
+					}
+
+					if (isset($_POST['cabill_addr'])) {
+						$process->mdata['cabill_addr'] = trim($_POST['cabill_addr']);
+					}
+
+					if (!empty($process->mdata['ssdate'])) {
+						if (!empty($_POST['fw'])) {
+							$process->mdata['fw'] = $_POST['fw'];
+						} else {
+							$process->mdata['fw'] = 1;
+						}
+					}
+					$process->updateMeta();
+					if ($_POST['custom_status'] == ShipmentProcess::CUSTOM_DONE||$_POST['custom_status'] == ShipmentProcess::STATE_AQIS_CUSTOMS_DONE)
+					{
+
+						if ($process->shipment->status == 57) {
+							if($process->shipment->scanCount()>0&&!$process->shipment->isParcelPickup())
+							{
+								$process->shipment->status = 58;
+							}else
+							{
+								$process->shipment->status = 60;
+							}
+						}
+
+						ImParcelService::accHeldShipment($process->shipment);
+
+						$process->status = $_POST['custom_status'];
+						$process->update('status');
+						//$this->checkSendNotice($id);
+					}
+					$transaction->commit();
+				} catch (Exception $ex) {
+					$transaction->rollback();
+					throw $ex;
+				}
+			}
+			echo 'done';
+			return true;
+		}
+	}
+
+	public function actionHouseWaybill($id)
+	{
+		$model = $this->loadModel($id);
+		if($model->consol->service==Consol::SEACONSOL)
+		{
+			oPDF::renderPDF('sea_custom_airwaybill', ['model' => $model], 1, $model->hbn . '.pdf');
+		}else if($model->consol->service==Consol::AIRCONSOL)
+		{
+			oPDF::renderPDF('custom_airwaybill', ['model' => $model], 1, $model->hbn . '.pdf');
+		}
+	}
+
+	public function actionUpdate()
+	{
+		$model = $this->loadModel($_POST['id']);
+		$model->mdata['custom_note'] = $_POST['custom_note'];
+		if ($model->save()) {
+			echo 'done';
+		} else {
+			echo json_encode($model->getErrors());
+		}
+	}
+
+	public function actionCopyLink($id)
+	{
+		$model = $this->loadModel($id);
+		$type = $_GET['type'];
+		$link = $model->getTheHashUrl($type);
+		echo $link;
+	}
+
+	public function actionAssignUser()
+	{
+		if (!empty($_POST)) {
+			$model = new TypeMapUser();
+			foreach ($_POST as $key => $value) {
+				$type_map = $_POST;
+				$r = TypeMapUser::model()->find('type=1 AND map_type=:map_type', [':map_type' => $key]);
+				if (!empty($r)) {
+					if (empty($value)) {
+						$r->status = 0;
+					} else {
+						$r->status = 1;
+						$r->user_id = $value;
+					}
+					$r->save();
+				} else {
+					$r = new TypeMapUser();
+					$r->type = TypeMapUser::TYPE_CUSTOM_PROCESS;
+					$r->map_type = $key;
+					$r->user_id = $value;
+					$r->status = 1;
+					$r->save();
+				}
+				$rs = ShipmentProcess::model()->findAll('status<24');
+				$transaction = Yii::app()->db->beginTransaction();
+				try {
+					foreach ($rs as $r) {
+						foreach ($r->preccesLog as $plog) {
+							if ($plog->status != 1) {
+								continue;
+							}
+							$plog->user_id = @$type_map[$plog->type];
+							$plog->update('user_id');
+						}
+					}
+					$transaction->commit();
+				} catch (Exception $ex) {
+					$transaction->rollback();
+				}
+			}
+			$this->ajaxResult($model);
+		}
+
+		$this->render('assign_user');
+	}
+
+	public function actionExport()
+	{
+		$model = new ImParcel('search');
+		$model->unsetAttributes(); // clear any default values
+		if (isset($_GET['ImParcel'])) {
+			$model->attributes = $_GET['ImParcel'];
+		}
+		$model->process_not_status = [24];
+		if (!empty($_GET['agent_id'])) {
+			if ($_GET['agent_id'] == 1002) {
+				$model->agent_id = $_GET['agent_id'];
+				$model->not_bwf = 2;
+			} elseif ($_GET['agent_id'] == 1401) {
+				$model->agent_id = 1002;
+				$model->bwf = 2;
+			} else {
+				$model->agent_id = $_GET['agent_id'];
+			}
+		}
+		$dp = $model->search(false);
+		$xls = new oExcel;
+		$i = 1;
+		$xls->addRow($i++, ['WBN', 'Ref', 'Awb', 'Packages', 'Weight', 'Status', 'process status', 'Agent', 'Sender', 'Sender Tel', 'Cnee Name', 'Cnee Tel', 'Address', 'State', 'Date', 'value(USD)', 'Extra Info','Memo','Note']);
+
+		foreach ($dp->data as $r) {
+			if (empty($r->cnee)) {
+				continue;
+			}
+			$ln = $r->getLastLog();
+			$extraInfo = $r->getExtraInfo();
+			$process_status = $r->getProcessStatus();
+			$dd = empty($ln) ? 0 : ceil((time() - strtotime($ln->time)) / 86400);
+			$xls->addRow($i++, [$r->hbn, $r->ref, empty($r->consol) ? '' : $r->consol->awb, $r->pkg, $r->weight, $r->getStatus(), $process_status, empty($r->agent) ? '' : $r->agent->name, $r->cnor->name, '="' . $r->cnor->tel . '"', $r->cnee->name, '="' . $r->cnee->tel . '"', $r->cnee->address, $r->cnee->state, $r->created, $r->dvalue, $extraInfo,$r->can,@$r->mdata['custom_note']]);
+		}
+		$xls->output('imp_search_export_' . time() . '.xlsx');
+	}
+
+	public function actionExportHistoryCustomKPIReport(){
+
+		if (empty($_POST)) {
+			$this->render('custom_process_time_pick',['type'=>'Total']);
+		} else {
+			$arrCustomKPIs = CustomsProcessService::getCustomProcessKPIReport($_POST['startdate'],$_POST['enddate']);
+			$xls = new oExcel;
+			$i = 1;
+			$xls->addRow($i++, ['Date','HV Open','HV Close','EMPP Open','EMPP Close','AQIS Open','AQIS Close']);
+			foreach($arrCustomKPIs as $startdate => $arrCustomKPI){
+				$xls->addRow($i++, [$startdate,$arrCustomKPI[1],$arrCustomKPI[2],$arrCustomKPI[3],$arrCustomKPI[4],$arrCustomKPI[5],$arrCustomKPI[6]]);
+			}
+			$xls->output('custom_process_export_' . time() . '.xlsx');
+		}
+	}
+
+	public function actionExportHistoryCustomKPIDetailReport(){
+
+		if (empty($_POST)) {
+			$this->render('custom_process_time_pick',['type'=>'Detail']);
+		} else {
+			$arrCustomKPIs = CustomsProcessService::getCustomProcessOpenRecordsDetail($_POST['startdate'],$_POST['enddate']);
+			$xls = new oExcel;
+			$i = 1;
+			$xls->addRow($i++, ['Date','HBN','REF','HV Open','HV Close','EMPP Open','EMPP Close','AQIS Open','AQIS Close']);
+			
+			foreach($arrCustomKPIs as $arrCustomKPI){
+				$xls->addRow($i++, [$arrCustomKPI[0],$arrCustomKPI[1],$arrCustomKPI[2],$arrCustomKPI[3],$arrCustomKPI[4],$arrCustomKPI[5],$arrCustomKPI[6],$arrCustomKPI[7],$arrCustomKPI[8]]);
+			}
+			$xls->output('custom_process_detail_export_' . time() . '.xlsx');
+		}
+	}
+
+	public function actionGetProcessAmount()
+	{
+		$temp = [];
+		$temp['empp_custom'] = ShipmentProcess::getProcessAmount([ShipmentProcess::STATE_EMPP_CUSTOM]);
+		$temp['aqis_custom'] = ShipmentProcess::getProcessAmount([ShipmentProcess::STATE_AQIS_CUSTOM]);
+		$temp['msg_send'] = ShipmentProcess::getProcessAmount([ShipmentProcess::MSG_SENDER, ShipmentProcess::MSG_CONSIGNEE]);
+		$temp['doc_wait'] = ShipmentProcess::getProcessAmount([ShipmentProcess::DOC_RECEIVED]);
+		$temp['msg_brok'] = ShipmentProcess::getProcessAmount([ShipmentProcess::MSG_BROKER]);
+		$temp['wait_entry'] = ShipmentProcess::getProcessAmount([ShipmentProcess::ENTRY_SEND]);
+		$temp['entry_confirm'] = ShipmentProcess::getProcessAmount([ShipmentProcess::ENTRY_CONFIRM, ShipmentProcess::INFORM_BROKER_PAY]);
+		$temp['inform_pay'] = ShipmentProcess::getProcessAmount([ShipmentProcess::INFROM_CUSTOMER_PAY]);
+		$temp['payment_rec'] = ShipmentProcess::getProcessAmount([ShipmentProcess::PAYMENT_RECEIVED]);
+		$temp['confirm_pay'] = ShipmentProcess::getProcessAmount([ShipmentProcess::CONFIRM_PAYMENT]);
+		echo json_encode($temp);
+	}
+
+	public function actionCustomDetail()
+	{
+		$type = $_GET['type']; //status
+		$index = $_GET['index']; //2=>1-3,3=>3-5, 4=>5+
+		$dayName = '';
+		if ($index == 2) {
+			$dayName = 'Less Than 3 Days';
+			$start = -1;
+			$end = 3;
+		} elseif ($index == 3) {
+			$dayName = "3-5 Days";
+			$start = 3;
+			$end = 5;
+		} elseif ($index == 4) {
+			$dayName = "5+ Days";
+			$start = 5;
+			$end = 365;
+		}
+		$sql = "SELECT t.pid as id, DATEDIFF(NOW(),date) as day_diff FROM `shipment_process` t WHERE status!=24 HAVING day_diff>=:start AND day_diff<:end";
+		$rs = Yii::app()->db->createCommand($sql)->bindValues([':start' => $start, ':end' => $end])->queryAll();
+		$ids = [];
+		foreach ($rs as $r) {
+			$ids[] = $r['id'];
+		}
+		$model = new ImParcel('search');
+		$model->unsetAttributes();
+		if (isset($_GET['ImParcel'])) {
+			$model->setAttributes($_GET['ImParcel']);
+		}
+		$model->process_statuses = ShipmentProcess::$processTypes[$type];
+		$model->mids = $ids;
+		$name = ShipmentProcess::$processTypesMap[$type] . "=>" . $dayName;
+		$list = AppHelper::setting2List('pods'); ksort($list);
+		$this->render('shipment_list', ['model' => $model, 'name' => $name ,'list'=>$list]);
+	}
+	public function actionCopyEmail($id)
+	{
+		$from = ImParcel::model()->findByPk($id);
+		$process = ShipmentProcess::model()->findByPk($_GET['fid']);
+		$to = $process->shipment;
+		if (!empty($to->cnee->email)) {
+			$to->note .= "email:" . $to->cnee->email;
+			$to->update('note');
+		}
+		$to->cnee->email = $from->cnee->email;
+		if ($to->cnee->save()) {
+			echo 'done';
+		} else {
+			echo implode(", ", $to->cnee->getErrors());
+		}
+	}
+	public function actionCopyLoa($id)
+	{
+		$fromFile = FileRepo::model()->findByPk($id);
+		if (!empty($fromFile)) {
+			$ifExist = FileRepo::model()->find('fid=:fid and status!=0 AND name=:name', [':fid' => $_GET['fid'], ':name' => $fromFile->name]);
+			if (!$ifExist) {
+				$fileRepo = new FileRepo;
+				$fileRepo->attributes = $fromFile->attributes;
+				$fileRepo->type = 19;
+				$fileRepo->date = date('Y-m-d H:i:s');
+				$fileRepo->fid = $_GET['fid'];
+				if ($fileRepo->save()) {
+					echo 'done';
+				} else {
+					var_dump($fileRepo->getErrors());
+				}
+				return;
+			}
+		}
+		echo 'done';
+	}
+
+	public function actionCopyEmailAndLoa()
+	{
+		$check1 = true;
+		$from = ImParcel::model()->findByPk($_GET['eid']);
+		$process = ShipmentProcess::model()->findByPk($_GET['efid']);
+		$to = $process->shipment;
+		if (!empty($to->cnee->email)) {
+			$to->note .= "email:" . $to->cnee->email;
+			$to->update('note');
+		}
+		$to->cnee->email = $from->cnee->email;
+		if ($to->cnee->save()) {
+			$check1 = true;
+		} else {
+			$check1 = false;
+			echo implode(", ", $to->cnee->getErrors());
+		}
+
+		$check2 = true;
+		$fromFile = FileRepo::model()->findByPk($_GET['lid']);
+		if (!empty($fromFile)) {
+			$ifExist = FileRepo::model()->find('fid=:fid and status!=0 AND name=:name', [':fid' => $_GET['lfid'], ':name' => $fromFile->name]);
+			if (!$ifExist) {
+				$fileRepo = new FileRepo;
+				$fileRepo->attributes = $fromFile->attributes;
+				$fileRepo->type = 19;
+				$fileRepo->date = date('Y-m-d H:i:s');
+				$fileRepo->fid = $_GET['lfid'];
+				if ($fileRepo->save()) {
+					$check2 = true;
+				} else {
+					var_dump($fileRepo->getErrors());
+					$check2 = false;
+				}
+			}
+		}
+		if($check1&&$check2)
+		{
+			echo "done";
+		}
+		return;
+	}
+	public function actionNotes($id)
+	{
+		$model = ShipmentProcess::model()->findByPk($id);
+		Log::add($model, Log::LOG_TYPE_NOTES, ['notes' => $_POST['notes']]);
+		$this->ajaxResult($model);
+	}
+	public function actionGenerateST($id)
+	{
+		$model = ImParcel::model()->findByPk($id);
+		if (!empty($_POST['ssdate'])) {
+			$model->process->mdata['ssdate'] = $_POST['ssdate'];
+			$model->process->update('meta');
+		}
+		$result = $model->createStorageInvoiceWhenDdu();
+		if ($result['status'] == 0) {
+			$model->addError('id', $result['msg']);
+		}
+		$this->ajaxResult($model);
+	}
+
+	public function actionGenerateInspectionRequestForm($id)
+	{
+		$model = $this->loadModel($id);
+		$customsProcessService = new CustomsProcessService();
+		if(!empty($_POST))
+		{
+			echo json_encode($customsProcessService->generateAQISFile($id,$_POST['type'],$_POST));
+			return;
+		}
+
+		$setting = $customsProcessService->getInsRequestFormSetting($id);
+
+		$this->render('edit_request_inspection_form', ['model' => $model,'setting'=>$setting,'type'=>"INS_REQUEST_FORM"]);
+	}
+
+	public function actionGenerateDisposalRequestForm($id)
+	{
+		$model = $this->loadModel($id);
+		$customsProcessService = new CustomsProcessService();
+		if(!empty($_POST))
+		{
+			echo json_encode($customsProcessService->generateAQISFile($id,$_POST['type'],$_POST));
+			return;
+		}
+
+		$setting = $customsProcessService->getInsRequestFormSetting($id);
+
+		$this->render('edit_request_disposal_form', ['model' => $model,'setting'=>$setting,'type'=>"DIS_REQUEST_FORM"]);
+	}
+
+	public function actionGoNextAqisStatus($id)
+	{
+		$customsProcessService = new CustomsProcessService();
+		echo json_encode($customsProcessService->goNextAqisStatus($id,$_POST['status'],$_POST['action'],$_POST));
+	}
+
+	public function actionCreateAqisEmail($id)
+	{
+		$customsProcessService = new CustomsProcessService();
+		if(!empty($_POST))
+		{
+			echo json_encode($customsProcessService->sendAQISEmail($id,$_POST,$_GET['type'],$_GET['action']));
+			return;
+		}
+
+		$model = $customsProcessService->getAqisEmail($id,$_GET['type']);
+		$this->render('create_email_m', [
+			'model' => $model
+		]);
+	}
+
+	public function loadModel($id)
+	{
+		$model = ImParcel::model()->findByPk($id);
+		if ($model === null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		return $model;
+	}
+
+	public function actionShowShipmentList()
+	{
+		$shipmentNos = $_GET["no"];
+		$shipmentNos = explode(",", $shipmentNos);
+		echo"<table><thead><td>HBN</td></thead>";
+		foreach ($shipmentNos as $key => $shipmentNo) {
+			echo "<tr><td>{$shipmentNo}</td></tr>";
+		}
+		echo "</table>";
+	}
+}

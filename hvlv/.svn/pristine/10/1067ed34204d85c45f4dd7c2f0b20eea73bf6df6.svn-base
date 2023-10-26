@@ -1,0 +1,167 @@
+<?php
+
+class SalesFunnelController extends Controller
+{
+	 /**
+	 * Declares class-based actions.
+	 */
+    protected $nonAjax = array('showallquestion','createQuestionAnswersForm');
+    protected $skipAcl = array('showallquestion','createQuestionAnswersForm');
+    protected $skipLogin = array('showallquestion','createQuestionAnswersForm');
+
+
+    public function actionShowAllQuestionAnswer(){
+    	// $questionModel = SalesfunnelRequirementsQuestions::model()->with('this_question','next_question');
+    	$questionModel = new SalesfunnelRequirementsQuestions('search');
+    	if (!empty($_GET['SalesfunnelRequirementsQuestions'])) {
+			$questionModel->attributes = $_GET['SalesfunnelRequirementsQuestions'];
+		}
+
+    	$this->render('list_question_answer', [
+            'questionModel' => $questionModel
+        ]);
+
+    }
+
+    public function actionQueAnswer()
+	{
+		if (!empty($_POST)) {
+			$id = $_POST["id"];
+			$nextQuestion = $_POST["nextQuestion"];
+			$requirementsAnswer = SalesfunnelRequirementsAnswer::model()->findByPk($id);
+			$requirementsAnswer->next_question_id = $nextQuestion;
+			$requirementsAnswer->save();
+		}
+		echo "done";
+	}
+
+	public function actionCreateQuestionAnswersForm()
+	{
+		$model = new SalesfunnelRequirementsQuestions('create');
+		$this->renderPartial('question_answer_storage_form',['model'=>$model]);
+	}
+
+	public function actionSaveQuestionAnswers()
+	{
+		$id = @$_GET['id'];
+		// echo(json_encode($id));
+		//echo(json_encode($_POST));
+		// Yii::app()->end();
+
+		$questionModel = new SalesfunnelRequirementsQuestions();
+		if(!empty($id))
+		{
+			$questionModel = SalesfunnelRequirementsQuestions::model()->findByPk($id);
+		}		
+		if(!empty($_POST['SalesfunnelRequirementsQuestions']['question_num']))
+		{
+			$questionModel->question_num = $_POST['SalesfunnelRequirementsQuestions']['question_num'];
+		}
+		if(!empty($_POST['SalesfunnelRequirementsQuestions']['question']))
+		{
+			$questionModel->question = $_POST['SalesfunnelRequirementsQuestions']['question'];
+		}
+		if(!empty($_POST['SalesfunnelRequirementsQuestions']['question_type']))
+		{
+			$questionModel->question_type = $_POST['SalesfunnelRequirementsQuestions']['question_type'];
+		}
+		$re = $questionModel->save();
+		// echo($questionModel->id);
+
+		if(!empty($_POST['items']['anid']) && $_POST['items']['anid'][0]>0)
+		{
+			foreach ($_POST['items']['anid'] as $key => $value) 
+			{
+				$oan = SalesfunnelRequirementsAnswer::model()->findByPk($value);
+				$oan->answer = $_POST['items']['an_answer'][$key];
+				$oan->question_id = $_POST['items']['pid'][$key];
+				$oan->next_question_id = $_POST['items']['nextQueId'][$key];
+				$oan->save();
+				// echo($oan);
+			} 
+		}else{
+			// $len = count($_POST['items']['an_answer']);
+			// $answerModel = [];
+			foreach ($_POST['items']['an_answer'] as $key => $value) 
+			{
+				$oan = new SalesfunnelRequirementsAnswer();
+				$oan->answer = $value;
+				$oan->question_id = $questionModel->id;
+				$oan->next_question_id = $_POST['items']['nextQueId'][$key];
+				$oan->save();
+				// echo($oan);
+			}
+		}
+		if($re)
+		{
+			echo "done";
+		}else
+		{
+			echo "failure";
+		}
+
+
+
+
+		// echo(json_encode($_POST));
+  		//Yii::app()->end();
+	}
+
+	public function actionUpdateQuestionAnswersForm()
+	{
+		$id = @$_GET['id'];
+		$model = SalesfunnelRequirementsQuestions::model()->findByPk($id);
+		$answers = [];
+		$questionType = $model->question_type;
+		if($questionType == SalesfunnelRequirementsQuestions::QUESTIONTYPERADIOBUTTON || $questionType == SalesfunnelRequirementsQuestions::QUESTIONTYPECHECKBOX)
+		{
+			$ansjs = SalesfunnelRequirementsAnswer::model()->findAll(["condition" => 'question_id = '.$id]);
+			// echo($ansjs[0]->id);
+			// Yii::app()->end();
+			foreach ($ansjs as $key => $value) {
+				$answers['anid'][] = $value->id;
+				$answers['an_answer'][] = $value->answer;
+				$answers['pid'][] = $value->question_id;
+				$answers['nextQueId'][] = $value->next_question_id;
+			}
+			$this->render('question_answer_storage_form',['model' => $model,'answers'=>$answers]);
+			reutrn ;
+		}
+		
+		$this->renderPartial('question_answer_storage_form',['model' => $model]);
+
+	}
+
+	public function actionShowCustomersDetail(){
+    	$submissionModel = new SalesfunnelRequirementsSubmission('search');
+    	$recordModel = new SalesfunnelRequirementsRecords('search');
+    	if (!empty($_GET['SalesfunnelRequirementsSubmission'])) {
+			$submissionModel->attributes = $_GET['SalesfunnelRequirementsSubmission'];
+		}
+
+
+    	$this->render('show_requirements', [
+            'submissionModel' => $submissionModel,
+            'recordModel' => $recordModel
+        ]);
+
+    }
+
+    public function actionShowIndividualRequirement(){
+    	$submit_id = $_GET['id'];
+        $submissionModel = SalesfunnelRequirementsSubmission::model()->findbypk($submit_id);
+        $requirementRecordModels = SalesfunnelRequirementsRecords::model()->with('question','answer')->findAll(["condition"=>'submit_id =  '.($submit_id),"order"=>"t.question_id ASC"]);
+        $questionModels = new SalesfunnelRequirementsQuestions('search');
+        $answerModels = new SalesfunnelRequirementsAnswer('search');
+        if (!empty($_GET['SalesfunnelRequirementsQuestions'])) {
+            $questionModel->attributes = $_GET['SalesfunnelRequirementsQuestions'];
+        }
+        if (!empty($_GET['SalesfunnelRequirementsAnswer'])) {
+            $answerModel->attributes = $_GET['SalesfunnelRequirementsAnswer'];
+        }
+
+    	$this->renderPartial('individual_requirement',[ 'submissionModel' => $submissionModel,
+            'requirementRecordModels' =>$requirementRecordModels]);
+    }
+      
+}

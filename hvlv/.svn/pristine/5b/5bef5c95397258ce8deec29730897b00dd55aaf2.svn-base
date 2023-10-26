@@ -1,0 +1,81 @@
+<div class="pane">
+	<div style="position:absolute;right:50px;">
+		<a class="jqm_link" href="<?=$this->createUrl('payment/createCreditNote');?>"><div class="icon" style="background-position:-128px -480px"></div> New Credit Note</a> &nbsp;
+	</div>
+	<h2><?=$this->t("Credit Note Created By ") . Yii::app()->user->name?></h2>
+	<?php $this->widget('zii.widgets.grid.CGridView', array(
+	'id' => 'credit-note-grid',
+	'cssFile' => false,
+	'dataProvider' => $model->search(),
+	'filter' => $model,
+	'columns' => array(
+		'no',
+		'date',
+		'transaction_date',
+		array('name' => 'client', 'value' => ' ( empty($data->org_id) || empty($data->cust) ) ? "" : $data->cust->shortName(5)'),
+		['name' => 'suborg_name', 'value' => '$data->subOrgName(5)'],
+		array('name' => 'status', 'value' => '$data->getStatus()',
+			'filter' => CHtml::dropDownList('Payment[status]', $model->status, $this->t($model::$states), array('prompt' => $this->t('All')))),
+		array('name' => 'type', 'value' => '$data->getType()',
+			'filter' => CHtml::dropDownList('Payment[type]', $model->type, $this->t(array('5' => 'Credit Note')), array('prompt' => $this->t('All')))),
+		array('name' => 'currency', 'value' => '$data->getCurrency()',
+			'filter' => CHtml::dropDownList('Payment[currency]', $model->currency, $this->t(Invoice::$currencies), array('prompt' => $this->t('All')))),
+		['name' => 'dpmt', 'value' => '$data->getDpmt()',
+			'filter' => CHtml::dropDownList('Payment[dpmt]', $model->dpmt, $this->t(Invoice::$dpmts), ['prompt' => $this->t('All')])],
+		'amount',
+		'ata',
+		array('name' => 'invnos', 'value' => '$data->getInvNos(2)'),
+		'ref',
+		array('name' => 'op_name', 'value' => 'isset($data->ops->fname)?$data->ops->fname:""'),
+		array(
+			'class' => 'oButtonColumn',
+			'template' => '{update}{log}{print}',
+			'buttons' => array
+			(
+				'update' => array(
+					'imageUrl' => false,
+					'visible' => 'true',
+					'url' => 'Yii::app()->createUrl("payment/updateCreditNote", ["id" => $data->id])',
+					'options' => array('class' => 'jqm_link grid_edit_btn', 'label' => $this->t('Update'), 'data-win-class' => 'L'),
+				),
+				'log' => array(
+					'imageUrl' => false,
+					'options' => array('class' => 'jqm_link grid_view_btn', 'label' => 'Log', 'data-win-class' => 'L'),
+					'visible' => 'true',
+					'url' => 'Yii::app()->createUrl("payment/log", ["fid" => $data->id])',
+					'label' => 'Log',
+				),
+				'print' => array(
+					'imageUrl' => false,
+					'options' => array('class' => 'grid_print_btn', 'data-dropdown' => '#'.$_GET["tabid"].'-dropdown-print'),
+					'url' => 'Yii::app()->createUrl("payment/printCreditNote", ["id" => $data->id])',
+					'label' => 'Print',
+				),
+			),
+		),
+	),
+));?>
+
+
+
+</div>
+
+<div id="<?=$_GET["tabid"];?>-dropdown-print" class="dropdown dropdown-tip dropdown-relative dropdown-anchor-right">
+	<ul class="dropdown-menu">
+		<li><a class="print_pdf" href="#" target="_blank">PDF</a></li>
+		<li><a class="print_xls" href="#" target="_blank">EXCEL</a></li>
+	</ul>
+</div>
+
+<script>
+$(function() {
+	var tab = $("#<?=$_GET['tabid'];?>");
+	var panel = tab.data('panel');
+
+	panel.on('click', 'a.grid_print_btn', function() {
+		var drop = $("#<?=$_GET["tabid"];?>-dropdown-print");
+		$('.print_pdf', drop).attr('href', $(this).attr('href') + '?type=pdf');
+		$('.print_xls', drop).attr('href', $(this).attr('href') + '?type=xls');
+	});
+});
+</script>

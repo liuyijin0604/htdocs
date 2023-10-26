@@ -1,0 +1,59 @@
+<?php
+
+class APILog
+{
+	public $fromInfo;
+	private $appName;
+	public function __construct($appName,$type)
+	{
+		$this->appName = $appName;
+		if(empty($type)||$type=='SYD')
+		{
+			$this->fromInfo=[
+				'suburb'=>"BANKSTOWN AERODROME",
+				'postcode'=>"2200",
+				'address'=>"1/233 Milperra Rd",
+				'state'=>"NSW"
+			];
+		}elseif($type=='MEL')
+		{
+			$this->fromInfo=[
+				'suburb'=>"Sunshine",
+				'postcode'=>"3020",
+				'address'=>"3B/8 Judge St",
+				'state'=>"VIC"
+			];
+		}elseif($type=='BNE')
+		{
+			$this->fromInfo=[
+				'suburb'=>"Coopers Plains",
+				'postcode'=>"4108",
+				'address'=>"6/55 Musgrave Rd",
+				'state'=>"QLD"
+			];
+		}elseif($type=='PER')
+		{
+			$this->fromInfo=[
+				'suburb'=>"Welshpool",
+				'postcode'=>"6106",
+				'address'=>"Warehouse, 8 Glenferrie Road",
+				'state'=>"WA"
+			];
+		}
+	}
+	public function log2file($m, $file='ELabel',$folder = '')
+	{
+		if(!empty($folder))
+		{
+			$lf = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR . $this->appName . DIRECTORY_SEPARATOR. $folder . DIRECTORY_SEPARATOR;
+		}else
+		{
+			$lf = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR . $this->appName . DIRECTORY_SEPARATOR;
+		}
+
+		$lf .= $this->appName.'_api_'.$file. date('Y-m-d') . '.log';
+		return file_put_contents($lf, $m."\n"."\n"."\n", FILE_APPEND);
+	}
+}
+
+?>

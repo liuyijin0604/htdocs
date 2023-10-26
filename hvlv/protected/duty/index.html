@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Duty/GST Calculator</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="">
+<meta name="author" content="">
+<link rel="shortcut icon" href="favicon.ico" >
+
+<!-- Le styles -->
+        <link rel="stylesheet" type="text/css" href="css/bootstrap.min.css">
+        <link rel="stylesheet" type="text/css" href="css/bootstrap-responsive.min.css">
+		<link rel="stylesheet" type="text/css" href="css/duty.css">
+		<link rel="stylesheet" href="css/jquery-ui.css">
+
+</head>
+
+<body>
+	<div class="hidden">
+		<div class="httpparameter">
+			<!--<a class="close">&times;</a>-->
+			<div class="row show-grid">
+				<div class="span2">
+					<div class="control-group">
+						<div class="controls">
+							<label class="control-label mylabel">Parameter Name</label>
+						</div>
+					</div>
+				</div>
+
+				<div class="span3">
+					<div class="control-group">
+						<div class="controls">
+							<input type="text" class="input-xlarge realinputvalue" value="">
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+		<div class="delivery">
+			<div class="row show-grid">  
+				<div class="span2">
+					<div class="control-group">
+						<label class="control-label" for="deliveryOption">Delivery Options</label>
+					</div>
+				</div>
+				<div class="span2">
+					<div class="controls">
+						<select class="input-small" id="deliveryOption">
+							<option value="air">Air</option>
+							<option value="sea">Sea</option>
+						</select>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+
+
+	<div class="navbar navbar-fixed-top navbar-inverse">
+		<div class="navbar-inner">
+			<div class="container">
+				<a class="btn btn-navbar" data-toggle="collapse"
+					data-target=".nav-collapse"> <span class="icon-bar"></span> <span
+					class="icon-bar"></span> <span class="icon-bar"></span>
+				</a>
+				 <a class="brand" href="#" style="position:relative; left:-150px;color:white;"><img src="img/PCAE_Logo_large.png" width="200" style="position:relative; left:-150px">Duty/GST Calculator</a>
+				<!--/.nav-collapse -->
+			</div>
+		</div>
+	</div>
+
+	<div class="container">
+
+		<div class="row show-grid">
+			<div id="leftcolumn" class="span6">
+				<form id="paramform" class="well" target="outputframe">
+<!--fieldset-->
+					<fieldset>
+						<legend>Duty Cost options</legend>
+						<br>
+						<div class="row show-grid">  
+							<div class="span2">
+								<div class="control-group">
+									<label class="control-label" for="calculatoroption">Options</label>
+								</div>
+							</div>
+							<div class="span2">
+								<div class="controls">
+									<select class="input-small" id="calculatoroption">
+										<option value="Duty">Duty</option>
+										<option value="GST">GST</option>
+									</select>
+								</div>
+							</div>
+						</div>
+						<p class="help-block"><i>If you need the app to Calculate the duty cost for you, input goods value and hs code, and click calculate cost button.</i></p>
+ <!--request method-->
+ 					
+<!--request method-->
+<!--parameters-->
+						<div id="allparameters">
+							<div class="row show-grid">
+								<div class="span2">
+									<div class="control-group">
+										<label class="control-label">Parameter Name</label>
+									</div>
+								</div>
+
+								<div class="span3">
+									<div class="control-group">
+										<label class="control-label">Parameter Value</label>
+									</div>
+								</div>
+							</div>
+							<div class="row show-grid">
+								<div class="span2">
+									<div class="control-group">
+										<label class="control-label">Currency</label>
+									</div>
+								</div>
+
+								<div class="span3">
+									<div class="control-group">
+										<select class="input-small" id="currency">
+										    <option value="USD">USD</option>
+											<option value="AUS">AUS</option>
+									     </select>
+									</div>
+								</div>
+							</div>
+
+						</div>
+
+<!--parameters-->			<br />
+
+<!--ajax-button-->
+						<div align="right">
+							<button id="submitSign" class="btn btn-success btn-large the-buttom">
+								<i class="icon-download-alt icon-white"></i> Calculate Cost
+							</button>
+						</div>
+					</fieldset>
+<!--fieldset-->
+				</form>
+
+				<div id="errordiv"></div>
+
+<!--
+	show output info			-->
+        
+  			<div class="alert alert-info">
+					<a class="close" data-dismiss="alert">&times;</a> <strong>Welcome!</strong>
+          Use this simple page to Calculate the Duty Cost.
+          <b>All values ​​are estimates, and ultimately to the actual subject</b>
+				</div>
+
+			</div>
+
+			<div class="span6">
+				<div id="ajaxoutput">
+					<pre id="statuspre">0</pre>
+					<pre class="pre-scrollable prettyprint linenums" id="outputpre"></pre>
+				</div>
+			</div>
+		</div>
+
+		<br>
+
+
+	</div>
+	<script src="assets/js/jquery-1.12.4.js"></script>
+	<script src="assets/js/jquery-ui.js"></script>
+	<script src="assets/js/bootstrap.min.js"></script>
+	<script src="assets/js/duty.js"></script>
+
+  
+</body>
+</html>

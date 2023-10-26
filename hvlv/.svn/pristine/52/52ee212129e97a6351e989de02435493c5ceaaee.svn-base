@@ -1,0 +1,114 @@
+<h3>Sea Process Operation</h3>
+<br/>
+<div class="pane">
+<div class="form">
+<?php $form=$this->beginWidget('CActiveForm', array(
+	'id'=>'sea-process-operation-form'.$_GET['tabid'],
+	'enableClientValidation'=>true,
+		'action'=> $this->createURL('consolProcess/seaOperation',array('id'=>$model->id)),
+	'clientOptions'=>array(
+		'validateOnSubmit'=>true,
+	),
+));
+?>
+<div class="row rowcol-left">
+	<?php echo CHtml::label('status','status'); ?>
+	<?php echo CHtml::dropDownList('consol_process_status',@$model->process->status, ConsolProcess::$states,array('prompt'=>'Select')); ?>
+	 <?php echo CHtml::button('Update', array('class' => 'updateStatus'));?>
+</div>
+<div class="row">
+<label>To Do List:</label>
+<table style="table-layout: fixed"  border="0" cellspacing="0" cellpadding="0" width="100%">
+	<?php 
+	   $index=0;
+	   $result="";
+	   foreach (ConsolProcess::$seaStates as $key=>$value){
+		   if($index%4==0){
+			   $result.="<tr>";
+			}
+			$checked= (($model->process->status & $key) >0) ? true : false;
+			$result.="<td width='25%'><input type='checkbox' id='".$key."_sea_status' name=seaStates[] value='$key' ".($checked?"checked":"")."/> ".$value."</td>";
+			$index++;
+			 if($index%4==0){
+			   $result.="</tr>";
+			}
+	   }
+	 echo $result;
+	?>
+</table>
+</div>
+	 <div class="row buttons">
+		 <?php echo CHtml::submitButton('Save'); ?>
+	</div>
+	</div>
+<div  style="width: 200px; float: right; margin-left: 20px;">
+	<?php echo $this->renderPartial('scan_info', array('model'=>$model));?>
+</div>
+
+<?php $this->endWidget(); ?>
+
+<br>
+<div style="clear:both"></div>
+<?php
+$invoices = Invoice::model()->findAll('consol_id= :cid AND status NOT IN (10,8)',[':cid' => $model->id]);
+$dp = new CArrayDataProvider($invoices,array(
+	'id' => 'consol_invoices-'.$_GET["tabid"]
+));
+$dp->pagination=array('pageSize' => 30,);
+$this->widget('zii.widgets.grid.CGridView', array(
+	'id'=>'consol_invoice_grid_'.$_GET['tabid'],
+	'cssFile' => false,
+	'dataProvider' => $dp,// $dp->search(),
+	'filter' => null,
+	'enableSorting' => false,
+	'columns'=>array(
+		array('name' => 'no', 'value' => '$data->no', ),
+		array('name' => 'bill_to', 'value' => '$data->cust->name', ),
+		array('header' => 'Invoice Total', 'value' => '$data->getCurrency().$data->total', ),
+		array(
+			'class'=>'oButtonColumn',
+			'template'=>'{view} ',
+			'buttons'=>array
+			(
+				'view' => array(
+					'url' => 'Yii::app()->createURL("invoice/print", array("id" => $data->id))',
+					'imageUrl'=>false,
+					'options' => array('class' => 'grid_view_btn', 'target' => '_blank'),
+				),
+			
+			),
+		),
+)));
+?>
+</div>
+</div>
+<script>
+$(function(){
+	var win = $('#jqmw_<?=$_GET["tabid"];?>');
+	var tab = $('#<?=$_GET["tabid"];?>');
+	var panel = $('#<?=$_GET["tabid"];?>').data('panel'); 
+	
+	tab.unbind('reload_custom_grid').bind('reload_custom_grid', function(){
+		$('#<?=$_GET["tabid"];?>_custom_grid', tab.data('panel')).yiiGridView('update');
+		return false;
+	});
+	
+	$('form#sea-process-operation-form<?=$_GET['tabid']?>',win).on('success',function(){
+		tab.trigger('reload_sea_consol_process_grid');
+	});
+
+	$('.updateStatus',win).click(function(){
+		var selected=$("#consol_process_status").val();
+		if(confirm('Are you sure to update status?')){
+			$.get('<?=$this->createUrl("consolProcess/process",["id"=>$model->id]);?>'+"?status="+selected,function(r){
+				if(r == 'done'){
+					myApp.notice('Done', 5000);
+				}else{
+					myApp.alert(r, false);
+				}
+				tab.trigger('reload_consol_process_grid');
+			});
+	 	}
+	});
+});
+</script>

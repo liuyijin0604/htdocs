@@ -1,0 +1,196 @@
+<?php
+
+/**
+ * This is the model class for table "imports_unknown_shipment".
+ *
+ * The followings are the available columns in table 'imports_unknown_shipment':
+ * @property integer $id
+ * @property string $barcode
+ * @property string $temp_barcode
+ * @property integer $user_id
+ * @property string $create_time
+ */
+class ImportsUnknownShipment extends CActiveRecord
+{
+	const NEWSTATUS = 1;
+	const CANCELLED = 100;
+	const PROCESSDONE = 80;
+	public static $states=[
+		1=>'New',
+		
+		80=>'Process done',
+		100=>'Cancelled',
+	];
+
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName()
+	{
+		return 'imports_unknown_shipment';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('user_id, create_time', 'required'),
+			array('user_id', 'numerical', 'integerOnly'=>true),
+			array('barcode, temp_barcode', 'length', 'max'=>45),
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, barcode, temp_barcode, user_id, create_time,status,container_no,ground_label', 'safe', 'on'=>'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+			'shipment' => [self::BELONGS_TO, 'ImParcel', 'shipment_id'],
+		);
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return array(
+			'id' => 'ID',
+			'barcode' => 'Barcode',
+			'temp_barcode' => 'Temp Barcode',
+			'user_id' => 'User',
+			'create_time' => 'Create Time',
+			'ground_label' => 'Location',
+		);
+	}
+
+	public function getStatus()
+	{
+		return isset(self::$states[$this->status]) ? Yii::t(strtolower(__CLASS__), self::$states[$this->status]) : $this->status;
+	}
+
+	public function generateTempBarcode()
+	{
+		if(empty($this->temp_barcode))
+		{
+			if(!empty($this->container_no))
+			{
+				$this->temp_barcode=$this->container_no."-UN".$this->id;
+			}else
+			{
+				$this->temp_barcode=date("Ymd")."-UN".$this->id;
+			}
+		}
+	}
+
+	public function getConsolUnknownBarcodes()
+	{
+		return ImportsUnknownShipment::model()->count("container_no = :containerNo and shipment_id = 0",[":containerNo"=>$this->container_no]);
+	}
+	public function getBarcodes($html = false)
+	{
+		$arr = ImportsUnknownShipment::model()->findAll("container_no = :containerNo",[":containerNo"=>$this->container_no]);
+		if($html)
+		{
+			return join("</br>",array_column($arr,"barcode"));
+		}else
+		{
+			return join(",",array_column($arr,"barcode"));
+		}
+	}
+
+	public function getClosedUnknownBarcodes()
+	{
+		return ImportsUnknownShipment::model()->count("container_no = :containerNo and status = :status",[":containerNo"=>$this->container_no,":status"=>self::PROCESSDONE]);
+	}
+
+	public function getEmptyConsolShipment()
+	{
+		return ImportsUnknownShipment::model()->count(["condition"=>"container_no = :containerNo and shipment_id != 0","params"=>[":containerNo"=>$this->container_no]]);
+	}
+
+	public function getConsolUnknownShipments()
+	{
+		return ImportsUnknownShipment::model()->findAll("container_no = :containerNo and shipment_id = 0",[":containerNo"=>$this->container_no]);
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search($pgn = true, $ps = 30)
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('id',$this->id);
+		$criteria->compare('barcode',$this->barcode,true);
+		$criteria->compare('temp_barcode',$this->temp_barcode,true);
+		$criteria->compare('user_id',$this->user_id);
+		$criteria->compare('create_time',$this->create_time,true);
+		$criteria->compare('consol_id',$this->consol_id);
+		$criteria->compare('container_no',$this->container_no);
+		$criteria->compare('ground_label',$this->ground_label);
+		$criteria->compare('dpt_id',$this->dpt_id);
+		if(empty($this->status))
+		{
+			$criteria->addCondition('status !='.self::CANCELLED .' and status !='.self::PROCESSDONE);
+		}else
+		{
+			$criteria->compare('status',$this->status);
+		}
+
+		$pagerparams = $_GET;
+
+		$sort = new CSort(get_called_class());
+		$sort->attributes = [
+			'*',
+		];
+		if(empty($pgn))
+		{
+			$sort->defaultOrder = 'shipment_id DESC';
+		}else
+		{
+			$sort->defaultOrder = 'id DESC';
+		}
+
+		return new CActiveDataProvider($this, [
+			'criteria' => $criteria,
+			'sort' => $sort,
+			'pagination' => $pgn ? [
+				'pageSize' => $ps,
+				'params' => $pagerparams,
+			] : false,
+		]);
+	}
+
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return ImportsUnknownShipment the static model class
+	 */
+	public static function model($className=__CLASS__)
+	{
+		return parent::model($className);
+	}
+}

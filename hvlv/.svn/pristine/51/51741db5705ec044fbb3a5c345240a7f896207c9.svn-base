@@ -1,0 +1,218 @@
+<?php
+
+/**
+ * This is the model class for table "cargo_booking".
+ *
+ * The followings are the available columns in table 'cargo_booking':
+ * @property integer $id
+ * @property string $create_date
+ * @property string $booking_date_1
+ * @property string $booking_date_2
+ * @property integer $status
+ * @property string $delivery_period
+ * @property integer $org_id
+ * @property integer $shipment_id
+ * @property string $booking_number
+ * @property string $meta
+ * @property integer $destination
+ * @property string $fee
+ * @property string $ref
+ * @property integer $cargo_process_id
+ * @property string $confirmed_date
+ * @property string $hbn
+ * @property string $comment
+ * @property string $other_ref
+ * @property string $depot
+ */
+class CargoBooking extends MetaModel
+{
+	const PRE_PENDING = 1;
+	const PENDING = 2;
+	const CONFIRMED = 3;
+	const REJECTED = 4;
+	const FINISHED = 6;
+
+	public static $bookingStatus = [
+		self::PRE_PENDING => 'Waiting customer confirmation',
+		self::PENDING => 'Waiting for confirmation',
+		self::CONFIRMED => 'Confirmed',
+		self::REJECTED => 'Rejected',
+		self::FINISHED => 'Delivered'
+	];
+	public $mdata = [];
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName()
+	{
+		return 'cargo_booking';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('create_date, booking_date_1, status, org_id, shipment_id, booking_number, destination, depot', 'required'),
+			array('status, org_id, shipment_id, destination, cargo_process_id, depot', 'numerical', 'integerOnly' => true),
+			array('delivery_period, booking_number, ref, hbn, other_ref', 'length', 'max' => 45),
+			array('fee', 'length', 'max' => 9),
+			array('meta, comment', 'safe'),
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, create_date, booking_date_1, booking_date_2, status, delivery_period, org_id, shipment_id, booking_number, meta, destination, fee, ref, cargo_process_id, hbn, confirmed_date, other_ref, depot', 'safe', 'on' => 'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+			'shipment'=>array(self::BELONGS_TO, 'ImParcel', 'shipment_id'),
+		);
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return array(
+			'id' => 'ID',
+			'create_date' => 'Create Date',
+			'booking_date_1' => 'Booking Date 1',
+			'booking_date_2' => 'Booking Date 2',
+			'status' => 'Status',
+			'delivery_period' => 'Delivery Time',
+			'org_id' => 'Org',
+			'shipment_id' => 'Shipment',
+			'booking_number' => 'Booking Number',
+			'meta' => 'Meta',
+			'destination' => 'Destination',
+			'fee' => 'Fee',
+			'ref' => 'Ref',
+			'cargo_process_id' => 'Cargo Process',
+			'confirmed_date' => 'Confirmed Date',
+			'hbn' => 'House Bill',
+			'comment' => 'Comment',
+			'other_ref' => 'Other Reference',
+			'depot' => 'Depot',
+		);
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search()
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria = new CDbCriteria;
+
+		$criteria->compare('id', $this->id);
+		$criteria->compare('create_date', $this->create_date, true);
+		$criteria->compare('booking_date_1', $this->booking_date_1, true);
+		$criteria->compare('booking_date_2', $this->booking_date_2, true);
+		$criteria->compare('status', $this->status);
+		$criteria->compare('delivery_period', $this->delivery_period, true);
+		if (Yii::app()->user->org == 1) {
+			$criteria->compare('org_id', $this->org_id);
+		} else {
+			$criteria->compare('org_id', Yii::app()->user->org);
+		}
+		$criteria->compare('shipment_id', $this->shipment_id);
+		$criteria->compare('booking_number', $this->booking_number, true);
+		$criteria->compare('meta', $this->meta, true);
+		$criteria->compare('destination', $this->destination);
+		$criteria->compare('fee', $this->fee, true);
+		$criteria->compare('ref', $this->ref, true);
+		$criteria->compare('cargo_process_id', $this->cargo_process_id);
+		$criteria->compare('confirmed_date', $this->confirmed_date, true);
+		$criteria->compare('hbn', $this->hbn, true);
+		$criteria->compare('other_ref', $this->other_ref, true);
+		$criteria->compare('depot', $this->depot);
+		$sort = new CSort();
+		$sort->attributes = [
+			'create_date' => [
+				'asc' => 'create_date ASC',
+				'desc' => 'create_date DESC'
+			]
+		];
+		$sort->defaultOrder = 'create_date DESC';
+
+		return new CActiveDataProvider($this, array(
+			'criteria' => $criteria,
+			'sort' => $sort,
+			'pagination' => ['pageSize' => 30],
+		));
+	}
+
+	public function generateBookingNumber($depot)
+	{
+		$today = date('Y-m-d');
+		$today = $today . ' 00:00:00';
+		$todayBookings = CargoBooking::model()->findAllBySql('SELECT * FROM cargo_booking WHERE create_date >= "' . $today . '"');
+		$bookingCount = count($todayBookings) + 1;
+		$s = date('ymd');
+		switch ($depot) {
+			case 106:
+				$this->booking_number = "SCD" . $s . $bookingCount;
+				break;
+			case 218:
+				$this->booking_number = "MCD" . $s . $bookingCount;
+				break;
+			case 530:
+				$this->booking_number = "BCD" . $s . $bookingCount;
+				break;
+			case 811:
+				$this->booking_number = "PCD" . $s . $bookingCount;
+				break;
+		}
+	}
+
+	public function getPodUrl()
+	{
+		$url = '';
+		$shipment = ImParcel::model()->findByPk($this->shipment_id);
+		if (!empty($shipment) && !empty($this->cargo_process_id)) {
+			$url = $shipment->getPodUrl($this->cargo_process_id);
+		}
+		return $url;
+	}
+
+	public function getInvoiceNo()
+	{
+		$invoiceNumber = '';
+		if (!empty($this->mdata['invoiceId'])) {
+			$invoice = Invoice::model()->findByPk($this->mdata['invoiceId']);
+			$invoiceNumber = @$invoice->no;
+		}
+		return $invoiceNumber;
+	}
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return CargoBooking the static model class
+	 */
+	public static function model($className = __CLASS__)
+	{
+		return parent::model($className);
+	}
+}

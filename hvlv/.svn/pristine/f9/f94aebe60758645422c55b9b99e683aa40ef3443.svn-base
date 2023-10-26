@@ -1,0 +1,167 @@
+<?php
+
+Class PriceEnquiry  extends MetaModel{
+    public const status_new = 10;
+	public const status_wait_quo = 15;
+    public const status_active = 20;
+	public const status_cannot_do = 25;
+    public const status_inactive = 30;
+	public const status_canceled = 40;
+
+    public const listStatus=[
+        self::status_new => 'new',
+		self::status_wait_quo => 'waitting quo',
+		self::status_active => 'active',
+		self::status_cannot_do => 'cannot do',
+        self::status_inactive => 'used',
+		self::status_canceled => 'canceled',
+    ];
+
+	public const listDepot=[
+        'Sydney' => 'Sydney',
+		'Melbourne' => 'Melbourne',
+		'Brisbane' => 'Brisbane',
+		'Perth' => 'Perth',
+		'Adelaide' => 'Adelaide',
+    ];
+
+    public const listDepotId=[
+        'Sydney' => 106,
+		'Melbourne' => 218,
+		'Brisbane' => 530,
+		'Perth' => 811,
+		'Adelaide' => 529,
+    ];
+
+	public const listDepotIdToDepotName = [
+		106 => 'Sydney',
+		218 => 'Melbourne',
+		530 => 'Brisbane',
+		811 => 'Perth',
+		529 => 'Adelaide'
+	];
+
+	public function funcPE(){
+		$strPE = $this->code;
+		if($this->status == self::status_active){
+			$strPE.='<font color="BLUE">[A]</font>';
+		}
+		return $strPE;
+
+	}
+
+    
+	public static function model($className=__CLASS__){
+		return parent::model($className);
+	}
+	
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName(){
+		return 'price_enquiry';
+	}
+
+	public function rules()
+	{
+
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			// The following rule is used by search().
+			array('id,status,date,code,cost,price,address,weight,length,width,height,quantity,note,meta,suburb,postcode,charge_code,dangerous_goods,name,tel,email,paid_by,memo,org_id,depot,update_time', 'safe'),
+			array('org_id,status', 'numerical', 'integerOnly'=>true),
+			// @todo Please remove those attributes that should not be searched.
+			array('id,status,date,code,cost,price,address,weight,length,width,height,quantity,note,meta,suburb,postcode,charge_code,dangerous_goods,org_id,depot,update_time', 'safe', 'on' => 'search'),
+		);
+	}
+
+	public function relations(){
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+		);
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels(){
+		return array(
+			'id' => 'id',
+            'status'=>'status',
+            'date'=>'date',
+            'code'=>'code',
+            'cost'=>'cost',
+            'price'=>'price',
+            'address' => 'address',
+            'weight' => 'weight',
+            'length' => 'length',
+            'width' => 'width',
+            'height' => 'height',
+            'quantity' => 'quantity',
+            'note' => 'note',
+			'meta' => 'meta',
+			'org_id' => 'org',
+			'suburb' => 'suburb',
+			'postcode' => 'postcode',
+			'dangerous_goods' => 'dangerous_goods',
+			'charge_code' => 'charge_code',
+
+			'depot' => 'depot',
+			'update_time' => 'update time',
+		);
+	}
+	
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 * @return CActiveDataProvider the data provider that can return the models based on the search/filter conditions.
+	 */
+	public function search(){
+		// Warning: Please modify the following code to remove attributes that
+		// should not be searched.
+
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('id',$this->id,true);
+		$criteria->compare('status',$this->status,true);
+        $criteria->compare('date',$this->date,true);
+
+        $criteria->compare('code',$this->code,true);
+        $criteria->compare('cost',$this->cost,true);
+        $criteria->compare('price',$this->price,true);
+        $criteria->compare('address',$this->address,true);
+        $criteria->compare('weight',$this->weight,true);
+        $criteria->compare('length',$this->length,true);
+        $criteria->compare('width',$this->width,true);
+        $criteria->compare('height',$this->height,true);
+        $criteria->compare('quantity',$this->quantity,true);
+        $criteria->compare('note',$this->note,true);
+
+		$criteria->compare('meta',$this->meta,true);
+
+		$criteria->compare('suburb',$this->suburb,true);
+        $criteria->compare('postcode',$this->postcode,true);
+		$criteria->compare('charge_code',$this->charge_code,true);
+        $criteria->compare('dangerous_goods',$this->dangerous_goods,true);
+
+
+		$criteria->compare('tel',$this->tel,true);
+		$criteria->compare('org_id',$this->org_id,false);
+
+		$criteria->compare('depot',$this->depot,true);
+		$criteria->compare('update_time', $this->update_time, true);
+		$criteria->addCondition('org_id!=4246');
+
+		return new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+			'sort'=>[
+				'defaultOrder'=>'t.id desc',
+			],
+			'pagination'=>[
+				'pageSize'=>'30',
+			],
+		));
+	}
+}

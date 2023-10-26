@@ -1,0 +1,22 @@
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-MrcW6ZMFYlzcLA8Nl+NtUVF0sA7MsXsP1UyJoMp4YLEuNSfAP+JcXn/tWtIaxVXM" crossorigin="anonymous"></script>
+<!-- jQuery -->
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+
+<center>
+    <div class="container" id="items">
+        <header class="entry-header has-text-align-center header-footer-group">
+            <div class="entry-header-inner section-inner medium">
+                <h1 class="entry-title">Please comfirm your information.</h1>
+            </div><!-- .entry-header-inner -->
+            <div class="entry-header-inner section-inner medium">
+    	        <h3>A) Thank you for Providing Information, Your enquiry ID is #SALFUN000 <?php echo $submissionModel->id ?></h3>
+    			<h3>B) Someone will contact you to provide pricing & other Account opening Information in due course.</h3>
+                <h3>C) Please feel free to Email back to us at <a href="mailto:sales@toplogistics.com.au">sales@toplogistics.com.au</a></h3>
+                <h3>D) An Account has been create for you, please view/reply to your messagge via following link <a href="https://toplogistics.com.au/" target="_blank">toplogistics.com.au/</a></h3>
+                <h4>Your temporary password is:</h4>
+                <h4>Your Email login is: <?php echo $submissionModel->email ?></h4>
+    		</div>
+        </header>
+    </div>
+</center>

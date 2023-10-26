@@ -1,0 +1,888 @@
+<div class="form">
+
+<?php $form=$this->beginWidget('CActiveForm', array(
+	'id'=>'org-form',
+	'enableAjaxValidation'=>false,
+)); ?>
+
+	<?php echo $form->errorSummary($model); ?>
+	
+	<?php if(Acl::hasAccess('C:org/F:SelectOrgType')): ?>
+	<div class="row rowcol rowleft">
+		<?php echo $form->labelEx($model,'type'); ?>
+		<?php echo $form->dropDownList($model, 'type', (Yii::app()->name == 'PEP'? [60 => 'Export Agent', 65 => 'Export Sub-Agent'] : User::checkIsNotTruckUser())?$this->t(Org::$types):$this->t(Org::$types_agent), array('empty' => $this->t('Select One'))); ?>
+	</div>
+	<?php endif; ?>
+	
+	<div class="row rowcol">
+		<?php
+		echo $form->labelEx($model,'code');
+		echo $form->textField($model,'code',array('size'=>20,'maxlength'=>30));
+		echo $form->error($model,'code');
+		?>
+	</div>
+	
+	<?php if(Acl::hasAccess('C:org/F:SetOrgOwner')): ?>
+	<div class="row rowcol rowleft">
+		<?php echo $form->labelEx($model,'by'); ?>
+		<?php echo $form->hiddenField($model,'by');
+			$acname = empty($_GET["tabid"])? 'org_by_ac' : $_GET["tabid"].'_org_by_ac';
+			$this->widget('zii.widgets.jui.CJuiAutoComplete', array(
+				'name' => $acname,
+				'sourceUrl' => array('org/userSuggest'),
+				'value' => (empty($model->by)? '' : ($model->by == 1))? 'System' : $model->owner->name,
+				'options' => array(
+						'showAnim' => 'fold',
+						'minLength' => 2,
+						'delay' => 200,
+						'select' => 'js:function(event, ui){ $(this).val(ui.item["label"]); $(this).prevAll("input[type=hidden]").val(ui.item["value"]).data("ov",ui.item["value"]); return false; }',
+						'change' => 'js:function(event, ui){ if(ui.item == null) $(this).prevAll("input[type=hidden]").val(""); return false; }',
+				),
+				'htmlOptions' => array(
+					'class' => 'required',
+					'size' => '50',
+				),
+		));
+		?>
+	</div>
+	<?php endif; ?>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('Account Manager / OP','op');
+		echo CHtml::hiddenField('extra[op_id]', @$model->extra['op_id']);
+		$this->widget('zii.widgets.jui.CJuiAutoComplete', array(
+			'name' => $_GET["tabid"].'_op_name',
+			'sourceUrl' => array('user/suggest'),
+			'value' => $model->getOPName(),
+			'options' => array(
+					'showAnim' => 'fold',
+					'minLength' => 2,
+					'delay' => 200,
+					'select' => 'js:function(event, ui){ $(this).val(ui.item["label"]); $(this).prevAll("input[type=hidden]").val(ui.item["value"]).data("ov",ui.item["value"]); return false; }',
+					'change' => 'js:function(event, ui){ if(ui.item == null) $(this).prevAll("input[type=hidden]").val($(this).prevAll("input[type=hidden]").data("ov")); return false; }',
+			),
+			'htmlOptions' => array(
+				'size' => '20',
+			),
+		));
+		?>
+	</div>
+
+	<div class="row rowcol">
+		<?php
+			echo CHtml::label('Sales Person','sp');
+			echo CHtml::hiddenField('extra[sp_id]', @$model->extra['sp_id']);
+			$this->widget('zii.widgets.jui.CJuiAutoComplete', array(
+				'name' => $_GET["tabid"].'_sp_name',
+				'sourceUrl' => array('user/suggest'),
+				'value' => $model->getSPName(),
+				'options' => array(
+						'showAnim' => 'fold',
+						'minLength' => 2,
+						'delay' => 200,
+						'select' => 'js:function(event, ui){ $(this).val(ui.item["label"]); $(this).prevAll("input[type=hidden]").val(ui.item["value"]).data("ov",ui.item["value"]); return false; }',
+						'change' => 'js:function(event, ui){ if(ui.item == null) $(this).prevAll("input[type=hidden]").val($(this).prevAll("input[type=hidden]").data("ov")); return false; }',
+				),
+				'htmlOptions' => array(
+					'size' => '20',
+				),
+			));
+		?>
+	</div>
+	
+	<div class="row rowcol rowleft">
+		<?php echo $form->labelEx($model,'name'); ?>
+		<?php echo $form->textField($model,'name',array('size'=>50,'maxlength'=>255)); ?>
+	</div>
+	
+	<div class="row rowcol">
+		<?php echo $form->labelEx($model,'abn'); ?>
+		<?php echo $form->textField($model,'abn',array('size'=>15,'maxlength'=>30)); ?>
+	</div>
+	
+	<div class="row rowcol">
+		<?php echo $form->labelEx($model,'accode'); ?>
+		<?php echo $form->textField($model,'accode',array('size'=>15,'maxlength'=>30)); ?>
+	</div>
+
+	<div class="row">
+		<?php echo $form->labelEx($model,'address'); ?>
+		<?php echo $form->textField($model,'address',array('size'=>50,'maxlength'=>255)); ?>
+	</div>
+
+	<div class="row rowcol rowleft">
+		<?php echo $form->labelEx($model,'suburb'); ?>
+		<?php echo $form->textField($model,'suburb',array('size'=>20,'maxlength'=>100)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo $form->labelEx($model,'state'); ?>
+		<?php echo $form->textField($model,'state',array('size'=>20,'maxlength'=>50)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo $form->labelEx($model,'postcode'); ?>
+		<?php echo $form->textField($model,'postcode',array('size'=>10,'maxlength'=>10)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo $form->labelEx($model,'country'); ?>
+		<?php echo $form->textField($model,'country',array('size'=>20,'maxlength'=>100)); ?>
+	</div>
+
+	<div class="row rowcol rowleft">
+		<?php echo $form->labelEx($model,'phone'); ?>
+		<?php echo $form->textField($model,'phone',array('size'=>20,'maxlength'=>50)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo $form->labelEx($model,'fax'); ?>
+		<?php echo $form->textField($model,'fax',array('size'=>20,'maxlength'=>50)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo $form->labelEx($model,'email'); ?>
+		<?php echo $form->textField($model,'email',array('size'=>20,'maxlength'=>50)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('Payment Type','paytype');?>
+		<?php echo CHtml::dropDownList('extra[paytype]', @$model->extra['paytype'], Payment::$types, array('empty' => $this->t('Select One'))); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('Payment Terms','payterm');?>
+		<?php echo CHtml::textField('extra[payterm]', @$model->extra['payterm'], array('size'=>5)); ?> Days
+	</div>
+    <div class="row rowcol rowleft">
+		<?php echo CHtml::label('Outturn Email','outturn_email');?>
+		<?php echo CHtml::textField('extra[outturn_email]', @$model->extra['outturn_email'], array('size'=>25)); ?>
+	</div>
+   
+    <div class="row rowcol">
+		<?php echo CHtml::label('Client Billing Email<span class="required">*</span>','client_billing_email');?>
+		<?php echo CHtml::textField('extra[client_billing_email]', @$model->extra['client_billing_email'], array('size'=>25)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('Customs Email','customs_email');?>
+		<?php echo CHtml::textField('extra[customs_email]', @$model->extra['customs_email'], array('size'=>25)); ?>
+	</div>
+
+    <div class="row rowcol">
+		<?php echo CHtml::label('Op Email','op_email');?>
+		<?php echo CHtml::textField('extra[op_email]', @$model->extra['op_email'], array('size'=>25)); ?>
+	</div>
+    <div class="row rowcol" style="margin-bottom: 10px;">
+		<?php echo CHtml::label('Name on Label','delivery_label_name');?>
+		<?php echo CHtml::textField('extra[delivery_label_name]', @$model->extra['delivery_label_name'], array('size'=>25)); ?>
+	</div>
+
+	<HR align=center width=100% color=#AED0EA SIZE=1 style="margin-bottom: 10px;">
+
+	<!-- @@Mark Date:2021/7/19
+	<div class="row rowcol rowleft">
+		<?php echo CHtml::label('Printer ID','printer_id');?>
+		<?php echo CHtml::textField('extra[printer_id]', @$model->extra['printer_id'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<label>&nbsp;</label>
+		<?php echo CHtml::checkbox('extra[thermal]', !empty($model->extra['thermal'])), $this->t(' Free Thermal Label'); ?> 
+	</div>
+	@@Mark Date:2021/7/19	-->
+
+	<!-- <div class="row rowcol">
+		<?php echo CHtml::label('Thermal Credit','thermal_credit');?>
+		<?php echo CHtml::textField('extra[thermal_credit]', @$model->extra['thermal_credit'], array('size'=>5)); ?> 
+	</div> -->
+
+	<!-- @@Mark Date:2021/7/19
+	<div class="row rowcol">
+		<label>&nbsp;</label>
+		<?php echo CHtml::checkbox('extra[wrapper]', !empty($model->extra['wrapper'])), $this->t(' 免费缠绕膜'); ?> 
+	</div>
+		@@Mark Date:2021/7/19-->
+
+	<!-- <div class="row rowcol">
+		<?php echo CHtml::label('Wrapper Credit','wrapper_credit');?>
+		<?php echo CHtml::textField('extra[wrapper_credit]', @$model->extra['wrapper_credit'], array('size'=>5)); ?> 
+	</div> -->
+
+	<!-- @@Mark Date:2021/7/19
+	<div class="row rowcol">
+		<label>&nbsp;</label>
+		<?php echo CHtml::checkbox('extra[tape]', !empty($model->extra['tape'])), $this->t(' 免费胶带'); ?> 
+	</div>
+		@@Mark Date:2021/7/19-->
+
+	<!-- <div class="row rowcol">
+		<?php echo CHtml::label('Tape Credit','tape_credit');?>
+		<?php echo CHtml::textField('extra[tape_credit]', @$model->extra['tape_credit'], array('size'=>5)); ?> 
+	</div> -->
+
+	<!-- @@Mark Date:2021/7/19
+	<div class="row rowcol">
+		<label>&nbsp;</label>
+		<?php echo CHtml::checkbox('extra[consum_postpay]', !empty($model->extra['consum_postpay'])), $this->t(' Consumable Postpaid'); ?> 
+	</div>
+
+	<div class="row rowcol">
+		<label>&nbsp;</label>
+		<?php echo '<button>', CHtml::link('Reset Password as Org ID', $this->createUrl("org/changePassword", array("id" => $model->id)), array('class' => 'jqm_link')), '</button>'; ?>
+	</div>
+
+	<div class="row rowcol">
+		<label>&nbsp;</label>
+		<?php echo CHtml::checkbox('extra[rural_surcharge]', !empty($model->extra['rural_surcharge'])), $this->t(' Rural Surcharge'); ?> 
+	</div>
+
+	<div class="row rowcol">
+		<label>&nbsp;</label>
+		<?php echo CHtml::checkbox('extra[company_customer]', !empty($model->extra['company_customer'])), $this->t(' Company Customer'); ?> 
+	</div>
+		@@Mark Date:2021/7/19-->
+
+	<div class="row rowcol rowleft">
+		<?php echo CHtml::label('Wms Invoice','wms_invoice');?>
+		<?php echo CHtml::dropDownList('extra[wms_invoice]', @$model->extra['wms_invoice'], array('all' => 'All', 'stock_in_only' => 'Stock In Only', 'fix_rate' => 'Fix Rate'), array('empty' => $this->t('Select One'))); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('Cnee Tel for 3PL (if empty)', '3pl_cnee_tel');?>
+		<?php echo CHtml::textField('extra[3pl_cnee_tel]', @$model->extra['3pl_cnee_tel'], ['size' => 25]); ?>
+	</div>
+
+	<div class="row rowcol">
+		<label>&nbsp;</label>
+		<?php echo CHtml::checkbox('extra[carton_label]', !empty($model->extra['carton_label'])), $this->t('&nbsp;Carton Shipment Match'); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('3PL Statement Feq', '3pl_statement_feq');?>
+		<?php echo CHtml::dropDownList('extra[3pl_statement_feq]', @$model->extra['3pl_statement_feq'], array('weekly' => 'Weekly', 'monthly' => 'Monthly', 'stop' => 'Stop statement and invoice'), array('empty' => $this->t('Select One'))); ?>
+	</div>
+
+	<div class="row rowcol">
+		<label>&nbsp;</label>
+		<?php echo CHtml::checkbox('extra[return_label_show_name]', !empty($model->extra['return_label_show_name'])), $this->t('&nbsp;Show Name On Return Label'); ?>
+	</div>
+
+	<div class="row rowcol">
+		<label>&nbsp;</label>
+		<?php echo CHtml::checkbox('extra[weight_adjust]', !empty($model->extra['weight_adjust'])), $this->t('&nbsp;Weight Adjust'); ?>
+	</div>
+
+	<!--Author:Nero Date:2021/6/21 Description:Choose Available Courier-->
+	<div class="row rowcol rowleft">
+		<?php echo CHtml::label('Available Courier (For 3pl)', 'available courier');?>
+		<?php echo CHtml::checkbox('extra[tla]', !empty($model->extra['tla'])), $this->t('&nbsp;TLA Express'); ?>
+	</div>
+
+	<div class="row rowcol">
+		<label>&nbsp;</label>
+		<?php echo CHtml::checkbox('extra[auspost]', !empty($model->extra['auspost'])), $this->t('&nbsp;AusPost'); ?>
+	</div>
+
+	<div class="row rowcol">
+		<label>&nbsp;</label>
+		<?php echo CHtml::checkbox('extra[fastway]', !empty($model->extra['fastway'])), $this->t('&nbsp;FastWay'); ?>
+	</div>
+
+	<div class="row rowcol">
+		<label>&nbsp;</label>
+		<?php echo CHtml::checkbox('extra[tnt]', !empty($model->extra['tnt'])), $this->t('&nbsp;TNT'); ?>
+	</div>
+
+	<div class="row rowcol">
+		<label>&nbsp;</label>
+		<?php echo CHtml::checkbox('extra[eiztoll]', !empty($model->extra['eiztoll'])), $this->t('&nbsp;Eiz Toll'); ?>
+	</div>
+
+	<div class="row rowcol">
+		<label>&nbsp;</label>
+		<?php echo CHtml::checkbox('extra[sf]', !empty($model->extra['sf'])), $this->t('&nbsp;SF'); ?>
+	</div>
+
+	<div class="row rowcol">
+		<label>&nbsp;</label>
+		<?php echo CHtml::checkbox('extra[allied]', !empty($model->extra['allied'])), $this->t('&nbsp;Allied'); ?>
+	</div>
+
+	<div class="row rowcol">
+		<label>&nbsp;</label>
+		<?php echo CHtml::checkbox('extra[ubitoll]', !empty($model->extra['ubitoll'])), $this->t('&nbsp;UBI Toll'); ?>
+	</div>
+
+	<div class="row rowcol">
+		<label>&nbsp;</label>
+		<?php echo CHtml::checkbox('extra[ubiaupost]', !empty($model->extra['ubiaupost'])), $this->t('&nbsp;UBI AuPost'); ?>
+	</div>
+
+	<div class="row rowcol">
+		<label>&nbsp;</label>
+		<?php echo CHtml::checkbox('extra[ubiborder]', !empty($model->extra['ubiborder'])), $this->t('&nbsp;UBI Border'); ?>
+	</div>
+
+	<!--@@Mark Date:2021/7/19
+	<?php if (isset(Yii::app()->user->grp) && Yii::app()->user->grp == 0) { ?>
+		<div class="row rowcol rowleft">
+			<?php echo CHtml::label('3PL Invoice Task Min ID', '3pl_invoice_task_min_id');?>
+			<?php echo CHtml::textField('extra[3pl_invoice_task_min_id]', @$model->extra['3pl_invoice_task_min_id'], ['size' => 25]); ?>
+		</div>
+	<?php } ?>
+	@@Mark Date:2021/7/19-->
+
+	<!--div class="row rowcol">
+		<label>&nbsp;</label>
+		<?php echo CHtml::checkbox('extra[release]', !empty($model->extra['release'])), $this->t(' 3PL PCAW release'); ?> 
+	</div-->
+
+	<!--@@Mark Date:2021/7/19
+	<div class="row rowcol rowleft">
+		<?php echo CHtml::label('Zone','pickup_zone');?>
+		<?php echo CHtml::dropDownList('extra[pickup_zone]', @$model->extra['pickup_zone'], oList::kvp('ex_zone'), array('empty' => $this->t('Select One'))); ?>
+	</div>
+	
+	<div class="row rowcol">
+		<label>&nbsp;</label>
+		<label>
+		<?php echo CHtml::checkbox('extra[rebate_apply]', !empty($model->extra['rebate_apply'])), $this->t(' Apply rebate as discount'); ?> 
+		</label>
+	</div>
+	
+	<div class="row rowcol">
+		<label>&nbsp;</label>
+		<label>
+		<?php echo CHtml::checkbox('extra[use_sr1]', !empty($model->extra['use_sr1'])), $this->t(' Use Baby Formula Mixed Rate (SR1)'); ?> 
+		</label>
+	</div>
+	@@Mark Date:2021/7/19 -->
+	<div class="cus_only" style="clear:both;">
+	<div class="row rowcol rowleft">
+		<?php echo CHtml::label('Currency', 'currency');?>
+		<?php echo CHtml::dropDownList('extra[currency]', @$model->extra['currency'], Invoice::$currencies, array('empty' => $this->t('Select One'))); ?>
+	</div>
+	<div class="row rowcol">
+		<?php echo CHtml::label('Second Currency on Invoice', 'currency2');?>
+		<?php echo CHtml::dropDownList('extra[currency_2nd]', @$model->extra['currency_2nd'], Invoice::$currencies, array('empty' => $this->t('Select One'))); ?>
+	</div>
+        <div class="row rowcol">
+            	<label>&nbsp;</label>
+		<?php echo CHtml::checkbox('extra[3pl_service_setup]', @$model->extra['3pl_service_setup']), $this->t('Open 3PL'); ?>
+	</div>
+	<div class="row rowcol rowleft">
+		<?php echo CHtml::label('Label', 'label');?>
+		<?php echo CHtml::radioButtonList('extra[label]', isset($model->extra['label'])? $model->extra['label'] : 0, $this->t(array(0=>'PCA', 1=>'Aus Post')), array('labelOptions' => array('class' => 'radio_label'), 'separator' => '&nbsp;&nbsp')); ?>
+	</div>
+
+	<div class="row rowcol rowleft">
+		<?php echo CHtml::label('Weight Threshold', 'wthreshold');?>
+		<?php echo CHtml::textField('extra[wthreshold]', @$model->extra['wthreshold'], array('size'=>5)); ?> %
+	</div>
+
+		<div class="row rowcol rowleft">
+			<?php echo CHtml::label('GST', 'incl-gst');?>
+			<?php echo CHtml::checkBox('extra[incl_gst]',@$model->extra['incl_gst']) . ' Invoice Including GST'; ?>
+		</div>
+		<div class="row">
+			<div class="rowcol">
+				
+			<?php echo CHtml::label('Insurance Invoice Ratio', 'insurance_invoice_ratio');?>
+			<?php echo CHtml::textField('extra[insurance_invoice_ratio]', @$model->extra['insurance_invoice_ratio'], array('size'=>5)); ?> %
+			</div>
+			<!--
+			<div class="rowcol">
+				<?php echo CHtml::label('Insurance USD/AUD ratio', 'insurance_usdaud_ratio');?>
+				<?php echo CHtml::textField('extra[insurance_usdaud_ratio]', @$model->extra['insurance_usdaud_ratio'], array('size'=>5)); ?>
+			</div>
+			-->
+		</div>
+
+	<div class="row" style="background:#efe;overflow:auto; display: none;">
+	<h4>Express Rates</h4>
+	<div class="row rowcol rowleft">
+		<?php echo CHtml::label('&#8804;1Kg Base Rate', 'rate_base_0');?>
+		<?php echo CHtml::textField('extra[rate_base_0]', @$model->extra['rate_base_0'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('&#8804;1Kg per 0.5Kg','rate_pkg_0');?>
+		<?php echo CHtml::textField('extra[rate_pkg_0]', @$model->extra['rate_pkg_0'], array('size'=>5)); ?>
+	</div>
+	<div class="row rowcol rowleft">
+		<?php echo CHtml::label('&#8804;20Kg Base Rate', 'rate_base_1');?>
+		<?php echo CHtml::textField('extra[rate_base_1]', @$model->extra['rate_base_1'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('&#8804;20Kg per 0.5Kg','rate_pkg_1');?>
+		<?php echo CHtml::textField('extra[rate_pkg_1]', @$model->extra['rate_pkg_1'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol rowleft">
+		<?php echo CHtml::label('&gt;20Kg Base Rate', 'rate_base_2');?>
+		<?php echo CHtml::textField('extra[rate_base_2]', @$model->extra['rate_base_2'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('&gt;20Kg per 1Kg','rate_pkg_2');?>
+		<?php echo CHtml::textField('extra[rate_pkg_2]', @$model->extra['rate_pkg_2'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('&gt;20Kg extra parcel','rate_exp_2');?>
+		<?php echo CHtml::textField('extra[rate_exp_2]', @$model->extra['rate_exp_2'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol rowleft">
+		<?php echo CHtml::label('&gt;30Kg per 1Kg','rate_pkg_30');?>
+		<?php echo CHtml::textField('extra[rate_pkg_30]', @$model->extra['rate_pkg_30'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('&gt;50Kg per 1Kg','rate_pkg_50');?>
+		<?php echo CHtml::textField('extra[rate_pkg_50]', @$model->extra['rate_pkg_50'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('&gt;70Kg per 1Kg','rate_pkg_70');?>
+		<?php echo CHtml::textField('extra[rate_pkg_70]', @$model->extra['rate_pkg_70'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('&gt;100Kg per 1Kg','rate_pkg_100');?>
+		<?php echo CHtml::textField('extra[rate_pkg_100]', @$model->extra['rate_pkg_100'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('&gt;300Kg per 1Kg','rate_pkg_2');?>
+		<?php echo CHtml::textField('extra[rate_pkg_300]', @$model->extra['rate_pkg_300'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('&gt;500Kg per 1Kg','rate_pkg_2');?>
+		<?php echo CHtml::textField('extra[rate_pkg_500]', @$model->extra['rate_pkg_500'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('&gt;1,000Kg per 1Kg','rate_pkg_2');?>
+		<?php echo CHtml::textField('extra[rate_pkg_1000]', @$model->extra['rate_pkg_1000'], array('size'=>5)); ?>
+	</div>
+	</div>
+	
+	<div class="row" style="background:#ffe;overflow:auto; display: none;">
+	<h4>Economic Rates</h4>
+	<div class="row rowcol rowleft">
+		<?php echo CHtml::label('&#8804;1Kg Base Rate', 'eco_rate_base_0');?>
+		<?php echo CHtml::textField('extra[eco_rate_base_0]', @$model->extra['eco_rate_base_0'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('&#8804;1Kg per 0.5Kg','eco_rate_pkg_0');?>
+		<?php echo CHtml::textField('extra[eco_rate_pkg_0]', @$model->extra['eco_rate_pkg_0'], array('size'=>5)); ?>
+	</div>
+	<div class="row rowcol rowleft">
+		<?php echo CHtml::label('&#8804;20Kg Base Rate', 'eco_rate_base_1');?>
+		<?php echo CHtml::textField('extra[eco_rate_base_1]', @$model->extra['eco_rate_base_1'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('&#8804;20Kg per 0.5Kg','eco_rate_pkg_1');?>
+		<?php echo CHtml::textField('extra[eco_rate_pkg_1]', @$model->extra['eco_rate_pkg_1'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol rowleft">
+		<?php echo CHtml::label('&gt;20Kg Base Rate', 'eco_rate_base_2');?>
+		<?php echo CHtml::textField('extra[eco_rate_base_2]', @$model->extra['eco_rate_base_2'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('&gt;20Kg per 1Kg','eco_rate_pkg_2');?>
+		<?php echo CHtml::textField('extra[eco_rate_pkg_2]', @$model->extra['eco_rate_pkg_2'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('&gt;20Kg extra parcel','eco_rate_exp_2');?>
+		<?php echo CHtml::textField('extra[eco_rate_exp_2]', @$model->extra['eco_rate_exp_2'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol rowleft">
+		<?php echo CHtml::label('&gt;30Kg per 1Kg','eco_rate_pkg_30');?>
+		<?php echo CHtml::textField('extra[eco_rate_pkg_30]', @$model->extra['eco_rate_pkg_30'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('&gt;50Kg per 1Kg','eco_rate_pkg_50');?>
+		<?php echo CHtml::textField('extra[eco_rate_pkg_50]', @$model->extra['eco_rate_pkg_50'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('&gt;70Kg per 1Kg','eco_rate_pkg_70');?>
+		<?php echo CHtml::textField('extra[eco_rate_pkg_70]', @$model->extra['eco_rate_pkg_70'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('&gt;100Kg per 1Kg','eco_rate_pkg_100');?>
+		<?php echo CHtml::textField('extra[eco_rate_pkg_100]', @$model->extra['eco_rate_pkg_100'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('&gt;300Kg per 1Kg','eco_rate_pkg_2');?>
+		<?php echo CHtml::textField('extra[eco_rate_pkg_300]', @$model->extra['eco_rate_pkg_300'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('&gt;500Kg per 1Kg','eco_rate_pkg_2');?>
+		<?php echo CHtml::textField('extra[eco_rate_pkg_500]', @$model->extra['eco_rate_pkg_500'], array('size'=>5)); ?>
+	</div>
+
+	<div class="row rowcol">
+		<?php echo CHtml::label('&gt;1,000Kg per 1Kg','eco_rate_pkg_2');?>
+		<?php echo CHtml::textField('extra[eco_rate_pkg_1000]', @$model->extra['eco_rate_pkg_1000'], array('size'=>5)); ?>
+	</div>
+	</div>
+	
+	<div class="row">
+		<?php echo CHtml::label('Warehouse','warehouse');?>
+		<?php echo CHtml::dropDownList('extra[warehouse][]', @$model->extra['warehouse'], Org::dptList(), array('multiple' => 'multiple', 'seize' => 3) ); ?>
+		<p><small>Hold ctrl key to select multiple</small></p>
+	</div>
+	</div>
+
+	 <div class="row">
+                <div class=" rowcol">
+                  <?php echo CHtml::label('Payment Method','credit_payment_method');?>
+                  <?php echo CHtml::radioButtonList('extra[credit_payment_method]',isset($model->extra['credit_payment_method'])? $model->extra['credit_payment_method'] : 0,array(0=>'Default',1=>'Option2(Pay in 15th and 1st of next month)'), array('labelOptions' => array('class' => 'radio_label'), 'separator' => '&nbsp;&nbsp'));?>
+               </div>
+
+        <div class="rowcol rowleft">
+			<?php echo CHtml::label('Credit Action', 'credit_action');?>
+			<?php echo CHtml::checkBox('extra[credit_action]',@$model->extra['credit_action'], array('size'=>5, 'readonly' => !Acl::hasAccess('B:Org/ManageCredit'))) . ' Credit Action'; ?>
+		</div>
+
+        <div class="rowcol rowleft">
+			<?php echo CHtml::label('Credit Notice', 'credit_notice');?>
+			<?php echo CHtml::checkBox('extra[credit_notice]',@$model->extra['credit_notice'], array('size'=>5, 'readonly' => !Acl::hasAccess('B:Org/ManageCredit'))) . ' Credit Notice'; ?>
+		</div>
+		<div class="rowcol">
+		<?php echo CHtml::label('Credit Limit', 'creditlimit');?>
+		<?php echo CHtml::textField('extra[creditlimit]', @$model->extra['creditlimit'], array('size'=>5, 'readonly' => !Acl::hasAccess('B:Org/ManageCredit'))); ?>
+		<?php
+		$defCurrency = 1;
+		if ( isset($model->extra['currency']) ) $defCurrency = $model->extra['currency'];
+		if ( empty($defCurrency) )  $defCurrency = 1;
+		echo Invoice::$currencies[$defCurrency]; ?>
+		</div>
+
+		<div class="rowcol">
+		<?php echo CHtml::label('Credit Terms', 'creditterms');?>
+		<?php echo CHtml::textField('extra[creditterms]', @$model->extra['creditterms'], array('size'=>5, 'readonly' => !Acl::hasAccess('B:Org/ManageCredit'))); ?> 天
+		</div>
+		<div class="rowcol">
+			<?php echo CHtml::label('Start From', 'credit_init_date');?>
+			<?php echo CHtml::textField('extra[credit_init_date]', @$model->extra['credit_init_date'], array('id' => 'extra_credit_init_date_'.$_GET['tabid'], 'class' => 'date_input', 'readonly' => !Acl::hasAccess('B:Org/ManageCredit'))); ?>
+		</div>
+		<div class="rowcol">
+			<?php echo CHtml::label('Extend Until', 'credit_ext_date');?>
+			<?php echo CHtml::textField('extra[credit_ext_date]', @$model->extra['credit_ext_date'], array('id' => 'extra_credit_ext_date_'.$_GET['tabid'], 'class' => 'date_input', 'readonly' => !Acl::hasAccess('B:Org/ManageCredit'))); ?>
+		</div>
+               <?php if(!$model->isNewRecord):?>
+               <div class="rowcol">
+                   <label>Credit Usage(%)</label>
+                   <div style="font-weight: bold; text-align: center"><?=$model->getCurrentCreditOfLimit()*100?>%</div>
+                </div>
+                 <div class="rowcol">
+                   <label>Credit Left</label>
+                   <div style="font-weight: bold; text-align: center"><?=(isset($model->extra['creditlimit'])?floatval($model->extra['creditlimit']):0)*(1-$model->getCurrentCreditOfLimit())?>&nbsp;AUD</div>
+                </div>
+               <div class="rowcol">
+                   <?php $term_credit=$model->getCurrentCreditTerm()?>
+                   <label>Left term</label>
+                   <div style="font-weight: bold; text-align: center"><?=$term_credit[0]?>&nbsp;Day</div>
+                </div>
+            <?php if(!empty($term_credit[1])):?>
+             <div class="rowcol">
+                   <label>Oldest Invoice no.</label>
+                   <div style="font-weight: bold; text-align: center"><?=$term_credit[1]?>&nbsp;</div>
+                </div>
+              <div class="rowcol">
+                   <label>Oldest Invoice date</label>
+                   <div style="font-weight: bold; text-align: center"><?=$term_credit[2]?>&nbsp;</div>
+                </div>
+            <?php endif;?>
+               <?php endif;?>
+
+		<div class="row rowcol rowleft">
+			<?php echo CHtml::label('Lock Account', 'lock');?>
+			<?php echo CHtml::checkBox('extra[credit_lock]',@$model->extra['credit_lock']) . ' Lock Account (over credit limit)'; ?>
+		</div>
+		<div class="row rowcol">
+			<?php echo CHtml::label('COD Account', 'COD Account');?>
+			<?php echo CHtml::checkBox('extra[cod_account]',@$model->extra['cod_account']) . ' COD Account'; ?>
+		</div>
+	</div>
+
+	<div class="exagt_only" style="clear:both;">
+		<div class="row rowcol rowleft">
+			<?php echo CHtml::label('SMS - ID upload','sms');?>
+			<?php echo CHtml::dropDownList('extra[smsid][]', @$model->extra['smsid'], array(0 => 'No SMS', 1 => 'Send to Consignee', 2 => 'Sent to Shipper', 3 => 'Sent to Agent')); ?>
+		</div>
+	
+		<div class="row rowcol">
+			<label>&nbsp;</label>
+			<label>
+			<?php echo CHtml::checkbox('extra[id_nophoto]', !empty($model->extra['id_nophoto'])), $this->t(' Allow ID number only, with no photo.'); ?> 
+			</label>
+		</div>
+
+	<div class="row">
+		<?php echo CHtml::label('Service Grade','sergra');?>
+		<?php echo CHtml::radioButtonList('extra[sergra]', empty($model->extra['sergra'])? 0 : 1, $this->t(array(0=>'Standard', 1=>'Premium Only')), array('labelOptions' => array('class' => 'radio_label'), 'separator' => '&nbsp;&nbsp')); ?>
+	</div>
+	
+	<div class="row rowcol rowleft">
+		<?php echo CHtml::label('Weight Check','wt_check');?>
+		<?php echo CHtml::checkBox('extra[wt_check]',@$model->extra['wt_check']) . ' (use conveyor weight)'; ?>
+	</div>
+	
+	<div class="row rowcol">
+		<?php echo CHtml::label('Own Weight','wt_own');?>
+		<?php echo CHtml::checkBox('extra[wt_own]',@$model->extra['wt_own']) . ' (use declare weight)'; ?>
+	</div>
+	
+	<div class="row rowcol">
+		<?php echo CHtml::label('POS Pickup','pospu');?>
+		<?php echo CHtml::checkBox('extra[pos_pu]',@$model->extra['pos_pu']); ?>
+	</div>
+	</div>
+
+	<!-- for courier of australia we need set minimum meets conditions for example : max weight and max dimension -->
+	<?php if ( $model->type == 15  ) : ?>
+		<div class="row">
+		<?php echo CHtml::label('Max Weight','maxwt');?>
+		<?php echo CHtml::textField('extra[maxwt]', @$model->extra['maxwt'], array('size'=>5)); ?> Kg
+		</div>
+		<div class="row">
+			<?php echo CHtml::label('Max Dimension(D,W,H)','maxdim');?>
+			<?php echo CHtml::textField('extra[maxdim]', @$model->extra['maxdim'], array('size'=>5)); ?> CM
+		</div>
+	<?php endif; ?>
+
+	<div class="row">
+		<?php echo $form->labelEx($model,'desc'); ?>
+		<?php echo $form->textArea($model,'desc',array('rows'=>4, 'cols'=>60)); ?>
+	</div>
+	
+	<div class="row">
+		<?php echo CHtml::label('Own broker','own_broker');?>
+		<?php echo CHtml::radioButtonList('extra[self_customs]', empty($model->extra['self_customs'])?0:1, $this->t(array(0=>'Inactive', 1=>'Active')), array('labelOptions' => array('class' => 'radio_label'), 'separator' => '&nbsp;&nbsp')); ?>
+	</div>
+
+	<div class="row">
+		<?php echo $form->labelEx($model,'status'); ?>
+		<?php echo $form->radioButtonList($model,'status', $this->t(array(1=>'Active', 0=>'Inactive')), array('labelOptions' => array('class' => 'radio_label'), 'separator' => '&nbsp;&nbsp')); ?>
+	</div>
+
+	<div class="row">
+	<h3>Functions</h3>
+	<?php
+		foreach(org::$cdts as $v => $c){
+			echo '<label style="width:180px;float:left;">'.CHtml::checkBox('cargo_driver_type[]', ($model->cargo_driver_type & $v) > 0, ['value' => $v]).' '.$c.'</label>';
+		}
+		echo '<label style="width:180px;float:left;">'.CHtml::checkBox('extra[is_cbm_courier]',@$model->extra['is_cbm_courier']).'CBM Courier</label>';
+		echo '<label style="width:180px;float:left;">'.CHtml::checkBox('extra[is_cbm_weight]',@$model->extra['is_cbm_weight']).'Compare CBM Weight</label>';
+		echo '<label style="width:180px;float:left;">'.CHtml::checkBox('extra[is_show_driver_cost]',@$model->extra['is_show_driver_cost']).'Is Show Cost</label>';
+	?>
+	</div>
+
+	<div class="row">
+	<h3>Unpacking Team</h3>
+	<?php
+		foreach(org::$upackingTypes as $v => $c){
+			echo '<label style="width:180px;float:left;">'.CHtml::checkBox('cargo_driver_type[]', ($model->cargo_driver_type & $v) > 0, ['value' => $v]).' '.$c.'</label>';
+		}
+		
+	?>
+	</div>
+	<!--@@Mark Date:2021/7/19
+	<div class="row">
+		<?php
+				echo "Invoice Rule:",CHtml::dropDownList('extra[cargoProcessCRules]', @$model->extra['cargoProcessCRules'], SystemSetting::getCargoProcessCRules(), array('empty' => $this->t('Select One')));
+
+		echo "Priority:",CHtml::numberField('extra[jobPriority]', @$model->extra['jobPriority']),"(1=0H,2=1H,3=2H...N=(N-1)H)";
+		?>
+	</div>
+	<?php if($model->cargo_driver_type>0):?>
+		<?php if(empty($model->users)):?>
+		<div style="position:absolute; right: 20px;">
+			<a href="<?=Yii::app()->createUrl("user/create", array("id" => $model->id,"type"=>"driverUser","title"=>"create driver user"));?>" class="tab_link">Create Driver User</a>
+		</div>
+		
+		<?php else:?>
+		<div style="position:absolute; right: 20px;">
+			<a href="<?=Yii::app()->createUrl("user/update", array("id" => $model->id,"type"=>"driverUser","title"=>"update driver user"));?>" class="tab_link">Manage Driver User</a>
+		</div>
+		<?php endif;?>
+	<?php endif;?>
+	@@Mark Date:2021/7/19	-->
+	<div class="row">
+		<h3>Price Enquiry Charge Code</h3>
+	</div>	
+	<div class="row">
+	<div class="rowcol">
+		<?= CHtml::label('SYD Toll/Allied/TNT Chargecode', 'price_enquiry');?>
+		<?=  CHtml::textField('extra[Sydney_Toll_Chargecode]', @$model->extra['Sydney_Toll_Chargecode'], array('size'=>25, 'readonly' => false)); ?> 
+		</div>
+	<div class="rowcol">
+		<?= CHtml::label('Has Forklift TLD Chargecode', 'price_enquiry');?>
+		<?=  CHtml::textField('extra[Has_TLD_Chargecode]', @$model->extra['Has_TLD_Chargecode'], array('size'=>25, 'readonly' => false)); ?> 
+		</div>
+		
+	</div>
+	<div class="row">
+	<div class="rowcol">
+		<?= CHtml::label('MEL Toll/Allied/TNT Chargecode', 'price_enquiry');?>
+		<?=  CHtml::textField('extra[Melbourne_Toll_Chargecode]', @$model->extra['Melbourne_Toll_Chargecode'], array('size'=>25, 'readonly' => false)); ?> 
+		</div>
+		<div class="rowcol">
+		<?= CHtml::label('No Forklift TLD Chargecode', 'price_enquiry');?>
+		<?=  CHtml::textField('extra[No_TLD_Chargecode]', @$model->extra['No_TLD_Chargecode'], array('size'=>25, 'readonly' => false)); ?> 
+		</div>
+		
+	</div>
+	<div class="row">
+		<div class="rowcol">
+		<!-- <? //CHtml::label('Brisbane TLD Chargecode', 'price_enquiry');?>
+		<?  //CHtml::textField('extra[Brisbane_TLD_Chargecode]', @$model->extra['Brisbane_TLD_Chargecode'], array('size'=>25, 'readonly' => false)); ?>  -->
+		</div>
+		<div class="rowcol">
+		<?= CHtml::label('BNE Toll/Allied/TNT Chargecode', 'price_enquiry');?>
+		<?=  CHtml::textField('extra[Brisbane_Toll_Chargecode]', @$model->extra['Brisbane_Toll_Chargecode'], array('size'=>25, 'readonly' => false)); ?> 
+		</div>
+	</div>
+	<div class="row">
+		<div class="rowcol">
+		<!-- <? //CHtml::label('Perth TLD Chargecode', 'price_enquiry');?>
+		<?  //CHtml::textField('extra[Perth_TLD_Chargecode]', @$model->extra['Perth_TLD_Chargecode'], array('size'=>25, 'readonly' => false)); ?>  -->
+		</div>
+		<div class="rowcol">
+		<?= CHtml::label('PER Toll/Allied/TNT Chargecode', 'price_enquiry');?>
+		<?=  CHtml::textField('extra[Perth_Toll_Chargecode]', @$model->extra['Perth_Toll_Chargecode'], array('size'=>25, 'readonly' => false)); ?> 
+		</div>
+	</div>
+	
+	<div class="row">
+		<h3>Extra Services</h3>
+	</div>
+	<div class="row">
+		<?php echo CHtml::checkBox('extra[name_validation]',@$model->extra['name_validation'], array('size'=>5, 'readonly' => !Acl::hasAccess('B:Org/ManageCredit'))) . ' Item Name Validation'; ?>
+	</div>
+
+	<?php if($model->type == Org::TYPE_SUPPLIER && !empty($model->extra['tld_driver_waiting_approval'])):?>
+		<?php
+		$trucks = Vehicle::model()->findAllByAttributes(array('org_id' => $model->id));
+		if (!empty($trucks)) {
+			foreach ($trucks as $truck) {
+				echo '<div class="row">';
+				echo '<div class="rowcol">';
+				echo CHtml::label("Plate No", "vehicle_plate");
+				echo CHtml::textField('vehicle_plate', $truck->plate_no,['disabled' => true]);
+				echo '</div>';
+				echo '<div class="rowcol">';
+				echo CHtml::label("Model", "vehicle_model");
+				echo CHtml::textField('vehicle_model', $truck->vehicle_model,['disabled' => true]);
+				echo '</div>';
+				echo '<div class="rowcol">';
+				echo CHtml::label("Load Capacity", "load_capacity");
+				echo CHtml::textField('load_capacity', $truck->load_capacity,['disabled' => true]);
+				echo '</div>';
+				echo '<div class="rowcol">';
+				echo CHtml::label("Has Tailgate", "has_tailgate");
+				echo CHtml::textField('has_tailgate', !empty($truck->has_tailgate) ? 'Yes' : 'No',['disabled' => true]);
+				echo '</div></div>';
+				// new row
+				echo '<div class="row">';
+				echo '<div class="rowcol">';
+				echo CHtml::label("Inner Length", "inner_length");
+				echo CHtml::textField('inner_length', $truck->inner_length,['disabled' => true]);
+				echo '</div>';
+				echo '<div class="rowcol">';
+				echo CHtml::label("Inner Width", "inner_width");
+				echo CHtml::textField('inner_width', $truck->inner_width,['disabled' => true]);
+				echo '</div>';
+				echo '<div class="rowcol">';
+				echo CHtml::label("Inner Height", "inner_height");
+				echo CHtml::textField('inner_height', $truck->inner_height,['disabled' => true]);
+				echo '</div>';
+				echo '<div class="rowcol">';
+				echo CHtml::label("Inner Volume", "inner_volume");
+				echo CHtml::textField('inner_volume', $truck->inner_volume,['disabled' => true]);
+				echo '</div></div>';
+				// new row
+				if (!empty($truck->has_tailgate)) {
+					echo '<div class="row">';
+					echo '<div class="rowcol">';
+					echo CHtml::label("Tailgate Lenght", "tailgate_length");
+					echo CHtml::textField('tailgate_length', $truck->tailgate_length,['disabled' => true]);
+					echo '</div>';
+					echo '<div class="rowcol">';
+					echo CHtml::label("Tailgate Width", "tailgate_width");
+					echo CHtml::textField('tailgate_width', $truck->tailgate_width,['disabled' => true]);
+					echo '</div>';
+					echo '<div class="rowcol">';
+					echo CHtml::label("Tailgate Weight", "tailgate_weight");
+					echo CHtml::textField('tailgate_weight', $truck->tailgate_weight,['disabled' => true]);
+					echo '</div></div>';
+				}
+				
+			}
+		}
+		?>
+	<?php endif;?>
+
+	<div class="row buttons">
+		<?php echo CHtml::submitButton($this->t($model->isNewRecord ? 'Create' : 'Save')); ?>
+	</div>
+	
+
+<?php $this->endWidget(); ?>
+
+</div><!-- form -->
+<script type="text/javascript">
+$(function(){
+	var tab = $('#<?=$_GET["tabid"];?>');
+        var panel=tab.data('panel');
+        function validateEmail(email) {
+              var re = /^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
+              return re.test(String(email).toLowerCase());
+        }
+        
+        $('form#org-form').on('submit',function(){
+          if(!$("#extra_client_billing_email",panel).val()){
+              alert('Please Input The Client Billing Email');
+              return false;
+        }
+           return true; 
+        });
+	
+	$('#Org_type', tab.data('panel')).change(function(){
+		var t = $(this).val();
+
+		if(t == 30 || t == 50|| t==60 || t == 70){
+			$('.cus_only', tab.data('panel')).show(); 
+		}else{
+			$('.cus_only', tab.data('panel')).hide();
+		}
+
+
+		if(t == 60 || t == 65){
+			$('.exagt_only', tab.data('panel')).show(); 
+		}else{
+			$('.exagt_only', tab.data('panel')).hide(); 
+		}
+	}).trigger('change');
+	
+	
+});
+</script>

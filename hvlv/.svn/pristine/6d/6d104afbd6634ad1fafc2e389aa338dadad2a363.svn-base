@@ -1,0 +1,149 @@
+<h1><?=$this->t('Batch Process');?></h1>
+<div class="form">
+
+<?php if(Acl::hasAccess('B:BatchProcess')):?>
+<?php $form=$this->beginWidget('CActiveForm', array(
+	'id'=>'iptp-label-form',
+	'enableAjaxValidation'=>false,
+	'action'=>$this->createUrl('imParcel/batchProcess')
+)); ?>
+	<div class="wide form">
+
+		<div class="row">
+			<?php echo $form->label($model, 'mhbns(,;Enter)'); ?>
+			<?php echo $form->textArea($model, 'mhbns', array('rows' => 6, 'cols' => 50)); ?>
+		</div>
+
+		<div class="row buttons">
+			<?php echo CHtml::submitButton($this->t('Sub Mov And FFI')); ?>
+		</div>
+
+	</div><!-- search-form -->
+
+
+<?php $this->endWidget(); ?>
+<?php endif; ?>
+<br>
+<?php if(Acl::hasAccess('B:BatchMarkGatepass')):?>
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+<br>
+
+<?php $form=$this->beginWidget('CActiveForm', array(
+	'id'=>'mark-shipment-gatepass-form',
+	'enableAjaxValidation'=>false,
+	'action'=>$this->createUrl('imParcel/batchMarkGatepass')
+)); ?>
+	
+	<div class="wide form">
+		<div class="row">
+			<?php echo $form->label($model, 'mhbns(,;Enter)'); ?>
+			<?php echo $form->textArea($model, 'mhbns', array('rows' => 6, 'cols' => 50)); ?>
+		</div>
+
+		<div class="row">
+                <?php echo CHtml::label(Yii::t('shipmentquestion','Upload Files'),'Upload Files'); ?>
+                 <?php
+		              $this->widget('CMultiFileUpload', array(
+		                 'model'=>new ImParcel(),
+		                 'attribute'=>'files',
+		                 'accept'=>'*',
+		                 'options'=>array(
+		                 ),
+		                 'denied'=>'File is not allowed',
+		                 'max'=>10, // max 10 files
+              ));
+            ?>
+        </div>
+
+		<div class="row buttons">
+			<?php echo CHtml::submitButton($this->t('Mark Shipment Gatepass')); ?>
+		</div>
+
+	</div><!-- search-form -->
+
+
+<?php $this->endWidget(); ?>
+<?php endif; ?>
+
+         <br>
+
+
+<?php if(Acl::hasAccess('B:BatchChangeShipment')):?>
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+<br>
+
+<?php $form=$this->beginWidget('CActiveForm', array(
+	'id'=>'mark-shipment-gatepass-form',
+	'enableAjaxValidation'=>false,
+	'action'=>$this->createUrl('imParcel/batchChangeShipment')
+)); ?>
+	
+	<div class="wide form">
+		<div class="row">
+			<?php echo CHtml::label('Consol No.', 'Consol No.'); ?>
+			<?php echo CHtml::textfield('consolNo'); ?>
+		</div>
+		<div class="row">
+			<?php echo $form->label($model, 'mhbns(,;Enter)'); ?>
+			<?php echo $form->textArea($model, 'mhbns', array('rows' => 6, 'cols' => 50)); ?>
+		</div>
+		<div class="row">
+			<?php echo $form->labelEx($model,'agent_id'); ?>
+			<?php echo $form->hiddenField($model,'agent_id');
+				$acname = empty($_GET["tabid"])? 'agent_ac' : $_GET["tabid"].'_agent_ac';
+				$this->widget('zii.widgets.jui.CJuiAutoComplete', array(
+					'name' => $acname,
+					'sourceUrl' => array('org/agentSuggest'),
+					'value' => empty($model->agent->name) ? '' : $model->agent->name,
+					'options' => array(
+							'showAnim' => 'fold',
+							'minLength' => 2,
+							'delay' => 200,
+							'select' => 'js:function(event, ui){ $(this).val(ui.item["label"]); $(this).prevAll("input[type=hidden]").val(ui.item["value"]).data("ov",ui.item["value"]); return false; }',
+							'change' => 'js:function(event, ui){ if(ui.item == null) $(this).prevAll("input[type=hidden]").val(""); return false; }',
+					),
+					'htmlOptions' => array(
+						'class' => 'required',
+						'size' => '50',
+					),
+			));
+			?>
+
+			<?php echo $form->error($model,'agent_id'); ?>
+		</div>
+
+		<div class="row buttons">
+			<?php echo CHtml::submitButton($this->t('Change Shipment Agent')); ?>
+		</div>
+
+	</div><!-- search-form -->
+
+
+<?php $this->endWidget(); ?>
+<?php endif; ?>
+
+         <br>
+
+</div><!-- form -->
+<div id="result"></div>
+<script type="text/javascript">
+$(function(){
+	var tab = $('#<?=$_GET["tabid"];?>');
+	var panel = tab.data('panel');
+	$('form#iptp-label-form', panel).data('custom_success', function(r){
+		var rdiv = $('#result', panel);
+		rdiv.empty();
+		if(r.done == true){
+			$('form#change-label-form', panel).resetForm();
+			myApp.notice(r.msg, 5000);
+		}else{
+			rdiv.append('<h3>Errors:</h3><p class="red" style="font-weight:bold;">'+r.msg+'</p>');
+		}
+		if(r.warns && r.warns.length > 0){
+			rdiv.append('<h3>Notices:</h3><p class="warn">'+r.warns.join('<br />')+'</p>');
+		}
+		$('input[type=submit]', panel).attr('disabled', false);
+	});
+
+});
+</script>

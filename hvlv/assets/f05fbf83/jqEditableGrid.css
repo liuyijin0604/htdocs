@@ -1,0 +1,22 @@
+@charset "UTF-8";
+.editableGrid  .edit_btn, .editableGrid  .cancel_btn, .editableGrid  .save_btn, .editableGrid  .delete_btn{
+	background: url(editablegridbtns.png) 0 0 no-repeat;
+	text-indent: -9999px;
+	width: 16px;
+	height: 16px;
+	display: block;
+	margin-right: 5px;
+	float: left;
+}
+.editableGrid  .save_btn{
+	background-position: 0 -16px;
+}
+.editableGrid  .edit_btn{
+	background-position: 0 -32px;
+}
+.editableGrid  .delete_btn{
+	background-position: 0 -48px;
+}
+.editableGrid  .add_btn{
+	background-position: 0 -64px;
+}

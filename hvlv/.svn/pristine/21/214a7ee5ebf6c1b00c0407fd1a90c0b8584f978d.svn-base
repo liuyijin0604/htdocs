@@ -1,0 +1,116 @@
+<?php 
+class ConsolService extends Service
+{
+	public function consolScanAll($model)
+	{
+		if(!empty($model->mdata["scanAllIng"]))
+		{
+			return ['done'=>2,'msg'=>'Scan all is processing'];
+		}
+		$model->mdata["scanAllIng"] = 1;
+		$model->save();
+		$minScanTime = $model->getMinScanTime();
+		if(!empty($minScanTime))
+		{
+			$st = $minScanTime;
+		}else
+		{
+			$st = $model->mdata['ctn_scstart_time'];
+			if(empty($st))
+			{
+				return ['done'=>2,'msg'=>'Without scan start time and parcel scan time'];
+			}
+		}
+		$st = strtotime($st);
+		$et = !empty($model->mdata['ctn_comp_time'])?$model->mdata['ctn_comp_time']:"";
+		if(!empty($et))
+		{
+			$et = strtotime($et);
+			$diff = $et - $st;
+			if($diff<0)
+			{
+				$model->mdata["scanAllIng"] = 0;
+				$model->save();
+				return ['done'=>2,'msg'=>'Complete time must be after the scan start time'];
+			}
+		}else
+		{
+			$model->mdata["scanAllIng"] = 0;
+			$model->save();
+			return ['done'=>2,'msg'=>'Without complete time'];
+		}
+		$transaction=Yii::app()->db->beginTransaction();
+		try {
+			foreach ($model->shipments as $i => $p) {
+				$scanTime = '';
+			// scaned before , just ignore
+				if ($p->type!=10) {
+					continue;
+				}
+				if ($p->pkg < $p->getOutPkg()) {
+					continue;
+				}
+
+				if($p->pkg > 1000){
+					$pt = !empty($et)?($st + rand(intval($diff/10), $diff)):($st + rand(10, 100 * $i));
+					$p->scan_data[50]['SCAN_ALL'] = date('Y-m-d H:i:s', $pt);
+				}else{
+					for ($j = 1; $j <= $p->pkg; $j++) {
+						if (!empty($p->scan_data[50][$p->hbn.'-'.$j])) {
+							if(empty($scanTime)||strtotime($p->scan_data[50][$p->hbn.'-'.$j])<strtotime($scanTime))
+							{
+								$scanTime = $p->scan_data[50][$p->hbn.'-'.$j];
+							}
+							continue;
+						}
+						$pt = !empty($et)?($st + rand(intval($diff/10), $diff)):($st + rand(10, 100 * $i));
+						$p->scan_data[50][$p->hbn.'-'.$j] = date('Y-m-d H:i:s', $pt);
+						if(empty($scanTime)||strtotime($p->scan_data[50][$p->hbn.'-'.$j])<strtotime($scanTime))
+						{
+							$scanTime = $p->scan_data[50][$p->hbn.'-'.$j];
+						}
+					}
+				}
+
+				if(empty($p->mdata['scan_time'])||$p->mdata['scan_time']!=$scanTime)
+				{
+					$firstScanTime = '';
+					if(!empty($p->scan_data[50]))
+					{
+						foreach ($p->scan_data[50] as $key => $value) {
+							$firstScanTime = $value;
+							break;
+						}
+					}
+					if(strtotime($firstScanTime)<strtotime($scanTime))
+					{
+						$scanTime = $firstScanTime;
+					}
+					ShipmentScan::genShipmentScan($p, 0, 0, $p->consol->dpt_id, 3600,$p->hbn,$scanTime);
+					$p->mdata['scan_time'] = $scanTime;
+					$p->updateDeconsolidationTime(false,false,true);
+				}
+				$p->save();
+				$courier_id = null;
+				if (empty($courier_id)) 
+				{
+					$courier_id=$p->getCourierId();
+				}
+				$action = "ScanAllByHand";
+				GatepassShipment::gatepassScan($p, $courier_id, 1, $p->consol->dpt_id,$action);
+			}
+			$transaction->commit();
+		} catch (Exception $ex) {
+			$model->mdata["scanAllIng"] = 0;
+		    $model->save();
+			$transaction->rollback();
+			throw $ex;
+		}
+
+		$model->mdata["scanAllIng"] = 0;
+		$model->save();
+		return ['done'=>1];
+	}
+	
+}
+?>

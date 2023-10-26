@@ -1,0 +1,64 @@
+<?php
+$podName=Org::dptList()[$_GET['pod_id']];
+$type=$_GET['consol_type']==20?"Sea":"Air";
+?>
+<h2><?=$podName.' '.$type;?> - Consol Processing</h2>
+<div style="position: absolute; right:80px;">
+		<a class="tab_link"  href="<?=$this->createUrl("consolProcess/seaConsolListByStatus", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type'],'process_status'=>ConsolProcess::STATE_NEW])?>" title="<?=$podName."-".$type?> New" ><span style="background-position:-48px -688px" class="icon"></span>Documentation---></a>
+
+
+
+		<a class="tab_link"  href="<?=$this->createUrl("consolProcess/seaConsolListByStatus", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type'],'process_status'=>ConsolProcess::STATE_WAITING_AIRPORT_CKIN])?>" title="<?=$podName."-".$type?> Waiting AirOut/Manifest" ><span style="background-position:-48px -688px" class="icon"></span>Waiting Receipt Outturn/Unpack schedule---></a>
+
+
+
+		<a class="tab_link"  href="<?=$this->createUrl("consolProcess/seaConsolListByStatus", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type'],'process_status'=>ConsolProcess::STATE_WAITING_WH_SCAN])?>" title="<?=$podName."-".$type?> Waiting WH Scan" ><span style="background-position:-48px -688px" class="icon"></span>Waiting WH Scan---></a>
+
+
+
+
+				 <a class="tab_link"  href="<?=$this->createUrl("consolProcess/seaConsolListByStatus", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type'],'process_status'=>ConsolProcess::STATE_WAITING_AIR_MANI])?>" title="<?=$podName."-".$type?> Waiting AirOut/Manifest" ><span style="background-position:-48px -688px" class="icon"></span>Waiting Unpack Outturn/Manifest---></a><!--(will have receipt and unpack ICS status identify)-->
+
+
+
+
+
+				 <a class="tab_link"  href="<?=$this->createUrl("consolProcess/seaConsolListByStatus", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type'],'process_status'=>ConsolProcess::STATE_WAITING_CREATE_INVOICE])?>" title="<?=$podName."-".$type?> Waiting AirOut/Manifest/Create Invoice" ><span style="background-position:-48px -688px" class="icon"></span>Exception/Dehire/Create Invoice---></a>
+				 <!--(will have receipt and unpack ICS status identify)-->
+
+
+		<a class="tab_link"  href="<?=$this->createUrl("consolProcess/seaConsolListByStatus", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type'],'process_status'=>ConsolProcess::STATE_CONSOL_PROCESS_DONE])?>" title="<?=$podName."-".$type?> Process Done" ><span style="background-position:-48px -688px" class="icon"></span>Process Done</a>
+</div>
+<br>
+<br>
+<div style="width:50%" id="sea-consols-client-view<?=$_GET['tabid']?>">
+	 <?php $this->widget('zii.widgets.grid.CGridView', [
+	 	'id'=>'sea-consols-client-list-grid',
+	 	'htmlOptions'=>['style'=>'width: 70%'],
+	 	'cssFile' => false,
+	 	'dataProvider'=>$dataProvider[0],
+	 	'filter'=>$dataProvider[1],
+	 	'columns'=>[
+	 		['name'=>'status','headerHtmlOptions' => ['style' => 'display:none'],'filterHtmlOptions' => ['style' => 'display:none'],
+	 			'htmlOptions' => ['style' => 'display:none'],'type'=>'raw'],
+	 		['name'=>'status_name','header'=>'Status'],
+	 		['name'=>'number', 'header'=>'Number'],
+	 		['name'=>'day1','header'=>'<=1 days'],
+	 		['name'=>'day2','header'=>'2 days'],
+	 		['name'=>'day3','header'=>'>=3 days','cssClassExpression' => '$data>0? "cloumn_red_1" : ""'],
+	 	],
+	 ]); ?>
+</div>
+
+ <div class="row">
+	<span> <h2> Available Consols </h2></span>
+										<!--<div id="loadingPic"  style="width:20px;height:20px;float:left;"></div>-->
+ <div id="consol-list-view">
+			<?php
+				 $this->renderPartial('sea_sub_consols', [
+				 	'consol' => $consol,
+				 	//           'name' =>'All'
+				 ]);
+		?>
+	</div>
+</div>

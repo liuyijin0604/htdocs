@@ -1,0 +1,191 @@
+<?php
+class GatePass extends Manifest
+{
+	public static $my_type = 50;
+
+	public $_mkv = ['company' => '', 'driver' => '', 'rego' => '', 'sig' => ''];
+	public $sids;
+
+	public function rules()
+	{
+		$rules = [
+			['dpt_id', 'required'],
+			['id, fwd_id, by_id, type, created, status, ref, total, meta, bwf, company, driver, rego', 'safe', 'on'=>'search'],
+		];
+		return array_merge(parent::rules(), $rules);
+	}
+	
+	public function beforeSave()
+	{
+		return parent::beforeSave();
+	}
+
+	public function attributeLabels()
+	{
+		return array_merge(parent::attributeLabels(), [
+			'company' => 'Company',
+			'driver' => 'Driver',
+			'rego' => 'Rego.',
+			'id' => 'Gate Pass No.'
+		]);
+	}
+
+	public function search($pgn = true, $ps = 30, $ec = false, $paidonly = false)
+	{
+		$c=new CDbCriteria;
+		$c->compare('id', $this->id);
+		$c->compare('dpt_id', $this->dpt_id);
+		$c->compare('by_id', $this->by_id);
+		$c->compare('created', $this->created, true);
+		$c->compare('status', $this->status);
+		$c->compare('ref', $this->ref, true);
+		$c->join = '';
+		foreach ($this->_mkv as $k => $v) {
+			if (!empty($v)) {
+				$ta = 'm_'.$k;
+				$c->join .= "LEFT JOIN meta ".$ta." ON
+						".$ta.".model = :model AND
+						".$ta.".fid = t.id AND
+						".$ta.".key = '".$k."' ";
+				$c->addCondition($ta.'.value LIKE :'.$k);
+				$c->params[':'.$k] = '%'.$v.'%';
+			}
+		}
+		if (!empty($c->join)) {
+			$c->params[':model'] = get_class($this);
+		}
+
+		if ($ec) {
+			$c->mergeWith($ec);
+		}
+
+		return new CActiveDataProvider($this, [
+			'criteria'=>$c,
+			'sort'=>[
+				'defaultOrder'=>'t.id DESC',
+			],
+			'pagination'=>$pgn? [
+				'pageSize' => $ps,
+			] : false,
+		]);
+	}
+
+	public static function checkStorage($id,$orgId=false,$front=false,$checkToDate = "")
+    {
+        $r = new StdClass;
+        $r->msg = 'Not Found';
+        $r->color = '#c00';
+        $r->done = true;
+        $shipment = null;
+        if(!$orgId||$orgId==1)
+        {
+        	$shipment = ImParcel::model()->find('(hbn = :hbn or ref = :hbn) and status !=100', array(':hbn' => $id));
+        }else
+        {
+        	$shipment = ImParcel::model()->find('((hbn = :hbn or ref = :hbn) and agent_id = :orgId) and status !=100', array(':hbn' => $id,':orgId'=>$orgId));
+    	}
+        if (!empty($shipment)) {
+        	if(($shipment->bwf&ImParcel::CUSTOM_DDP)>0||(($shipment->bwf & ImParcel::CUSTOM_DDU) > 0 && empty($shipment->process)))
+        	{
+        		$storageFee = $shipment->getStorageFee($front,$checkToDate);
+        		if(empty($storageFee[8]))
+        		{
+        			echo json_encode($r);
+        			Yii::app()->end();
+        		}
+        		
+        		$orgName = "";
+        		$DDStr = "";
+        		if(($shipment->bwf&ImParcel::CUSTOM_DDP)>0)
+        		{
+        			$orgName = $storageFee[4];
+        			$DDStr = "DDP";
+        		}elseif(($shipment->bwf & ImParcel::CUSTOM_DDU) > 0)
+        		{
+        			$orgName = Org::model()->findByPk(Org::ORGID_IMPORT_CASUAL_CUSTOMER)->name;
+        			$DDStr = "DDU";
+        		}
+
+		        $priceStr = ($storageFee[10]=="CBM")?"/CBM/Day":"/KG/Day";
+		        $baseFeeStr = ($storageFee[8]=="Sea")?"$".$storageFee[9]:"";
+		        $r->msg = "<p>".$DDStr." Storage ".$shipment->ref."</p>";
+		        $r->msg .="<p>Org:".$orgName."</p>";
+		        $r->msg .="<p>Type:".$storageFee[8]."</p>";
+		        $r->msg .="<p>Weight:".$storageFee[5]."</p>";
+		        $r->msg .="<p>CBM:".number_format($storageFee[6],3,'.','')."</p>";
+		        $r->msg .="<p>Unit Price:$".$storageFee[7]."{$priceStr}</p>";
+		        $r->msg .="<p>Base Fee:".$baseFeeStr."</p>";
+		        $r->msg .="<p>Available Date:".$storageFee[2]."</p>";
+		        $r->msg .="<p>Now:".$storageFee[3]."</p>";
+		        $r->msg .= '<p>Storage Rates Fee : $' . number_format($storageFee[0], 2, '.', '') . ' Days: ' . $storageFee[1]."</p>";
+		        $r->msg .= '<p>Storage Total Fee : $' . number_format($storageFee[0]+$storageFee[9], 2, '.', '')."</p>";
+		        $r->msg .= "<button id = 'generate_invoice' onClick='generateDdpInvoice({$shipment->id},\"{$storageFee[3]}\")'>Generate ".$DDStr." Invoice</button>";
+        	}else if(($shipment->bwf&ImParcel::CUSTOM_DDU)>0)
+        	{
+        		$storageFee = $shipment->createStorageInvoiceWhenDdu(true,$checkToDate);
+        		if($front)//for front of client
+				{
+					if($shipment->status>=ImParcel::STATE_CLEAR||(!empty($shipment->consol)&&$shipment->consol->isWDT()))
+					{
+						if (!(!empty($shipment->cargo_process)&&$shipment->cargo_process->type==CargoProcess::PICKUP_CARGO)) {
+							if(!empty($storageFee['items']))
+        					{
+								$storageFee['items'][0][6] = 0;
+								$storageFee['cal'][2] = 0;
+							}
+						}
+					}
+				}
+
+        		if(!empty($storageFee['items']))
+        		{
+        		$r->msg = "<p>DDU Storage ".$shipment->ref."</p>";
+        		$r->msg .="<p>Org:".$shipment->agent->name."</p>";
+		        $r->msg .="<p>Calulate by:".$storageFee['cal'][0]."s</p>";
+		        if($storageFee['cal'][0]=='day')
+		        {
+		        	$r->msg .="<p>Minimum Charge: $50</p>";
+		        	$r->msg .="<p>CBM:".number_format($storageFee['cal'][3],3,'.','')."</p>";
+		        }else
+		        {
+		        	$r->msg .="<p>Weight:".$storageFee['cal'][3]."</p>";
+		        }
+		        $priceStr = '$'.$storageFee['cal'][1].'/'.$storageFee['cal'][4].'/'.$storageFee['cal'][0];
+		        $r->msg .="<p>Rate:{$priceStr}</p>";
+		        $r->msg .="<p>Available Date:".$storageFee['items'][0][11]."</p>";
+		        $r->msg .="<p>Now:".$storageFee['items'][0][12]."</p>";
+		        if(!empty($storageFee['items'][1][6]))
+		        {
+		        	$r->msg .= '<p>Base Fee : $' .$storageFee['items'][1][6]."</p>";
+		    	}
+		        $r->msg .= '<p>Storage Rates Fee : $' . number_format($storageFee['items'][0][6], 2, '.', '') . ' '.$storageFee['cal'][0].'s: ' . $storageFee['cal'][2]."</p>";
+
+		        if(!empty($storageFee['items'][1][6]))
+		        {
+		        	$r->msg .= '<p>Storage Total Fee : $' . number_format($storageFee['items'][0][6]+$storageFee['items'][1][6], 2, '.', '') ."</p>";
+		    	}else
+		    	{
+		    		$r->msg .= '<p>Storage Total Fee : $' . number_format($storageFee['items'][0][6], 2, '.', '') ."</p>";
+		    	}
+
+		        $r->msg .= "<p>Invoice To : ".Org::model()->findByPk($storageFee['invoice']->to_id)->name."</p>";
+		        $r->msg .= "<p>Invoice Shows : ".CHtml::textfield("invoice_shows",$storageFee['invoice']->mdata['name'],["style"=>"width:100%;height:4em;"])."</p>";
+		        $r->msg .= "<button id = 'generate_invoice' onClick='generateDduInvoice({$shipment->id},\"{$storageFee['items'][0][12]}\")'>Generate DDU Invoice</button>";
+		    	}
+
+		    	if($storageFee['status']==0)
+        		{
+        			$r->msg = $storageFee['msg'];
+        		}
+        	}else
+        	{
+        		$r->msg = "Isn't DDU or DDP";
+        	}
+           
+        }
+        echo json_encode($r);
+
+        Yii::app()->end();
+    }
+
+}

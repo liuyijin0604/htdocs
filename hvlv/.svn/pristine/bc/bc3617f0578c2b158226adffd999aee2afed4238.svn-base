@@ -1,0 +1,252 @@
+<?php
+
+/**
+ * This is the model class for table "org_flexible_rate".
+ *
+ * The followings are the available columns in table 'org_flexible_rate':
+ * @property integer $id
+ * @property integer $org_id
+ * @property integer $user_id
+ * @property string $create
+ * @property string $amount
+ * @property string $item
+ * @property string $unit
+ * @property string $minimum
+ * @property integer $branch
+ * @property string $cargo
+ */
+class OrgFlexibleRate extends CActiveRecord
+{
+	const ETD = 1;
+	const ETA = 2;
+
+	public static $searchCriteria = [
+		1=>"by consol etd",
+		2=>"by consol eta"
+
+	];
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName()
+	{
+		return 'org_flexible_rate';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('org_id, user_id, create', 'required'),
+			array('org_id, user_id', 'numerical', 'integerOnly'=>true),
+			array('amount, minimum', 'length', 'max'=>10),
+			array('item, unit, cargo, branch, service', 'length', 'max'=>45),
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, org_id, user_id, create, amount, item, unit, minimum, branch, cargo', 'safe', 'on'=>'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+		);
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return array(
+			'id' => 'ID',
+			'org_id' => 'Org',
+			'user_id' => 'User',
+			'create' => 'Create',
+			'amount' => 'Amount',
+			'item' => 'Item',
+			'unit' => 'Unit',
+			'minimum' => 'Minimum',
+			'branch' => 'Branch',
+			'cargo' => 'Cargo',
+		);
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search()
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('id',$this->id);
+		$criteria->compare('org_id',$this->org_id);
+		$criteria->compare('user_id',$this->user_id);
+		$criteria->compare('create',$this->create,true);
+		$criteria->compare('amount',$this->amount,true);
+		$criteria->compare('item',$this->item,true);
+		$criteria->compare('unit',$this->unit,true);
+		$criteria->compare('minimum',$this->minimum,true);
+		$criteria->compare('branch',$this->branch);
+		$criteria->compare('cargo',$this->cargo,true);
+
+		return new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+		));
+	}
+
+	 /**
+     * get price rate weight ranges based on charge code ID
+     * @param $chargeCodeId
+     * @return array
+     */
+    public function getOrgFlexibleRateByOrgId($orgId,$version = null){
+    	if(empty($version))
+    	{
+        	$rt = OrgFlexibleRate::model()->findAll('org_id = :rid and fid = 0',array(':rid' => $orgId));
+    	}else
+    	{
+    		$orgFlexibleRateBk = new OrgFlexibleRateBk();
+    		$rt = $orgFlexibleRateBk->findAll('org_id = :rid and fid = 0 and version = :version',array(':rid' => $orgId,":version"=>$version));
+    	}
+        $rates = array();
+        foreach ( $rt as $rate ) {
+            $oneRate = array(
+                'item' => $rate['item'],
+                'amount' => $rate['amount'],
+                'unit' => $rate['unit'],
+                'minimum' => $rate['minimum'],
+                'branch' => $rate['branch'],
+                'cargo' => $rate['cargo'],
+                'service' => $rate['service'],
+                'rebate' => $rate['rebate']
+            );
+            $rates[] = $oneRate;
+        }
+        return $rates;
+    }
+
+    	 /**
+     * get price rate weight ranges based on charge code ID
+     * @param $chargeCodeId
+     * @return array
+     */
+    public static function getOrgFlexibleRateByOrgIds($consolId,$orgIds,$isWithId=false,$isCopy = false){
+    	$consol = Consol::model()->findByPk($consolId);
+    	$str = "and branch like '%{$consol->dpt_id}%'";
+    	if($consol->service==Consol::SEACONSOL)
+    	{
+    		$seaType = Consol::SEA_TYPE[@$consol->mdata['sea_type']];
+    		$str.=" and cargo like '%{$seaType}%'";
+    		$str.=" and service like '%{$consol->service}%'";
+    	}else
+    	{
+    		$airType = Consol::AIR_TYPE[@$consol->mdata['air_type']];
+    		$str.=" and cargo like '%{$airType}%'";
+    		$str.=" and service like '%{$consol->service}%'";
+    	}
+    	$canCopy = false;
+    	$rt = OrgFlexibleRate::model()->findAll('fid = :fid and model ="Consol" '.$str.' and org_id in ('.join(',',$orgIds).')',[":fid"=>$consolId]);
+    	if(empty($rt))
+    	{
+    		$r = OrgFlexibleRate::model()->find('org_id in ('.join(',',$orgIds).')  and fid = 0 '.$str);
+    		if(empty($r)) return [];
+
+    		$startDate = "";
+    		if($r->criteria==OrgFlexibleRate::ETD)
+    		{
+    			$startDate = $consol->etd;
+    		}elseif($r->criteria==OrgFlexibleRate::ETA)
+    		{
+    			$startDate = $consol->eta;
+    		}
+
+    		$rt = OrgFlexibleRate::model()->findAll('org_id in ('.join(',',$orgIds).')  and fid = 0 and start_date <=:startDate and criteria=:criteria '.$str,[":startDate"=>$startDate,":criteria"=>$r->criteria]);
+    		if(empty($rt))
+    		{
+    			$r = OrgFlexibleRateBk::model()->find(['condition'=>'org_id in ('.join(',',$orgIds).')  and fid = 0 and start_date <=:startDate and criteria=:criteria ',"params"=>[":startDate"=>$startDate,":criteria"=>$r->criteria],"order"=>"version DESC"]);
+    			if(!empty($r))
+    			{
+    				$rt = OrgFlexibleRateBk::model()->findAll(['condition'=>'org_id in ('.join(',',$orgIds).')  and fid = 0 and version= :version '.$str,"params"=>[":version"=>$r->version]]);
+    			}
+    		}
+    		$canCopy =true;
+    	}
+        $rates = array();
+        foreach ( $rt as $rate ) {
+            $oneRate = array(
+            	'org_id' => $rate['org_id'],
+                'item' => $rate['item'],
+                'amount' => $rate['amount'],
+                'unit' => $rate['unit'],
+                'minimum' => $rate['minimum'],
+                'branch' => $rate['branch'],
+                'cargo' => $rate['cargo'],
+                'service' => $rate['service'],
+                'rebate' => $rate['rebate']
+            );
+
+            if($isWithId)
+            {
+            	$oneRate['id'] = $rate['id'];
+            }
+
+            $rates[] = $oneRate;
+            if($isCopy&&$canCopy)
+		    {
+		    	$OrgFlexibleRate = new OrgFlexibleRate();
+				$OrgFlexibleRate->item =    $rate->item;
+				$OrgFlexibleRate->amount =  $rate->amount;
+				$OrgFlexibleRate->unit =    $rate->unit;
+				$OrgFlexibleRate->minimum = $rate->minimum;
+				$OrgFlexibleRate->branch =  $rate->branch;
+				$OrgFlexibleRate->cargo =   $rate->cargo;
+				$OrgFlexibleRate->service = $rate->service;
+				$OrgFlexibleRate->org_id =  $rate->org_id;
+				$OrgFlexibleRate->user_id=  $rate->user_id;
+				$OrgFlexibleRate->create =  $rate->create;
+				$OrgFlexibleRate->rebate =  $rate->rebate;
+				$OrgFlexibleRate->start_date = $rate->start_date;
+				$OrgFlexibleRate->criteria = $rate->criteria;
+				$OrgFlexibleRate->model="Consol";
+			   	$OrgFlexibleRate->fid = $consolId;
+				$OrgFlexibleRate->save();
+		    }
+        }
+
+        return $rates;
+    }
+
+
+
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return OrgFlexibleRate the static model class
+	 */
+	public static function model($className=__CLASS__)
+	{
+		return parent::model($className);
+	}
+}

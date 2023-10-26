@@ -1,0 +1,1408 @@
+<?php
+/*
+ * To change this template, choose Tools | Templates
+ * and open the template in the editor.
+ */
+class ApiShipmentAction extends CAction
+{
+	public $ctlr;
+	public $debug;
+	public $user;
+	public static $currencies = [
+		'AUD' => '1',
+		'USD' => '2',
+		'RMB' => '3',
+	];
+
+	public function run()
+	{
+		$this->ctlr = $this->getController();
+		$this->debug = !empty($_POST['test']);
+		$this->user = empty($this->ctlr->user)? false : User::model()->findByPk($this->ctlr->user);
+		if (!empty($_POST['method']) && method_exists($this, $_POST['method'])) {
+			if (!in_array($_POST['method'], ['get'])) {
+				$this->log(json_encode($_POST));
+			}
+			$this->{$_POST['method']}();
+		} else {
+			throw new CHttpException(400, 'API method not found!');
+		}
+	}
+
+	public function log($l)
+	{
+		$tmp = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR . 'shipmentapi' . DIRECTORY_SEPARATOR ;
+		file_put_contents($tmp.'shipment_api_'  . date('Y-m-d') . '.log', date('Y-m-d H:i:s').' '.$l."\n", FILE_APPEND);
+	}
+
+	public function create()
+	{
+		if ($this->debug) {
+			$o = new stdClass;
+			$o->status = 1;
+			$o->msg = 'Success';
+			echo json_encode($o);
+			return true;
+		}
+
+		//check credit status
+		$agt = Org::model()->findByPk($this->user->org_id);
+		// if ($agt->overCreditLimit() && !in_array($agt->type, [60,65])) {
+		// 	$o=['status' => 0, 'msg' => 'Account over limit, please contact customer support'];
+		// } else {
+			$d = $this->ctlr->data;
+
+			if (!empty($d->shipments)) {
+				$trans = Yii::app()->db->beginTransaction();
+				try {
+					$o = [];
+					foreach ($d->shipments as $s) {
+						$o[] = $this->newShipmentWithChargeCode($s);
+					}
+					$trans->commit();
+				} catch (Exception $ex) {
+					$trans->rollback();
+					throw $ex;
+				}
+			} elseif (is_object($d)) {
+				$o = $this->newShipmentWithChargeCode($d);
+			} else {
+				$o=['status' => 0, 'msg' => 'Json data malformatted'];
+			}
+		// }
+		
+		echo json_encode($o);
+	}
+	
+	/**
+	 * API new shipment added based on Chargecode
+	 * @param $d
+	 * @return stdClass
+	 * @throws CDbException
+	 */
+	private function newShipmentWithChargeCode($d)
+	{
+		$o = new stdClass;
+		$o->status = 0;
+		$o->msg = '';
+		if (!empty($d->no) && !empty($this->user->org_id) && Shipment::model()->count('agent_id = :aid AND hbn = :h', [':aid' => $this->user->org_id, ':h' => $d->no]) > 0) {
+			$o->msg = 'Shipment '.$d->no.' already exists';
+			return $o;
+		}
+		switch ($d->type) {
+			case 10:
+				$d->agent_id = $this->user->org_id;
+				$rt = ChooseShipment::newShipmentWithChargeCode($d);
+				$o->status = $rt->success? 1 : 0;
+				$o->msg = empty($rt->error)? $rt->msg : implode(', ', $rt->error);
+				if ($o->status) {
+					$p = ImParcel::model()->find('hbn = :hbn', [':hbn' => $rt->connote]);
+					if ($this->user->id == 720 && !empty($p->trans[0]) && $p->trans[0]->org_id == 115) {
+						$o->depot = @$p->trans[0]->mdata['fw_dest_code'];
+					}
+				}
+				foreach(['connote', 'ref', 'custref', 'lref', 'longref','barcode','old_address','new_address'] as $k){
+					if(isset($rt->{$k})) $o->{$k} = $rt->{$k};
+				}
+				$this->log(json_encode($o));
+				if (!empty($p->mdata['ap_sid'])) {
+					$o->ap_sid = $p->mdata['ap_sid'];
+				}
+				return $o;
+				break;
+			case 20:
+				$p = new ExParcel();
+				break;
+			default:
+				$p = new Shipment();
+				$p->type = $d->type;
+				break;
+		}
+
+		$cnee = new Addr;
+		if (!empty($d->consignee)) {
+			foreach ($d->consignee as $k => $v) {
+				if ($k == 'phone') {
+					$k = 'tel';
+				}
+				if ($k == 'cnid') {
+					$cnid = CnID::model()->find('no = :no AND status IN (10, 15, 18, 20)', [':no' => $v]);
+					if ($cnid) {
+						$d->consignee->cnid_id = $cnid->id;
+					}
+					$cnee->cnid_no = $v;
+					continue;
+				}
+				$v = str_replace(' ', ' ', $v);//replace chinese character space
+				$v = trim($v);
+				$cnee->{$k} = $v;
+			}
+		}
+
+		if ($d->type == 20) {
+			$cnee->country = 'PR China';
+			if((empty($cnee->state) || empty($cnee->city))) {
+				$cnee->setCnAddr($d->consignee->address, empty($d->consignee->postcode)? '' : $d->consignee->postcode);
+			}
+			if(empty($cnee->postcode)) {
+				$cnee->getZip();
+			}
+		}
+		$cnee->save();
+		
+		$cnor = new Addr;
+		if (!empty($d->shipper)) {
+			foreach ($d->shipper as $k=>$v) {
+				if ($k == 'phone') {
+					$k = 'tel';
+				}
+				$cnor->{$k} = $v;
+			}
+		}
+		$cnor->save();
+		if (empty($cnor->name) || !preg_match('/[A-z]+/', $cnor->name)) {
+			$o->msg = '[20001] - Shipment '.$d->cust_ref.' consignor name is empty';
+		}
+		$p->status = 10;
+		$p->pkg = empty($d->packs)? 1 : $d->packs;
+		$p->weight =empty($d->weight)?0:round($d->weight*100)/100;
+			 
+		if (!empty($d->dim)) {
+			$p->mdata['dim'] = json_decode(strtolower(json_encode($d->dim)), true);
+		}
+		$p->cbm = empty($d->cbm)?0:$d->cbm;
+		$p->agent_id = empty($this->user)? 0 : $this->user->org_id;
+		$p->cref = empty($d->cust_ref)? '' : $d->cust_ref;
+
+		if (!empty($d->flag)&&is_numeric($d->flag)) {
+			$p->bwf=$p->bwf|$d->flag;
+		}   //adding flag for Michelle
+		// in case agent : jiacheng(838) , we set default DIM and CBM if not set
+		// 30(w) * 15(h) * 3(d)
+		if ($p->agent_id == Org::ORGID_CLIENT_JIACHENG) {
+			if ($p->cbm == 0) {
+				$p->cbm = 0.001350;
+				$p->mdata['dim']['w'] = 30;
+				$p->mdata['dim']['h'] = 15;
+				$p->mdata['dim']['d'] = 3;
+			}
+		}
+
+		$p->insurance = empty($d->insurance)? 0 : $d->insurance;
+		$p->note = empty($d->notes)? '' : $d->notes;
+		$p->currency = empty($d->currency)? 2 : (empty(self::$currencies[$d->currency])? 2 : self::$currencies[$d->currency]);
+		$p->cnor_id = $cnor->id;
+		$p->cnee_id = $cnee->id;
+		if (!empty($d->no)) {
+			$p->hbn = $d->no;
+		}
+		if (empty($p->hbn)) {
+			$p->hbn = $p->genHbn();
+		}
+
+		//$o = $this->checkAmazon($d,$o);
+		if(!empty($o->msg))
+		{
+			return $o;
+		}
+
+		if (!empty($d->items)) {
+			foreach ($d->items as $i=>$itm) {
+				if (is_array($itm)) {
+					$p->eitems['type'][$i] = $itm[0];
+					$p->eitems['g'][$i] = (empty($itm[1]) && !empty($itm[2]))? $itm[2] : $itm[1];
+					$p->eitems['g_zh'][$i] = $itm[2];
+					$p->eitems['b'][$i] = $itm[3];
+					$p->eitems['m'][$i] = $itm[4];
+					$p->eitems['q'][$i] = $itm[5];
+					$p->eitems['v'][$i] = sprintf('%0.2f', $itm[6]);
+					$p->eitems['hs'][$i] = $itm[7];
+					if (!empty($itm[8])) {
+						$p->eitems['sku'][$i] = $itm[8];
+						$pd = ExProdb::model()->find('sku = :sku', [':sku' => $itm[8]]);
+						if (!empty($pd)) {
+							$p->eitems['pid'][$i] = $pd->id;
+						}
+					}
+				} elseif (!empty($itm->type)) {
+					$p->eitems['type'][$i] = $itm->type;
+					$p->eitems['g'][$i] = (!empty($itm->name))? $itm->name : '';
+					if (!empty($itm->name_zh)) {
+						$p->eitems['g_zh'][$i] = $itm->name_zh;
+					}
+					if (!empty($itm->brand)) {
+						$p->eitems['b'][$i] = $itm->brand;
+					}
+					if (!empty($itm->model)) {
+						$p->eitems['m'][$i] = $itm->model;
+					}
+					$p->eitems['q'][$i] = $itm->qty;
+					if (!empty($itm->price)) {
+						$p->eitems['v'][$i] = sprintf('%0.2f', $itm->price);
+					}
+					if (!empty($itm->hs)) {
+						$p->eitems['hs'][$i] = $itm->hs;
+					}
+					if (!empty($itm->sku)) {
+						$p->eitems['sku'][$i] = $itm->sku;
+						$pd = ExProdb::model()->find('sku = :sku', [':sku' => $itm->sku]);
+						if (!empty($pd)) {
+							$p->eitems['pid'][$i] = $pd->id;
+						}
+					}
+				}
+			}
+		}
+
+		if (!empty($d->ref)) {
+			$p->ref = $d->ref;
+		}
+
+		$p->mdata['client_entry'] = ['items'=> $p->eitems];
+
+		if ($p->save()) {
+			$o->status = 1;
+			$o->msg = 'Success';
+			$o->connote = $p->hbn;
+			if (!empty($p->cref)) {
+				$o->custref = $p->cref;
+			}
+			if (!empty($p->ref)) {
+				$o->ref = $p->ref;
+			}
+			if (!empty($d->mkv)) {
+				$p->_mkv = (array) $d->mkv;
+				Meta::saveAll($p);
+			}
+			if ($this->user->id == 720 && !empty($p->trans[0]) && $p->trans[0]->org_id == 115) {
+				$o->depot = @$p->trans[0]->mdata['fw_dest_code'];
+			}
+
+		} else {
+			$o->status = 0;
+			$o->msg = '';
+			$o->ref = '';
+			$o->custref = '';
+			$errors = $p->getErrors();
+			if (!empty($errors)) {
+				$o->msg = '[50001] - Failed to save parcel : ';
+				foreach ($p->getErrors() as $e) {
+					$o->msg .= implode('; ', $e);
+				}
+			}
+		}
+
+		$this->log(json_encode($o));
+		return $o;
+	}
+
+	public function update()
+	{
+		if ($this->debug) {
+			$o = new stdClass;
+			$o->status = 1;
+			$o->msg = 'Success';
+			echo json_encode($o);
+			return true;
+		}
+
+		$d = $this->ctlr->data;
+
+		if (!empty($d->shipments)) {
+			$o = [];
+			$trans = Yii::app()->db->beginTransaction();
+			try {
+				foreach ($d->shipments as $s) {
+					$o[] = $this->updateShipment($s);
+				}
+				$trans->commit();
+			} catch (Exception $ex) {
+				$trans->rollback();
+				throw $ex;
+			}
+		} elseif (is_object($d)) {
+			$o = $this->updateShipment($d);
+		} else {
+			$o=['status' => 0, 'msg' => 'Json data malformatted'];
+		}
+		$this->log(json_encode($o));
+		echo json_encode($o);
+	}
+
+	public function updateShipment($d, $testOnly = false, $fids=[])
+	{
+		$o = new stdClass;
+		$o->status = 1;
+		$o->msg = "";
+		$o->error = [];
+		$qs = [];
+		$agt_id = empty($this->user)? -1 : (empty($this->user->org_id)? -1: $this->user->org_id);
+		if($agt_id < 0 && empty($this->user->org_id) && !empty($this->user->org)) $agt_id = $this->user->org;
+		$params = [':agt' => $agt_id];
+		if(!empty($d->no)){
+			$qs[] = 'hbn = :n';
+			$params[':n'] = $d->no;
+		}
+		if(!empty($d->ref)){
+			$qs[] = 'ref = :r';
+			$params[':r'] = $d->ref;
+		}
+		if(!empty($d->cust_ref)){
+			$qs[] = 'cref = :cr';
+			$params[':cr'] = $d->cust_ref;
+		}
+		if(!empty($d->cref)){
+			$qs[] = 'cref = :cr';
+			$params[':cr'] = $d->cref;
+		}
+		if(empty($qs)){
+			$o->status = 0;
+			$o->msg = 'no/ref/cust_ref should be supply to update the shipment';
+			return $o;
+		}
+		$q = implode(' OR ', $qs);
+
+		if(Shipment::model()->count('('.$q.') AND agent_id = :agt AND status != 100', $params) > 1){
+			$o->status = 0;
+			$o->msg = 'no/ref/cust_ref refer to different shipments';
+			return $o;
+		}
+
+		$p = Shipment::model()->find('('.$q.') AND agent_id = :agt AND status != 100', $params);
+
+		if (empty($p)) {
+			$o->status = 0;
+			$o->msg = 'Shipment not found.';
+		} elseif (((($p->status > 25&&$p->status!=42) && $p->type == 10) || ($p->status > 20 && $p->type == 20) || !empty($p->mdata['direct_courier']))&&empty($p->mdata['can_edit'])) {
+			$o->status = 0;
+			$o->msg = 'Shipment can not be changed.';
+		} else {
+			if(empty($p->cnor))
+			{
+				$p->cnor = new Addr();
+			}
+
+			if (!empty($d->shipper)) {
+				foreach ($d->shipper as $k=>$v) {
+					if ($k == 'phone') {
+						$k = 'tel';
+					}
+					$p->cnor->{$k} = $v;
+				}
+				if(!$testOnly) $p->cnor->save();
+			}
+			if (!empty($d->consignee)) {
+				foreach ($d->consignee as $k=>$v) {
+					if ($k == 'phone') {
+						$k = 'tel';
+					}
+					$p->cnee->{$k} = $v;
+				}
+				$p->cnee->state = Addr::checkAuState($p->cnee->state);
+				if(!$testOnly) $p->cnee->save();
+			}
+			if (!empty($d->receiver)) {
+				if (!empty($d->receiver->name)) {
+					if (empty($p->receiver)) {
+						$receiver = new Addr;
+						foreach ($d->receiver as $k => $v) {
+							if ($k == 'phone') {
+								$k = 'tel';
+							}
+							$receiver->{$k} = $v;
+						}
+						if(!$testOnly) $receiver->save();
+						$p->receiver_id = $receiver->id;
+						$p->update('receiver_id');
+					} else {
+						foreach ($d->receiver as $k => $v) {
+							if ($k == 'phone') {
+								$k = 'tel';
+							}
+							$p->receiver->{$k} = $v;
+						}
+						if(!$testOnly) $p->receiver->save();
+					}
+				}
+			}
+			if ($p->type == 20 && (empty($p->cnee->state) || empty($p->cnee->postcode) || empty($p->cnee->city))) {
+				$p->cnee->setCnAddr($d->consignee->address, empty($d->consignee->postcode)? '' : $d->consignee->postcode);
+			}
+				
+			// for import parcel check consignee address
+			if ($p->type == 10) {
+				if (!empty($d->cust_ref2)) {
+					if (is_array($d->cust_ref2)) {
+						$p->mdata['cust_ref2'] = implode(" ", $d->cust_ref2);
+					} else {
+						$p->mdata['cust_ref2'] = $d->cust_ref2;
+					}
+				}
+
+				if(!empty($d->amazon_shipment_ids))
+				{
+					$p->mdata['amazon_shipment_ids']=rtrim($d->amazon_shipment_ids,',');
+					$p->mdata['amazon_shipment_ids']=rtrim($d->amazon_shipment_ids,';');
+				}
+				if(!empty($d->amazon_po)){
+					// if(strlen($d->amazon_po) > 100){
+					// 	$o->error[] = '[90008] - Shipment '.$d->cust_ref.' amazon PO must be less than 100 characters';
+					// }
+					$p->mdata['amazon_po'] = rtrim($d->amazon_po, ',');
+					$p->mdata['amazon_po'] = rtrim($d->amazon_po, ';');
+				}
+
+				$o = ChooseShipment::checkAmazonPo($p,$o);
+				if(!empty($o->error))
+				{
+					$o->msg = join(',',$o->error);
+					return $o;
+				}
+
+				if (!empty($d->importer_abn)) {
+					$p->mdata['importer_abn'] = $d->importer_abn;
+				}
+				if (!empty($d->vendor_id)) {
+					$p->mdata['vendor_id'] = $d->vendor_id;
+				}
+				if (!empty($d->consignor_tin)) {
+					$p->mdata['consignor_tin'] = $d->consignor_tin;
+				}
+					
+				if (!empty($d->consignee)) {
+					$suburb = isset($p->cnee->suburb) ? trim($p->cnee->suburb) : '';
+					$state = isset($p->cnee->state) ? trim($p->cnee->state) : '';
+					$postcode = isset($p->cnee->postcode) ? trim($p->cnee->postcode) : '';
+					//for saicheng
+					if (isset($d->chargecode))
+					{
+						$chargeCodeInfo = ImportChargeCode::model()->find('chargecode = :ccode', [':ccode' => $d->chargecode]);
+					}else
+					{
+						$chargeCodeInfo = ImportChargeCode::model()->find('chargecode = :ccode', [':ccode' => $p->mdata['chargecode']]);
+					}
+
+					//when not passed aupostvalid, we use our database to do the valid!
+					if(empty($chargeCodeInfo->mdata['cm_address']))
+					{
+						if (empty($p->cnee->country) || $p->cnee->country == 'AU') {
+						if (!Postcode::validateAddress($suburb, $state, $postcode, 'AU')){
+							$o->status = 0;
+							$o->msg = '[90001] - Shipment ' . $p->hbn . ' suburb,state,postcode combination wrong';
+							return $o;
+						}
+						}
+					}
+				}
+			}
+			if(!$testOnly) $p->cnee->save();
+			//is B2B
+
+			if(!empty($p->cnee->company)&&mb_strlen($p->cnee->company,"utf-8")>5)//is B2B
+			{
+				$p->mdata['is_b2b'] = 1;
+			}else
+			{
+				$p->mdata['is_b2b'] = '';
+				unset($p->mdata['is_b2b']);
+			}
+
+			if(!empty($d->packs))
+			{
+				if(!$p->checkCanEditPkg($d))
+				{
+					$o->status = 0;
+					$o->msg = "[90024] - shipment " . $p->hbn . " due to courier limitation, you can not change the packages of this parcel, please cancel and create a new parcel";
+					$o->no = $p->hbn;
+					return $o;
+				}
+				$p->pkg = $d->packs;
+			}
+
+			if(!empty($d->weight) && $d->weight > 0) 
+			{
+				if(!$p->checkCanEditWeight($d))
+				{
+					$o->status = 0;
+					$o->msg = "[90024] - shipment " . $p->hbn . " due to courier limitation, you can not change the weight of this parcel, please cancel and create a new parcel";
+					$o->no = $p->hbn;
+					return $o;
+				}
+				$p->weight = max(number_format(floatval($d->weight), 4, '.', ''), 0.01);
+			}
+			
+			if (!empty($d->cbm) && $d->cbm > 0) {
+				$p->cbm = $d->cbm;
+			}
+			if (!empty($d->dim)) {
+				$p->mdata['dim'] = json_decode(strtolower(json_encode($d->dim)), true);
+			}
+			if (!empty($d->packages)&&$p->type==10) {
+				if (sizeof($d->packages)!=$p->pkg) {//the packages infor must match the pkg
+					$o->status = 0;
+					$o->msg = '[90007] - Shipment '.$d->cust_ref.'  numbers of packages not match the packs ';
+					return $o;
+				}
+				$totalWeight=0;
+				$cbm=0;
+				$calculateCbm=0;
+				array_splice($p->packs, 0);
+				foreach ($d->packages as $index=>$pack) {
+					if (empty($pack->weight)) {
+						$o->status = 0;
+						$o->msg = '[90006] - Shipment '.$d->cust_ref.' package '.($index+1).' weight are mandatory';
+						return $o;
+					} else {
+						$length = 0;
+						if(isset($pack->depth))
+						{
+							$length= $pack->depth;
+						}elseif(isset($pack->length))
+						{
+							$length= $pack->length;
+						}
+
+						$p->packs[$index]=['weight'=>$pack->weight,'length'=>$length,
+							'height'=>isset($pack->height)?$pack->height:0,'width'=>isset($pack->width)?$pack->width:0,
+							'reference'=>isset($pack->reference)?$pack->reference:0];
+						if (!empty($pack->cbm)) {
+							$p->packs[$index]['cbm']=$pack->cbm;//M3
+						} elseif ($p->packs[$index]['length']*$p->packs[$index]['width']*$p->packs[$index]['height']>0) {
+							$p->packs[$index]['cbm']= number_format($p->packs[$index]['length']*$p->packs[$index]['width']*$p->packs[$index]['height']/1000000, 6, '.', '');
+						} else {
+							$p->packs[$index]['cbm']=0;
+						}
+					}
+					$totalWeight+=$pack->weight;
+					$cbm+=$p->packs[$index]['cbm'];
+					$calculateCbm+=number_format($p->packs[$index]['length']*$p->packs[$index]['width']*$p->packs[$index]['height']/1000000, 6, '.', '');
+				}
+				$cbm=number_format(max($cbm, $calculateCbm)/$p->pkg, 6, '.', '');
+				$p->cbm=$cbm;
+				$p->weight=max($p->weight, $totalWeight, 0.01);
+			}
+
+			if($p->weight < 0.01){
+				$o->status = 0;
+				$o->msg = '[90006] - Shipment '.$p->cref.' weight are mandatory';
+				$o->no = $p->hbn;
+				return $o;
+			}
+			$p->cref = empty($d->cust_ref)? $p->cref: $d->cust_ref;
+			$p->insurance = empty($d->insurance)? 0 : $d->insurance;
+			if (!empty($d->currency)&&$p->type==10) {
+				if (!in_array($d->currency, ['USD','AUD'])) {
+					$o->status = 0;
+					$o->msg = 'failed update, must use USD/AUD as currency for imports shipment';
+					$o->no = $p->hbn;
+					return $o;
+				}
+				$p->currency = empty($d->currency)? 2 : (empty(self::$currencies[$d->currency])? 2 : self::$currencies[$d->currency]);
+			}
+			if (!empty($d->notes)) {
+				$p->note = empty($d->notes)? $p->note : $d->notes;
+			}
+			if (!empty($d->cust_ref1)) {
+				$p->mdata['cust_ref1']=$d->cust_ref1;
+			}
+			if (!empty($d->clear)&&$d->type==10) { //for import need customer set up DDP OR DDU,
+				if (preg_match('/DDP/i', $d->clear)) {
+					$p->bwf=$p->bwf|64;
+					$p->bwf=$p->bwf&128^$p->bwf;
+				} elseif (preg_match('/DDU/i', $d->clear)) {
+					$p->bwf=$p->bwf|128;
+					$p->bwf=$p->bwf&64^$p->bwf;
+				}
+			}
+			if (!empty($d->items)) {
+				$p->eitems = [];
+				foreach ($d->items as $i=>$itm) {
+					if (is_array($itm)) {
+						$p->eitems['type'][$i] = $itm[0];
+						$p->eitems['g'][$i] = $itm[1];
+						$p->eitems['g_zh'][$i] = $itm[2];
+						$p->eitems['b'][$i] = $itm[3];
+						$p->eitems['m'][$i] = $itm[4];
+						$p->eitems['q'][$i] = $itm[5];
+						$p->eitems['v'][$i] = sprintf('%0.2f', $itm[6]);
+						$p->eitems['hs'][$i] = $itm[7];
+
+						// for import parcel , items : name , quantity and value are mandatory
+						if ($p->type == 10 && (empty($p->eitems['g'][$i]) || empty($itm[5]) || empty($itm[6]))) {
+							$o->status = 0;
+							$o->msg = '[90003] - Shipment items(name,quantity,value) are mandatory';
+
+							return $o;
+						}
+					} elseif (!empty($itm->type)) {
+						$p->eitems['type'][$i] = $itm->type;
+						$p->eitems['g'][$i] = (!empty($itm->name))? $itm->name : '';
+						if (!empty($itm->name_zh)) {
+							$p->eitems['g_zh'][$i] =$itm->name_zh;
+						}
+						if (!empty($itm->brand)) {
+							$p->eitems['b'][$i] = $itm->brand;
+						}
+						if (!empty($itm->model)) {
+							$p->eitems['m'][$i] = $itm->model;
+						}
+						$p->eitems['q'][$i] = $itm->qty;
+						if (!empty($itm->price)) {
+							$p->eitems['v'][$i] = sprintf('%0.2f', $itm->price);
+						}
+						if (!empty($itm->hs)) {
+							$p->eitems['hs'][$i] = $itm->hs;
+						}
+
+						// for import parcel , items : name , quantity and value are mandatory
+						if ($p->type == 10 && (empty($p->eitems['g'][$i]) || empty($itm->qty) || empty($itm->price))) {
+							$o->status = 0;
+							$o->msg = '[90003] - Shipment items(name,quantity,value) are mandatory';
+							return $o;
+						}
+					}
+				}
+			}
+						
+			// if supply chargecode, which is possible the Reserve service, so we need to do some validation!
+			if (isset($d->chargecode) && $d->chargecode > 0 && ($p->cbwf&4096)==0) {
+				if (ImportChargeCode::isActive($d->chargecode)) {
+					// $chargeCodeInfo = ImportChargeCode::model()->find('chargecode = :ccode', [':ccode' => $d->chargecode]);
+					// $chargeCodeSetUp=$chargeCodeInfo->hasChargeSetUp($p);
+					// if (!$chargeCodeSetUp['status']) {
+					// 	$o->msg = '[90010] - Shipment '.$d->cust_ref." ".$chargeCodeSetUp['msg'];
+					// 	$o->status=0;
+					// 	return $o;
+					// }
+					// $rt = ChooseShipment::SelectServiceByChargeCode($d->chargecode, $p);
+					// if (isset($rt)) {
+					// 	$o->msg = $rt->msg. implode(';', $rt->error);
+					// 	$o->status = $rt->status;
+					// } else {
+					// 	$o->msg = '[30001] - ' . $p->hbn . '- Unknown Error';
+					// 	$o->status = 0;
+					// 	return $o;
+					// }
+					// $p->mdata['chargecode'] = $d->chargecode;
+				} else {
+					$o->msg = '[40001] - Chargecode : ' . $d->chargecode . ' has been disabled';
+					$o->status = 0;
+					return $o;
+				}
+				if ($o->status==0) {
+					return $o;
+				}
+			}
+			$p->mdata['client_entry'] = ['items'=> $p->eitems];
+
+			if (!empty($d->direct)) {
+				if (in_array($d->direct,[1,3])) {
+					$p->directCourier($d->direct);
+					$p->update(['cbwf','meta']);
+				} elseif ($d->direct == 2) {//cancel the direct courier if already manifest give errors.
+					if (!empty($p->mdata['direct_courier']) || ($p->cbwf & 64) > 0) {
+						$o->status = 0;
+						$o->msg = "[90004] - shipment " . $p->hbn . " already Manifest, you can't change it ";
+						return $o;
+					} else {
+						$p->cbwf = ($p->cbwf ^ 32) & $p->cbwf;
+						$p->update(['cbwf']);
+					}
+				}
+			}
+
+			if (isset($d->dg)&&!empty($p->trans)) {
+				if(!empty($d->dg)){
+					if(!in_array($p->trans[0]->org_id,Org::$dg_org))
+					{
+						$o->msg = '[90010] - ' . $p->hbn . ' only '.join(',',Org::$dg_org_name).' provide DG service';
+						return $o;
+					}else
+					{
+						$p->mdata['is_dg'] = $d->dg;
+					}
+				}else
+				{
+					$p->mdata['is_dg'] = $d->dg;
+				}
+			}
+			
+			if(!empty($fids['consol_id'])) $p->consol_id = $fids['consol_id'];
+			if(!empty($fids['man_id'])) $p->man_id = $fids['man_id'];
+			if($testOnly){
+				$o->status = 1;
+				$o->msg = 'Success';
+				$o->no = $p->hbn;
+				return $o;
+			}
+						
+			if($p->save()) {
+				if (($p->cbwf & 4096) > 0) {//clearance only service
+					$o->status = 1;
+					$o->msg = 'Success';
+					$o->no = $p->hbn;
+					return $o;
+				}
+				// in case startrack , fastway or toll
+				// we need update to third party system as well
+				// currently only for startrack
+				// we don't allow our customer to update startrack informaiton, as this will modify the tracking numbers.
+				if ($p->type == 10) {
+					if (isset($p->mdata['ss_shipment_id']) && !empty($p->mdata['ss_shipment_id'])) {
+						if (empty($p->mdata['ss_shipment_items'])) {
+							$o->msg = '[40003] - this startrack shipment not allow updating now, please create a new shipment based on the information';
+							$o->status = 0;
+							return $o;
+						}
+						if (preg_match("/4XHZ\d{8}/i", $p->ref)) {
+							$ss= new StarTrackAPI('mel', true);
+						} else {
+							$ss = new StarTrackAPI('syd', true);
+						}
+						$result = $ss->updateShipment($p->mdata['ss_shipment_id'], $p);
+						// create label
+						$respLabel = $ss->createLabels([$p->mdata['ss_shipment_id']]);
+						if (!$result) {
+							$o->status = 0;
+							$o->msg = 'failed update from Startrack System';
+							$o->no = $d->no;
+							return $o;
+						}
+						$o->status = 1;
+						$o->msg = 'Success';
+						$o->no = $p->hbn;
+					} else {
+						$o->status = 1;
+						$o->msg = 'Success';
+						$o->no = $p->hbn;
+					}
+				} else {
+					$o->status = 1;
+					$o->msg = 'Success';
+					$o->no =$p->hbn;
+				}
+			} else {
+				$o->status = 0;
+				$o->msg = implode('; ', $p->getErrors());
+			}
+		}
+			   
+		return $o;
+	}
+
+	public function cancel()
+	{
+		$d = $this->ctlr->data;
+		$p = Shipment::model()->find('hbn = :n AND agent_id = :agt', [':n' => $d->no, ':agt' => empty($this->user)? -1 : $this->user->org_id]);
+
+		$o = new stdClass;
+		if (empty($p)) {
+			$o->status = 0;
+			$o->msg = 'Shipment not found.';
+		} else {
+			$trans = $p->trans;
+			if(!empty($trans)&&!empty(end($trans)->mdata['oid']))
+			{
+				$o->status = 0;
+				$o->msg = 'Shipment was manifested and can not be changed';
+			}else
+			{
+				$p->status = 100;
+				$p->save();
+				$o->status = 1;
+				$o->msg = 'Success';
+			}
+		}
+		$this->log(json_encode($o));
+		echo json_encode($o);
+	}
+
+	public function get()
+	{
+		$d = $this->ctlr->data;
+		$criteria = new CDbCriteria();
+		$criteria->addCondition("agent_id=:aid");
+		$criteria->params[':aid'] = empty($this->user)? -1 : $this->user->org_id;
+		if (!empty($d->no)) {
+			$fld = 'hbn';
+			$dv = $d->no;
+		} elseif (!empty($d->cust_ref)) {
+			$fld = 'cref';
+			$dv = $d->cust_ref;
+		} elseif (!empty($d->ref)) {
+			$fld = 'ref';
+			$dv = $d->ref;
+		}
+		if (is_array($dv)) {
+			$criteria->addInCondition($fld, $dv);
+		} else {
+			$criteria->addCondition($fld."=:no");
+			$criteria->params[':no'] = $dv;
+		}
+
+		$rs = Shipment::model()->findAll($criteria);
+		
+		$o = new stdClass;
+		if (empty($rs)) {
+			$o->status = 0;
+			$o->msg = 'Shipment not found.';
+		} else {
+			$o->status = 1;
+			$o->msg = 'Success';
+			foreach ($rs as $p) {
+				$s = new stdClass;
+				$s->no = $p->hbn;
+				$s->ref = $p->ref;
+				$s->cust_ref = $p->cref;
+				$s->weight = $p->weight;
+				$s->cbm = $p->cbm;
+				$s->packs = $p->pkg;
+				$s->insurance = $p->insurance;
+				$s->currency = empty($p->currency)? 'AUD' : Invoice::$currencies[$p->currency];
+				$s->shipper = [
+					'name' => $p->cnor->name,
+					'address' => $p->cnor->address,
+					'state' => $p->cnor->state,
+					'city' => $p->cnor->city,
+					'suburb' => $p->cnor->suburb,
+					'postcode' => $p->cnor->postcode,
+					'phone' => $p->cnor->tel,
+					'email' => $p->cnor->email,
+				];
+				$s->consignee = [
+					'name' => $p->cnee->name,
+					'address' => $p->cnee->address,
+					'state' => $p->cnee->state,
+					'city' => $p->cnee->city,
+					'suburb' => $p->cnee->suburb,
+					'postcode' => $p->cnee->postcode,
+					'phone' => $p->cnee->tel,
+					'email' => $p->cnee->email,
+				];
+				foreach ($p->eitems['g'] as $gi => $g) {
+					$s->items[] = [
+						'type' => empty($p->eitems['type'][$gi])? 'O' : $p->eitems['type'][$gi],
+						'name' => $g,
+						'name_zh' => empty($p->eitems['g_zh'][$gi])? '' : $p->eitems['g_zh'][$gi],
+						'brand' => empty($p->eitems['b'][$gi])? '' : $p->eitems['b'][$gi],
+						'model' => empty($p->eitems['m'][$gi])? '' : $p->eitems['m'][$gi],
+						'qty' => empty($p->eitems['q'][$gi])? '' : $p->eitems['q'][$gi],
+						'price' => empty($p->eitems['v'][$gi])? '' : $p->eitems['v'][$gi],
+						'hs' => empty($p->eitems['hs'][$gi])? '' : $p->eitems['hs'][$gi],
+					];
+				}
+				$s->notes = $p->note;
+				if (preg_match('/^(AMQ|333UF|33EVJ|33EVH|33A8Y|33MBQ)\d{7}/', $p->ref)) {
+					$aids = [];
+					for ($i=1; $i<=$p->pkg; $i++) {
+						$aid = $p->ref.sprintf('%02s', $i).'00093'.'50'.'0';
+						$aid .= AusPostAPI::aidChkDgt($aid);
+						$aids[] = $aid;
+					}
+					$s->ap_consignment = [
+						'id' => $p->ref,
+						'aids' => $aids,
+					];
+				}
+				if(!empty($d->barcode))
+				{
+					$barcode = $p->getParcelBarcode(null);
+					if(!empty($barcode)) $s->barcode= $barcode;
+				}
+				$o->shipments[] = $s;
+			}
+		}
+		echo json_encode($o);
+	}
+
+	public function label()
+	{
+		if ($this->debug) {
+			$o = new stdClass;
+			$o->status = 1;
+			$o->msg = 'Success';
+			echo json_encode($o);
+			return true;
+		}
+		$data = $this->ctlr->data;
+		$agent_id = empty($this->user)? 0 : $this->user->org_id;
+		if (!empty($data->shipments)) {
+			$allShipments = [];
+			$barcodes = [];
+			if (sizeof($data->shipments)>10) {
+				$o=['status' => 0, 'msg' => 'shipments number should be less than 10'];
+				echo json_encode($o);
+				return;
+			}
+			foreach ($data->shipments as $d) {
+				$criteria = new CDbCriteria();
+				$criteria->compare('agent_id', $agent_id);
+				$criteria->addCondition('status != '.ImParcel::STATE_CANCELLED);
+				$criteria->limit=2;
+				if (!empty($d->no)) {
+					if (!is_array($d->no)) {
+						$d->no = [$d->no];
+					}
+					$criteria->addInCondition('hbn', $d->no);
+				} elseif (!empty($d->ref)) {
+					if (!is_array($d->ref)) {
+						$d->ref = [$d->ref];
+					}
+					$criteria->addInCondition('ref', $d->ref);
+				}elseif (!empty($d->cust_ref)) {
+					if (!is_array($d->cust_ref)) {
+						$d->cust_ref = [$d->cust_ref];
+					}
+					$criteria->addInCondition('cref', $d->cust_ref);
+				}
+
+				if(!empty($d->barcode))
+				{
+					$barcode = $d->barcode;
+					$sn = 0;
+					$courier_id = 0;
+					$p = ShipmentScan::getShipmentByBarcode($barcode,$sn,$courier_id,true,$agent_id);
+					if(empty($p))
+					{
+						$rs = [];
+					}else
+					{
+						$rs = [$p];
+						if(!empty($barcodes[$p->ref]))
+						{
+							$barcodes[$p->ref] = [];
+						}
+						$barcodes[$p->ref][] = $sn;
+					}
+				}else
+				{
+					$rs = Shipment::model()->findAll($criteria);
+				}
+				$allShipments= array_merge($allShipments, $rs);
+			}
+			$this->updatelabel($allShipments, $data->shipments[0],$barcodes);
+		} elseif (is_object($data)) {
+			$d=$data;
+			$barcode = [];
+			$criteria = new CDbCriteria();
+			$criteria->limit=2;
+			$criteria->compare('agent_id', $agent_id);
+			$criteria->addCondition('status != '.ImParcel::STATE_CANCELLED);
+			if (!empty($d->no)) {
+				if (!is_array($d->no)) {
+					$d->no = [$d->no];
+				}
+				$criteria->addInCondition('hbn', $d->no);
+			} elseif (!empty($d->cust_ref)) {
+				if (!is_array($d->cust_ref)) {
+					$d->cust_ref = [$d->cust_ref];
+				}
+				$criteria->addInCondition('cref', $d->cust_ref);
+			} elseif (!empty($d->ref)) {
+				if (!is_array($d->ref)) {
+					$d->ref = [$d->ref];
+				}
+				$criteria->addInCondition('ref', $d->ref);
+			}
+
+			if(!empty($d->barcode))
+			{
+				$barcode = $d->barcode;
+				$sn = 0;
+				$courier_id = 0;
+				$p = ShipmentScan::getShipmentByBarcode($barcode,$sn,$courier_id,true,$agent_id);
+				if(empty($p))
+				{
+					$rs = [];
+				}else
+				{
+					$rs = [$p];
+					$barcode = [$p->ref=>[$sn]];
+				}
+			}else
+			{
+				$rs = Shipment::model()->findAll($criteria);
+			}
+			$this->updatelabel($rs, $d,$barcode);
+		} else {
+			$o=['status' => 0, 'msg' => 'Json data malformatted'];
+			echo json_encode($o);
+		}
+	}
+
+	public function updatelabel($rs, $d,$barcode=false)
+	{
+
+		// $lblForAupost = false ;
+		// if (isset($d->label_type) && strtoupper($d->label_type) == 'AUSPOST') {
+		// 	$lblForAupost = true;
+		// }
+
+		// in case HVLV system prints label directly
+		$fn = 'label';
+		// if ($lblForAupost) {
+		// 	foreach ($rs as $p) {
+		// 		if (empty($p->ref)) {
+		// 			$p->ref = ImParcel::genEparcelNo();
+		// 			$longTrackingNumber = $p->ref.sprintf('%02s', 1).'00093'.'50'.'0';
+		// 			$longTrackingNumber .= AusPostAPI::aidChkDgt($longTrackingNumber);
+		// 			$p->note = $longTrackingNumber;
+		// 			$p->nolog = true;
+		// 			$p->update(['ref','note', 'meta']);
+		// 		}
+		// 	}
+		// }
+
+		foreach ($rs as $k =>  $r) {
+			if (!empty($r->mdata['client_entry'])) {
+				$cltent = $r->mdata['client_entry'];
+
+				if (!empty($cltent['items'])) {
+					$r->eitems = $cltent['items'];
+				}
+			}
+
+			if(!empty($d->show_sku)) $r->mdata['show_sku']=1;
+		}
+
+		$oRs = [];
+		$thisRs = [];
+		$eizLs = [];
+		$ps = [];
+		foreach ($rs as $key => $p) {
+			if(!empty($p->mdata['org_rate_id']))
+			{
+				$orgRate = OrgRate::model()->findByPk($p->mdata['org_rate_id']);
+			}
+			if (!empty($p->mdata['aupost_int'])) {//||!empty($p->mdata['printUrl'])
+				$oRs[] = $p;
+			}else if(!empty($p->mdata['org_rate_id'])&&ImParcelService::isOtherLabel($p))
+			{
+				$eizLs[] = $p;
+			}else
+			{
+				$thisRs[] = $p;
+			}
+		}
+		// merge startrack labels with other labels
+		$pdfps=['rs' => $thisRs,'barcode'=>$barcode];
+		if (empty($d->base64)&&empty($d->zpl)) {
+			if(!empty($oRs)||!empty($eizLs))
+			{
+				if(!empty($thisRs))
+				{
+					$tf = oPDF::renderPDF('label_A6', $pdfps, 2);
+					$ps[] = $tf;
+				}
+
+				foreach ($eizLs as $key => $p) {
+					$apiLabel = ImParcelService::getEizLabel($p);
+					if(!empty($apiLabel))
+					{
+						$ps[] = $apiLabel;
+					}
+				}
+
+				$apa = new AusPostAPI('syd', true, false);
+				foreach ($oRs as $p) {
+					if(!empty($p->mdata['ap_lbls']))
+					{
+						foreach($p->mdata['ap_lbls'] as $lbl){
+							$t = 0;
+							while($t < 3){
+								if($t > 0) sleep(1);
+								$r3 = $apa->getLabel($lbl);
+								foreach($r3->labels as $l){
+									if(empty($l->url)) continue;
+									$f = tempnam(Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR."temp".DIRECTORY_SEPARATOR, 'pp');
+									file_put_contents($f, file_get_contents($l->url));
+									$ps[] = $f;
+									break 2;
+								}
+								$t++;
+							}
+						}
+					}
+					// if(!empty($p->mdata['printUrl']))
+					// {
+					// 	$f = tempnam(Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR."temp".DIRECTORY_SEPARATOR, 'pp');
+					// 	file_put_contents($f, file_get_contents($p->mdata['printUrl']));
+					// 	$ps[] = $f;
+					// }
+				}
+				oPDF::mergePDF($ps, 1, true, $fn.'.pdf');
+			}else
+			{
+				oPDF::renderPDF('label_A6', $pdfps, 1, $fn . '.pdf');
+			}
+
+		} elseif (!empty($d->zpl)) {
+			foreach ($rs as $p) {
+				echo $this->zplLabel($p);
+			}
+		} else {
+			if(!empty($oRs)||!empty($eizLs))
+			{
+				if(!empty($thisRs))
+				{
+					$tf = oPDF::renderPDF('label_A6', $pdfps, 2);
+					$ps[] = $tf;
+				}
+				
+				foreach ($eizLs as $key => $p) {
+					$apiLabel = ImParcelService::getEizLabel($p);
+					if(!empty($apiLabel))
+					{
+						$ps[] = $apiLabel;
+					}
+				}
+
+				$apa = new AusPostAPI('syd', true, false);
+				foreach ($oRs as $p) {
+					if(!empty($p->mdata['ap_lbls']))
+					{
+						foreach($p->mdata['ap_lbls'] as $lbl){
+							$t = 0;
+							while($t < 3){
+								if($t > 0) sleep(1);
+								$r3 = $apa->getLabel($lbl);
+								foreach($r3->labels as $l){
+									if(empty($l->url)) continue;
+									$f = tempnam(Yii::app()->basePath . DIRECTORY_SEPARATOR . "runtime" . DIRECTORY_SEPARATOR."temp".DIRECTORY_SEPARATOR, 'pp');
+									file_put_contents($f, file_get_contents($l->url));
+									$ps[] = $f;
+									break 2;
+								}
+								$t++;
+							}
+						}
+					}
+
+					// if(!empty($p->mdata['printUrl']))
+					// {
+					// 	$f = tempnam(Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR."temp".DIRECTORY_SEPARATOR, 'pp');
+					// 	file_put_contents($f, file_get_contents($p->mdata['printUrl']));
+					// 	$ps[] = $f;
+					// }
+				}
+				
+				echo base64_encode(oPDF::mergePDF($ps, 0, true));
+			}else
+			{
+				echo base64_encode(oPDF::renderPDF('label_A6', $pdfps, 0));
+			}
+		}
+	}
+		
+	public function zplLabel($p)
+	{
+		$totalQty = empty($p->eitems['q'])? 0 : array_sum($p->eitems['q']);
+		for ($i=1; $i<=$p->pkg;$i++) {
+			$aid = $p->ref.sprintf('%02s', $i).'00093'.'50'.'0';
+			$aid .= AusPostAPI::aidChkDgt($aid).'0'.sprintf('%04s', $p->cnee->postcode);
+			$said = str_replace('AMQ', '>6AMQ>5', $aid);
+			$model = [
+				'agent_id'=>$p->agent_id,
+				'cnee_name' => $p->cnee->name,
+				'cnee_address' => $p->cnee->address,
+				'cnee_state_postcode' => $p->cnee->suburb . ' ' . $p->cnee->state . ' ' . $p->cnee->postcode,
+				'shipment'=>$p,
+				'cnee_phone' => $p->cnee->tel,
+				'weight' => $p->weight/$p->pkg,
+				'cnor_name' => $p->cnor->name,
+				'cnor_address' => '6C The Crescent',
+				'cnor_state_postcode' => 'KINGSGROVE NSW 2208',
+				'parcel_ref' => $p->ref.($p->pkg>1? '-'.$i : ''),
+				'parcel_uni_no' => $p->hbn,
+				'parcel_qty'=>round($totalQty/$p->pkg, 0),
+				'parcel_cref' => $p->cref,
+				'parcel_index' => "$i/$p->pkg",
+				'parcel_aupost_id' => $aid,
+				'created'=>$p->created,
+				'parcel_aupost_barcode' => '>;>899700160'. $said
+			];
+			if (isset($p->trans) && !empty($p->trans) && $p->trans[0]->org_id == Org::ORGID_COURIER_FASTWAY) {
+				$allData = $this->controller->renderPartial('//_pdf/_label_fastway_zpl', ['model' => $model], true);
+			} else {
+				$allData = $this->controller->renderPartial(isset($p->mdata['test_aupost_2014'])? '//_pdf/_label_eparcel_zpl_2014' : '//_pdf/_label_eparcel_zpl_2014_1', ['model' => $model], true);
+			}
+			echo $allData;
+		}
+	}
+	private function checkAmazon(&$d,&$o)
+	{
+		if (!empty($d->amazon_po)) 
+		{
+			$amazonMsg = '[90005] - Number of amazon po must equals the number of amazon shipment id';
+			$p->mdata['amazon_po'] = $d->amazon_po;
+			if (!empty($d->amazon_shipment_ids)) {
+				$p->mdata['amazon_shipment_ids']=$d->amazon_shipment_ids;
+				$amazonPoSperateNumber = preg_match_all('/[.,;]/', trim($d->amazon_po));
+				$amazonIdsSperateNumber = preg_match_all('/[.,;]/', trim($d->amazon_shipment_ids));
+				$amazonPoArr = preg_split('/[.,;]/', trim($d->amazon_po));
+				$amazonShipmentIds = preg_split('/[.,;]/', trim($d->amazon_shipment_ids));
+				if(count($amazonPoArr)!=count($amazonShipmentIds))
+				{
+					$o->status = 0;
+					$o->msg = $amazonMsg;
+					return $o;
+				}
+			}else
+			{
+				$o->status = 0;
+				$o->msg = $amazonMsg;
+				return $o;
+			}
+		}else if(empty($d->amazon_po)&&!empty($d->amazon_shipment_ids))
+		{
+			$o->status = 0;
+			$o->msg = '[90005] - Number of amazon po must equals the number of amazon shipment id';
+			return $o;
+		}
+		return $o;
+	}
+
+	public function updateShipmentStatusForPCAE()
+	{
+		$agt_id = empty($this->user)? -1 : (empty($this->user->org_id)? -1: $this->user->org_id);
+		if($agt_id < 0 && empty($this->user->org_id) && !empty($this->user->org)) $agt_id = $this->user->org;
+		if($agt_id!=Org::ORGID_CLIENT_PCAE)
+		{
+			echo "wrong org";
+			return;
+		}
+		$d = $this->ctlr->data;
+		$o = [];
+		// $apiService = new ApiService();
+		// if (!empty($d->shipments)) {
+		// 	$o = [];
+		// 	$trans = Yii::app()->db->beginTransaction();
+		// 	try {
+		// 		foreach ($d->shipments as $s) {
+		// 			$o[] = $apiService->updateShipmentStatusForPCAE($s);
+		// 		}
+		// 		$trans->commit();
+		// 	} catch (Exception $ex) {
+		// 		$trans->rollback();
+		// 		throw $ex;
+		// 	}
+		// } elseif (is_object($d)) {
+		// 	$o = $apiService->updateShipmentStatusForPCAE($d);
+		// } else {
+		// 	$o=['status' => 0, 'msg' => 'Json data malformatted'];
+		// }
+		$this->log(json_encode($o));
+		echo json_encode($o);
+	}
+
+	public function validateAddress()
+	{
+		$agt_id = empty($this->user)? -1 : (empty($this->user->org_id)? -1: $this->user->org_id);
+		if($agt_id < 0 && empty($this->user->org_id) && !empty($this->user->org)) $agt_id = $this->user->org;
+		if($agt_id!=Org::ORGID_CLIENT_PCAE)
+		{
+			echo "wrong org";
+			return;
+		}
+		$d = $this->ctlr->data;
+		$suburb = $d->suburb;
+		$state = $d->state;
+		$postcode = $d->postcode;
+		$apiService = new AusPostAPI('syd');
+		if (is_object($d)) {
+			$result = $apiService->validateAddress($suburb, $state, $postcode);
+			if($result===true)
+			{
+				$o=['status' => 1, 'msg' => 'valid','result'=>$result];
+			}else
+			{
+				$o=['status' => 1, 'msg' => 'invalid','result'=>$result];
+			}
+		} else {
+			$o=['status' => 0, 'msg' => 'Json data malformatted'];
+		}
+		$this->log(json_encode($o));
+		echo json_encode($o);
+	}
+
+	public function doTNTRouting()
+	{
+		$agt_id = empty($this->user)? -1 : (empty($this->user->org_id)? -1: $this->user->org_id);
+		if($agt_id < 0 && empty($this->user->org_id) && !empty($this->user->org)) $agt_id = $this->user->org;
+		if($agt_id!=Org::ORGID_CLIENT_PCAE)
+		{
+			echo "wrong org";
+			return;
+		}
+		$d = $this->ctlr->data;
+		$data = [];
+		$data['CSurburb'] = $d->CSurburb;
+		$data['CPostcode'] = $d->CPostcode;
+		$data['DSuburb'] = $d->DSuburb;
+		$data['DPostcode'] = $d->DPostcode;
+		$data['ServiceCode'] = $d->ServiceCode;
+		$apiService = TntAPI::getTntInterface('syd_top');
+		if (is_object($d)) {
+			$result = $apiService->doRoutingRequestPublic($data);
+			if(!empty($result))
+			{
+				$o=['status' => 1, 'msg' => 'valid','result'=>$result];
+			}
+		} else {
+			$o=['status' => 0, 'msg' => 'Json data malformatted'];
+		}
+		$this->log(json_encode($o));
+		echo json_encode($o);
+	}
+
+	public function receiveTrackingInfo()
+	{
+		$agt_id = empty($this->user)? -1 : (empty($this->user->org_id)? -1: $this->user->org_id);
+		if($agt_id < 0 && empty($this->user->org_id) && !empty($this->user->org)) $agt_id = $this->user->org;
+		if($agt_id!=Org::ORGID_CLIENT_TRACKING)
+		{
+			echo "wrong org";
+			return;
+		}
+		$d = $this->ctlr->data;
+		$trackingService = new TrackingService();
+		if (is_object($d)) {
+			$result = $trackingService->handlingTrackingInfo($d);
+			if(!empty($result))
+			{
+				$o=['status' => 1, 'msg' => 'success','result'=>$result];
+			}else
+			{
+				$o=['status' => 0, 'msg' => 'failed','result'=>$result];
+			}
+		} else {
+			$o=['status' => 0, 'msg' => 'Json data malformatted'];
+		}
+		$this->log(json_encode($o));
+		echo json_encode($o);
+	}
+
+
+	public function getShipmentNeedTracking()
+	{
+		$agt_id = empty($this->user)? -1 : (empty($this->user->org_id)? -1: $this->user->org_id);
+		if($agt_id < 0 && empty($this->user->org_id) && !empty($this->user->org)) $agt_id = $this->user->org;
+		if($agt_id!=Org::ORGID_CLIENT_TRACKING)
+		{
+			echo "wrong org";
+			return;
+		}
+		$d = $this->ctlr->data;
+		$trackingService = new TrackingService();
+		$result = $trackingService->getShipmentNeedTracking();
+		if(!empty($result))
+		{
+			$o=['status' => 1, 'msg' => 'success','result'=>$result];
+		}else
+		{
+			$o=['status' => 0, 'msg' => 'failed','result'=>$result];
+		}
+		$this->log(json_encode($o));
+		echo json_encode($o);
+	}
+}

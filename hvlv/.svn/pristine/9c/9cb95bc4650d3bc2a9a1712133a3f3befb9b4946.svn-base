@@ -1,0 +1,273 @@
+<style>
+	.uploading {
+		position: relative;
+		clear: both;
+		width: 150px;
+		font-size: 1.4em;
+		font-weight: bold;
+		color: #BC3426;
+		line-height: 32px;
+		z-index: 99;
+		padding: 15px 5px;
+		margin-bottom: -20px;
+		display: none;
+	}
+</style>
+<div style="right: 20px;position: absolute;">
+	<a href="#" data-dropdown="#<?= $_GET["tabid"]; ?>-dropdown-2">
+		<!-- <div style="background-position:-16px 0" class="icon"></div> Batch Export -->
+	</a>
+	<div id="<?= $_GET["tabid"]; ?>-dropdown-2" class="dropdown dropdown-tip dropdown-relative dropdown-anchor-right">
+		<!-- <ul class="dropdown-menu">
+			<li><a href="<?= $this->createUrl('imParcel/export', ['typ' => 'clabel']) ?>" target="_blank" id="ecl">Export Courier Labels</a></li>
+			<li><a href="<?= $this->createUrl('imParcel/export', ['typ' => 'plabel']) ?>" target="_blank" id="epl">Export TLA Labels</a></li>
+			<li><a href="<?= $this->createUrl('imParcel/export', ['typ' => 'dgdoc']) ?>" target="_blank" id="edd">Export DG docs</a></li>
+			<li><a href="<?= $this->createUrl('imParcel/export', ['typ' => 'sodoc']) ?>" target="_blank" id="eso">Export Sea Order</a></li>
+			<li><a href="<?= $this->createUrl('imParcel/export', ['typ' => 'amiauto']) ?>" target="_blank" id="amio">Export AMI automation</a></li>
+			<li><a href="<?= $this->createUrl('imParcel/export', ['typ' => 'dfe']) ?>" target="_blank" id="dfe">Export DFE Shipment</a></li>
+			<li><a href="<?= $this->createUrl('imParcel/exportAllDFE') ?>" target="_blank">Export ALL DFE Shipment</a></li>
+			<li><a href="<?= $this->createUrl('imParcel/exportAllChangedLabelShipment') ?>" target="_blank">Export ALL Changed Shipment</a></li>
+			<li><a href="<?= $this->createUrl('imParcel/export', ['typ' => 'dfeCost']) ?>" target="_blank" id="dfeCost">Export DFE Shipment With 4 Cost</a></li>
+		</ul> -->
+	</div>
+	<!-- <a class="tab_link" href="<?= $this->createUrl('imParcel/create'); ?>" title="New Shipment">
+		<div class="icon" style="background-position:-16px 0"></div> New Shipment
+	</a> &nbsp; -->
+	<!-- <a class="export_search" target="_blank" href="<?= $this->createUrl('imParcel/export', ['typ' => '']); ?>">
+		<div style="background-position:-48px -688px" class="icon"></div> Export Current Search
+	</a> &nbsp; -->
+	<!-- <a href="#" class="export_search" target="_blank" data-baseurl="<?= $this->createUrl('imParcel/export', ['typ' => 'pdf']); ?>"><div style="background-position:-48px -688px" class="icon"></div> Export Labels</a> -->
+	<!-- <?php if (Acl::hasAccess("B:imParcel/batchStatus")) { ?>
+		<a class="jqm_link" href="<?= $this->createUrl('imParcel/batchStatus', ['status' => 60]); ?>" title="Batch Cleared">
+			<div style="background-position:-48px -688px" class="icon"></div> Batch Cleared
+		</a>
+	<?php } ?> -->
+	<!-- <a href="#" data-dropdown="#<?= $_GET["tabid"]; ?>-dropdown-1">
+		<div style="background-position:-48px -688px" class="icon"></div> Import
+	</a> -->
+	<!-- <div id="<?= $_GET["tabid"]; ?>-dropdown-1" class="dropdown dropdown-tip dropdown-relative dropdown-anchor-right">
+		<ul class="dropdown-menu">
+			<?php if (Acl::hasAccess("B:imParcel/batchStatus")) { ?>
+				<li><a href="<?= $this->createUrl('uploadMani/seperateShipment') ?>" class="jqm_link">Change Label</a></li>
+			<?php } ?>
+			<?php if (Acl::hasAccess("B:imParcel/batchWeight")) { ?>
+				<li><a href="<?= $this->createUrl('imParcel/batchWeight') ?>" class="jqm_link">Change Weight</a></li>
+			<?php } ?>
+			<?php if (Acl::hasAccess("B:imParcel/batchIsB2B")) { ?>
+				<li><a href="<?= $this->createUrl('imParcel/batchIsB2B') ?>" class="jqm_link">Change isB2B</a></li>
+			<?php } ?>
+		</ul>
+	</div> -->
+</div>
+<h1>KP Summary Report</h1>
+
+<!-- <p>
+<?= $this->t('You may optionally enter a comparison operator (<b>&lt;</b>, <b>&lt;=</b>, <b>&gt;</b>, <b>&gt;=</b>, <b>&lt;&gt;</b> or <b>=</b>) at the beginning of each of your search values to specify how the comparison should be done.'); ?></p> -->
+
+<?php echo CHtml::link($this->t('Advanced Search'), '#', ['class' => 'search-button']); ?>
+<div style="left: 10px;position: absolute;">
+	<a class="jqm_link" data-win-class="L" href="<?=$this->createUrl('report/cargoInvoice');?>" title="Export KP Invoice">Export KP Invoice</a>  
+</div>
+<div class="search-form" style="display:none">
+	<?php $this->renderPartial('_search_cargoprocess', [
+		'model' => $model,
+	]);
+	?>
+</div>
+<div class="uploading"><img src="https://www.pcaexpress.com.au/client/css/images/ajaxLoader.gif" width="24" /> Loading</div>
+<div id="export_cargo_cost_detail" style="margin: 10px 0; border: 1px solid;padding:20px;display: none;"></div>
+
+<?php if ($isReCalculate) { ?>
+	<?php $this->widget('zii.widgets.grid.CGridView', [
+		'id' => 'im-parcel-grid' . @$modelType,
+		'cssFile' => false,
+		'dataProvider' => $model->search(true, 100, false, true, $pod_id, $cargo_type),
+		'filter' => $model,
+		'columns' => [
+			['name' => 'shipment.consol_no', 'type' => 'raw', 'value' => 'empty($data->shipment->consol_id)? "" : "<a href=\"".Yii::app()->createURL(Consol::getTheConsolType($data->shipment->consol_id)==70?"dmawbConsol/update":"imcoConsol/update", array("id" => $data->shipment->consol_id))."\" class=\"tab_link\" title=\"".@$data->shipment->consol->no."\">".@$data->shipment->consol->no."</a>"', 'filter' => CHtml::textField('ImParcel[consol_no]', $cargo->consol_no)],
+			array('name' => 'hbn', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->createURL("imParcel/update", array("id" => $data->shipment_id))."\" class=\"tab_link\" title=\"".$data->shipment->hbn."\">".$data->shipment->hbn."</a>"',),
+			array('name' => 'ref', 'value' => '@$data->getRef()'),
+			['name' => 'agent_id', 'value' => '@$data->shipment->agent_id'],
+			['header' => 'Depot', 'value' => '@$data->getDepot()'],
+			['header' => 'Type', 'value' => '@$data->getCargoTypeName()'],
+			['name' => 'shipment.cnee.postcode', 'filter' => CHtml::textField('CargoProcess[postcode]', @$model->postcode)],
+			['name' => 'shipment.weight', 'filter' => CHtml::textField('CargoProcess[weight]', @$model->weight), 'value' => '$data->getWeight()'],
+			['name' => 'shipment.pkg', 'cssClassExpression' => '$data->getShowColor("pkg")', 'filter' => CHtml::textField('CargoProcess[pkg]', @$model->pkg), 'value' => '$data->getPackages()'],
+			['name' => 'shipment.cbm', 'value' => '@$data->getTotalCBM()', 'filter' => CHtml::textField('CargoProcess[cbm]', @$model->cbm)],
+			['header' => 'Job Name', 'value' => '@$data->job_relation->job->job_name'],
+			['header' => 'Release Date', 'value' => '@$data->started'],
+			['name' => 'comp_date'],
+			['header' => 'Days', 'value' => '@$data->getDateDiff()'],
+			['header' => 'Effective Delivery', 'value' => '@$data->isGoodDelivery()'],
+			['header' => 'Driver', 'value' => '@$data->getDriver()'],
+			['header' => 'System Cost', 'value' => '@$data->getCargoProcessFeeReCal()'],
+			['header' => 'System Base Cost', 'value' => '@$data->getSystemBaseCost()'],
+			['header' => 'System Interstate Cost', 'value' => '@$data->getSystemInterstateCost()'],
+			['header' => 'Supplier Cost', 'value' => '@$data->getSupplierCost()'],
+			['header' => 'ChargeCode', 'value' => '@$data->getChargeCode()'],
+			['header' => 'Revenue', 'value' => '@$data->getCargoProcessRevenueFeeReCal()'],
+			['header' => 'Revenue Base', 'value' => '@$data->getSystemRevenueBase()'],
+			['header' => 'MHCharge', 'value' => '@$data->getMHCharge()'],
+			['header' => 'OSCharge', 'value' => '@$data->getOSCharge()'],
+			['header' => 'RECharge', 'value' => '@$data->getRECharge()'],
+			['header' => 'LevyCharge', 'value' => '@$data->getLevyCharge()'],
+			['header' => 'FuelCharge', 'value' => '@$data->getFuelCharge()'],
+			['header' => 'OT', 'value' => '@$data->getSystemOt()'],
+			['header' => 'Paid Rev', 'value' => '@$data->getPaidInvoice();']
+		],
+	]); ?>
+<?php } else { ?>
+	<?php $this->widget('zii.widgets.grid.CGridView', [
+		'id' => 'im-parcel-grid' . @$modelType,
+		'cssFile' => false,
+		'dataProvider' => $model->search(true, 100, false, true, @$pod_id, @$cargo_type),
+		'filter' => $model,
+		'columns' => [
+			['name' => 'shipment.consol_no', 'type' => 'raw', 'value' => 'empty($data->shipment->consol_id)? "" : "<a href=\"".Yii::app()->createURL(Consol::getTheConsolType($data->shipment->consol_id)==70?"dmawbConsol/update":"imcoConsol/update", array("id" => $data->shipment->consol_id))."\" class=\"tab_link\" title=\"".@$data->shipment->consol->no."\">".@$data->shipment->consol->no."</a>"', 'filter' => CHtml::textField('ImParcel[consol_no]', @$cargo->consol_no)],
+			array('name' => 'hbn', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->createURL("imParcel/update", array("id" => $data->shipment_id))."\" class=\"tab_link\" title=\"".$data->shipment->hbn."\">".$data->shipment->hbn."</a>"',),
+			array('name' => 'ref', 'value' => '@$data->getRef()'),
+			['name' => 'agent_id', 'value' => '@$data->shipment->agent_id'],
+			['header' => 'Depot', 'value' => '@$data->getDepot()'],
+			['header' => 'Type', 'value' => '@$data->getCargoTypeName()'],
+			['name' => 'shipment.cnee.postcode', 'filter' => CHtml::textField('CargoProcess[postcode]', @$model->postcode)],
+			['name' => 'shipment.weight', 'filter' => CHtml::textField('CargoProcess[weight]', @$model->weight), 'value' => '$data->getWeight()'],
+			['name' => 'shipment.pkg', 'cssClassExpression' => '$data->getShowColor("pkg")', 'filter' => CHtml::textField('CargoProcess[pkg]', @$model->pkg), 'value' => '$data->getPackages()'],
+			['name' => 'shipment.cbm', 'value' => '@$data->getTotalCBM()', 'filter' => CHtml::textField('CargoProcess[cbm]', @$model->cbm)],
+			['header' => 'Job Name', 'value' => '@$data->job_relation->job->job_name'],
+			['header' => 'Release Date', 'value' => '@$data->started'],
+			['name' => 'comp_date'],
+			['header' => 'Days', 'value' => '@$data->getDateDiff()'],
+			['header' => 'Effective Delivery', 'value' => '@$data->isGoodDelivery()'],
+			['header' => 'Driver', 'value' => '@$data->getDriver()'],
+			['header' => 'System Cost', 'value' => '@$data->getCargoProcessFee()'],
+			['header' => 'System Base Cost', 'value' => '@$data->getSystemBaseCost()'],
+			['header' => 'System Interstate Cost', 'value' => '@$data->getSystemInterstateCost()'],
+			['header' => 'Supplier Cost', 'value' => '@$data->getSupplierCost()'],
+			['header' => 'ChargeCode', 'value' => '@$data->getChargeCode()'],
+			['header' => 'Revenue', 'value' => '@$data->getCargoProcessRevenueFee()'],
+			['header' => 'Revenue Base', 'value' => '@$data->getSystemRevenueBase()'],
+			['header' => 'MHCharge', 'value' => '@$data->getMHCharge()'],
+			['header' => 'OSCharge', 'value' => '@$data->getOSCharge()'],
+			['header' => 'RECharge', 'value' => '@$data->getRECharge()'],
+			['header' => 'LevyCharge', 'value' => '@$data->getLevyCharge()'],
+			['header' => 'FuelCharge', 'value' => '@$data->getFuelCharge()'],
+			['header' => 'OT', 'value' => '@$data->getSystemOt()'],
+			['header' => 'Paid Rev', 'value' => '@$data->getPaidInvoice();']
+		],
+	]); ?>
+
+<?php } ?>
+
+<script type="text/javascript">
+	$(function() {
+		var tab = $('#<?= $_GET["tabid"]; ?>');
+		var panel = tab.data('panel');
+
+
+		var resetFilters = function() {
+			$('.search-form form', panel).trigger('reset');
+			$('#im-parcel-grid<?= @$modelType ?>', panel).yiiGridView('update', {
+				data: 'CoParcel=reset'
+			});
+		};
+
+		$('.search-button', panel).click(function() {
+			$('.search-form', panel).toggle();
+			return false;
+		});
+
+		$('.search-form form', panel).on('submit', function() {
+			$('#im-parcel-grid<?= @$modelType ?>', panel).yiiGridView('update', {
+				data: $('.filters input, .filters select', panel).serialize() + '&' + $(this).serialize()
+			});
+			return false;
+		}).find('.reset_btn').click(resetFilters);
+
+		tab.bind('onOpen', function() {
+			$('#im-parcel-grid<?= @$modelType ?>', panel).yiiGridView('update');
+		});
+
+		tab.on('gridUpdated', function() {
+			$('tr.filters td:last-child', panel).empty().append($('<input type="button" id="reset_filter" value="Reset" />').on('click', resetFilters));
+		}).trigger('gridUpdated');
+
+
+
+		$('#ecl', panel).on('mousedown', function() {
+			var q = $('.filters input, .filters select', panel).serialize() + '&' + $('.search-form form', panel).serialize();
+			$(this).attr('href', $(this).attr('href') + '&' + q);
+		});
+		$('#epl', panel).on('mousedown', function() {
+			var q = $('.filters input, .filters select', panel).serialize() + '&' + $('.search-form form', panel).serialize();
+			$(this).attr('href', $(this).attr('href') + '&' + q);
+		});
+		$('#edd', panel).on('mousedown', function() {
+			var q = $('.filters input, .filters select', panel).serialize() + '&' + $('.search-form form', panel).serialize();
+			$(this).attr('href', $(this).attr('href') + '&' + q);
+		});
+		$('#eso', panel).on('mousedown', function() {
+			var q = $('.filters input, .filters select', panel).serialize() + '&' + $('.search-form form', panel).serialize();
+			$(this).attr('href', $(this).attr('href') + '&' + q);
+		});
+		$('#amio', panel).on('mousedown', function() {
+			var q = $('.filters input, .filters select', panel).serialize() + '&' + $('.search-form form', panel).serialize();
+			$(this).attr('href', $(this).attr('href') + '&' + q);
+		});
+		var dfeHref = $('#dfe').attr('href');
+		$('#dfe', panel).on('mousedown', function() {
+			var q = $('.filters input, .filters select', panel).serialize() + '&' + $('.search-form form', panel).serialize();
+			$(this).attr('href', dfeHref + '&' + q);
+		});
+
+		$('input[name="yt0"]', panel).click(function() {
+			if ($('input[name="CargoProcess[ref]"]', panel).length) {
+				$('input[name="CargoProcess[ref]"]', panel).val("");
+			}
+			if ($('input[name="CargoProcess[hbn]"]', panel).length) {
+				$('input[name="CargoProcess[hbn]"]', panel).val("");
+			}
+		});
+
+		$('.pane', panel).on('focus', 'input[name="CargoProcess[ref]"]', function() {
+			if ($('input[name="CargoProcess[ref]"]', panel).val() == "searching") {
+				$('input[name="CargoProcess[ref]"]', panel).val("");
+			}
+		});
+
+		$('#export_button').click(function(e) {
+			e.preventDefault();
+			e.stopPropagation();
+			var listData = new FormData();
+			var listName2Value = $('#yw0', panel).serializeArray();
+			for (var i = 0; i < listName2Value.length; i++) {
+				var objName2Value = listName2Value[i];
+				listData.append(objName2Value.name, objName2Value.value);
+			}
+			$('.uploading', panel).fadeIn();
+			$('#export_cargo_cost_detail', panel).hide();
+			$('#export_cargo_cost_detail', panel).html('');
+			$.ajax({
+				type: "POST",
+				url: "<?= $this->createUrl('report/cargoProcessReportExport'); ?>",
+				data: listData,
+				dataType: 'html',
+				// async: false,
+				contentType: false,
+				processData: false,
+				success: function(resp) {
+					$('#export_cargo_cost_detail', panel).show();
+					$('#export_cargo_cost_detail', panel).html(resp);
+					$('.uploading', panel).fadeOut();
+				}
+			});
+			//obj = JSON.parse(htmlobj.responseText);
+		});
+
+		// var dfeCostHref = $('#dfeCost').attr('href');
+		// $('#dfeCost', panel).on('mousedown', function() {
+		// 	var q = $('.filters input, .filters select', panel).serialize() + '&' + $('.search-form form', panel).serialize();
+		// 	$(this).attr('href', dfeCostHref + '&' + q);
+		// });
+
+	});
+</script>

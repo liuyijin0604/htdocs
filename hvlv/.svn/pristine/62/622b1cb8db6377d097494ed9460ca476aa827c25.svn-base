@@ -1,0 +1,1223 @@
+<?php
+
+class DmawbConsolController extends Controller
+{
+	protected $nonAjax = ['exportAmazon','export','seaManifest','seaOrder','shipmentsDo','cargoReceipt','exportStartrackApLodge','exportStartrackMelApLodge','seaOutturnShipments','seaDeliveryOrderTogether','exportCurrentSearch'];
+
+	/**
+	 * Creates a new model.
+	 * If creation is successful, the browser will be redirected to the 'view' page.
+	 */
+	public function actionCreate()
+	{
+		$model = new DmawbConsol('create');
+
+		if (isset($_POST['DmawbConsol'])) {
+			$model->attributes = $_POST['DmawbConsol'];
+
+			$model->mdata['awb_wt'] = $_POST['mdata']['awb_wt'];
+			$model->mdata['cgb_wt'] = $_POST['mdata']['cgb_wt'];
+			$model->mdata['shipments'] = $_POST['mdata']['shipments'];
+			$model->mdata['item'] = $_POST['mdata']['item'];
+
+			// set department id as sydney warehouse
+			// when create invoice will use this value
+			if ($model->pod=='AUMEL') {
+				$model->dpt_id=Org::PCAE_DEPARTMENT_MELBOURNE;
+			} else {
+				$model->dpt_id = Org::PCAE_DEPARTMENT_SYDNEY;
+			}
+			if (empty($model->eta)) {
+				$model->eta = date('Y-m-d');
+			}
+
+			$model->save();
+			$this->ajaxResult($model, ['id']);
+		}
+
+		$this->render('create', [
+			'model' => $model,
+		]);
+	}
+
+	/**
+	 * Updates a particular model.
+	 * If update is successful, the browser will be redirected to the 'view' page.
+	 * @param integer $id the ID of the model to be updated
+	 */
+	public function actionUpdate($id)
+	{
+		$model = $this->loadModel($id);
+
+		if (!empty($_POST)) {
+			if (!empty($_POST['mdata'])) {
+				foreach ($_POST['mdata'] as $k=>$v) {
+					$model->mdata[$k] = trim($v);
+				}
+			}
+
+			if(empty($_POST['mdata']['not_apply_org_flexible_rate'])){
+				unset($model->mdata['not_apply_org_flexible_rate']);
+			}
+
+			if(empty($_POST['mdata']['blockacr'])){
+				unset($model->mdata['blockacr']);
+			}
+
+			if(empty($_POST['mdata']['skip_cacr'])){
+				unset($model->mdata['skip_cacr']);
+			}elseif(empty($model->mdata['acr_stat']) || $model->mdata['acr_stat'] < 5){
+				$model->mdata['acr_stat'] = 5;
+			}
+
+			if (isset($_POST['DmawbConsol'])) {
+				// if change etd, and if the shipment already have flight dispatch tracking infor,then we need to update them
+				if (!empty($_POST['DmawbConsol']['etd'])) {
+					if ($model->etd!=$_POST['DmawbConsol']['etd']) {
+						$model->etd=$_POST['DmawbConsol']['etd'];
+						$model->mdata['updatedEtd']=1;
+						$model->updateFlight();
+					}
+				}
+				
+				$model->attributes = $_POST['DmawbConsol'];
+				if (empty($model->eta)) {
+					$model->eta = $model->created;
+				}
+			}
+
+			$model->save();
+			if (!empty($_POST['AmazonInfo']['booking_ref'])) {
+				$amazonInfo=$model->getAmazonInfo();
+				$amazonInfo->booking_ref=$_POST['AmazonInfo']['booking_ref'];
+				if (!empty($_POST['AmazonInfo']['amazon_booking_time'])) {
+					$amazonInfo->amazon_booking_time=$_POST['AmazonInfo']['amazon_booking_time'];
+					$shipment=$model->linkShipment(false);
+					$shipment->mdata['amazon_booking_time']=$_POST['AmazonInfo']['amazon_booking_time'];
+					$shipment->mdata['booking_ref']=$_POST['AmazonInfo']['booking_ref'];
+					$shipment->updateMeta();
+					$shipment->updateAmazonBookingTime();
+				}
+				$amazonInfo->update('booking_ref');
+			} elseif (empty($_POST['AmazonInfo']['booking_ref'])&&(!empty($model->amazon_info->booking_ref))) {
+				$model->amazon_info->booking_ref='';
+				$model->amazon_info->update('booking_ref');
+			}
+			// create invoice for special import agent client
+			if (!empty($_POST['gen_inv'])) {
+				if ($_POST['gen_inv'] == 1) {
+					$errors = $model->genInvoice();
+					if (!empty($errors)) {
+						$model->addError('make Invoice Failed', $errors[0]);
+					}
+				}
+			}
+
+			$this->ajaxResult($model);
+		}
+
+		if (isset($_GET['tab'])) {
+			Acl::hasAccess($this->CaName . '/' . $_GET['tab'], true);
+			$this->render('tab_' . $_GET['tab'], ['model' => $model]);
+		} else {
+			$this->render('update', ['model' => $model]);
+		}
+	}
+
+
+	public function actionNotes($id)
+	{
+		$model = $this->loadModel($id);
+		if (!empty($_POST['notes'])) {
+			$log = Log::add($model, 6, ['notes' => $_POST['notes']]);
+			$this->ajaxResult($log);
+		}
+	}
+
+	public function actionUpdateByNo($no)
+	{
+		$consol = DmawbConsol::model()->find('no = :no', [':no' => $no]);
+		if (!empty($consol)) {
+			$this->actionUpdate($consol->id);
+		} else {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+	}
+
+	/**
+	 * send ACR
+	 */
+	public function actionAcr($id)
+	{
+		//air cargo
+		$cn = $this->loadModel($id);
+		$hwb =$cn->no;
+		$airline = substr(trim($cn->airline), 0, 2);
+		if (empty($airline)) {
+			$airline = preg_replace('/\d+/', '', trim($cn->airline));
+		}
+		$flight = preg_match('/^\d+$/', $cn->flight) ? $cn->flight : substr($cn->flight, 2);
+		$awb = preg_replace('/[^\d]+/', '', $cn->awb);
+
+		if (empty($cn->mdata['cnee'])) {
+			$cn->addError('meta', 'Consignee Name required');
+		}
+		if (empty($cn->mdata['cnee_addr'])) {
+			$cn->addError('meta', 'Consignee Address required');
+		}
+		if (empty($cn->mdata['cnor'])) {
+			$cn->addError('meta', 'Shipper Name required');
+		}
+		if (empty($cn->mdata['cnor_addr'])) {
+			$cn->addError('meta', 'Shipper Address required');
+		}
+		 
+		if (empty($cn->mdata['shipments'])) {
+			$cn->addError('meta', 'Packs No. required');
+		}
+		if (empty($cn->mdata['awb_wt'])) {
+			$cn->addError('meta', 'Weight required');
+		}
+		if (empty($cn->mdata['cbm'])) {
+			$cn->addError('meta', 'cbm required');
+		}
+		if ($cn->hasErrors()) {
+			$this->ajaxResult($cn);
+		}
+
+		$checkErrors = [];
+		foreach ($cn->shipments as $i=>$p) 
+		{
+			foreach ($p->eitems['v'] as $j => $v) {
+				if($v==0) $checkErrors[]=$p->ref.' Item Empty Value';
+			}
+
+			foreach ($p->eitems['q'] as $k => $q) {
+				if($q==0) $checkErrors[]=$p->ref.' Item Empty Quantity';
+			}
+		}
+
+		if(!empty($checkErrors))
+		{
+			$cn->addError('meta',json_encode($checkErrors));
+			$this->ajaxResult($cn);
+			return;
+		}
+
+		if (empty($cn->mdata['acr_stat'])&&empty($_GET['sub'])) {
+			if ($cn->service == 20) {
+				if (empty($cn->awb)) {
+					$cn->addError('meta', 'Ocean Bill required');
+				}
+				if (empty($cn->mdata['container_no'])) {
+					$cn->addError('meta', 'Container No. required');
+				}
+				if (empty($cn->mdata['house_bill'])) {
+					$cn->addError('meta', 'House Bill Required');
+				}
+				if (empty($cn->mdata['item'])) {
+					$cn->addError('meta', 'Good Description Required');
+				}
+				if (empty($cn->flight)) {
+					$cn->addError('meta', 'voyage number Required');
+				}
+				if (empty($cn->airline)) {
+					$cn->addError('meta', 'vessel IMO number Required');
+				}
+				 
+				if ($cn->hasErrors()) {
+					$this->ajaxResult($cn);
+				}
+				//sea acr
+				$em = new Edimsg;
+				$em->dt = date('Y-m-d H:i:s');
+				$em->type = 'SEACR-C';
+				$em->sender = Yii::app()->params['ics']['testing']? Yii::app()->params['ics']['test_site'] : Yii::app()->params['ics']['prod_site'];
+				$em->receiver = Yii::app()->params['ics']['customs_id'];
+				$em->status = 19;
+				$em->fid = $cn->id;
+				$em->save();
+				$em->mid = sprintf('%06s', substr($em->id, -6));
+				$vn = Edimsg::model()->count('type = :t AND fid = :fid', [':t' => 'SEACR-C', ':fid' => $cn->id]);
+			 
+				$obl=$cn->awb;// /required ocean bill landing
+			$hbl=$cn->mdata['house_bill'];//house bill landing
+			 //A document signed and delivered by the Master of a Ship to the consignor. A document of title and a receipt for goods.
+			 $voyage_number=$cn->flight ;// like 023s
+			 $vessel=$cn->airline; //IMO  like 9235103
+			 $container_number=trim($cn->mdata['container_no']);//container no  like OOLU9551594
+			 $container_size= DmawbConsol::getContainerCode($cn->mdata['sea_type']);
+
+				// 2008=> 20*8   2095=>20*8*9.5   4008=>40*8    0000=>OTHER
+			 $packs=$cn->mdata['shipments'];// the number of packs
+			 $cargo_type=$cn->mdata['cargo_type'];           // Import Cargo Type   FCL=>Full Container load           LCL=>Less than Container load   B/B=>Break bulk
+			 $goods=$cn->mdata['item'];  //the name of goods like stc. handheld vacuum
+			 $weight=$cn->mdata['awb_wt']; //the total weight of the goods// net weight not including packing and carrier equipment
+			 $volume=$cn->mdata['cbm']; //  3.190 .....
+		 
+			 $cnee_name = $cn->mdata['cnee'];
+				$cnee_addr = $cn->mdata['cnee_addr'];
+				$cnor_name = $cn->mdata['cnor'];
+				$cnor_addr = $cn->mdata['cnor_addr'];
+				if (!empty($cn->mdata['rece'])&&!empty($cn->mdata['rece_addr'])) {
+					$cnee_name= $cn->mdata['rece'];
+					$cnee_addr = $cn->mdata['rece_addr'];
+				}
+				$msg = "UNH+".$em->mid."+CUSCAR:D:99B:UN'
+BGM+933:::SEACR+" .$cn->no.($vn>1? '-'.$vn : '').":".$vn."+9'
+RFF+BH:".$hbl."'
+RFF+MB:".$obl."'
+RFF+PQ:CC'
+NAD+CN++".Edimsg::strSegment($cnee_name, 35, 2).":".Edimsg::strSegment($cnee_addr, 35, 3)."'
+NAD+CZ++".Edimsg::strSegment($cnor_name, 35, 2).":".Edimsg::strSegment($cnor_addr, 35, 3)."'
+NAD+AH+".Yii::app()->params['ics']['abn']."::95'
+NAD+VW+".Yii::app()->params['ics']['abn']."::95'
+TDT+20+".$voyage_number."++11++++".$vessel."::11'
+LOC+8+".$cn->pod."::6'
+LOC+12+".$cn->pod."::6'
+LOC+27+".substr($cn->pol, 0, 2)."::5'
+LOC+76+".$cn->pol."::6'
+LOC+73+".$cn->pol."::6'
+GIS+FFO:109:95'
+CNI++:::I'
+RFF+AAQ:".$container_number."'
+GID+1'
+RFF+ACC:".$container_size."'
+GID+1'
+RFF+ZZZ:1'
+GID+1'
+PAC+".$packs."'
+PAC+++".$cargo_type.":67:95'
+PAC+++GENN:121:95'
+PAC+++PK:185:95'
+FTX+AAA+++".Edimsg::strSegment(str_replace('/', ',', trim($goods, '/')), 512, 5)."'
+MEA+AAE+AAL+KG:".sprintf("%.2f", $weight)."'
+MEA+AAE+ABJ+CU:".sprintf("%.2f", $volume)."'
+MEA+AAE+G+KG:".sprintf("%.2f", $weight)."'
+";
+				$mc = substr_count($msg, "\n")+1;
+				$msg .= "UNT+".$mc."+".$em->mid."'";
+				$em->msg = $msg;
+				if (Yii::app()->params['ics']['testing']) {
+					$em->mdata['test'] = 1;
+				}
+				//echo $msg;
+				$em->status = 20;
+				$em->save();
+				$cn->mdata['acr_stat'] = 1;
+				$cn->status = 30;
+				$cn->save();
+			} else {//air acr
+				if (!preg_match('/^\d{11}$/i', $awb)) {
+					$cn->addError('meta', 'awb are not valid');
+				}
+				if (empty($cn->mdata['dvalue'])) {
+					$cn->addError('meta', 'goods value required for air cargo report!');
+				}
+				
+				if ($cn->hasErrors()) {
+					$this->ajaxResult($cn);
+				}
+				$em = new Edimsg;
+				$em->dt = date('Y-m-d H:i:s');
+				$em->type = 'AIRCR-C';
+				$em->sender = Yii::app()->params['ics']['testing'] ? Yii::app()->params['ics']['test_site'] : Yii::app()->params['ics']['prod_site'];
+				$em->receiver = Yii::app()->params['ics']['customs_id'];
+				$em->status = 19;
+				$em->fid = $id;
+				$em->save();
+				$em->mid = sprintf('%06s', substr($em->id, -6));
+				$vn = Edimsg::model()->count('type = :t AND fid = :fid', [':t' => 'AIRCR-C', ':fid' => $cn->id]);
+
+				$cnee_name = $cn->mdata['cnee'];
+				$cnee_addr = $cn->mdata['cnee_addr'];
+				$cnor_name = $cn->mdata['cnor'];
+				$cnor_addr = $cn->mdata['cnor_addr'];
+				if (!empty($cn->mdata['rece'])&&!empty($cn->mdata['rece_addr'])) {
+					$cnee_name= $cn->mdata['rece'];
+					$cnee_addr = $cn->mdata['rece_addr'];
+				}
+
+				$msg = "UNH+" . $em->mid . "+CUSCAR:D:99B:UN'
+BGM+933:::AIRCR+" . $cn->no . ($vn > 1 ? '-' . $vn : '') . ":" . $vn . "+9'
+RFF+PQ:CC'
+RFF+HWB:" . $hwb . "'
+RFF+MWB:" . $awb . "'
+NAD+CN++" . Edimsg::strSegment($cnee_name, 35, 2) . ":" . Edimsg::strSegment($cnee_addr, 35, 3) . "'
+NAD+CZ++" . Edimsg::strSegment($cnor_name, 35, 2) . ":" . Edimsg::strSegment($cnor_addr, 35, 3) . "'
+NAD+VW+" . Yii::app()->params['ics']['abn'] . "::95'
+TDT+20+" . $flight . "++6+" . $airline . "::3'
+LOC+8+" . $cn->pod . "::6'
+LOC+76+" . $cn->pol . "::6'
+LOC+12+" . $cn->pod . "::6'
+LOC+91+" . $cn->pol . "::6'
+DTM+178:" . date("Ymd", strtotime($cn->eta)) . ":102'
+CNI+1'
+RFF+UCN:" . $cn->no . "'
+MOA+44:" . sprintf("%.2f", $cn->mdata['dvalue']) . ":USD'
+GID+1'
+PAC+" . $cn->mdata['shipments'] . "'
+FTX+AAA+++" . Edimsg::strSegment(str_replace('/', ',', trim($cn->mdata['item'], '/')), 512, 5)   . "'
+MEA+AAE+G+KG:" . sprintf("%.2f", $cn->mdata['awb_wt']) . "'
+";
+				$mc = substr_count($msg, "\n") + 1;
+				$msg .= "UNT+" . $mc . "+" . $em->mid . "'";
+				$em->msg = $msg;
+				if (Yii::app()->params['ics']['testing']) {
+					$em->mdata['test'] = 1;
+				}
+				//echo $msg;
+				$em->status = 20;
+				$em->save();
+				$cn->mdata['acr_stat'] = 1;
+				$cn->status = 30;
+				$cn->save();
+			}
+		} elseif (!empty($_GET['sub'])) {
+			/***************
+			 * sub ACR
+			 */
+			if ($cn->service == 20) {
+				//sea small acr not develop yet
+				foreach ($cn->shipments as $i=>$p) {
+					if (!$p->canSendACR()) {
+						continue;
+					}
+					if (($p->cbwf&ImParcel::CBWF_DIRECT_CONSOL_BASE)>0) {
+						continue;
+					}
+					if (empty($p->weight)) {
+						$cn->addError('meta', 'Shipment '.$p->hbn.' has no weight.');
+						continue;
+					} elseif (empty($p->dvalue)) {
+						$cn->addError('meta', 'Shipment '.$p->hbn.' has no value.');
+						continue;
+					} elseif (empty($p->pkg)) {
+						$cn->addError('meta', 'Shipment '.$p->hbn.' has number of packs.');
+						continue;
+					}
+					$canSac = $p->canSAC();
+					$obl=$cn->awb;// /required ocean bill landing
+					 $hbl=$cn->mdata['house_bill'];//house bill landing
+					 //A document signed and delivered by the Master of a Ship to the consignor. A document of title and a receipt for goods.
+					 $voyage_number=$cn->flight ;// like 023s
+					 $vessel=$cn->airline; //IMO  like 9235103
+					 $container_number=trim($cn->mdata['container_no']);//container no  like OOLU9551594
+					 $container_size= DmawbConsol::getContainerCode($cn->mdata['sea_type']);
+					$cargo_type=$cn->mdata['cargo_type'];
+					if (empty($cargo_type)) {
+						$cargo_type="LCL";
+					}
+					$volume=$p->cbm>0?$p->cbm*$p->pkg:$p->weight/250;
+					if ($volume<0.01) {
+						$volume=0.01;
+					}
+					$em = new Edimsg;
+					$em->dt = date('Y-m-d H:i:s');
+					$em->type = 'SEACR-S';
+					$em->sender = Yii::app()->params['ics']['testing']? Yii::app()->params['ics']['test_site'] : Yii::app()->params['ics']['prod_site'];
+					$em->receiver = Yii::app()->params['ics']['customs_id'];
+					$em->status = 19;
+					$em->fid = $p->id;
+					$em->save();
+					$em->mid = sprintf('%06s', substr($em->id, -6));
+					$vn = Edimsg::model()->count('type = :t AND fid = :fid', [':t' => 'SEACR-S', ':fid' => $p->id]) + 1;
+					$msg = "UNH+".$em->mid."+CUSCAR:D:99B:UN'
+BGM+933:::SEACR+".$p->hbn.($vn>1? '-'.$vn : '').":".$vn."+9'
+RFF+PQ:PO'\n";
+					if (!empty($hbl)) {
+						$msg.="RFF+BM:".$hbl."'\n";
+					}
+					/**
+					 * if shipment have more than two shipments then it should be LCL;
+					 */
+					if (sizeof($cn->shipments)>2) {
+						$count = 0;
+						foreach ($cn->shipments as $temp_shipment) {
+							if ($temp_shipment->status != 100) {
+								$count ++;
+							}
+						}
+						if ($count > 2) {
+							$cargo_type="LCL";
+						}
+					}
+					$cnor_name = $p->cnor->name;
+					if (!preg_match('/\w/', $cnor_name)) {
+						$cnor_name = $p->agent->name;
+					}
+					$cnor_name = $cnor_name;
+					$cnor_addr = $p->cnor->fullAddress(['suburb', 'city', 'state', 'postcode']);
+					if (!preg_match('/\w/', $cnor_addr)) {
+						$cnor_addr = $p->agent->getAddress(true, false, false);
+					}
+					$cnor_addr = trim($cnor_addr, " .,");
+					$cnor_addr = $cnor_addr;
+								
+					if (!empty($p->receiver)&&!empty($p->receiver->address)&&!empty($p->receiver->name)&&!empty($p->receiver->postcode)) {
+						$cnee_name=$p->receiver->name;
+						$cnee_addr = $p->receiver->fullAddress(['suburb', 'city', 'state', 'postcode']);
+					} else {
+						$cnee_name = $p->cnee->name;
+						$cnee_addr = $p->cnee->fullAddress(['suburb', 'city', 'state', 'postcode']);
+					}
+					//$goods = WordReplace::replace($p->getGoods(), $p->agent_id)[0];//use word replace service;
+					if (in_array($p->agent_id, SystemSetting::getNameValidationCustomers())) {
+						$goods = WordReplace::replace($p->getGoods(), $p->agent_id)[0];
+					} else {
+						$goods = $p->getGoods();
+					}
+								
+					$msg .= "RFF+BH:".$p->hbn."'
+RFF+MB:".$obl."'
+NAD+AH+".Yii::app()->params['ics']['abn']."::95'
+NAD+VW+".Yii::app()->params['ics']['abn']."::95'
+NAD+CN++".Edimsg::strSegment($cnee_name, 35, 2).":".Edimsg::strSegment($cnee_addr, 35, 3)."'
+NAD+CZ++".Edimsg::strSegment($cnor_name, 35, 2).":".Edimsg::strSegment($cnor_addr, 35, 3)."'
+TDT+20+".$voyage_number."++11++++".$vessel."::11'
+LOC+8+".$cn->pod."::6'
+LOC+12+".$cn->pod."::6'
+LOC+27+".substr($cn->pol, 0, 2)."::5'
+LOC+76+".$cn->pol."::6'
+LOC+73+".$cn->pol."::6'
+CNI++:::I'
+RFF+AAQ:".$container_number."'
+GID+1'
+RFF+ACC:".$container_size."'
+GID+1'
+RFF+ZZZ:1'
+".($canSac ? "GIS+SAC:109:95'\n" : "")."GID+1'
+PAC+".$p->pkg."'
+PAC+++".$cargo_type.":67:95'
+PAC+++GENN:121:95'
+PAC+++PK:185:95'
+FTX+AAA+++".Edimsg::strSegment(str_replace('/', ',', trim($goods, '/')), 512, 5)."'
+MEA+AAE+AAL+KG:".sprintf("%.2f", $p->weight)."'
+MEA+AAE+ABJ+CU:".sprintf("%.2f", $volume)."'
+MEA+AAE+G+KG:".sprintf("%.2f", $p->weight)."'
+";
+					$mc = substr_count($msg, "\n")+1;
+					$msg .= "UNT+".$mc."+".$em->mid."'";
+					$em->msg = $msg;
+					if (Yii::app()->params['ics']['testing']) {
+						$em->mdata['test'] = 1;
+					}
+					//echo $msg;
+					$em->status = 20;
+					$em->save();
+					$p->status = 50;
+					$p->save();
+				}
+				$cn->status = 30;
+				$cn->save();
+				$this->ajaxResult($cn);
+			} else { //air small acr;
+				//check the prohibted words at first
+				$errs=[];
+				foreach ($cn->shipments as $i=>$p) {
+					if (($p->cbwf&ImParcel::CBWF_DIRECT_CONSOL_BASE)>0) {
+						continue;
+					}
+					//$temp=WordReplace::replace($p->getGoods(), $p->agent_id)[1];
+					if (in_array($p->agent_id, SystemSetting::getNameValidationCustomers())) {
+						$temp = WordReplace::replace($p->getGoods(), $p->agent_id)[1];
+					}
+					if (!empty($temp)) {
+						$errs[]="shipment ".$p->ref." ".implode("|", $temp);
+					};//use word replace service;
+				}
+				if(!empty($cn->mdata['house_bill'])){
+					$hwb = $cn->mdata['house_bill'];
+				}
+					
+				if (empty($errs)) {
+					foreach ($cn->shipments as $i=>$p) {
+						// if($p->status > 50 || $p->value >= 1000) continue;
+						// don't need to check the value , even more than 1000 we still need to report , but not for SAC
+						if ($p->status >= 50 || $p->status == 42) {
+							continue;
+						}
+						if (($p->cbwf&ImParcel::CBWF_DIRECT_CONSOL_BASE)>0) {
+							continue;
+						}
+
+						if (empty($p->weight)) {
+							$cn->addError('meta', 'Shipment '.$p->hbn.' has no weight.');
+							continue;
+						} elseif (empty($p->dvalue)) {
+							$cn->addError('meta', 'Shipment '.$p->hbn.' has no value.');
+							continue;
+						} elseif (empty($p->pkg)) {
+							$cn->addError('meta', 'Shipment '.$p->hbn.' has number of packs.');
+							continue;
+						}
+
+						// only value < 750USD can SAC
+						// or 1000 AUD can be SAC (Self Assessed Clearance) only
+						$canSac = $p->canSAC();
+						// special one
+						// for Michelle don't send sac for this shipment
+						// if ( $p->hbn == '8202853606' ) {
+						//     $canSac = false;
+						//}
+						$em = new Edimsg;
+						$em->dt = date('Y-m-d H:i:s');
+						$em->type = 'AIRCR-S';
+						$em->sender = Yii::app()->params['ics']['testing']? Yii::app()->params['ics']['test_site'] : Yii::app()->params['ics']['prod_site'];
+						$em->receiver = Yii::app()->params['ics']['customs_id'];
+						$em->status = 19;
+						$em->fid = $p->id;
+						$em->save();
+						$em->mid = sprintf('%06s', substr($em->id, -6));
+						$vn = Edimsg::model()->count('type = :t AND fid = :fid', [':t' => 'AIRCR-S', ':fid' => $p->id]) + 1;
+						$msg = "UNH+".$em->mid."+CUSCAR:D:99B:UN'
+BGM+933:::AIRCR+".$p->hbn.($vn>1? '-'.$vn : '').":".$vn."+9'
+RFF+PQ:PO'
+RFF+AWB:".$hwb."'\n";
+						$cnor_name = $p->cnor->name;
+						if (!preg_match('/\w/', $cnor_name)) {
+							$cnor_name = $p->agent->name;
+						}
+						$cnor_name = $cnor_name;
+
+						$cnor_addr = $p->cnor->fullAddress(['suburb', 'city', 'state', 'postcode']);
+						if (!preg_match('/\w/', $cnor_addr)) {
+							$cnor_addr = $p->agent->getAddress(true, false, false);
+						}
+						$cnor_addr = trim($cnor_addr, " .,");
+						$cnor_addr = $cnor_addr;
+								
+						if (!empty($p->receiver)&&!empty($p->receiver->address)&&!empty($p->receiver->name)&&!empty($p->receiver->postcode)) {
+							$cnee_name=$p->receiver->name;
+							$cnee_addr = $p->receiver->fullAddress(['suburb', 'city', 'state', 'postcode']);
+						} else {
+							$cnee_name = $p->cnee->name;
+							$cnee_addr = $p->cnee->fullAddress(['suburb', 'city', 'state', 'postcode']);
+						}
+
+						//        $goods = $p->getGoods();
+					//$goods = WordReplace::replace($p->getGoods(), $p->agent_id)[0];//use word replace service;
+					if (in_array($p->agent_id, SystemSetting::getNameValidationCustomers())) {
+						$goods = WordReplace::replace($p->getGoods(), $p->agent_id)[0];
+					} else {
+						$goods = $p->getGoods();
+					}
+$msg .= "RFF+HWB:".$p->hbn."'
+RFF+MWB:".$awb."'
+NAD+CN++".Edimsg::strSegment($cnee_name, 35, 2).":".Edimsg::strSegment($cnee_addr, 35, 3)."'
+NAD+CZ++".Edimsg::strSegment($cnor_name, 35, 2).":".Edimsg::strSegment($cnor_addr, 35, 3)."'
+NAD+VW+".Yii::app()->params['ics']['abn']."::95'
+TDT+20+".$flight."++6+".$airline."::3'
+LOC+8+".$cn->pod."::6'
+LOC+76+".$cn->pol."::6'
+LOC+12+".$cn->pod."::6'
+LOC+91+".$cn->pol."::6'
+DTM+178:".date("Ymd", strtotime($cn->eta)).":102'
+CNI+1'
+RFF+UCN:".$p->hbn."'
+MOA+44:".sprintf("%.2f", $p->getDvalue()).":USD'
+".($canSac ? "GIS+SAC:109:95'\n" : "")."GID+1'
+PAC+".$p->pkg."'
+FTX+AAA+++".Edimsg::strSegment(str_replace('/', ',', trim($goods, '/')), 512, 5)."'
+MEA+AAE+G+KG:".sprintf("%.2f", $p->weight)."'
+";
+						$mc = substr_count($msg, "\n")+1;
+						$msg .= "UNT+".$mc."+".$em->mid."'";
+						$em->msg = $msg;
+						if (Yii::app()->params['ics']['testing']) {
+							$em->mdata['test'] = 1;
+						}
+						//echo $msg;
+						$em->status = 20;
+						$em->save();
+						$p->status = 50;
+						$p->save();
+					}
+					if (!empty($cn->process)&&$cn->process->status<=ConsolProcess::STATE_WAITING_SUB_ACR) {
+						$cn->process->updateStatus(ConsolProcess::STATE_WAITING_SEND_UBM);
+					}
+				} else {
+					$cn->addError('prohibited', implode(';', $errs));
+				}
+			}
+		}
+		$this->ajaxResult($cn);
+	}
+
+	public function actionSeaManifest($id)
+	{
+		$model= $this->loadModel($id);
+		if ($model->service != 20) {
+			throw new CHttpException(404, 'Only Sea Type Has Sea Manifest.');
+		}
+		oPDF::renderPDF('sea_consol_manifest', ['model' => $model], 1, $model->no.'.pdf');
+	}
+	
+	/**
+	 * Lists and search.
+	 */
+	public function actionList()
+	{
+		$model = new DmawbConsol('search');
+		$model->unsetAttributes();  // clear any default values
+		if (isset($_GET['DmawbConsol'])) {
+			$model->attributes = $_GET['DmawbConsol'];
+		}
+		$delivery_type='All Type';
+		if (!empty($_GET['delivery_type'])) {
+			$model->service=$_GET['delivery_type'];
+			switch ($_GET['delivery_type']) {
+					case 10: $delivery_type='Air';break;
+					case 20: $delivery_type="Sea";break;
+				}
+		}
+		$this->render('list', [
+			'model' => $model,
+			'delivery_type'=>$delivery_type,
+		]);
+	}
+
+	public function actionExportCurrentSearch()
+	{
+		$csv = [];
+		$csv[] = 'No,Owner Name,Status,Service,Depot,AWB No.,House Bill,Shipments,Weight,POL,POD,ETA,extra Info';
+		$model = new DmawbConsol('search');
+		$model->unsetAttributes();  // clear any default values
+		if (isset($_GET['DmawbConsol'])) {
+			$model->attributes = $_GET['DmawbConsol'];
+		}
+		$delivery_type='All Type';
+		if (!empty($_GET['delivery_type'])) {
+			$model->service=$_GET['delivery_type'];
+			switch ($_GET['delivery_type']) {
+					case 10: $delivery_type='Air';break;
+					case 20: $delivery_type="Sea";break;
+				}
+		}
+		$consols = $model->search(false)->data;
+
+		foreach ($consols as $r)
+		{
+			$csv[] = $r->no.",".(empty($r->owner_id)?"":(empty($r->owner->name)?"":$r->owner->name)).",".$r->getStatus().",".$r->getService().",".@$r->depot->name.",".$r->awb.",".@$r->mdata["house_bill"].",".@$r->mdata["shipments"].",".@$r->mdata["cgb_wt"].",".$r->pol.",".$r->pod.",".$r->eta.",".$r->getConsolDGWarnings(true);
+		}
+
+
+		header("Content-type: text/csv");
+		header("Content-Disposition: attachment; filename=consol_export.csv");
+		header("Pragma: no-cache");
+		header("Expires: 0");
+		echo implode("\n", $csv);
+	}
+
+
+	/*export amazon require list
+	 *
+	 */
+	public function actionExportAmazon()
+	{
+		$errors=[];
+		$tempShipments=[];
+		if (!empty($_POST['amazon_id'])) {
+			foreach (preg_split("/[,;\n]/", $_POST['shipments']) as $ref) {
+				if (preg_match("/^DW\d{8}[A-Z]{3}$/i", trim($ref))) {
+					$temp=DmawbConsol::model()->find('no=:no', [':no'=>$ref]);
+					if (empty($temp->mdata['amazon_uqty'])) {
+						$errors[]=$ref.' Not have unit Qty';
+					}
+				} else {
+					$temp= Shipment::model()->find('hbn=:no OR ref=:no', [':no'=>$ref]);
+				}
+				if (empty($temp->mdata['amazon_po'])) {
+					$errors[]=$ref.' Not have amazon PO#';
+				}
+				if (empty($temp->mdata['amazon_shipment_ids'])) {
+					$errors[]=$ref.' Not have amazon Shipments Ids';
+				}
+				if (empty($temp->mdata['amzon_pallet'])) {
+					$errors[]=$ref.' Not have pallets';
+				}
+				$tempShipments[]=$temp;
+			}
+			if (!empty($errors)) {
+				$msg='';
+				foreach ($errors as $err) {
+					$msg.='<div style="color:red">'.$err."</div>";
+				}
+				echo $msg;
+				return;
+			}
+			$csv=[];
+			$csv[]='ARN,PRO,BOL List,Vendor Name,Pallet Count,Carton Count,Unit Count,PO List';
+			foreach ($tempShipments as $index=>$temp) {
+				if (get_class($temp)=="DmawbConsol") {
+					$csv[]=',,"'.(implode(',', preg_split('/[,;\n]/', $temp->mdata['amazon_po']))).'",,'.$temp->mdata['amzon_pallet'].','.$temp->mdata['shipments'].','.$temp->mdata['amazon_uqty']
+								.',"'.(implode(',', preg_split('/[,;\n]/', $temp->mdata['amazon_shipment_ids']))).'"';
+				} else {
+					$csv[]=',,"'.(implode(',', preg_split('/[,;\n]/', $temp->mdata['amazon_po']))).'",,'.$temp->mdata['amzon_pallet'].','.$temp->pkg.','.$temp->itemsTotQty()
+								.',"'.(implode(',', preg_split('/[,;\n]/', $temp->mdata['amazon_shipment_ids']))).'"';
+				}
+			}
+			header("Cache-Control: maxage=1");
+			header("Content-type: text/csv");
+			header("Content-Disposition: attachment; filename=amazon_".date('YmdHis').".csv");
+			echo implode("\n", $csv);
+			Yii::app()->end();
+		}
+		$this->render('export_amazon');
+	}
+	/**
+	 * underbond Movement Request
+	 * for tow types. air or sea
+	 * @param type $id
+	 */
+		
+		
+	public function actionUbm($id)
+	{
+		$model=$this->loadModel($id);
+		if (!empty($_POST)) {
+			// in case delete schedule UBM
+			if (isset($_POST['delete'])) {
+				if ($_POST['delete'] == 'Delete') {
+					$this->deleteUbm($model);
+					$this->ajaxResult($model);
+				}
+			}
+			if (isset($_POST['force_ubm'])) {
+				if ($_POST['force_ubm'] == 'Force Send UBM') {
+					$this->forceSendUbm($model);
+				}
+			}
+
+			$model->attributes=$_POST['DmawbConsol'];
+			if (!empty($_POST['mdata'])) {
+				foreach ($_POST['mdata'] as $k=>$v) {
+					$model->mdata[$k] = $v;
+				}
+			}
+			$model->save();
+			$this->preUbm($model);
+			$this->ajaxResult($model);
+		}
+		if (empty($model->mdata['ubm_dest'])) {
+			$model->mdata['ubm_dest'] = $model->getEstID();
+		}
+		
+		$this->render('ubm', [
+			'model'=>$model,
+		]);
+	}
+		
+		
+	private function preUbm($model, $force=false)
+	{
+		//send ubm
+		$em = new Edimsg;
+		$em->dt = date('Y-m-d H:i:s');
+		$em->type = 'UBMREQ';
+		$em->sender = Yii::app()->params['ics']['testing']? Yii::app()->params['ics']['test_site'] : Yii::app()->params['ics']['prod_site'];
+		$em->receiver = Yii::app()->params['ics']['customs_id'];
+		$em->status = 19;
+		$em->fid = $model->id;
+		if ($model->service == 20) {
+			$em->mdata['voyage_number']=$model->flight;
+			$em->mdata['vessel']=$model->airline;
+			$voyage_number=$model->flight ;// like 023s
+			$vessel=$model->airline; //IMO  like 9235103
+			$obl=$model->awb;// /required ocean bill landing
+			$container_number=trim($model->mdata['container_no']);//container no  like OOLU9551594
+			$hbl=$model->mdata['house_bill'];
+			$cargo_type=$model->mdata['cargo_type'];
+			$em->save();
+			$em->mid = sprintf('%06s', substr($em->id, -6));
+			$vn = Edimsg::model()->count('type = :t AND fid = :fid', [':t' => 'UBMREQ', ':fid' => $model->id]);
+			$msg = "UNH+".$em->mid."+CUSCAR:D:99B:UN'
+BGM+31:::UBMREQ+".$model->no.($vn == 1? '' : '-'.$vn).":".$vn."+9'
+RFF+ACD:".($model->totShipments() ==1? 'MOV' : 'DCL')."'
+NAD+VW+".Yii::app()->params['ics']['abn']."::95'
+TDT+1++ROA'
+TDT+20+".$voyage_number."++11++++".$vessel."::11'
+LOC+4+".$model->mdata['ubm_dest']."::95'
+LOC+5+".$model->mdata['ubm_origin']."::95'
+LOC+11+".(!empty($model->mdata['ubm_discharge'])?$model->mdata['ubm_discharge']:$model->mdata['ubm_origin'])."::95'
+CNI++:::I'
+RFF+AAQ:".$container_number."'
+GID+1'
+PAC+".$model->mdata['shipments']."'
+PAC+++PK:185:95'
+PAC+++FCL:67:95'
+";
+			$mc = substr_count($msg, "\n")+1;
+			$msg .= "UNT+".$mc."+".$em->mid."'";
+			$em->msg = $msg;
+			// if (!$force) {
+			// 	if (isset($model->mdata['dclallowed'])&&$model->mdata['dclallowed']==1) {
+			// 		$model->mdata['ubmsent'] = 1;
+			// 		$em->status = 20; // sent
+			// 	} else {
+			// 		$model->mdata['ubmsent'] = 2;
+			// 		$em->status = 18; // on schedule status
+			// 	}
+			// } else {
+			// 	$model->mdata['ubmsent'] = 1;
+			// 	$em->status = 20; // sent
+			// }
+			$model->mdata['ubmsent'] = 1;
+			$em->status = 20; // sent
+
+			if (!empty($model->process)&&$model->service==Consol::AIRCONSOL) {
+				if(empty($model->mdata['NOA_SENT_UB']))
+				{
+					$model->process->updateStatus(ConsolProcess::STATE_UB_ON_SCHEDULE);
+				}
+			}
+			
+			$model->update(['meta']);
+			$em->save();
+		} else {
+			//airline-underbond movement
+			$em->mdata['airline'] = $model->airline;
+			$em->mdata['flight'] = $model->flight;
+			$em->mdata['eta'] = $model->eta;
+			$em->mdata['etd'] = $model->etd;
+
+			$em->save();
+			$em->mid = sprintf('%06s', substr($em->id, -6));
+			$vn = Edimsg::model()->count('type = :t AND fid = :fid', [':t' => 'UBMREQ', ':fid' => $model->id]);
+			//$airline = preg_replace('/\d+/', '', trim($model->airline));
+			//if(empty($airline)) $airline = preg_replace('/\d+/', '',trim($model->airline));
+			//$flight = preg_replace('/[^\d]+/', '', $model->flight);
+
+			$airline = substr(trim($model->airline), 0, 2);
+			$flight = substr(trim($model->flight), 2);
+			$msg = "UNH+".$em->mid."+CUSCAR:D:99B:UN'
+BGM+31:::UBMREQ+".$model->no.($vn == 1? '' : '-'.$vn).":".$vn."+9'
+RFF+ACD:MOV'
+NAD+VW+".Yii::app()->params['ics']['abn']."::95'
+TDT+1++ROA'
+TDT+20+".$flight."++6+".$airline."::3'
+LOC+4+".$model->mdata['ubm_dest']."::95'
+LOC+5+".$model->mdata['ubm_origin']."::95'
+LOC+11+".(!empty($model->mdata['ubm_discharge'])?$model->mdata['ubm_discharge']:$model->mdata['ubm_origin'])."::95'
+DTM+132:".date("Ymd", strtotime($model->eta)).":102'
+CNI++:::I'
+RFF+MWB:".str_replace('-', '', $model->awb)."'
+GID+1'
+PAC+".$model->mdata['shipments']."'
+";
+			$mc = substr_count($msg, "\n")+1;
+			$msg .= "UNT+".$mc."+".$em->mid."'";
+			$em->msg = $msg;
+			if (Yii::app()->params['ics']['testing']) {
+				$em->mdata['test'] = 1;
+			}
+			if (!$force) {
+				if ($this->isAirlineArrived($model->flight, $model->eta)) {
+					//echo $msg;
+				$em->status = 20; // in queue status
+				$model->mdata['ubmsent'] = 1;
+				} else {
+					$model->mdata['ubmsent'] = 2;
+					$em->status = 18; // on schedule status
+				}
+			} else {
+				$em->status = 20; // in queue status
+				$model->mdata['ubmsent'] = 1;
+			}
+			if (!empty($model->process)&&$model->service==Consol::AIRCONSOL) {
+				if(empty($model->mdata['NOA_SENT_UB']))
+				{
+					$model->process->updateStatus(ConsolProcess::STATE_UB_ON_SCHEDULE);
+				}
+			}
+			$model->update(['meta']);
+			$em->save();
+		}
+	}
+	/**
+	 * try to delete on the schedule UBM request
+	 * @param $console
+	 */
+	private function deleteUbm($console)
+	{
+		// try to find them
+		$ubmModels = Edimsg::model()->findAll('fid = :fid AND type = :type AND status = 18', [':fid' => $console->id,':type' => 'UBMREQ']);
+		foreach ($ubmModels as $ubm) {
+			$ubm->delete();
+		}
+		// reset UBN sent status
+		unset($console->mdata['ubmsent']);
+		if (!empty($model->process)) {
+			$model->process->updateStatus(ConsolProcess::STATE_WAITING_SEND_UBM);
+		}
+		$console->save();
+	}
+		
+	private function forceSendUbm($model)
+	{
+		// delete on schedule one if existing
+		$this->deleteUbm($model);
+		$this->preUbm($model, true);
+		$this->ajaxResult($model);
+	}
+
+	
+	/**
+	 * check to see if the flight arrived or not
+	 * @param $flight
+	 * @param $etd
+	 * @return bool
+	 */
+	private function isAirlineArrived($flight, $etd)
+	{
+		$arrived = false;
+
+		// call flight tracking logic
+		include(Yii::app()->basePath.DIRECTORY_SEPARATOR.'commands/trackingCommand.php');
+		$tracking = new trackingCommand('ubm', null);
+		$d = $tracking->flight($flight, $etd);
+		if (!empty($d)) {
+			if ($d[7] == 2) { //arrival
+
+				// if  30 minutes  after arrived
+				// we set arrived , so that we can send UBM message
+				// get real arrived time
+				$laterTime = strtotime($d[5]) + 30 * 60;
+				if (time() > $laterTime) {
+					$arrived = true;
+				}
+			}
+		}
+		return $arrived;
+	}
+		
+	//air outturn//seaout
+	public function actionAirout($id)
+	{
+		$this->forward('imcoConsol/airout');
+	}
+
+	//air outturn//seaout
+	public function actionSeaDeliveryOrderTogether($id)
+	{
+		$this->forward('imcoConsol/seaDeliveryOrderTogether');
+	}
+		
+	public function actionExport($id)
+	{
+		$model=$this->loadModel($id);
+		$csv = [];
+		$csv[] = 'TYPE,CONNOTE NO.,REFERENCE,WEIGHT,Volume,CNEE,TEL,ADDRESS,SUBURB,STATE,P/C,DESTINATION,,PCS,COMMODITY,INNER ITEMS,UNIT VALUE,TTL VALUE,CMETER,SHIPPER,SHIPPER ADD,SHIPPER STATE,SHIPPER PC,SHIPPER COUNTRY CODE,SHIPPER CONTACT';
+		foreach ($model->shipments as $r) {
+			if (($r->cbwf&ImParcel::CBWF_DIRECT_CONSOL_BASE)>0) {
+				continue;
+			}
+			$volume=$r->cbm>0?$r->cbm*$r->pkg:$r->weight/250;
+			if ($volume<0.01) {
+				$volume=0.01;
+			}
+			$csv[] = 'parcel,"'.$r->hbn.'","'.$r->ref.'",'.$r->weight.','.sprintf("%.2f", $volume).',"'.$r->cnee->name.'","'.$r->cnee->tel.'","'.str_replace('"', '', $r->cnee->address).'","'.$r->cnee->suburb.'","'.$r->cnee->state.'",'.$r->cnee->postcode.','.$r->cnee->country.','.$r->cnee->country.','.$r->pkg.',"'.implode(',', $r->eitems['g']).'","'.implode(',', $r->eitems['q']).'","'.implode(',', $r->eitems['v']).'",'.$r->dvalue.','.$r->cbm.',"'.$r->cnor->name.'","'.str_replace('"', '', $r->cnor->address).'","'.$r->cnor->state.'",'.$r->cnor->postcode.',"'.$r->cnor->country.'",'.$r->cnor->tel;
+		}
+		header("Content-type: text/csv");
+		header("Content-Disposition: attachment; filename=consol_manifest_".$model->awb.".csv");
+		header("Pragma: no-cache");
+		header("Expires: 0");
+		echo implode("\n", $csv);
+	}
+
+			
+	/**
+		 * Returns a pdf of sea order if the shipment is belong to sea types.
+		 * @param integer the ID of the model to be loaded
+		 */
+	public function actionSeaOrder($id)
+	{
+		$model= $this->loadModel($id);
+		if ($model->service != 20) {
+			throw new CHttpException(404, 'Only Sea Type Has Sea Order.');
+		}
+		oPDF::renderPDF('sea_order_consol', ['model' => $model], 1, $model->no.'.pdf');
+	}
+
+	public function actionShipmentsDo($id)
+	{
+		$model= $this->loadModel($id);
+		if ($model->service != 20) {
+			throw new CHttpException(404, 'Only Sea Type Has Sea Order.');
+		}
+		
+		$fs = [];
+		foreach($model->shipments as $p){
+			if(in_array($p->status, [10, 42])) continue;
+			$tf = tempnam(Yii::app()->basePath."/runtime", "csdo");
+			oPDF::renderPDF('sea_order', ['model' => $p], 2, $tf);
+			$fs[] = $tf;
+		}
+		oPDF::mergePDF($fs, 1, true, $model->no.'.pdf');
+	}
+
+	/**
+		 * Returns a pdf of sea order if the shipment is belong to sea types.
+		 * @param integer the ID of the model to be loaded
+		 */
+	public function actionCargoReceipt($id)
+	{
+		$model= $this->loadModel($id);
+		if (!empty($model->owner_id == Org::ORGID_COURIER_4PX)) {
+			oPDF::renderPDF('cargo_receipt_4px', ['model' => $model], 1, $model->no.'.pdf');
+			return;
+		} 
+
+		if (!empty($model->mdata['amazon_po'])) {
+			oPDF::renderPDF('cargo_receipt_direct', ['model' => $model], 1, $model->no.'.pdf');
+		} else {//sea consol
+			oPDF::renderPDF('cargo_receipt_other', ['model' => $model], 1, $model->no.'.pdf');
+		}
+	}
+			
+	/* *
+	 *  search the Amazon Booking ref and return the related consol or shipment
+	 * @Param   booking_ref
+	 * @return Consol or shipment
+	 */
+	public function actionAmazonSearch()
+	{
+		$filtersForm=new FiltersForm();
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+		$provide=[];
+		if (!empty($_GET['amazon_booking_ref'])||!empty($_GET['amazon_booking_time'])) {
+			$amazonBookingRef=$_GET['amazon_booking_ref'];
+			$amazonBookingTime=$_GET['amazon_booking_time'];
+			$criteria=new CDbCriteria;
+			$criteria->addCondition('model!="CargoProcessJob"');
+			if (!empty($amazonBookingRef)) {
+				$criteria->compare('booking_ref', $amazonBookingRef, true);
+			}
+			if (!empty($amazonBookingTime)) {
+				$criteria->compare('amazon_booking_time', $amazonBookingTime, true);
+			}
+			$rs= AmazonInfo::model()->findAll($criteria);
+			$totalWeight = [];
+			foreach ($rs as $r) {
+				$p = $r->model::model()->findByPk($r->fid);
+				if(empty($p)) continue;
+				if(!empty($p->shipment))
+				{
+					$p = $p->shipment;
+				}
+				$totalWeight[$p->id] = floatval($p->weight);
+			}
+			$totalWeight = array_sum($totalWeight);
+			foreach ($rs as $index=>$r) {
+				$p = $r->model::model()->findByPk($r->fid);
+				if(empty($p)) continue;
+				if(!empty($p->shipment))
+				{
+					$p = $p->shipment;
+				}
+				$thisIndex = ($r->model=='ImParcel'||$r->model=='CargoProcess')?$p->id:$r->fid;
+				$provide[$thisIndex]=['id'=>$index,"fid"=>($r->model=='ImParcel'||$r->model=='CargoProcess')?$p->id:$r->fid,'model'=>($r->model=='ImParcel'||$r->model=='CargoProcess')?'ImParcel':$r->model,'no'=>($r->model=='ImParcel'||$r->model=='CargoProcess')?$p->hbn:$p->no,'booking_ref'=>$r->booking_ref,'amazon_booking_time'=>$r->amazon_booking_time,'ref'=>($r->model=='ImParcel'||$r->model=='CargoProcess')?$p->ref:$p->awb,'wt_percent'=>number_format(round($p->weight / $totalWeight * 10000) / 100, 4, '.', '') . '%','consol' => $p->consol->no];
+			}
+		}
+		$filteredData = $filtersForm->filter($provide);
+		$dataprovider = new CArrayDataProvider($filteredData, array(
+			'pagination' => array(
+				'pageSize' => 100,
+			),
+		));
+		if (isset($_GET['amazon_booking_ref'])) {
+			$this->render('amazon_part_search', ['dataProvider'=>[$dataprovider,$filtersForm]]);
+			return;
+		}
+		$this->render('amazon_search', ['dataProvider'=>[$dataprovider,$filtersForm]]);
+	}
+	 
+	/**
+	 * @param $id
+	 * @throws CHttpException
+	 */
+	public function actionExportStartrackApLodge($id)
+	{
+		$model = $this->loadModel($id);
+
+		// get order ID firstly
+		$orderIds = [];
+		foreach ($model->shipments as $s) {
+			if (($s->cbwf&ImParcel::CBWF_DIRECT_CONSOL_BASE)>0) {
+				continue;
+			}
+			if (preg_match('/^7RFZ\d{8}/', $s->ref) && !empty($s->trans)) {
+				foreach ($s->trans as $tranship) {
+					if (!empty($tranship->mdata['oid'])) {
+						$orderId = $tranship->mdata['oid'];
+						if (!isset($orderIds[$orderId])) {
+							$orderIds[$orderId] = $orderId;
+						}
+					}
+				}
+			}
+		}
+
+		if (!empty($orderIds)) {
+			$api = new StarTrackAPI('syd', true);
+			$api->getOrderSummary($orderIds);
+		} else {
+			$model->addError('id', 'No any StarTrack order found!');
+			$this->ajaxResult($model);
+		}
+	}
+	 
+	/**
+	 * @param $id
+	 * @throws CHttpException
+	 */
+	public function actionExportStartrackMelApLodge($id)
+	{
+		$model = $this->loadModel($id);
+		// get order ID firstly
+		$orderIds = [];
+		foreach ($model->shipments as $s) {
+			if (($s->cbwf&ImParcel::CBWF_DIRECT_CONSOL_BASE)>0) {
+				continue;
+			}
+			if (preg_match('/^4XHZ\d{8}/', $s->ref) && !empty($s->trans)) {
+				foreach ($s->trans as $tranship) {
+					if (!empty($tranship->mdata['oid'])) {
+						$orderId = $tranship->mdata['oid'];
+						if (!isset($orderIds[$orderId])) {
+							$orderIds[$orderId] = $orderId;
+						}
+					}
+				}
+			}
+		}
+		if (!empty($orderIds)) {
+			$api = new StarTrackAPI('mel', true);
+			$api->getOrderSummary($orderIds);
+		} else {
+			$model->addError('id', 'No any StarTrack order found!');
+			$this->ajaxResult($model);
+		}
+	}
+		
+	public function actionSeaOutturnShipments($id)
+	{
+		$this->forward('imcoConsol/seaOutturnShipments');
+	}	
+
+	/**
+	 * Returns the data model based on the primary key given in the GET variable.
+	 * If the data model is not found, an HTTP exception will be raised.
+	 * @param integer the ID of the model to be loaded
+	 */
+	public function loadModel($id)
+	{
+		$model = DmawbConsol::model()->findByPk($id);
+		if ($model === null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		return $model;
+	}
+}

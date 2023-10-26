@@ -1,0 +1,204 @@
+<?php
+class InvLineService extends Service
+{
+    public function createContainerPickupBookingInvLine($pbn, $shipment,$isPayWithAccountCode = false)
+    {
+        $invoice = Invoice::model()->findByAttributes(['no' => $pbn]);
+        if(!empty($invoice)) {
+            $invoiceLine = InvLine::model()->findByAttributes(['inv_id' => $invoice->id]);
+            if (empty($invoiceLine)) {
+                $booking = PickupBooking::model()->findByAttributes(['booking_number' => $pbn]);
+                $chargeItems = new stdClass;
+                $chargeItems->items = [];
+                $palletFeeBase = SystemSetting::getSetting("BookingFee","palletFee");
+                $wrapFeeBase = SystemSetting::getSetting("BookingFee","wrapFee");
+                $baseFeeBase = SystemSetting::getSetting("BookingFee","baseFee");
+                $base = new stdClass;
+                $pallet = new stdClass;
+                $wrap = new stdClass;
+
+                $percentage = 1;
+                $discountStr="";
+                if($isPayWithAccountCode)
+                {
+                    $accountCode = SellRate::findImCode($booking->mdata['account_code']);
+                    $percentage = $percentage-$accountCode->item;
+                    if($percentage<9.999)
+                    {
+                        $discountStr=" ".($accountCode->item*100)."% discount";
+                    }
+                }
+
+
+
+                if($booking->mdata['pallet_requirement'] == 'chep'||$booking->mdata['pallet_requirement'] == 'origin') {
+                    $palletFee = 0;
+                } else {
+                    $palletFee = $palletFeeBase * $shipment->mdata['amzon_pallet']*$percentage;
+                }
+                if($booking->mdata['shrink_wrap'] == 'wrap'){
+                    $shrinkWrapFee = $wrapFeeBase * $shipment->mdata['amzon_pallet']*$percentage;
+                } else {
+                    $shrinkWrapFee = 0;
+                }
+                
+
+                $base->{"0"} = "Booking Base";
+                $base->{"1"}  = $shipment->hbn." Booking Base Fee".$discountStr;
+                $base->{"2"}  = $shipment->pkg;
+                $base->{"3"} = $shipment->weight;
+                $base->{"4"}  = $shipment->cbm;
+                $base->{"5"}  = number_format($baseFeeBase*$percentage, 2, '.', '');
+                $base->{"6"}  = $shipment->mdata['amzon_pallet'];
+                $base->{"7"}  = number_format($baseFeeBase*$percentage, 4, '.', '');
+                $base->{"8"}  = 0;
+                $base->rebate = "0";
+
+                $pallet->{"0"} = "Plain Pallet";
+                $pallet->{"1"} = $shipment->hbn." Plain Pallet Fee".$discountStr;
+                $pallet->{"2"} = $shipment->pkg;
+                $pallet->{"3"} = $shipment->weight;
+                $pallet->{"4"} = $shipment->cbm;
+                $pallet->{"5"} = number_format((float)$palletFee, 2, '.', '');
+                $pallet->{"6"} = $shipment->mdata['amzon_pallet'];
+                $pallet->{"7"} = number_format((float)$palletFee, 4, '.', '');
+                $pallet->{"8"} = 0;
+                $pallet->rebate = "0";
+
+                $wrap->{"0"} = "Shrink Wrap";
+                $wrap->{"1"} = $shipment->hbn." Shrink Wrap Fee".$discountStr;
+                $wrap->{"2"} = $shipment->pkg;
+                $wrap->{"3"} = $shipment->weight;
+                $wrap->{"4"} = $shipment->cbm;
+                $wrap->{"5"} = number_format((float)$shrinkWrapFee, 2, '.', '');
+                $wrap->{"6"} = $shipment->mdata['amzon_pallet'];
+                $wrap->{"7"} = number_format((float)$shrinkWrapFee, 4, '.', '');
+                $wrap->{"8"} = 0;
+                $wrap->rebate = "0";
+
+                array_push($chargeItems->items, $base, $pallet, $wrap);
+
+                $invLine = new InvLine();
+                $invLine->inv_id = $invoice->id;
+                $invLine->model = 'ImcoConsol';
+                $invLine->amount = $invoice->total;
+                $invLine->gst = $invoice->gst;
+                $invLine->qty = 1;
+                $invLine->mdata = $chargeItems;
+                $invLine->rebate = 0;
+                $invLine->save();
+            }
+        } 
+    }
+
+    public function createContainerPickupBookingInvLineMultiple($pbn,$isPayWithAccountCode = false)
+    {
+        $pbs = PickupBookingSubmit::model()->findByAttributes(['submit_no' => $pbn]);
+
+        $invoice = Invoice::model()->findByAttributes(['no' => $pbn]);
+        if(!empty($invoice)) {
+            $invoiceLine = InvLine::model()->findByAttributes(['inv_id' => $invoice->id]);
+            if (empty($invoiceLine)) {
+                $chargeItems = new stdClass;
+                $chargeItems->items = [];
+                foreach ($pbs->booking as $key => $booking)
+                {
+                    $shipment = $booking->shipment;
+                    $palletFeeBase = SystemSetting::getSetting("BookingFee","palletFee");
+                    $wrapFeeBase = SystemSetting::getSetting("BookingFee","wrapFee");
+                    $baseFeeBase = SystemSetting::getSetting("BookingFee","baseFee");
+                    $base = new stdClass;
+                    $pallet = new stdClass;
+                    $wrap = new stdClass;
+
+                    $percentage = 1;
+                    $discountStr="";
+                    if($isPayWithAccountCode)
+                    {
+                        $accountCode = SellRate::findImCode($booking->mdata['account_code']);
+                        $percentage = $percentage-$accountCode->item;
+                        if($percentage<9.999)
+                        {
+                            $discountStr=" ".($accountCode->item*100)."% discount";
+                        }
+                    }
+
+
+                    if($booking->mdata['pallet_requirement'] == 'chep'||$booking->mdata['pallet_requirement'] == 'origin') {
+                        $palletFee = 0;
+                    } else {
+                        $palletFee = $palletFeeBase * $shipment->mdata['amzon_pallet']*$percentage;
+                    }
+                    if($booking->mdata['shrink_wrap'] == 'wrap'){
+                        $shrinkWrapFee = $wrapFeeBase * $shipment->mdata['amzon_pallet']*$percentage;
+                    } else {
+                        $shrinkWrapFee = 0;
+                    }
+                    $base->{"0"} = "Booking Base";
+                    $base->{"1"}  = $shipment->hbn." Booking Base Fee".$discountStr;
+                    $base->{"2"}  = $shipment->pkg;
+                    $base->{"3"} = $shipment->weight;
+                    $base->{"4"}  = $shipment->cbm;
+                    $base->{"5"}  = number_format($baseFeeBase*$percentage, 2, '.', '');
+                    $base->{"6"}  = $shipment->mdata['amzon_pallet'];
+                    $base->{"7"}  = number_format($baseFeeBase*$percentage, 4, '.', '');
+                    $base->{"8"}  = 0;
+                    $base->rebate = "0";
+
+                    $pallet->{"0"} = "Plain Pallet";
+                    $pallet->{"1"} = $shipment->hbn." Plain Pallet Fee".$discountStr;
+                    $pallet->{"2"} = $shipment->pkg;
+                    $pallet->{"3"} = $shipment->weight;
+                    $pallet->{"4"} = $shipment->cbm;
+                    $pallet->{"5"} = number_format((float)$palletFee, 2, '.', '');
+                    $pallet->{"6"} = $shipment->mdata['amzon_pallet'];
+                    $pallet->{"7"} = number_format((float)$palletFee, 4, '.', '');
+                    $pallet->{"8"} = 0;
+                    $pallet->rebate = "0";
+
+                    $wrap->{"0"} = "Shrink Wrap";
+                    $wrap->{"1"} = $shipment->hbn." Shrink Wrap Fee".$discountStr;
+                    $wrap->{"2"} = $shipment->pkg;
+                    $wrap->{"3"} = $shipment->weight;
+                    $wrap->{"4"} = $shipment->cbm;
+                    $wrap->{"5"} = number_format((float)$shrinkWrapFee, 2, '.', '');
+                    $wrap->{"6"} = $shipment->mdata['amzon_pallet'];
+                    $wrap->{"7"} = number_format((float)$shrinkWrapFee, 4, '.', '');
+                    $wrap->{"8"} = 0;
+                    $wrap->rebate = "0";
+
+                    array_push($chargeItems->items, $base, $pallet, $wrap);
+
+                }
+
+                $invLine = new InvLine();
+                $invLine->inv_id = $invoice->id;
+                $invLine->model = 'ImcoConsol';
+                $invLine->amount = $invoice->total;
+                $invLine->gst = $invoice->gst;
+                $invLine->qty = 1;
+                $invLine->mdata = $chargeItems;
+                $invLine->rebate = 0;
+                $invLine->save();
+                
+            }
+        } 
+    }
+
+    public function createCargoBookingInvoiceLine($booking, $invoiceId, $ccode, $amount, $gst, $description, $qty, $tax)
+    {
+        $invLine = new InvLine();
+        $shipment = ImParcel::model()->findByPk($booking->shipment_id);
+        $invLine->inv_id = $invoiceId;
+        $invLine->model = 'ImcoConsol';
+        $invLine->fid = !empty($shipment)?$shipment->consol_id:0;
+        $invLine->ccode = $ccode;
+        $invLine->amount = $amount*1.1;
+        $invLine->gst = $gst;
+        $invLine->det = $description;
+        $invLine->qty = $qty;
+        $invLine->tax = $tax;
+        $invLine->linkto = $shipment->hbn;
+        $invLine->save();
+    }
+}

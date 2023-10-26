@@ -1,0 +1,130 @@
+<?php
+$this->widget('zii.widgets.grid.CGridView', array(
+    'id' => 'bwtrunk-grid',
+    'dataProvider' => new CArrayDataProvider($bwtrunks),
+    'columns' => array(
+        'id',
+        array(
+            'name' => 'CTO_start',
+            'type' => 'raw',
+            'value' => function($data) {
+                return CHtml::activeTextField($data, 'CTO_start', array('class' => 'editable-field'));
+            },
+        ),
+        array(
+            'name' => 'CTO_finish',
+            'type' => 'raw',
+            'value' => function($data) {
+                return CHtml::activeTextField($data, 'CTO_finish', array('class' => 'editable-field'));
+            },
+        ),
+        array(
+            'name' => 'Client_start',
+            'type' => 'raw',
+            'value' => function($data) {
+                return CHtml::activeTextField($data, 'Client_start', array('class' => 'editable-field'));
+            },
+        ),
+        array(
+            'name' => 'Client_finish',
+            'type' => 'raw',
+            'value' => function($data) {
+                return CHtml::activeTextField($data, 'Client_finish', array('class' => 'editable-field'));
+            },
+        ),
+        array(
+            'class' => 'CButtonColumn',
+            'template' => '{save} {delete}',
+            'buttons' => array(
+                'save' => array(
+                    'label' => 'Save',
+                    'url' => 'javascript:void(0);',
+                    'options' => array(
+                        'class' => 'save-button',
+                        'onclick' => 'saveRow(this);', 
+                    ),
+                ),
+                'delete' => array(
+                    'label' => 'Delete',
+                    'url' => 'javascript:void(0);',
+                    'options' => array(
+                        'class' => 'delete-button',
+                        'onclick' => 'deleteRow(this);', 
+                    ),
+                ),
+            ),
+        ),
+    ),
+));
+
+?>
+
+<script>
+   function saveRow(element) {
+        var row = $(element).closest('tr');
+        var id = row.find('td:first-child').text();
+        var ctoStart = row.find('input[name*=CTO_start]').val();
+        var ctoFinish = row.find('input[name*=CTO_finish]').val();
+        var clientStart = row.find('input[name*=Client_start]').val();
+        var clientFinish = row.find('input[name*=Client_finish]').val();
+
+        $.ajax({
+            url: '<?php echo $this->createUrl("bwtrunk/save"); ?>',
+            type: 'POST',
+            data: {
+                id: id,
+                CTO_start: ctoStart,
+                CTO_finish: ctoFinish,
+                Client_start: clientStart,
+                Client_finish: clientFinish
+            },
+            success: function(response) {
+                if (response === 'success') {
+                    // Handle successful save
+                    alert('Data saved successfully!');
+                    // Update the row with saved data if necessary
+                    // ...
+                } else {
+                    // Handle save error
+                    alert('An error occurred while saving the data.');
+                }
+            },
+            error: function() {
+                // Handle save error
+                alert('An error occurred while saving the data.');
+            }
+        });
+
+        return false;
+    }
+
+    function deleteRow(element) {
+        var row = $(element).closest('tr');
+        var id = row.find('td:first-child').text();
+
+        $.ajax({
+            url: '<?php echo $this->createUrl("bwtrunk/delete"); ?>',
+            type: 'POST',
+            data: { id: id },
+            success: function(response) {
+                if (response === 'success') {
+                    // Handle successful deletion
+                    alert('Data deleted successfully!');
+                    // Remove the row from the grid
+                    row.remove();
+                } else {
+                    // Handle deletion error
+                    alert('An error occurred while deleting the data.');
+                }
+            },
+            error: function() {
+                // Handle deletion error
+                alert('An error occurred while deleting the data.');
+            }
+        });
+
+        return false;
+    }
+
+</script>
+

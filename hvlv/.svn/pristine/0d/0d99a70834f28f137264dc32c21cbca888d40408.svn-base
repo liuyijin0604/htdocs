@@ -1,0 +1,126 @@
+<h1><?=$name?></h1>
+<style>
+    .cloumn_red{
+        background-color:red;
+    }   
+</style>
+<?php echo CHtml::link($this->t('Advanced Search'),'#',array('class'=>'search-button')); ?>
+<div class="search-form" style="display:none">
+<?php $this->renderPartial('_search',array(
+	'model'=>$model,
+));
+$model->isCustomSearching = 1;
+?>
+</div>
+<?php 
+$directionArr = [];
+if(isset($status))
+{
+	if(in_array($status, array_keys(ShipmentProcess::$aqisStates)))
+	{
+		$directionArr[] = ['name'=>'direction_due_date','value'=>'@$data->process->direction_due_date','cssClassExpression' => '!empty($data->process->direction_due_date)?(count(HolidayHelper::getDatesBetweenTwoDays($data->process->direction_due_date,date("Y-m-d")))>=2? "cloumn_red" : ""):""'];
+
+		if(in_array($status, array_keys(ShipmentProcess::$insstates))&&$status>ShipmentProcess::STATE_WAITING_FOR_INSPECTION)
+		{
+			$directionArr[] = ['name'=>'confirm_date','value'=>'@$data->process->confirm_date','cssClassExpression' => '!empty($data->process->mdata["confirm_date"])?(count(HolidayHelper::getDatesBetweenTwoDays($data->process->mdata["confirm_date"],date("Y-m-d")))>=2? "cloumn_red" : ""):""'];
+		}
+
+		if(in_array($status, array_keys(ShipmentProcess::$disstates))&&$status>ShipmentProcess::STATE_DISPOSAL_ARRANGED)
+		{
+			$directionArr[] = ['name'=>'confirm_date','value'=>'@$data->process->confirm_date','cssClassExpression' => '!empty($data->process->mdata["confirm_date"])?(count(HolidayHelper::getDatesBetweenTwoDays($data->process->mdata["confirm_date"],date("Y-m-d")))>=2? "cloumn_red" : ""):""'];
+		}
+	}
+
+
+}
+
+$this->widget('zii.widgets.grid.CGridView', [
+	'id'=>$_GET["tabid"].'_custom_grid',
+	'cssFile' => false,
+	'dataProvider'=>$model->search(true, 30),
+	'filter'=>$model,
+	'columns'=>array_merge([
+		['name' => 'hbn', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->createURL("imParcel/update", array("id" => $data->id))."\" class=\"tab_link\" title=\"".$data->getHbn()."\">".$data->getHbn()."</a>"',],
+		'ref',
+		'can',
+		['name'=>'awb_name','header'=>'awb','type'=>'raw','value'=>'empty($data->consol)?"":$data->consol->awb',],
+		['name' => 'pkg', 'header' => 'Pkgs'],
+		['header'=>'Agent','name'=>'agent_name','value'=>'@$data->agent->name'],
+		['name' => 'consol_no', 'type'=>'raw', 'value' => 'empty($data->consol_id)? "" : "<a href=\"".Yii::app()->createURL(@$data->consol->type == 70? "dmawbConsol/update" : "imcoConsol/update", array("id" => $data->consol_id))."\" class=\"tab_link\" title=\"".@$data->consol->no."\">".@$data->consol->no."</a>"',],
+		['name' => 'status', 'value' => '$data->getStatus()',
+			'filter'=>CHtml::hiddenField('status', @$status).CHtml::dropDownList('ImParcel[status]', $model->status, $this->t(ImParcel::$states), ['prompt'=>$this->t('All')]),],
+		['name' => 'ddpt_id', 'value' => '@$data->depot->name',
+			'filter'=>CHtml::dropDownList('ImParcel[ddpt_id]', $model->ddpt_id, $this->t(Org::dptList()), ['prompt'=>$this->t('All')]),],
+		['name'=>'consol_eta','header'=>'eta','type'=>'raw','value'=>'@$data->consol->eta','htmlOptions'=>['width'=>'80px'],'cssClassExpression' => 'isset($data->consol)?(@$data->consol->getEtaToNow()>5? "cloumn_red" : ""):""'],
+		['name'=>'process_doc_date','header'=>'Date', 'type'=>'raw','value'=>'@$data->process->date','cssClassExpression' => '@$data->process->getUpdateToNow()>=3? "cloumn_red" : ""']
+		],$directionArr,[
+		['name' => 'cnee_name', 'type' => 'raw', 'value'=>function($data){
+            $cnee = empty($data->receiver->name)? @$data->cnee : @$data->receiver;
+
+            return empty($cnee)? '' : CHtml::tag('div', ['title'=>@$cnee->name."\n".$cnee->company."\n".$cnee->fullAddress()."\n".$cnee->tel."\n".$cnee->email], @$cnee->name);
+            },],
+		'postcode',
+		// ['name' => 'cnee_addr','header'=>'Address' ,'value' => 'empty($data->cnee)?"":substr($data->cnee->address,0,20)'],
+		// ['name' => 'cnee_company','header'=>'Company', 'value' => 'empty($data->cnee)?"":$data->cnee->company'],
+		// ['name' => 'cnee_tel','header'=>'Tel', 'value' => 'empty($data->cnee)?"":$data->cnee->tel'],
+		// ['name' => 'cnee_email','header'=>'Email', 'value' => 'empty($data->cnee)?"":$data->cnee->email'],
+		['header'=>'Chg. Code','value'=>'$data->getChargecode()'],
+		['header' => 'Note', 'type' => 'raw',   'value'=>function ($data) {
+            return CHtml::tag('div', ['title'=>@$data->mdata["custom_note"],], mb_substr(@$data->mdata["custom_note"], 0, 15));
+        },'filter'=>CHtml::textField('ImParcel[customNote]',@$model->customNote)],
+		['header'=>'value','value'=>'$data->dvalue'],
+		['name'=>'process_broker','header'=>'Broker','value'=>'@$data->process->getBrokerName()','filter'=>CHtml::dropDownList('ImParcel[process_broker]', $model->process_broker, $this->t(ShipmentProcess::brokerList()), ['prompt'=>$this->t('All')])],
+		['name'=>'process_status','value'=>'$data->getProcessStatus()','filter'=>CHtml::dropDownList('ImParcel[process_status]', $model->process_status, $this->t(ShipmentProcess::$statesdisplay), ['prompt'=>$this->t('All')]),],
+		['header'=>'Process Type','type'=>'raw','value'=>'$data->process->getProcessType()'],
+		['header'=>'Depot', 'type' => 'raw','value'=>'$data->consol->pod','filter'=>CHtml::dropDownList('ImParcel[depot]', @$model->depot, $this->t($list), ['prompt'=>'All'])],
+		['header'=>'extra Info','type'=>'raw','value'=>'$data->getWarnings()','filter'=>CHtml::dropDownList('ImParcel[bwf]', $model->bwf, $this->t(ImParcel::$bwfs), ['prompt'=>'All'])],
+		['header'=>'AQIS Ins Paid','value'=>'@$data->process->mdata["aqis_invoice_paid_amount"]'],
+		[
+			'class'=>'oButtonColumn',
+			'template'=>'{update}{log}',
+			'buttons'=>[
+				
+				'update' => [
+					'url'=>'Yii::app()->createURL("customProcess/updateFile",array("id"=>$data->id,"parentTab"=>$_GET["tabid"]))',
+					'imageUrl'=>false,
+					'visible'=>'true',
+					'options' => ['class' => 'tab_link grid_edit_btn', 'label'=>$this->t('Update'), 'title' => '$data->hbn', 'data-win-class' => 'L'],
+				],
+				'log' => [
+					'imageUrl'=>false,
+					'options' => ['class' => 'jqm_link grid_view_btn', 'label' => 'Log', 'data-win-class' => 'L'],
+					'visible' => 'true',
+					'url' => 'Yii::app()->createUrl("customProcess/log", ["id" => $data->id])',
+					'label' => 'Log'
+				],
+			],
+		],
+	]),
+]); ?>
+
+<script type="text/javascript">
+$(function(){
+	var tab = $('#<?=$_GET["tabid"];?>');
+	var panel = tab.data('panel');
+	
+	var resetFilters = function(){
+		$('.search-form form', panel).trigger('reset');
+		$('#<?=$_GET["tabid"];?>_custom_grid', panel).yiiGridView('update', {data: 'ImParcel=reset'});
+	};
+
+	tab.bind('onOpen', function(){
+		$('#<?=$_GET["tabid"];?>_custom_grid', panel).yiiGridView('update');
+	});
+
+	$('.search-button', panel).on('click', function(){
+		$('.search-form', panel).toggle();
+		return false;
+	});
+
+	$('.search-form form', panel).on('submit', function(){
+		$('#<?=$_GET["tabid"];?>_custom_grid', panel).yiiGridView('update', {data: $('.filters input, .filters select', panel).serialize() + '&' + $(this).serialize()});
+		return false;
+	}).find('.reset_btn').on('click', resetFilters);
+
+});
+</script>

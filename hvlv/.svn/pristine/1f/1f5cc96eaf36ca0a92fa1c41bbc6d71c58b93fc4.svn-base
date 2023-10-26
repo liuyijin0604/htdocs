@@ -1,0 +1,1156 @@
+<?php
+
+class ImportsMailController extends Controller
+{
+	protected $nonAjax = ['body', 'eml','readEmail','parkEmail', 'exportFeedbackDetails'];
+
+	/**
+	 * Displays a particular model.
+	 * @param integer $id the ID of the model to be displayed
+	 */
+	public function actionList($isWms = false)
+	{
+		if (!empty(Yii::app()->user)&&Yii::app()->user->grp == 72) {
+			$this->redirect('myEmails');
+		}
+		$model = new ImportsMail('search');
+		$model->is3pl = 0;
+		if (!empty($_GET['ImportsMail'])) {
+			$model->attributes = $_GET['ImportsMail'];
+		}
+		$model->no_status = [50, 60, 100];
+		$total = 0;
+		$provide = [];
+		$mailTypes = ImportsMail::$mailTypes;
+		$importscs_list_id = ImportsMail::$importscs_list_id;
+		if($isWms)
+		{
+			$model->is3pl = 1;
+			$mailTypes = ImportsMail::$wmsMailTypes;
+			$importscs_list_id = ImportsMail::$wmscs_list_id;
+		}
+		if (empty($_GET['ImportsMail'])) {
+		$sql = "SELECT type, COUNT(*) as no,COUNT(if(status=10,1,null)) as n10, COUNT(if(status=20,1,null)) as n20  FROM `imports_mail` WHERE  type!=80 AND status not in (50,60,100) AND create_time > '2021-08-20 00:00:00' GROUP by type";
+		$rs = Yii::app()->db->createCommand($sql)->queryAll();
+		foreach ($rs as $index => $r) {
+			if(!in_array($r['type'],array_keys($mailTypes))) continue;
+			$total += intval($r['no']);
+			$provide[] = ['id' => $index + 1, 'rawType' => $r['type'], 'type' => $mailTypes[$r['type']], 'new' => $r['n10'], 'allocated' => $r['n20']];
+		}
+		}
+		$kpiService = new KpiService();
+		$service = new Service();
+		$result =  $service->getCacheData('TodayImportsMail'.($isWms?1:0));
+		if(empty($result)||!empty($_POST['refreshMailCache']))
+		{
+			$result = [];
+			if (empty($_GET['ImportsMail']))
+			{
+				foreach ($importscs_list_id as $user_id => $user_name) {
+					$result[$user_id] = [];
+					$log = Log::model()->find('model = "User" AND lid = :lid AND type = 3', [':lid' => $user_id]);
+					if(!empty($log))
+					{
+						$user_create = $log->time;
+					}else
+					{
+						$user_create = '2000-01-01 00:00:00';
+					}
+
+					$sql = "SELECT COUNT(*) as number,user_id FROM `mail_user` mu join `imports_mail` im on mu.mail_id = im.id WHERE SUBDATE(CURDATE(),INTERVAL 360 MINUTE) <= im.`create_time` AND im.`create_time`<=SUBDATE(CURDATE(),INTERVAL -1080 MINUTE) AND mu.user_id = " . $user_id . " AND im.create_time >= '" . $user_create . "' GROUP BY user_id";
+					$todyOpen = Yii::app()->db->createCommand($sql)->queryAll();
+					foreach ($todyOpen as $r) {
+						if (isset($result[$r['user_id']])) {
+							$result[$r['user_id']]['today_open'] = $r['number'];
+						}
+					}
+					$sql = "SELECT COUNT(*) as number, user_id FROM `mail_user` mu join `imports_mail` im on mu.mail_id = im.id WHERE SUBDATE(CURDATE(),INTERVAL 360 MINUTE)<=`close_time` AND `close_time`<=SUBDATE(CURDATE(),INTERVAL -1080 MINUTE) AND mu.status=50 GROUP BY user_id";
+					$todayReply = Yii::app()->db->createCommand($sql)->queryAll();
+					foreach ($todayReply as $r) {
+						if (isset($result[$r['user_id']])) {
+							$result[$r['user_id']]['today_reply_only'] = $r['number'];
+						}
+					}
+
+					$sql = "SELECT COUNT(*) as number, user_id FROM `mail_user` mu join `imports_mail` im on mu.mail_id = im.id WHERE SUBDATE(CURDATE(),INTERVAL 360 MINUTE)<=`park_time` AND `park_time`<=SUBDATE(CURDATE(),INTERVAL -1080 MINUTE) AND mu.status=50 GROUP BY user_id";
+					$todayReply = Yii::app()->db->createCommand($sql)->queryAll();
+					foreach ($todayReply as $r) {
+						if (isset($result[$r['user_id']])) {
+							$result[$r['user_id']]['today_reply_park'] = $r['number'];
+						}
+					}
+
+					$sql = "SELECT COUNT(*) as number,user_id FROM `mail_user` mu join `imports_mail` im on mu.mail_id = im.id WHERE SUBDATE(CURDATE(),INTERVAL 360 MINUTE)<=`close_time` AND `close_time`<=SUBDATE(CURDATE(),INTERVAL -1080 MINUTE) AND mu.status=60  GROUP BY user_id";
+					$todayCloseOnly = Yii::app()->db->createCommand($sql)->queryAll();
+					foreach ($todayCloseOnly as $r) {
+						if (isset($result[$r['user_id']])) {
+							$result[$r['user_id']]['today_close_only'] = $r['number'];
+						}
+					}
+
+
+					$sql = "SELECT COUNT(*) as number,user_id FROM `mail_user` mu join `imports_mail` im on mu.mail_id = im.id WHERE SUBDATE(CURDATE(),INTERVAL 360 MINUTE)<=`park_time` AND `park_time`<=SUBDATE(CURDATE(),INTERVAL -1080 MINUTE) AND mu.status=10 and (flag&4)>0  GROUP BY user_id";
+					$todayRead = Yii::app()->db->createCommand($sql)->queryAll();
+					foreach ($todayRead as $r) {
+						if (isset($result[$r['user_id']])) {
+							$result[$r['user_id']]['today_park'] = $r['number'];
+						}
+					}
+					$sql = "SELECT COUNT(*) as number,user_id FROM `mail_user` mu join `imports_mail` im on mu.mail_id = im.id WHERE mu.status=10 and (flag&4)=0 AND im.`create_time` <= SUBDATE(CURDATE(),INTERVAL -1020 MINUTE) AND mu.user_id = " . $user_id . " AND im.create_time >= '" . $user_create . "' GROUP BY user_id";
+					$todayLeft = Yii::app()->db->createCommand($sql)->queryAll();
+					foreach ($todayLeft as $r) {
+						if (isset($result[$r['user_id']])) {
+							$result[$r['user_id']]['today_left'] = $r['number'];
+						}
+					}
+				}
+				// foreach ($result as $key => $value) {
+				// 	if (empty($value)) {
+				// 		unset($result[$key]);
+				// 	}
+				// }
+				unset($result[530]);
+				$yesterdayData = $service->getCacheData('ImportsMail'.($isWms?1:0));
+				if(empty($yesterdayData))
+				{
+					$yesterdayData = [];
+				}
+
+				$allResult = [];
+				$myResult = [];
+				$kpiResult = $kpiService->calculateMonthEmailKPI(date("Y-m"));
+
+				foreach ($result as $user_id => $r) {
+					$today_left=intval(@$r['today_left']);
+					$today_park=intval(@$r['today_park']);
+					$today_reply=intval(@$r['today_reply_only'])+intval(@$r['today_reply_park']);
+					$today_close_only = intval(@$r['today_close_only']);
+					$today_close=intval($today_park+$today_reply+$today_close_only);
+					$finishPercent=($today_close+$today_left)>0?($today_close/($today_close+$today_left)):0;
+
+					$monthlyFinishPercent = isset($kpiResult[$user_id])?$kpiResult[$user_id][2]:0;
+					$myResult[$user_id] = [$finishPercent,$monthlyFinishPercent];
+				}
+				arsort($myResult);
+				foreach ($myResult as $user_id => $r) {
+					$allResult[$user_id] = $result[$user_id];
+					$allResult[$user_id]['finishPercent'] = $r[0];
+					$allResult[$user_id]['monthlyFinishPercent'] = $r[1];
+					$allResult[$user_id]['yesterdayData'] = 0;
+					if(!empty($yesterdayData[$user_id]))
+					{
+						$allResult[$user_id]['yesterdayData'] = $yesterdayData[$user_id]['today_left'];
+					}
+				}
+				$result = $allResult;
+				if(!empty($_POST['cacheMail']))
+				{
+					$service->setCacheData('ImportsMail'.($isWms?1:0),$result,86400);
+					$yesterdayData = $service->getCacheData('ImportsMail'.($isWms?1:0));
+
+					return;
+				}
+				$service->setCacheData('TodayImportsMail'.($isWms?1:0),$result,86400);
+			}
+
+		}
+
+		$filtersForm = new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters = $_GET['FiltersForm'];
+		}
+		$filteredData = $filtersForm->filter($provide);
+		$dataprovider = new CArrayDataProvider($filteredData);
+		$dataprovider->pagination = ['pageSize' => 10];
+		$sort = new CSort();
+		$sort->attributes = [
+			'type' => [
+				'asc' => 'type ASC',
+				'desc' => 'type DESC',
+			],
+		];
+		$sort->defaultOrder = "type ASC";
+		$dataprovider->sort = $sort;
+
+		$feedbackAttributes = ['type'=>ReportCache::IMPORTS_MAIL_FEEDBACK_REPORT, 'status'=>1];
+		$feedback = ReportCache::model()->findByAttributes($feedbackAttributes);
+		$feedbackData = [];
+		if(!empty($feedback->mdata))
+		{
+			$feedbackData = $feedback->mdata;
+		}
+		if(empty($_POST['backend_command']))
+		{
+			$this->render('list', [
+				'model' => $model,
+				'dataProvider' => [$dataprovider, $filtersForm],
+				'total' => $total,
+				'result' => $result,
+				'isWms' =>$isWms,
+				'feedback' => $feedbackData
+			]);
+		}
+	}
+
+	public function actionWmsList()
+	{
+		$this->actionList(true);
+	}
+
+	public function actionMyWmsEmails()
+	{
+		$_GET['isWms'] = 1;
+		$this->actionMyEmails();
+	}
+		/**
+	 * Displays a particular model.
+	 * @param integer $id the ID of the model to be displayed
+	 */
+	public function actionListSimple()
+	{
+		if (Yii::app()->user->grp == 72) {
+			$this->redirect('myEmails');
+		}
+		$model = new ImportsMail('search');
+		if (!empty($_GET['ImportsMail'])) {
+			$model->attributes = $_GET['ImportsMail'];
+		}
+		$model->no_status = [50, 60, 100];
+		$total = 0;
+		$provide = [];
+		$sql = "SELECT type, COUNT(*) as no,COUNT(if(status=10,1,null)) as n10, COUNT(if(status=20,1,null)) as n20  FROM `imports_mail` WHERE  type!=80 AND status not in (50,60,100) GROUP by type";
+		$rs = Yii::app()->db->createCommand($sql)->queryAll();
+		foreach ($rs as $index => $r) {
+			$total += intval($r['no']);
+			$provide[] = ['id' => $index + 1, 'rawType' => $r['type'], 'type' => ImportsMail::$mailTypes[$r['type']], 'new' => $r['n10'], 'allocated' => $r['n20']];
+		}
+		$result = [];
+
+		unset($result[530]);
+		$filtersForm = new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters = $_GET['FiltersForm'];
+		}
+		$filteredData = $filtersForm->filter($provide);
+		$dataprovider = new CArrayDataProvider($filteredData);
+		$dataprovider->pagination = ['pageSize' => 10];
+		$sort = new CSort();
+		$sort->attributes = [
+			'type' => [
+				'asc' => 'type ASC',
+				'desc' => 'type DESC',
+			],
+		];
+		$sort->defaultOrder = "type ASC";
+		$dataprovider->sort = $sort;
+		$this->render('listSimple', [
+			'model' => $model,
+			'dataProvider' => [$dataprovider, $filtersForm],
+			'total' => $total,
+			'result' => $result,
+		]);
+	}
+
+	public function actionMailListDailyReport()
+	{
+		$importscs_list_id = ImportsMail::$importscs_list_id;
+		if(!empty($_GET['isWms']))
+		{
+			$importscs_list_id = ImportsMail::$wmscs_list_id;
+		}
+		$filtersForm = new FiltersForm;
+		$provide = [];
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters = $_GET['FiltersForm'];
+		}
+		if (!empty($_GET['start_date']) && !empty($_GET['end_date'])) {
+			$start_time = $_GET['start_date'];
+			$end_time = $_GET['end_date'];
+			$show_type = $_GET['show_type'];
+			if ($show_type == 0) {
+				$sql = "SELECT CEIL(SUM(unfinished)/COUNT(DISTINCT record_date)) as unfinished_avg, CEIL(SUM(`open`)/COUNT(DISTINCT record_date)) as open_avg, "
+					. "CEIL(SUM(`read`)/COUNT(DISTINCT record_date)) as read_avg,"
+					. " CEIL(SUM(`reply`)/COUNT(DISTINCT record_date)) as reply_avg,CEIL(SUM(`close`)/COUNT(DISTINCT record_date)) as close_avg,"
+					. " CEIL(SUM(`percent`)/COUNT(DISTINCT record_date)) as percent_avg,uid from `mail_history_record` WHERE record_date<=:end_time AND record_date>=:start_time AND percent>0 GROUP BY uid";
+				$rs = Yii::app()->db->createCommand($sql)->bindValues([':end_time' => $end_time, ':start_time' => $start_time])->queryAll();
+				$provide = $this->preReportProvide($rs,$importscs_list_id);
+			} else {
+				$sql = "SELECT SUM(unfinished) as unfinished_avg, SUM(`open`) as open_avg, "
+					. "SUM(`read`) as read_avg,SUM(`reply`) as reply_avg,SUM(`close`) as close_avg,"
+					. " SUM(`percent`) as percent_avg,uid, record_date from `mail_history_record` WHERE record_date<=:end_time AND record_date>=:start_time AND percent>0 GROUP BY uid,record_date";
+				$rs = Yii::app()->db->createCommand($sql)->bindValues([':end_time' => $end_time, ':start_time' => $start_time])->queryAll();
+				$provide = $this->preReportProvide($rs,$importscs_list_id);
+			}
+		}
+		$filteredData = $filtersForm->filter($provide);
+		$dataprovider = new CArrayDataProvider($filteredData);
+		$dataprovider->pagination = ['pageSize' => 15];
+		if (!empty($_GET['partial'])) {
+			$this->renderPartial('report_search', [
+				'dataProvider' => [$dataprovider, $filtersForm],
+			]);
+			return;
+		}
+		$this->render('report', ['dataProvider' => [$dataprovider, $filtersForm]]);
+	}
+	public function preReportProvide($rs,$importscs_list_id)
+	{
+		$provide = [];
+		$index = 1;
+		foreach ($rs as $oneUserRecord) {
+			if (in_array($oneUserRecord['uid'], array_keys($importscs_list_id))) {
+				$userName = User::getUserName($oneUserRecord['uid']);
+				$provide[] = ['id' => $index++, 'uid' => $oneUserRecord['uid'], 'user_name' => $userName, 'unfinished' => intval($oneUserRecord['unfinished_avg']), 'open' => intval($oneUserRecord['open_avg']), 'read' => intval($oneUserRecord['read_avg']),
+					'close' => intval($oneUserRecord['close_avg']), 'percent' => ceil($oneUserRecord['percent_avg']), 'reply' => intval($oneUserRecord['reply_avg']), 'date' => isset($oneUserRecord['record_date']) ? $oneUserRecord['record_date'] : ''];
+			}
+		}
+		return $provide;
+	}
+	/**
+	 * Updates a particular model.
+	 * If update is successful, the browser will be redirected to the 'view' page.
+	 * @param integer $id the ID of the model to be updated
+	 */
+	public function actionUpdate($id)
+	{
+		$model = $this->loadModel($id);
+
+		// Uncomment the following line if AJAX validation is needed
+		// $this->performAjaxValidation($model);
+		if (isset($_GET['tab'])) {
+			if ($_GET['tab'] == 'overview') {
+				if (!empty($_POST['ImportsMail'])) {
+					if ($model->op_id != $_POST['ImportsMail']['op_id']) {
+						$model->assignMapping($_POST['ImportsMail']['op_id']);
+					}
+					if ($model->type != $_POST['ImportsMail']['type']) {
+						$model->changeTypeMapping($_POST['ImportsMail']['type']);
+					}
+					$model->attributes = $_POST['ImportsMail'];
+					if ($model->status == 10 && $model->op_id > 0) {
+						$model->status = 20;
+					}
+					$model->mdata['cs_ref'] = @$_POST['cs_ref'];
+					$model->save();
+					$this->ajaxResult($model);
+				}
+			}
+			$this->render('tab_' . $_GET['tab'], ['model' => $model]);
+		} else {
+
+			$importsMailService = new ImportsMailService();
+			$relations = $importsMailService->getEmailPreviousAndNext($model);
+			$this->render('update', ['model' => $model,'previous'=>$relations['previousId'],'next'=>$relations['nextId'],'previousNo'=>$relations['previousNo'],'nextNo'=>$relations['nextNo']]);
+		}
+	}
+
+	public function actionBody($id)
+	{
+		$model = $this->loadModel($id);
+		$loadResult = $model->loadContent();
+		if($loadResult)
+		{
+			echo '<div style="white-space:', ($model->isHtmlBody ? 'pre-inline' : 'pre-wrap'), ';overflow: auto">', $model->tempMailBody, '</div>';
+		}else
+		{
+			echo '<div style="white-space:', ($model->isHtmlBody ? 'pre-inline' : 'pre-wrap'), ';overflow: auto">', $model->plain_body, '</div>';
+		}
+	}
+
+	public function actionEml($id){
+		$model = $this->loadModel($id);
+		header("Cache-Control: maxage=1");
+		header("Content-Type: message/rfc822");
+		header("Content-Disposition: attachment;filename=\"".$model->no.".eml\"");
+		echo $model->rawcontent();
+		Yii::app()->end();
+	}
+
+	/**
+	 * Reply the Customer
+	 * @param Integer $id
+	 */
+	public function actionReply($id)
+	{
+		$model = new ReplyEmail('search');
+		$email = $this->loadModel($id);
+		if (isset($_POST['ReplyEmail'])) {
+			//                var_dump($_POST['ReplyEmail']);return;
+			$model->attributes = $_POST['ReplyEmail'];
+			$model->reply_subject = $model->reply_subject . (preg_match('/\{EM\d+\}$/i', $model->reply_subject) ? '' : ' {' . $email->no . '}');
+			foreach ($_POST['mdata'] as $k => $v) {
+				$model->mdata[$k] = $v;
+			}
+			$model->email_id = $email->id;
+			$model->reply_op = Yii::app()->user->id;
+			$model->save();
+			if (!empty(Yii::app()->session['uploads'][$_POST['ppupload']][2])) {
+				foreach (Yii::app()->session['uploads'][$_POST['ppupload']][2] as $fid) {
+					$fr = FileRepo::model()->findByPk($fid);
+					$fr->fid = $model->id;
+					$fr->save();
+				}
+			}
+			$o = $model->sendMail();
+			if ($model->status != 1) {
+				$model->addError('id', $o['msg']);
+			} else {
+				if(!empty($_POST['park']))
+				{
+				    $email->replyAndPark();
+				}else
+				{
+					$email->mailUserReply();
+				}
+				if(!empty($email->ticket))
+				{
+					$ticket = ShipmentQuestionSubmit::model()->find('ticket=:ticket',[":ticket"=>$email->ticket]);
+					if(!empty($ticket)&&!empty($ticket->shipmentQuestion))
+					{
+						$sq = $ticket->shipmentQuestion[0];
+						$sq->process_type = ShipmentQuestion::TYPE_RESPONSED;
+						$sq->save();
+					}
+				}
+			}
+			$this->ajaxResult($model);
+		}
+		$model->reply_email = $email->from_email;
+		$loadResult = $email->loadContent();
+		if($loadResult)
+		{
+			$model->reply_body = $email->getReplyHeader() . @$email->tempMailBody;
+		}else
+		{
+			$model->reply_body = $email->getReplyHeader() . @$email->plain_body;
+		}
+
+		$model->reply_subject = (preg_match('/^re:/i', $email->subject) ? '' : 'Re: ') . $email->subject;
+		if(empty($email->mdata['to_email']))
+		{
+			$model->reply_from = Yii::app()->user->grp == 72 ? Yii::app()->user->email : 'imports@toplogistics.com.au';
+		}else
+		{
+			$model->reply_from = Yii::app()->user->grp == 72 ? Yii::app()->user->email : @$email->mdata['to_email'];
+		}
+
+		if($email->is3pl==1)
+		{
+			if(empty($email->mdata['to_email']))
+			{
+				$model->reply_from = Yii::app()->user->grp == 72 ? Yii::app()->user->email : '3pl@toplogistics.com.au';
+			}else
+			{
+				$model->reply_from = Yii::app()->user->grp == 72 ? Yii::app()->user->email : @$email->mdata['to_email'];
+			}
+
+			if(empty($email->mdata['to_email'])&&!empty($email->to_email))
+			{
+				$model->reply_from = Yii::app()->user->grp == 72 ? Yii::app()->user->email : @$email->to_email;
+			}
+		}
+		$model->reply_from = str_replace('pcaexpress', 'toplogistics', $model->reply_from);
+		$cc = [];
+		if (!empty($email->mdata['cc'])) {
+			foreach ($email->mdata['cc'] as $c) {
+				if ($c['address'] != $email->mdata['to_email']) {
+					$cc[] = $c['address'];
+				}
+
+			}
+		}
+		$cc[] = $model->reply_from;
+		$model->mdata['cc'] = implode(';', array_unique($cc));
+		if(preg_match('/toplogistics/i', $model->reply_email)&&!preg_match('/toplogistics/i', $model->reply_from))
+		{
+			$temp = $model->reply_email;
+			$model->reply_email = $model->reply_from;
+			$model->reply_from = $temp;
+			$model->reply_from = preg_replace('/;/', '', $model->reply_from);
+			$model->mdata['cc'] = $model->reply_from;
+		}
+		
+		$park = 0;
+		if(!empty($_POST['park'])) $park =1;
+		$this->render('reply_email', ['model' => $model,'park'=>$park]);
+	}
+
+	/**
+	 * Reply the Customer
+	 * @param Integer $id
+	 */
+	public function actionQuickReply()
+	{
+		$faqAnswer = $_POST['faqAnswer'];
+		$id = $_POST['id'];
+		$model = new ReplyEmail('search');
+		$email = $this->loadModel($id);
+		$model->reply_email = $email->from_email;
+		$loadResult = $email->loadContent();
+		if($loadResult)
+		{
+			$model->reply_body = $faqAnswer.$email->getReplyHeader() . @$email->tempMailBody;
+		}else
+		{
+			$model->reply_body = $faqAnswer.$email->getReplyHeader() . @$email->plain_body;
+		}
+
+		$model->reply_subject = (preg_match('/^re:/i', $email->subject) ? '' : 'Re: ') . $email->subject;
+		if(empty($email->mdata['to_email']))
+		{
+			$model->reply_from = Yii::app()->user->grp == 72 ? Yii::app()->user->email : 'imports@toplogistics.com.au';
+		}else
+		{
+			$model->reply_from = Yii::app()->user->grp == 72 ? Yii::app()->user->email : @$email->mdata['to_email'];
+		}
+
+		if($email->is3pl==1)
+		{
+			if(empty($email->mdata['to_email']))
+			{
+				$model->reply_from = Yii::app()->user->grp == 72 ? Yii::app()->user->email : '3pl@toplogistics.com.au';
+			}else
+			{
+				$model->reply_from = Yii::app()->user->grp == 72 ? Yii::app()->user->email : @$email->mdata['to_email'];
+			}
+
+			if(empty($email->mdata['to_email'])&&!empty($email->to_email))
+			{
+				$model->reply_from = Yii::app()->user->grp == 72 ? Yii::app()->user->email : @$email->to_email;
+			}
+		}
+		$model->reply_from = str_replace('pcaexpress', 'toplogistics', $model->reply_from);
+		$cc = [];
+		if (!empty($email->mdata['cc'])) {
+			foreach ($email->mdata['cc'] as $c) {
+				if ($c['address'] != $email->mdata['to_email']) {
+					$cc[] = $c['address'];
+				}
+
+			}
+		}
+		$cc[] = $model->reply_from;
+		$model->mdata['cc'] = implode(';', array_unique($cc));
+		if(preg_match('/toplogistics/i', $model->reply_email)&&!preg_match('/toplogistics/i', $model->reply_from))
+		{
+			$temp = $model->reply_email;
+			$model->reply_email = $model->reply_from;
+			$model->reply_from = $temp;
+			$model->reply_from = preg_replace('/;/', '', $model->reply_from);
+			$model->mdata['cc'] = $model->reply_from;
+		}
+		
+		$model->reply_subject = $model->reply_subject . (preg_match('/\{EM\d+\}$/i', $model->reply_subject) ? '' : ' {' . $email->no . '}');
+		$model->email_id = $email->id;
+		$model->reply_op = Yii::app()->user->id;
+		$model->save();
+		if (!empty(Yii::app()->session['uploads'][$_POST['ppupload']][2])) {
+			foreach (Yii::app()->session['uploads'][$_POST['ppupload']][2] as $fid) {
+				$fr = FileRepo::model()->findByPk($fid);
+				$fr->fid = $model->id;
+				$fr->save();
+			}
+		}
+		$o = $model->sendMail();
+		if ($model->status != 1) {
+			$model->addError('id', $o['msg']);
+		} else {
+			if(!empty($_POST['park']))
+			{
+			    $email->replyAndPark();
+			}else
+			{
+				$email->mailUserReply();
+			}
+			if(!empty($email->ticket))
+			{
+				$ticket = ShipmentQuestionSubmit::model()->find('ticket=:ticket',[":ticket"=>$email->ticket]);
+				if(!empty($ticket)&&!empty($ticket->shipmentQuestion))
+				{
+					$sq = $ticket->shipmentQuestion[0];
+					$sq->process_type = ShipmentQuestion::TYPE_RESPONSED;
+					$sq->save();
+				}
+			}
+		}
+		$this->ajaxResult($model);
+	}
+
+	public function actionReplyAndPark($id)
+	{
+		$_POST['park'] = 1;
+		$this->actionReply($id);
+	}
+
+	/**
+	 *edit Statement Email
+	 * @param Integer $id
+	 */
+	public function actionCreateEmail()
+	{
+		$emailService = new EmailService();
+		$model = new Emailog();
+		if (isset($_POST['Emailog'])) {
+			$model->attributes = $_POST['Emailog'];
+			foreach ($_POST['mdata'] as $k => $v) {
+				$model->mdata[$k] = $v;
+			}
+			if(empty($model->mdata['cc']))
+			{
+				$model->mdata['cc'] = $model->mdata['from'];
+			}else
+			{
+				$model->mdata['cc'] .= ";".$model->mdata['from'];
+			}
+			
+			$model = $emailService->createEmail($model,$_FILES);
+
+			$this->ajaxResult($model);
+		}
+		$model->type= 0;
+		$model->status=10;
+		$model->to_id=0;
+		$model->dt = date('Y-m-d H:i:s');
+		$model->prepTemplate();
+		$model->subject = "";
+		$model->body = "";
+		$model->mdata['fromName']='TLA Finance';
+		$model->mdata['from']='finance@toplogistics.com.au';
+		$model->mdata['cc']='finance@toplogistics.com.au';
+		$sig = ImportsMailSignature::model()->find('user_id=:uid AND status=1', [':uid' => Yii::app()->user->id]);
+		if (!empty($sig)) {
+			$model->body .= $sig->sig_body;
+		}
+
+		$model->mdata['to'] = "";
+		$allCCEmail = [];
+		$ccEmails = explode(';', $model->mdata['cc']);
+		foreach ($ccEmails as $key => $value) {
+			$allCCEmail[] = $value;
+		}
+		$model->mdata['cc'] = "";
+		$this->render('create_email', ['model' => $model,'data'=>json_encode($_GET)]);
+	}
+
+	public function actionForward($id)
+	{
+		$model = new ReplyEmail('search');
+		$email = $this->loadModel($id);
+		if (isset($_POST['ReplyEmail'])) {
+			$model->attributes = $_POST['ReplyEmail'];
+			$model->reply_subject = $model->reply_subject . (preg_match('/\{EM\d+\}$/i', $model->reply_subject) ? '' : ' {' . $email->no . '}');
+
+			foreach ($_POST['mdata'] as $k => $v) {
+				$model->mdata[$k] = $v;
+			}
+			$model->email_id = $email->id;
+			$model->reply_op = Yii::app()->user->id;
+			$model->save();
+			if (!empty(Yii::app()->session['uploads'][$_POST['ppupload']][2])) {
+				foreach (Yii::app()->session['uploads'][$_POST['ppupload']][2] as $fid) {
+					$fr = FileRepo::model()->findByPk($fid);
+					$fr->fid = $model->id;
+					$fr->save();
+				}
+			}
+			if (!empty($email->attachments)) {
+				$transaction = Yii::app()->db->beginTransaction();
+				try {
+					foreach ($email->attachments as $at) {
+						$tempAt = new FileRepo();
+						$tempAt->fid = $model->id;
+						$tempAt->type = 29;
+						$tempAt->name = $at->name;
+						$tempAt->hash = $at->hash;
+						$tempAt->mime = $at->mime;
+						$tempAt->size = $at->size;
+						$tempAt->date = $at->date;
+						$tempAt->status = $at->status;
+						$tempAt->save();
+					}
+					$transaction->commit();
+				} catch (Exception $ex) {
+					$transaction->rollback();
+				}
+			}
+			$o = $model->sendMail();
+			if ($model->status != 1) {
+				$model->addError('id', $o['msg']);
+			} else {
+				$email->mailUserReply();
+			}
+			$this->ajaxResult($model);
+		}
+		//            $model->reply_email=$email->from_email;
+		$email->loadContent();
+		if($email->isHtmlBody)
+		{
+			$model->reply_body = $email->getReplyHeader() . @$email->plain_body;
+		}else
+		{
+			$model->reply_body = $email->getReplyHeader() . @$email->tempMailBody;
+		}
+		
+		$model->reply_subject = (preg_match('/^fw:/i', $email->subject) ? '' : 'Fw: ') . $email->subject;
+		$model->reply_from = 'imports@toplogistics.com.au';
+		/*
+		$cc='';
+		if (!empty($email->mdata['cc'])) {
+		foreach ($email->mdata['cc'] as $c) {
+		$cc.=$c['address'].';';
+		}
+		}
+		$model->mdata['cc']=$cc;
+		 */
+		$this->render('reply_email', ['model' => $model]);
+	}
+
+	public function actionTotalEmails()
+	{
+		$model = new ImportsMail('search');
+		if (!empty($_GET['ImportsMail'])) {
+			$model->attributes = $_GET['ImportsMail'];
+		}
+		$isWms = !empty($_GET['isWms'])?1:0;
+		$mailTypes = ImportsMail::$mailTypes;
+		$importscs_list_id = ImportsMail::$importscs_list_id;
+		if($isWms)
+		{
+			$model->is3pl = 1;
+			$mailTypes = ImportsMail::$wmsMailTypes;
+			$importscs_list_id = ImportsMail::$wmscs_list_id;
+		}else
+		{
+			$model->is3pl = 0 ;
+		}
+
+
+
+		$total = 0;
+		$provide = [];
+		$sql = "SELECT type, COUNT(*) as no,COUNT(if(status=10,1,null)) as n10, COUNT(if(status=20,1,null)) as n20,COUNT(if(status=50,1,null)) as n50, COUNT(if(status=60,1,null)) as n60, COUNT(if(status=100,1,null)) as n100 FROM `imports_mail` WHERE  status not in (100) ".($isWms==1?" and is3pl=1 ":" and is3pl=0 ")." GROUP by type";
+		$rs = Yii::app()->db->createCommand($sql)->queryAll();
+		foreach ($rs as $index => $r) {
+			$total += intval($r['no']);
+			$provide[] = ['id' => $index + 1, 'rawType' => $r['type'], 'type' => $mailTypes[$r['type']], 'new' => $r['n10'], 'allocated' => $r['n20'], 'replied' => $r['n50'], 'close' => $r['n60']];
+		}
+		$filtersForm = new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters = $_GET['FiltersForm'];
+		}
+		$filteredData = $filtersForm->filter($provide);
+		$dataprovider = new CArrayDataProvider($filteredData);
+		$dataprovider->pagination = ['pageSize' => 10];
+		$sort = new CSort();
+		$sort->attributes = [
+			'type' => [
+				'asc' => 'type ASC',
+				'desc' => 'type DESC',
+			],
+		];
+		$sort->defaultOrder = "type ASC";
+		$dataprovider->sort = $sort;
+		$this->render('total_list', [
+			'model' => $model,
+			'dataProvider' => [$dataprovider, $filtersForm],
+			'total' => $total,
+		]);
+	}
+
+	public function actionMyEmails()
+	{
+		$model = new ImportsMail('search');
+		$isWms = !empty($_GET['isWms'])?1:0;
+		if (!empty($_GET['ImportsMail'])) {
+			$model->attributes = $_GET['ImportsMail'];
+		}
+		if (!empty($_GET['user_id'])) {
+			$user_id = $_GET['user_id'];
+		} else {
+			$user_id = Yii::app()->user->id;
+		}
+
+		$mailTypes = ImportsMail::$mailTypes;
+		$model->is3pl = null;
+		$importscs_list_id = ImportsMail::$importscs_list_id;
+
+		$mailTypes = ImportsMail::$mailTypes+ImportsMail::$wmsMailTypes;
+		$importscs_list_id = ImportsMail::$importscs_list_id+ ImportsMail::$wmscs_list_id;
+
+
+		$model->myUserId = $user_id;
+		$total = 0;
+		$provide = [];
+		$result = [];
+		foreach ($mailTypes as $type => $typeName) {
+			$result['type'] = [];
+		}
+		$log = Log::model()->find('model = "User" AND lid = :lid AND type = 3', [':lid' => $user_id]);
+		if(!empty($log))
+		{
+			$user_create = $log->time;
+		}else
+		{
+			$user_create = '2000-01-01 00:00:00';
+		}
+
+		$sql = "SELECT COUNT(*) as number, mail_type FROM `mail_user` mu join `imports_mail` im on mu.mail_id = im.id WHERE CURDATE() <= im.`create_time` AND im.`create_time` >= '" . $user_create . "' AND user_id = " . $user_id . " GROUP BY mail_type";
+		$todyOpen = Yii::app()->db->createCommand($sql)->queryAll();
+		foreach ($todyOpen as $r) {
+			$result[$r['mail_type']]['today_open'] = $r['number'];
+		}
+		$sql = "SELECT COUNT(*) as number,mail_type FROM `mail_user` WHERE (CURDATE()<=`close_time` or CURDATE()<=`park_time`) AND status=50 AND user_id=" . $user_id . " GROUP BY mail_type";
+		$todayReply = Yii::app()->db->createCommand($sql)->queryAll();
+		foreach ($todayReply as $r) {
+			$result[$r['mail_type']]['today_reply'] = $r['number'];
+		}
+		$sql = "SELECT COUNT(*) as number,mail_type FROM `mail_user` WHERE CURDATE()<=`park_time` AND status=10 AND user_id=" . $user_id . " GROUP BY mail_type";
+		$todayRead = Yii::app()->db->createCommand($sql)->queryAll();
+		foreach ($todayRead as $r) {
+			$result[$r['mail_type']]['today_park'] = $r['number'];
+		}
+		$sql = "SELECT COUNT(*) as number, mail_type FROM `mail_user` mu join `imports_mail` im on mu.mail_id = im.id WHERE (mu.status = 10 or ((im.flag&4)>0&&mu.close_time='0000-00-00 00:00:00')) AND im.`create_time` >= '" . $user_create . "' AND user_id = " . $user_id . " GROUP BY mail_type";
+		$todayLeft = Yii::app()->db->createCommand($sql)->queryAll();
+		foreach ($todayLeft as $r) {
+			$result[$r['mail_type']]['today_left'] = $r['number'];
+		}
+		foreach ($result as $key => $value) {
+			if (empty($value)) {
+				unset($result[$key]);
+			}
+		}
+		$index = 1;
+		$total = 0;
+		foreach ($result as $key => $r) {
+			$type = @$mailTypes[$key];
+			$todayOpen = intval(@$r['today_open']);
+			$todayPark = intval(@$r['today_park']);
+			$todayReply = intval(@$r['today_reply']);
+			$todayLeft = intval(@$r['today_left']);
+			$todayTotal = $todayPark + $todayReply;
+			$total += $todayLeft;
+			$provide[] = ["id" => $index++, 'rawType' => $key, 'type' => $type, 'today_open' => $todayOpen, 'today_park' => $todayPark, 'today_reply' => $todayReply, 'today_total' => $todayTotal, 'left' => $todayLeft];
+		}
+		$filtersForm = new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters = $_GET['FiltersForm'];
+		}
+		$filteredData = $filtersForm->filter($provide);
+		$dataprovider = new CArrayDataProvider($filteredData);
+		$dataprovider->pagination = ['pageSize' => 10];
+		$sort = new CSort();
+		$sort->attributes = [
+			'type' => [
+				'asc' => 'type ASC',
+				'desc' => 'type DESC',
+			],
+		];
+		$sort->defaultOrder = "type ASC";
+		$dataprovider->sort = $sort;
+		$this->render('my_email_list', [
+			'model' => $model,
+			'dataProvider' => [$dataprovider, $filtersForm],
+			'total' => $total,
+			'result' => $result,
+			'user_id' => $user_id,
+			'isWms' => $isWms
+		]);
+	}
+
+	public function actionRelatedEmail()
+	{
+		$id = $_GET["id"];
+		$action = $_GET["action"];
+
+		$model = new ImportsMail('search');
+		$model->is3pl = null;
+		$model->myUserId = User::currentUserID();
+
+		$log = Log::model()->find('model = "User" AND lid = :lid AND type = 3', [':lid' => $model->myUserId]);
+		if(!empty($log))
+		{
+			$user_create = $log->time;
+		}else
+		{
+			$user_create = '2000-01-01 00:00:00';
+		}
+
+
+		$ec = new CDbCriteria;
+		$ec->addCondition('t.create_time >= "' . $user_create . '"');
+		$model->id = ">".$id;
+		if($action=="previous")
+		{
+			$model->id = "<".$id;
+			$_GET['sort'] = "t.id.desc";
+		}else
+		{
+			$model->id = ">".$id;
+			$_GET['sort'] = "t.id";
+		}
+
+		$email = $model->search(true, 1, $ec, false)->data;
+
+		if(!empty($email))
+		{
+			$this->actionUpdate($email[0]->id);
+		}
+
+
+
+
+	}
+	public function actionMyTotalEmails()
+	{
+		$model = new ImportsMail('search');
+		// $isWms = !empty($_GET['isWms'])?1:0;
+		if (!empty($_GET['ImportsMail'])) {
+			$model->attributes = $_GET['ImportsMail'];
+		}
+		if (!empty($_GET['user_id'])) {
+			$user_id = $_GET['user_id'];
+		} else {
+			$user_id = Yii::app()->user->id;
+		}
+		
+		$mailTypes = ImportsMail::$mailTypes+ImportsMail::$wmsMailTypes;
+		$importscs_list_id = ImportsMail::$importscs_list_id+ImportsMail::$wmscs_list_id;
+		// if($isWms)
+		// {
+		// 	$model->is3pl = 1;
+		// 	$mailTypes = ImportsMail::$wmsMailTypes;
+		// 	$importscs_list_id = ImportsMail::$wmscs_list_id;
+		// }
+		$model->is3pl = null;
+
+
+
+		$model->myAllUserId = $user_id;
+		$total = 0;
+		$provide = [];
+		$sql = "SELECT type, COUNT(*) as no,COUNT(if(status=10,1,null)) as n10, COUNT(if(status=20,1,null)) as n20,COUNT(if(status=50,1,null)) as n50,COUNT(if(status=60,1,null))"
+		. " as n60 FROM `imports_mail` WHERE  status !=100 AND ( op_id=" . $user_id . " OR type in (" . implode(',', ImportsMailUserMap::getUserTypes($user_id)) . ")) GROUP by type";
+		$rs = Yii::app()->db->createCommand($sql)->queryAll();
+		foreach ($rs as $index => $r) {
+			$total += intval($r['no']);
+			$provide[] = ['id' => $index + 1, 'rawType' => $r['type'], 'type' => $mailTypes[$r['type']], 'new' => $r['n10'], 'allocated' => $r['n20'], 'replied' => $r['n50'], 'closed' => $r['n60']];
+		}
+		$filtersForm = new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters = $_GET['FiltersForm'];
+		}
+		$filteredData = $filtersForm->filter($provide);
+		$dataprovider = new CArrayDataProvider($filteredData);
+		$dataprovider->pagination = ['pageSize' => 10];
+		$sort = new CSort();
+		$sort->attributes = [
+			'type' => [
+				'asc' => 'type ASC',
+				'desc' => 'type DESC',
+			],
+		];
+		$sort->defaultOrder = "type ASC";
+		$dataprovider->sort = $sort;
+		$this->render('my_total_email_list', [
+			'model' => $model,
+			'dataProvider' => [$dataprovider, $filtersForm],
+			'total' => $total,
+			'user_id' => $user_id,
+		]);
+	}
+
+	public function actionCloseEmail($id)
+	{
+		$model = $this->loadModel($id);
+		$model->close();
+		echo 'done';
+	}
+	public function actionReadEmail($id)
+	{
+		$model = $this->loadModel($id);
+		$model->read();
+		echo 'done';
+	}
+
+	public function actionParkEmail($id)
+	{
+		$model = $this->loadModel($id);
+		$model->park();
+		echo 'done';
+	}
+
+	public function actionFilterManage()
+	{
+		$isWms = !empty($_GET['isWms'])?1:0;
+		if (!empty($_POST)) {
+			if (!empty($_POST['filter_meta_items'])) {
+				$meta_item = json_decode($_POST['filter_meta_items'], true);
+				ImportsMailFilter::model()->deleteAll('is3pl = :is3pl',[':is3pl'=>$isWms]);
+				foreach ($meta_item as $item) {
+					$model = new ImportsMailFilter('search');
+					$model->attributes = $item;
+					$model->is3pl = $isWms;
+					$model->save();
+				}
+				$this->ajaxResult($model);
+			}
+		}
+		$this->render('filter_manage',['isWms'=>$isWms]);
+	}
+	public function actionManageUserMap()
+	{
+		if (!empty($_POST)) {
+			if (!empty($_POST['inports_mail_map_user_items'])) {
+				$meta_item = json_decode($_POST['inports_mail_map_user_items'], true);
+				$history_record = [];
+				$new_record = [];
+				$isWms = !empty($_POST['isWms'])?1:0;
+				$history = ImportsMailUserMap::model()->findAll('is3pl = :is3pl',[':is3pl'=>$isWms]);
+				foreach ($history as $h) {
+					$history_record[$h->type_id][] = $h->user_id;
+				}
+				ImportsMailUserMap::model()->deleteAll('is3pl = :is3pl',[':is3pl'=>$isWms]);
+				foreach ($meta_item as $key => $value) {
+					foreach ($value as $k => $v) {
+						if (empty($v) || empty($v['uid'])) {
+							continue;
+						}
+						$model = new ImportsMailUserMap;
+						$model->type_id = $k;
+						$model->user_id = $v['uid'];
+						if (!empty($v['tel'])) {
+							$model->tel = $v['tel'];
+						}
+						$new_record[$k][] = $v['uid'];
+						$model->is3pl  = $isWms;
+						$model->save();
+					}
+				}
+				$result = $this->getArrayResult($history_record, $new_record);
+				ImportsMail::newMappingUserMail($result);
+				$this->ajaxResult($model);
+			}
+		}
+	}
+
+	private function getArrayResult($old, $new)
+	{
+		$result = ['add' => [], 'remove' => []];
+		//add first
+		$old_keys = array_keys($old);
+		$new_keys = array_keys($new);
+		if (!empty(array_diff($old_keys, $new_keys))) {
+			foreach (array_diff($old_keys, $new_keys) as $onediff) {
+				$result['remove'][$onediff] = $old[$onediff];
+				unset($old[$onediff]);
+			}
+		}
+		if (!empty(array_diff($new_keys, $old_keys))) {
+			foreach (array_diff($new_keys, $old_keys) as $onediff) {
+				$result['add'][$onediff] = $new[$onediff];
+				unset($new[$onediff]);
+			}
+		}
+		if (!empty($old)) {
+			foreach ($old as $key => $value) {
+				if (array_diff($old[$key], $new[$key])) {
+					$result['remove'][$key] = array_diff($old[$key], $new[$key]);
+				}
+				if (array_diff($new[$key], $old[$key])) {
+					$result['add'][$key] = array_diff($new[$key], $old[$key]);
+				}
+			}
+		}
+		return $result;
+	}
+	/***
+	 * Manage Personal Signature
+	 */
+	public function actionMySignature()
+	{
+		if (!empty($_POST)) {
+			$transaction = Yii::app()->db->beginTransaction();
+			try {
+				$model = ImportsMailSignature::model()->findByPk($_POST['select_signature']);
+				$model->sig_body = $_POST['ImportsMailSignature']['sig_body'];
+				ImportsMailSignature::removeDefault();
+				$model->status = 1;
+				$model->save();
+				$transaction->commit();
+			} catch (Exception $ex) {
+				$transaction->rollback();
+			}
+			$this->ajaxResult($model);
+		}
+		$this->render('signature_management');
+	}
+
+	public function actionNewSignature()
+	{
+		$model = new ImportsMailSignature();
+		if (!empty($_POST['ImportsMailSignature'])) {
+			$model->user_id = Yii::app()->user->id;
+			$model->sig_name = $_POST['ImportsMailSignature']['sig_name'];
+			$model->sig_body = $_POST['ImportsMailSignature']['new_sig_body'];
+			if (!ImportsMailSignature::haveDefaultSignature()) {
+				$model->status = 1;
+			}
+			$model->save();
+			$this->ajaxResult($model);
+		}
+
+		$this->render('new_signature', ['model' => $model]);
+	}
+
+	public function actionSelectSignature()
+	{
+		$model = ImportsMailSignature::model()->findByPk($_GET['id']);
+		$this->render('_sig_form', ['model' => $model]);
+	}
+
+	public function actionFeedbackDetails($id)
+	{
+		$model = new ImportsMail('search');
+		$model->unsetAttributes();
+		$model->op_id = $id;
+		$this->render('feedback_details', ['model' => $model]);
+	}
+
+	public function actionExportFeedbackDetails()
+	{
+		$xls = new oExcel;
+		$xls->setColWidth([20, 20, 20, 20, 20, 20, 20]);
+		$i = 1;
+		$xls->addRow($i++, ['Email Feedback Details']);
+		$xls->mergeCells('A1:H1');
+		$xls->setFont('A1', ['bold' => true, 'size' => '20']);
+		$xls->centerAlignment('A1');
+		$xls->addRow($i++, ['No', 'Ticket','From Email', 'To Email', 'OP ID', 'Reply Time', 'Rating']);
+
+		if (!empty($_GET['op_id'])) {
+			$op_id = $_GET['op_id'];
+			$sql = "SELECT * FROM imports_mail WHERE `status` = 111 AND `op_id` = " . $op_id . " ORDER BY `date` DESC";
+			$response = ImportsMail::model()->findAllBySql($sql);
+			foreach($response as $email) {
+				$xls->addRow($i++, [$email->no, $email->ticket, $email->from_email, $email->to_email, $email->op_id, $email->date, $email->mdata['rating']]);
+			}
+
+		}
+		$xls->output('Imports_Mail_Feedback_Report' . date('Ymd') . '.xlsx');
+	}
+	/**
+	 * Returns the data model based on the primary key given in the GET variable.
+	 * If the data model is not found, an HTTP exception will be raised.
+	 * @param integer $id the ID of the model to be loaded
+	 * @return ImportsMail the loaded model
+	 * @throws CHttpException
+	 */
+	public function loadModel($id)
+	{
+		$model = ImportsMail::model()->findByPk($id);
+		if ($model === null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		return $model;
+	}
+}

@@ -1,0 +1,1180 @@
+<?php
+
+class ShipmentController extends Controller
+{
+	/**
+	 * Declares class-based actions.
+	 */
+	protected $nonAjax=['bulkPrint','print','export','report'];
+	protected $skipAcl=['auPcSuggest','cnCitySuggest','cnSuburbSuggest','prodSuggest', 'tracking'];
+
+	protected $org;
+	protected $type;
+
+
+	public function beforeAction($action)
+	{
+		if (!Yii::app()->user->isGuest) {
+			$this->org = Org::model()->findByPk(Yii::app()->user->org);
+			$this->type = 'im';
+		}
+		return parent::beforeAction($action);
+	}
+
+	public function actionCreate()
+	{
+		$model = new ImParcel;
+		if (!empty($_POST)) {
+			$_POST = utf8zts::t2sArray($_POST);
+			$predata=new stdClass();
+			$predata->chargecode=$_POST['chargecode'];
+			$predata->shipper=$_POST['Cnor'];
+			$predata->consignee=$_POST['Cnee'];
+			$predata->weight=$_POST['ImParcel']['weight'];
+			$predata->cbm=$_POST['ImParcel']['cbm'];
+			$predata->insurance=$_POST['ImParcel']['insurance'];
+			$predata->cust_ref=$_POST['ImParcel']['cref'];
+			$predata->packs=(isset($_POST['ImParcel']['pkg'])&&$_POST['ImParcel']['pkg']>0)?$_POST['ImParcel']['pkg']:1;
+			$predata->items=[];
+			if (empty($_POST['items'])) {
+				$model->addError('id', 'Items need to be supplied!');
+				$this->ajaxResult($model);
+			}
+			foreach ($_POST['items']['g'] as $k=> $item_name) {
+				$predata->items[$k]=['type' => 'O', 'name' => trim($item_name), 'qty' => trim($_POST['items']['q'][$k]),
+					'price' => trim($_POST['items']['v'][$k]),'name_zh'=>isset($_POST['items']['g_zh'][$k])?trim($_POST['items']['g_zh'][$k]):''
+					,'hs'=>isset($_POST['items']['hs'][$k])?$_POST['items']['hs'][$k]:''];
+			}
+			$predata->agent_id= $this->org->id;
+			$manifest=null;
+			if (!empty($_GET['man_id'])) {
+				$manifest= Manifest::model()->find('fwd_id=:oid AND id=:id', [':oid'=>$this->org->id,':id'=>$_GET['man_id']]);
+			}
+			if (empty($predata->weight)) {
+				$model->addError('id', 'Weight need to be supplied!');
+				$this->ajaxResult($model);
+			}
+			$d=ChooseShipment::newShipmentWithChargeCode($predata, false, empty($manifest->id)? null : ['man_id' => $manifest->id]);
+			if ($d->success) {//sucess
+				$this->ajaxResult($model, ['id', 'hbn'], json_encode($d));
+			} else {
+				$model->addError('id', json_encode($d));
+				$this->ajaxResult($model);
+			}
+		}
+
+		$this->render('create', ['model' => $model, 'type' => $this->type, 'org' => $this->org]);
+	}
+
+	public function actionManage()
+	{
+		$model = new ImParcel('search');
+		$model->unsetAttributes();
+		$model->ot_id = null;
+//		$model->dbCriteria->order = 't.id ASC';
+		if (isset($_GET['ImParcel'])&&$model->ref=="Search") {
+			$model->ref = "";
+		}
+		if (isset($_GET['ImParcel'])) {
+			$model->attributes = $_GET['ImParcel'];
+		}
+		if (isset(Yii::app()->user->org) && Yii::app()->user->org > 1) {
+			$model->agent_id = Yii::app()->user->org;
+		}
+
+		if(isset($_GET['awb']))
+		{
+			$model->awb_name = trim($_GET['awb']);
+		}
+		if (!isset($_GET['ImParcel'])) {
+			$model->ref = "Search";
+		}
+		$this->render('manage', ['model' => $model, 'type' => $this->type]);
+	}
+
+	public function actionExport()
+	{
+		$model = new ImParcel('search');
+		$model->unsetAttributes();
+		$model->dbCriteria->order = 't.id DESC';
+		if (!empty($_GET['ImParcel'])) {
+			$model->attributes = $_GET['ImParcel'];
+		}
+		if (Yii::app()->user->org > 1) {
+			$model->agent_id = Yii::app()->user->org;
+		}
+
+		if(isset($_GET['awb']))
+		{
+			$model->awb_name = trim($_GET['awb']);
+		}
+		
+		$criteria = new CDbCriteria;
+		$criteria->condition = "t.created >= '".$_POST['start']."' AND t.created < DATE_ADD('".$_POST['end']."', INTERVAL 1 DAY)";
+		$dp = $model->search(false, 0, $criteria);
+
+		$xls = new oExcel;
+		$i = 1;
+		$xls->addRow($i++, ['运单号', '参考号','客户运单号','重量', '状态', '发件人', '电话', '收件人', '电话', '地址', '区','洲','国家', '日期']);
+
+		foreach ($dp->data as $r) {
+			if (empty($r->cnee)) {
+				continue;
+			}
+
+			$rowData = ['="'.$r->hbn.'"',
+				'="'.$r->ref.'"',
+				empty($r->cref)? '' : '="'.$r->cref.'"',
+				'="'.$r->weight.'"',
+				$r->getStatus(),
+				$r->cnor->name,
+				'="'.$r->cnor->tel.'"',
+				$r->cnee->name,
+				'="'.$r->cnee->tel.'"',
+				$r->cnee->address,
+				$r->cnee->suburb,
+				$r->cnee->state,
+				$r->cnee->country,
+				$r->created];
+
+			$xls->addRow($i++, $rowData);
+		}
+		$xls->output('shipment_export_'.time().'.xlsx');
+	}
+
+	public function actionReport()
+	{
+		$model = new ImParcel('search');
+		$xls = new oExcel;
+		$i = 1;
+		$hdr = ['运单号', '派送单号', '参考号','重量', '状态', '发件人', '电话', '收件人', '电话', '地址', '区','洲','邮编', '日期'];
+		$fn = 'shipment_report_'.time().'.xlsx';
+		$addInfo = function ($r, &$d) {
+			return;
+		};
+		switch ($_GET['type']) {
+			case 'noid':
+				$rs = $model->with('cnee')->findAll('agent_id = :aid AND status < 18 AND cnee.cnid_id = 0', [':aid' => Yii::app()->user->org]);
+			break;
+			case 'nop':
+				$rs = $model->findAll('agent_id = :aid AND status NOT IN (100,102) AND cbwf = 1', [':aid' => Yii::app()->user->org]);
+			break;
+			case 'dlv':
+				$rs = $model->findAll('agent_id = :aid AND status IN (70, 80, 81, 83, 94) AND created > DATE_SUB(NOW(), INTERVAL 3 MONTH)', [':aid' => Yii::app()->user->org]);
+				$hdr[] = '派送信息';
+				$fn = 'shipment_delivery_report_'.time().'.xlsx';
+				$addInfo = function ($r, &$d) {
+					$ts = $r->tracks;
+					$c = [];
+					for ($i = 0; $i< 3; $i++) {
+						$t = array_pop($ts);
+						if (empty($t)) {
+							break;
+						}
+						$c[] = $t->dt.': '.$t->activity;
+					}
+					if (!empty($c)) {
+						$d[] = implode("\n", $c);
+					}
+				};
+			break;
+		}
+
+		$xls->addRow($i++, $hdr);
+
+		foreach ($rs as $r) {
+			$rowData = ['="'.$r->hbn.'"',
+				empty($r->ref)? '' : '="'.$r->ref.'"',
+				empty($r->cref)? '' : '="'.$r->cref.'"',
+				'="'.$r->weight.'"',
+				$r->getStatus(),
+				$r->cnor->name,
+				'="'.$r->cnor->tel.'"',
+				$r->cnee->name,
+				'="'.$r->cnee->tel.'"',
+				$r->cnee->address,
+				$r->cnee->suburb,
+				$r->cnee->state,
+				$r->cnee->postcode,
+				$r->created];
+			$addInfo($r, $rowData);
+			$xls->addRow($i++, $rowData);
+		}
+		$xls->output($fn);
+	}
+
+	public function actionExportOrgTLDWithoutPackages()
+	{
+		$reportService = new ReportService();
+		$data = $reportService->getOrgTLDWithoutPackages(User::currentUserOrgId());
+		$i = 1;
+		$header = ['港口','运单号', '派送单号', '客户运单号','重量', '总体积', '件数'];
+		$filename = 'shipment_report_'.time().'.xlsx';
+		$reportService->exportData($data,$header,$filename);
+	}
+	
+	public function actionBulkPrint($s, $fn)
+	{
+		$model = new ImParcel('search');
+		switch ($s) {
+			case 'nop':
+				$rs = $model->findAll('agent_id = :aid AND status NOT IN (100,102) AND cbwf = 1', [':aid' => Yii::app()->user->org]);
+			break;
+			case 'irnop':
+				$rs = $model->findAll('agent_id = :aid AND status >= 18 AND status NOT IN (100,102) AND cbwf = 1', [':aid' => Yii::app()->user->org]);
+			break;
+			default:
+				$model->mids = explode(',', $s);
+				$dp = $model->search(false);
+				$rs = $dp->data;
+			break;
+		}
+
+		foreach($rs as $key => $d)
+		{
+			if ($d->status == 8) {
+				$d->status = 9;
+				$d->save();
+			} elseif (($r->cbwf & 1) > 0) {
+				$d->cbwf -= 1;
+				$d->custom_log_note = 'Printed';
+				$d->save();
+			}
+			if(!empty($d->consol)&&preg_match('/WDT/i', $d->consol->no))
+			{
+				continue;
+			}
+
+			$apiLabel = ImParcelService::getEizLabel($d);
+			if(!empty($apiLabel))
+			{
+				$ps[] = $apiLabel;
+			}else
+			{
+				$normal[] = $d;
+			}
+		}
+
+		if(!empty($normal))
+		{
+			$normalLabel = oPDF::renderPDF('label_A6', ['tpl' => '_label_1', 'rs' => $normal], 2);
+			$ps[] = $normalLabel;
+		}
+
+		oPDF::mergePDF($ps, 1, true, $fn.'.pdf');
+	}
+	
+	public function actionMarkPrint()
+	{
+	}
+	
+	public function actionPrint($id)
+	{
+		$model = $this->loadModel($id);
+		if ($model->status == 8) {
+			$model->status = 9;
+			$model->save();
+		}
+		// for AMQ label we use AMQ label template
+		$fn=$model->hbn;
+		foreach ([$model] as $key => $d) {
+			if(!empty($d->consol)&&preg_match('/WDT/i', $d->consol->no))
+			{
+				if($d->getParentShipment()->status!=ImParcel::DELIVERED)
+				{
+					if(empty($_GET['ppwd']))
+					{
+						continue;
+					}else if($this->authPassword($_GET['ppwd'])&&(in_array(User::currentUserOrgId(), [1474,3321,3103])||in_array(User::currentUserID(), [3517])))
+					{
+
+					}else
+					{
+						continue;
+					}
+				}
+			}
+
+			$apiLabel = ImParcelService::getEizLabel($d);
+			if(!empty($apiLabel))
+			{
+				$ps[] = $apiLabel;
+			}else
+			{
+				$normal[] = $d;
+			}
+		}
+
+		if(!empty($normal))
+		{
+			$normalLabel = oPDF::renderPDF('label_A6', ['tpl' => '_label_1', 'rs' => $normal], 2);
+			$ps[] = $normalLabel;
+		}
+
+		oPDF::mergePDF($ps, 1, true, $fn.'.pdf');
+	}
+
+	/**
+	 * Authenticate
+	 */
+	public function actionAuthPassword(){
+		$resp = ['success' => 0 , 'msg' => 'Unknown Error'];
+		if($this->authPassword($_POST['ppwd']))
+		{
+			$resp['success'] = 1;
+		}
+		echo json_encode($resp);
+	}
+
+	/**
+	 * Authenticate
+	 */
+	private function authPassword($password){
+		if(User::getCurrentUser()->password == md5($password))
+		{
+			return true;
+		}
+		return false;
+	}
+	
+	public function actionUpdate($id)
+	{
+		$model = $this->loadModel($id);
+		if (!Acl::hasAccess('B:Import/SeeAllShipments') && !empty($model->agent_id) && $model->agent_id != Yii::app()->user->org) {
+			Acl::denied403();
+		}
+		
+		if (!empty($_POST)) {
+			$_POST = utf8zts::t2sArray($_POST);
+			$model->cnor->attributes = $_POST['Cnor'];
+			$model->cnor->save();
+			$model->cnee->attributes = $_POST['Cnee'];
+			$model->cnee->save();
+			if(!empty($_POST['Receiver']['name']))
+			{
+				if(empty($model->receiver))
+				{
+					$model->receiver = new Addr();
+				}
+
+				$model->receiver->attributes = $_POST['Receiver'];
+				$model->receiver->save();
+				$model->receiver_id = $model->receiver->id;
+			}
+			if(!empty($_POST[get_class($model)]['pkg'])&&$_POST[get_class($model)]['pkg']!=$model->pkg&&!empty($model->pkg))
+			{
+				if(!$model->checkCanEditPkg())
+				{
+					$model->addError("id","this shipment can not be updated number of packages");
+					$this->ajaxResult($model);
+				}
+			}
+
+			$model->attributes=$_POST[get_class($model)];
+
+			if (empty($model->cnor_id)) {
+				$model->cnor_id = $model->cnor->id;
+			}
+			if (empty($model->cnee_id)) {
+				$model->cnee_id = $model->cnee->id;
+			}
+
+			if(!empty($_POST['clear']))
+			{
+				$model->bwf=$model->bwf&ImParcel::CUSTOM_DDU^$model->bwf;// clear DDP
+				$model->bwf=$model->bwf&ImParcel::CUSTOM_DDP^$model->bwf; //clear DDU
+				$model->bwf = $model->bwf|$_POST['clear'];
+			}
+
+			// remove inalid items
+			$items = $_POST['items'];
+			foreach ($items['q'] as $i=>$qty) {
+				if (empty($qty)) {
+					unset($items['q'][$i]);
+					unset($items['g'][$i]);
+					unset($items['g_zh'][$i]);
+					unset($items['pid'][$i]);
+					unset($items['hs'][$i]);
+					unset($items['v'][$i]);
+					continue;
+				}
+			}
+			$model->eitems = $items;
+			$model->state = $model->cnee->state;
+			$model->postcode = $model->cnee->postcode;
+			$model->mdata['amazon_po'] = $_POST['mdata']['amazon_po'];
+			$model->mdata['amazon_shipment_ids'] = $_POST['mdata']['amazon_shipment_ids'];
+			$chargecodeService = new ChargecodeService();
+			$errorMsg = $chargecodeService->checkChargecode($model);
+			if(!empty($errorMsg))
+			{
+				$model->addError('Chargecode Error',$errorMsg);
+				$this->ajaxResult($model);
+			}
+
+
+
+			$model->save();
+			$this->ajaxResult($model, ['id', 'hbn', 'status'], 'Shipment updated successfully.');
+		}
+
+		$this->render($model->canBeUpdate()? 'update' : 'view', ['model' => $model, 'type' => $this->type, 'org' => $this->org]);
+	}
+
+	public function actionAuPcSuggest()
+	{
+		$this->forward('/postcode/suggest');
+	}
+
+	public function actionCnCitySuggest()
+	{
+		$this->forward('/cnZip/suggestCity');
+	}
+
+	public function actionCnSuburbSuggest()
+	{
+		$this->forward('/cnZip/suggestSuburb');
+	}
+		
+	public function actionHeldList()
+	{
+		$model=new ImParcel('search');
+		$model->unsetAttributes();  // clear any default values
+		if (isset($_GET['ImParcel'])) {
+			$model->attributes=$_GET['ImParcel'];
+		}
+		if (Yii::app()->user->grp>10) {
+			$model->agent_id=Yii::app()->user->org;
+		}
+		$model->searchHeld=true;
+		if (isset($_GET['ImParcel']['heldDate'])) {
+			$model->heldDate=$_GET['ImParcel']['heldDate'];
+		}
+		$this->render('shipment_list', [
+			'model'=>$model,'org'=>$this->org,
+		]);
+	}
+	public function actionExportHeldList()
+	{
+		$model=new ImParcel('search');
+		$model->unsetAttributes();  // clear any default values
+		if (isset($_GET['ImParcel'])) {
+			$model->attributes=$_GET['ImParcel'];
+		}
+		if (Yii::app()->user->grp>10) {
+			$model->agent_id=Yii::app()->user->org;
+		}
+		$model->searchHeld=true;
+		if (isset($_GET['ImParcel']['heldDate'])) {
+			$model->heldDate=$_GET['ImParcel']['heldDate'];
+		}
+		$data = $model->search(false)->data;
+		$xls = new oExcel;
+		$i = 1;
+		$xls->addRow($i++, ['运单号', '参考号', '客户运单号','重量', '状态', '发件人', '电话', '收件人', '电话', '地址', '区','洲','国家', '日期','Held 日期']);
+
+		foreach ($data as $r) {
+			if (empty($r->cnee)) {
+				continue;
+			}
+
+			$rowData = ['="'.$r->hbn.'"',
+				'="'.$r->ref.'"',
+				empty($r->cref)? '' : '="'.$r->cref.'"',
+				'="'.$r->weight.'"',
+				$r->getStatus(),
+				$r->cnor->name,
+				'="'.$r->cnor->tel.'"',
+				$r->cnee->name,
+				'="'.$r->cnee->tel.'"',
+				$r->cnee->address,
+				$r->cnee->suburb,
+				$r->cnee->state,
+				$r->cnee->country,
+				$r->created,
+			    ImParcelService::getTimePoint($r,6)];
+
+			$xls->addRow($i++, $rowData);
+		}
+		$xls->output('shipment_export_'.time().'.xlsx');
+	}
+
+	public function actionCnorSuggest()
+	{
+		$model = new ImParcel('search');
+		$rs = $model::model()->with('cnor')->findAll([
+			'condition' => 't.agent_id = :a AND (cnor.name LIKE :t OR cnor.tel LIKE :t)',
+			'order' => 'cnor.name,cnor.tel',
+			'group' => 'cnor.name,cnor.tel',
+			'params' => [':a' => Yii::app()->user->org, ':t' => $_GET['term'].'%']
+		]);
+		$a = [];
+		foreach ($rs as $r) {
+			$attr = $r->cnor->attributes;
+			unset($attr['id'], $attr['cnid_id'], $attr['owner_id'], $attr['acc']);
+			$a[] = $attr + ['label' => $r->cnor->name.'/'.$r->cnor->tel];
+		}
+		echo json_encode($a);
+	}
+
+	public function actionCneeSuggest($id = 0)
+	{
+		{
+			$rs = ImParcel::model()->with('cnee')->findAll([
+				'condition' => "t.agent_id = :agt AND cnee.id IN (SELECT MAX(id) FROM addr a WHERE a.city != '' AND a.tel != '' AND a.id != :id AND (a.name LIKE :t OR a.tel LIKE :t) GROUP BY name,tel)",
+				'params' => [':agt' => Yii::app()->user->org, ':t' => $_GET['term'].'%', ':id' => $id],
+				'order' => 'cnee.id DESC',
+				'limit' => 20,
+			]);
+
+			$a = [];
+			foreach ($rs as $s) {
+				$r = $s->cnee;
+				$attr = $r->attributes;
+				unset($attr['id'], $attr['cnid_id'], $attr['owner_id'], $attr['acc']);
+				$a[] = $attr + [
+					'value' => $r->name,
+					'label' => $r->name.' ('.$r->city.'/'.$r->tel.')',
+					'cnid' => $r->cnid_id,
+					'cnid_no' => $r->cnid_id > 0? $r->cnid->no : '',
+				];
+			}
+		}
+		echo json_encode($a);
+	}
+
+	public function actionProdSuggest()
+	{
+		$a = [];
+		echo json_encode($a);
+	}
+
+	public function actionUploadCustomsFiles()
+	{
+		if(empty($_FILES['file']))
+		{
+			$model=new ImParcel('search');
+			$model->unsetAttributes();  // clear any default values
+			if (isset($_GET['ImParcel'])) {
+				$model->attributes=$_GET['ImParcel'];
+			}
+			if (Yii::app()->user->grp>10) {
+				$model->agent_id=Yii::app()->user->org;
+			}
+			$model->searchHeld=true;
+			if (isset($_GET['ImParcel']['heldDate'])) {
+				$model->heldDate=$_GET['ImParcel']['heldDate'];
+			}
+			$this->render('upload_customs_files', [
+				'model'=>$model,'org'=>$this->org,
+			]);
+			return;
+		}
+
+		$f = $_FILES['file'];
+		$filename = $f['tmp_name'];
+		$name = $f['name'];
+		$hbn = "";
+		$nameArr = explode('-', explode('.', $name)[0]);
+		if(count($nameArr)<=2)
+		{
+			$hbn =$nameArr[0];
+		}else
+		{
+			for ($i=0; $i < count($nameArr)-1 ; $i++) {
+				if(empty($hbn))
+				{
+					$hbn = $nameArr[$i];
+				}else
+				{
+					$hbn .= '-'.$nameArr[$i];
+				}
+			}
+		}
+		if(empty($hbn)) echo 'DONE';
+
+		$model = ImParcel::model()->find('(hbn=:hbn or ref=:hbn or cref=:hbn) and status!=100',[":hbn"=>$hbn]);
+		if(empty($model))
+		{
+			echo 'DONE';
+			return;
+		}else
+		{
+			if(empty($model->process))
+			{
+				$model->bwf = $model->bwf|ImParcel::BWF_HELD_OTHER;
+				$model->save();
+			}
+			
+		}
+		if(!is_uploaded_file($filename)) return false;
+		$thisHash =FileRepo::uploadHash($model, FileRepo::CUSTOMSSENDERFILE);
+		$filesize = filesize($filename);
+		$date = date('Y-m-d H:i:s');
+		$fileHash = hash_file('crc32b', $filename).hash('crc32b', $filesize);
+		$finfo = finfo_open(FILEINFO_MIME_TYPE);
+		$mime = finfo_file($finfo, $f['tmp_name']);
+		$fr = CargoProcess::updateUploadSingleFile($filesize,$date,$fileHash,$finfo,$mime,$filename,$name, $thisHash,false,false,false,false,FileRepo::STATUS_ACTIVE);
+		echo 'DONE';
+
+
+	}
+	
+	public function actionTracking()
+	{
+		if (!empty($_GET['c'])) {
+			$cs = preg_split('/[\s,;]+/', trim($_GET['c']));
+			$rs = [];
+			foreach ($cs as $c) {
+				$p = Shipment::model()->find('(hbn = :c or ref = :c) and status !=100', [':c' => $c]);
+
+				if (empty($p)) {
+					echo '<h2>'.$this->t('Consignment not found').': '.$c.'</h2>';
+					continue;
+				}
+				$o = $p->trackingInfo(0,true,false);
+				if (empty($o)) {
+					echo '<h2>'.$c.' '.$this->t('has no tracking info').'</h2>';
+					continue;
+				}
+				echo '<h2>'.$this->t('Consignment').': '.$c.'</h2>';
+				echo '<div class="gd-summary">
+		<div class="row">
+		<div class="col-md-4 col-sm-6 col-xs-12">
+		  <label class="lbl">'.$this->t('Status').': </label>
+		  <span>'.$o->status.'</span>
+		</div>
+		<div class="col-md-4 col-sm-6 col-xs-12">
+		  <label class="lbl">'.$this->t('Departure Depot').': </label>
+		  <span>'.$o->odpt.'</span>
+		</div>
+		<div class="col-md-4 col-sm-6 col-xs-12">
+		  <label class="lbl">'.$this->t('Departure Date').': </label>
+		  <span>'.$o->odate.'</span>
+		</div>
+	  </div>
+	  <div class="row">
+		<div class="col-md-4 col-sm-6 col-xs-12">
+		  <label class="lbl">'.$this->t('Service').': </label>
+		  <span>'.$this->t('Express').'</span>
+		</div>
+		<div class="col-md-4 col-sm-6 col-xs-12">
+		  <label class="lbl">'.$this->t('Delivery Depot').': </label>
+		  <span>'.$o->ddpt.'</span>
+		</div>
+		<div class="col-md-4 col-sm-6 col-xs-12">
+		  <label class="lbl">'.$this->t('Estimated Dispatch Date').': </label>
+		  <span>'.$o->eta.'</span>
+		</div>
+	  </div>
+	</div>';
+	  
+				echo '<table cellspacing="0" cellpadding="0" border="0" id="lvTrackingGrid" class="gvTable" style="width:100%">
+	<thead>
+	<tr class="thead">
+	  <th style="width: 20%" align="left">'.$this->t('Date &amp; Time').' </th>
+	  <th align="left">'.$this->t('Description').' </th>
+	  <th style="width: 10%" align="left">'.$this->t('Depot').' </th>
+	</tr>
+	</thead>
+	<tbody>
+	';
+				foreach ($o->tracks as $t) {
+					$tm = isset($msgmap[$t[0]])? $msgmap[$t[0]]: $t[0];
+					$m = empty($t[3])? [] : json_decode($t[3], true);
+					echo '<tr>
+	  <td>'.$t[2].'</td>
+	  <td>'.(empty($m['signature'])? '' : '<img src="data:image/png;base64,'.$m['signature'].'" width="150" /><br />').nl2br($tm).'</td>
+	  <td>'.$t[1].'</td>
+	</tr>';
+				}
+	
+				echo '</tbody></table>';
+				if ($p->status == 80) {
+					echo 'EMS: <a href="http://www.kuaidi100.com/all/ems.shtml?mscomnu='.$p->ref.'" target="_blank">'.$p->ref.'</a>';
+				} else {
+					foreach ($p->trans as $ts) {
+						echo $ts->infoLink(true).'<br />';
+					}
+				}
+			}
+			Yii::app()->end();
+		}
+
+
+
+		$model = new ImParcel('search');
+		$model->unsetAttributes();
+		$model->ot_id = null;
+		if(!empty( $_GET['mhbns']))
+		{
+			$model->mhbns = $_GET['mhbns'];
+		}
+		$model->afterArrival = true;
+//		$model->dbCriteria->order = 't.id ASC';
+		if (isset($_GET['ImParcel'])) {
+			$model->attributes = $_GET['ImParcel'];
+		}
+		if(!isset($_GET['ImParcel']['ref']))
+		{
+			$model->ref = "Input";
+		}
+		if(!empty($model->mhbns))
+		{
+			$model->ref = '';
+		}
+		if(!empty($_GET['ImParcel']['ref'])&&$_GET['ImParcel']['ref']!='Input')
+		{
+			$model->ref = $_GET['ImParcel']['ref'];
+			$model->mhbns = '';
+		}
+		if (isset(Yii::app()->user->org) && Yii::app()->user->org > 1) {
+			$model->agent_id = Yii::app()->user->org;
+		}
+
+
+		$this->render('tracking', ['model' => $model, 'type' => $this->type]);
+	}
+
+	public function actionGetStorageFee()
+	{
+		if (isset($_POST['barcode'])) {
+            GatePass::checkStorage($_POST['barcode'],Yii::app()->user->org,true);
+            return;
+        }
+
+        $model = new ImParcel('search');
+        $model->unsetAttributes();
+//		$model->dbCriteria->order = 't.id ASC';
+		if (isset($_GET['ImParcel'])) {
+			$model->attributes = $_GET['ImParcel'];
+		}
+		if (isset(Yii::app()->user->org) && Yii::app()->user->org > 1) {
+			$model->agent_id = Yii::app()->user->org;
+		}
+		$model->status = ImParcel::STATE_DUTY_HELD;
+
+        $this->render('check_storage',['model'=>$model]);
+	}
+
+	public function actionUpdateStorageStatus($id)
+	{
+		$model = ImParcel::model()->findByPk($id);
+//		$model->dbCriteria->order = 't.id ASC';
+		if (isset($_POST['ImParcel'])) 
+		{
+			$model = ImParcel::model()->findByPk($_POST['ImParcel']['id']);
+			if($model->status == ImParcel::STATE_DUTY_HELD)
+			{
+				$model->status = ImParcel::STATE_CLEAR_WAIT;
+				$model->mdata['agent_release_parcel'] = 1; 
+				$model->save();
+				$this->ajaxResult($model);
+			}
+		}
+
+        $this->render('update_storage_list_status',['model'=>$model]);
+	}
+
+	public function actionTimeReport()
+	{
+		$model=new ImParcel('search');
+		$model->unsetAttributes();  // clear any default values
+		if (isset($_GET['ImParcel'])) {
+			$model->attributes=$_GET['ImParcel'];
+		}
+		if(isset($_GET['awb']))
+		{
+			$model->awb_name = trim($_GET['awb']);
+		}
+
+		$model->consol_id = '>0';
+		$model->status = '>50';
+		if (Yii::app()->user->grp>10) {
+			$model->agent_id=Yii::app()->user->org;
+		}
+
+		$this->render('time_report', [
+			'model'=>$model,'org'=>$this->org,
+		]);
+	}
+
+	public function actionExportTimeReport()
+	{
+		$model=new ImParcel('search');
+		$model->unsetAttributes();  // clear any default values
+		if (isset($_GET['ImParcel'])) {
+			$model->attributes=$_GET['ImParcel'];
+		}
+		if(isset($_GET['awb']))
+		{
+			$model->awb_name = trim($_GET['awb']);
+		}
+
+		$model->consol_id = '>0';
+		$model->status = '>50';
+		if (Yii::app()->user->grp>10) {
+			$model->agent_id=Yii::app()->user->org;
+		}
+
+		$xls = new oExcel;
+		$i = 1;
+		// $xls->addRow($i++, ['WBN', 'Ref','Awb','Packages', 'Weight', 'Status', 'Agent', 'Sender', 'Sender Tel', 'Cnee Name', 'Cnee Tel', 'Address', 'State', 'Date', 'Delay','Extra Info']);
+		$xls->addRow($i++, ['包裹追踪号', '柜号 / 提单号','Memo','状态','拆柜时间', '从PCA仓库出库时间', '派送商揽收时间	', '妥投时间', '最后一条追踪轨迹字段', '最后一条追踪轨迹对应的时间']);
+		$dp = $model->search(false);
+		foreach ($dp->data as $r) {
+			$xls->addRow($i++, [$r->ref, @$r->consol->awb."  /  ".@$r->consol->mdata["container_no"],$r->can, ImParcel::$states[$r->status],ImParcelService::getTimePoint($r,1),ImParcelService::getTimePoint($r,2),ImParcelService::getTimePoint($r,3),ImParcelService::getTimePoint($r,4),is_array(ImParcelService::getTimePoint($r,5))?ImParcelService::getTimePoint($r,5)[0]:"",is_array(ImParcelService::getTimePoint($r,5))?ImParcelService::getTimePoint($r,5)[1]:""]);
+		}
+		$xls->output('time_report_'.time().'.xlsx');
+	}
+
+	public function actionUpid($id)
+	{
+		$model = $this->loadModel($id);
+		$this->render('upid', ['model' => $model]);
+	}
+
+	public function actionBookSchedule(){
+		$model = new ImParcel('search');
+		$model->unsetAttributes();
+		if(!empty($_GET["ImParcel"]))
+		{
+			$model->setAttributes($_GET["ImParcel"]);
+		}
+		if (isset(Yii::app()->user->org) && Yii::app()->user->org > 1) {
+			$model->agent_id = Yii::app()->user->org;
+		}
+
+		$model->willBeCargoProcess = true;
+		$model->ot_id = null;
+		$this->render('bookschedules',["model"=>$model]);
+	}
+
+	public function actionScheduleBooking(){
+		//$temp = $_POST;
+		$bookDate = $_POST['date'];
+		$arrayShipmentID = explode(',',$_POST['id']);
+		$successfulShipmentsCount = 0;
+		$errorShipmentCount = 0;
+		$successfulInfo=[];
+		$errorInfo=[];
+
+		$transaction=Yii::app()->db->beginTransaction();
+		try{
+			foreach ($arrayShipmentID as $shipmentId){
+				$model = ImParcel::model()->findByPk($shipmentId);
+				$unloadDate = @$model->consol->mdata['ContainerUnloadDate'];
+				$oldBookDate = $model->mdata['delivery_booking_time'];
+				if($unloadDate<$bookDate&&!empty($unloadDate)){
+					$cargoProcessModel = CargoProcess::model()->findBySql('select * from cargo_process where status = 10 and status !=101 and shipment_id ='.$shipmentId);
+					if(!empty($cargoProcessModel)){
+						if(!empty($cargoProcessModel->mdata['delivery_booking_time'])){
+							$model->mdata['delivery_booking_time'] = $bookDate;
+							$model->update(['meta']);
+							$cargoProcessModel->mdata['delivery_booking_time']=$bookDate;
+							$cargoProcessModel->save();
+							$cargoProcessModel->saveNormalDeliveryInfo($bookDate);
+							$successfulShipmentsCount++;
+							$successfulInfo[] = "<br /> Ref: ".$model->ref." update successful! Schedule Date: ".$bookDate;
+						}else{
+							$model->mdata['delivery_booking_time'] = $bookDate;
+							$model->update(['meta']);
+							$oldBookDate = $cargoProcessModel->mdata['delivery_booking_time'];
+							$cargoProcessModel->mdata['delivery_booking_time']=$bookDate;
+							$cargoProcessModel->save();
+							$cargoProcessModel->saveNormalDeliveryInfo($bookDate);
+							$successfulShipmentsCount++;
+							$successfulInfo[] = "<br /> Ref: ".$model->ref." update successful! Old Date ".$oldBookDate." New Date: ".$bookDate;
+						}
+					}else{
+						if(empty($oldBookDate)){
+							//$model->mdata['CustomerBookingDate'] = $bookDate;
+							$model->mdata['delivery_booking_time'] = $bookDate;
+							$model->update(['meta']);
+							$model->saveNormalDeliveryInfo($bookDate);
+							$successfulShipmentsCount++;
+							$successfulInfo[] = "<br /> Ref: ".$model->ref." update successful! Schedule Date: ".$bookDate;
+						}else{
+							$model->mdata['delivery_booking_time'] = $bookDate;
+							$model->update(['meta']);
+							$model->saveNormalDeliveryInfo($bookDate);
+							$successfulShipmentsCount++;
+							$successfulInfo[] = "<br /> Ref: ".$model->ref." update successful! Old Date ".$oldBookDate." New Date: ".$bookDate;
+						}
+					}
+				}else{
+					if(!empty($unloadDate)){
+						$errorShipmentCount++;
+						$errorInfo[] = "<br /> Ref: ".$model->ref." schedule date needs to be greate than ".$unloadDate;
+					}else{
+						/**
+						 * if not have unloadDate and cargoprocess be created then update booking time;
+						 */
+						$cargoProcessModel = CargoProcess::model()->findBySql('select * from cargo_process where status = 10 and status !=101 and shipment_id ='.$shipmentId);
+						if(!empty($cargoProcessModel)){
+							if(!empty($cargoProcessModel->mdata['delivery_booking_time'])){
+								$model->mdata['delivery_booking_time'] = $bookDate;
+								$model->update(['meta']);
+								$cargoProcessModel->mdata['delivery_booking_time']=$bookDate;
+								$cargoProcessModel->save();
+								$cargoProcessModel->saveNormalDeliveryInfo($bookDate);
+								$successfulShipmentsCount++;
+								$successfulInfo[] = "<br /> Ref: ".$model->ref." update successful! Schedule Date: ".$bookDate;
+							}else{
+								$model->mdata['delivery_booking_time'] = $bookDate;
+								$model->update(['meta']);
+								$oldBookDate = $cargoProcessModel->mdata['delivery_booking_time'];
+								$cargoProcessModel->mdata['delivery_booking_time']=$bookDate;
+								$cargoProcessModel->save();
+								$cargoProcessModel->saveNormalDeliveryInfo($bookDate);
+								$successfulShipmentsCount++;
+								$successfulInfo[] = "<br /> Ref: ".$model->ref." update successful! Old Date ".$oldBookDate." New Date: ".$bookDate;
+							}
+						}else{
+							$errorShipmentCount++;
+							$errorInfo[] = "<br /> Ref: ".$model->ref." could not be update!";
+						}
+					}
+					
+				}
+			}
+			if(empty($errorInfo)){
+				$transaction->commit();
+				echo json_encode([
+					'isSuccess' => true,
+					'shipmentscount' => $successfulShipmentsCount,
+					'info'=>$successfulInfo,
+				]);
+				return;
+			}else{
+				$transaction->rollback();
+				echo json_encode([
+					'isSuccess' => false,
+					'shipmentscount' => $errorShipmentCount,
+					'info'=>$errorInfo,
+				]);
+				return;
+			}
+		}
+		catch(Exception $ex){
+			$transaction->rollback();
+			throw $ex;
+		}
+	}
+
+	public function actionProcessPage()
+	{
+		switch ($_GET['tab']) {
+			case 'need_schedule':
+				$model = new ImParcel('search');
+				$model->unsetAttributes();
+				if(!empty($_GET["ImParcel"]))
+				{
+					$model->setAttributes($_GET["ImParcel"]);
+				}
+				if (isset(Yii::app()->user->org) && Yii::app()->user->org > 1) {
+					$model->agent_id = Yii::app()->user->org;
+				}
+
+				$model->willBeCargoProcess = true;
+				$model->ot_id = null;
+				$this->render('bookschedules',["model"=>$model]);
+				break;
+			case 'waiting_for_delivery':
+				$model = new ImParcel('search');
+				$model->unsetAttributes();
+				if(!empty($_GET["ImParcel"]))
+				{
+					$model->setAttributes($_GET["ImParcel"]);
+				}
+				if (isset(Yii::app()->user->org) && Yii::app()->user->org > 1) {
+					$model->agent_id = Yii::app()->user->org;
+				}
+
+				$model->overseasWarehouseBooked = true;
+				$model->ot_id = null;
+				$this->render('waiting_for_delivery', array('model' => $model));
+				break;
+		}
+	}
+
+	public function actionBookScheduleIndex()
+	{
+		$this->render('book_schedule_index');
+	}
+
+	public function actionCheckStorage()
+	{
+		if (!empty($_POST)) {
+			$res = new stdClass;
+			$shipmentId = $_POST['shipment_id'];
+			$scheduledDate = $_POST['scheduled_date'];
+			$scheduledDate = date('Y-m-d', strtotime($scheduledDate));
+			$shipment = ImParcel::model()->findByPk($shipmentId);
+			$cargoProcessService = new CargoProcessService();
+			//$storage = $shipment->getStorageFee(false, $scheduledDate);
+			$storage = $cargoProcessService->calculateCargoProcessStorageFee($scheduledDate, $shipment);
+			$res->storageFee = $storage[0];
+			$res->storageDays = $storage[1];
+			$res->storageStart = $storage[2];
+			$res->storageTo = $storage[3];
+			echo json_encode($res);
+		}
+	}
+
+	public function actionUpdateScheduledDate()
+	{
+		if (!empty($_GET['id'])) {
+			$shipment = ImParcel::model()->findByPk($_GET['id']);
+			$this->render('update_scheduled_date', array('model'=>$shipment));
+		} else if (!empty($_POST)) {
+			$res = new stdClass;
+			$res->success = true;
+			$shipmentId = $_POST['shipment_id'];
+			$scheduledDate = date('Y-m-d', strtotime($_POST['scheduled_date']));
+			$bookingRef = !empty($_POST['amazon_po']) ? $_POST['amazon_po'] : '';
+			$amazonShipmentIds = !empty($_POST['amazon_shipment_id']) ? $_POST['amazon_shipment_id'] : '';
+			$res->deliveryDate = $scheduledDate;
+			$storageStart = date('Y-m-d', strtotime($_POST['storage_start']));
+			$storageTo = date('Y-m-d', strtotime($_POST['storage_to']));
+			$storageDays = intval($_POST['storage_days']);
+			$storageFee = floatval($_POST['storage_fee']);
+			$res->errMsg = '';
+
+			$transaction = Yii::app()->db->beginTransaction();
+			try {
+				$shipment = ImParcel::model()->findByPk($shipmentId);
+				$availableDate = $shipment->getUnPackingDate();
+				if (!empty($availableDate)) {
+					$availableDate = date('Y-m-d', strtotime($availableDate . '+2 day'));
+				}
+				$oldBookDate = @$shipment->mdata['delivery_booking_time'];
+				if (!empty($availableDate) && $availableDate < $scheduledDate) {
+					$cargoProcessModel = CargoProcess::model()->findBySql('select * from cargo_process where status = 10 and status !=101 and shipment_id ='.$shipmentId);
+					if (!empty($cargoProcessModel)) {
+						if (!empty($cargoProcessModel->mdata['delivery_booking_time'])) {
+							$shipment->mdata['delivery_booking_time'] = $scheduledDate;
+							$shipment->mdata['amazon_po'] = $bookingRef;
+							$shipment->mdata['amazon_shipment_ids'] = $amazonShipmentIds;
+							$shipment->update(['meta']);
+							$cargoProcessModel->mdata['delivery_booking_time'] = $scheduledDate;
+							$cargoProcessModel->save();
+							$cargoProcessModel->saveNormalDeliveryInfo($scheduledDate);
+						} else {
+							$shipment->mdata['delivery_booking_time'] = $scheduledDate;
+							$shipment->mdata['amazon_po'] = $bookingRef;
+							$shipment->mdata['amazon_shipment_ids'] = $amazonShipmentIds;
+							$shipment->update(['meta']);
+							$oldBookDate = $cargoProcessModel->mdata['delivery_booking_time'];
+							$cargoProcessModel->mdata['delivery_booking_time'] = $scheduledDate;
+							$cargoProcessModel->save();
+							$cargoProcessModel->saveNormalDeliveryInfo($scheduledDate);
+						}
+					} else {
+						if(empty($oldBookDate)) {
+							$shipment->mdata['delivery_booking_time'] = $scheduledDate;
+							$shipment->mdata['amazon_po'] = $bookingRef;
+							$shipment->mdata['amazon_shipment_ids'] = $amazonShipmentIds;
+							if (empty($shipment->scan)) {
+								$shipment->mdata['cargo_ignore_scan'] = 1;
+							}
+							$shipment->save();
+							$shipment->saveNormalDeliveryInfo($scheduledDate);
+						} else {
+							$shipment->mdata['delivery_booking_time'] = $scheduledDate;
+							$shipment->mdata['amazon_po'] = $bookingRef;
+							$shipment->mdata['amazon_shipment_ids'] = $amazonShipmentIds;
+							if (empty($shipment->scan)) {
+								$shipment->mdata['cargo_ignore_scan'] = 1;
+							}
+							$shipment->save();
+							$shipment->saveNormalDeliveryInfo($scheduledDate);
+						}
+					}
+				} else {
+					if (!empty($availableDate)) {
+						$res->success = false;
+						$res->errMsg = 'Items are not available on your selected date, please choose another date.';
+					} else {
+						$cargoProcessModel = CargoProcess::model()->findBySql('select * from cargo_process where status = 10 and status !=101 and shipment_id ='.$shipmentId);
+						if (!empty($cargoProcessModel)) {
+							if (!empty($cargoProcessModel->mdata['delivery_booking_time'])) {
+								$shipment->mdata['delivery_booking_time'] = $scheduledDate;
+								$shipment->mdata['amazon_po'] = $bookingRef;
+								$shipment->mdata['amazon_shipment_ids'] = $amazonShipmentIds;
+								$shipment->update(['meta']);
+								$cargoProcessModel->mdata['delivery_booking_time'] = $scheduledDate;
+								$cargoProcessModel->save();
+								$cargoProcessModel->saveNormalDeliveryInfo($scheduledDate);
+							} else {
+								$shipment->mdata['delivery_booking_time'] = $scheduledDate;
+								$shipment->mdata['amazon_po'] = $bookingRef;
+								$shipment->mdata['amazon_shipment_ids'] = $amazonShipmentIds;
+								$shipment->update(['meta']);
+								$oldBookDate = $cargoProcessModel->mdata['delivery_booking_time'];
+								$cargoProcessModel->mdata['delivery_booking_time'] = $scheduledDate;
+								$cargoProcessModel->save();
+								$cargoProcessModel->saveNormalDeliveryInfo($scheduledDate);
+							}
+						} else {
+							$res->success = false;
+							$res->errMsg = 'Ref: ' . $shipment->ref . ' could not be update.';
+						}
+					}
+				}
+
+				if ($storageFee > 0 && $storageDays > 0) {
+					$invoiceService = new InvoiceService();
+					$invoiceService->createCGStorageInvoice($shipment, $storageStart, $storageTo, $storageDays, $storageFee);
+					$shipment->mdata['cg_storage_invoiced_to'] = $storageTo;
+					$shipment->update(['meta']);
+				}
+				$transaction->commit();
+			} catch (Exception $e) {
+				$transaction->rollback();
+				throw $e;
+			}
+			
+			echo json_encode($res);
+		}
+	}
+
+	public function actionCancelSchedule($id)
+	{
+		$shipment = ImParcel::model()->findByPk($id);
+		if (!empty($shipment)) {
+			$shipment->mdata['delivery_booking_time'] = '';
+			if (Yii::app()->user->org == 1) {
+				$shipment->mdata['delivery_booking_cancelled_by'] = 'internal';
+			} else {
+				$shipment->mdata['delivery_booking_cancelled_by'] = 'external';
+			}
+			$shipment->update(['meta']);
+			$cargoProcess = CargoProcess::model()->findByAttributes(array('shipment_id' => $shipment->id));
+			if (!empty($cargoProcess)) {
+				$cargoProcess->mdata['delivery_booking_time'] = '';
+				$cargoProcess->save();
+			}
+		}	
+	}
+
+	public function actionShowInfo()
+	{
+		if (!empty($_GET['id'])) {
+			$cargoProcess = CargoProcess::model()->findByAttributes(array('shipment_id' => $_GET['id']), 'status' != CargoProcess::DELETED);
+			if (!empty($cargoProcess) && !empty($cargoProcess->mdata['overseas_booking_cancellation_reason'])) {
+				$this->render('cancellation_reason', array('reason'=>$cargoProcess->mdata['overseas_booking_cancellation_reason']));
+			}
+		}
+	}
+
+	public function loadModel($id)
+	{
+		$model = ImParcel::model()->findByPk($id);
+
+		if ($model===null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		return $model;
+	}
+}

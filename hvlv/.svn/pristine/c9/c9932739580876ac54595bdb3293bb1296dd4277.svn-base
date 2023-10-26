@@ -1,0 +1,428 @@
+<?php
+
+/**
+ * This is the model class for table "system_setting".
+ *
+ * The followings are the available columns in table 'system_setting':
+ * @property integer $id
+ * @property string $key
+ * @property string $meta
+ * @property integer $uid
+ * @property string $date
+ */
+class SystemSetting extends MetaModel
+{
+	/**
+	 * @return string the associated database table name
+	 */
+	private $cargoProcessRuleAttr = ['minimum','costCBM','minimumIncludeCBM','freeKM','extraFeeKM','fuelCharge'];
+	public function tableName()
+	{
+		return 'system_setting';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('key, meta, uid, date', 'required'),
+			array('uid', 'numerical', 'integerOnly'=>true),
+			array('key', 'length', 'max'=>45),
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, key, meta, uid, date', 'safe', 'on'=>'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+		);
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return array(
+			'id' => 'ID',
+			'key' => 'Key',
+			'meta' => 'Meta',
+			'uid' => 'Uid',
+			'date' => 'Date',
+		);
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search()
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+		$criteria->compare('id',$this->id);
+		$criteria->compare('key',$this->key,true);
+		$criteria->compare('meta',$this->meta,true);
+		$criteria->compare('uid',$this->uid);
+		$criteria->compare('date',$this->date,true);
+
+		return new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+		));
+	}
+
+
+	public static function getCargoProcessCRules()//{"c1":{"minimum":"70","costCBM":"20","minimumIncludeCBM":"3.5","freeKM":"30","extraFeeKM":"1","fuelCharge":"4"}}
+	{
+		$cRule = self::model()->find(' `key` = :key ',[":key"=>'cargoProcess']);
+		$results = [];
+		foreach ($cRule->mdata as $key => $value) {
+			$results[$key] = $key;
+		}
+		return $results;
+	}
+
+	public static function getCargoProcessRuleSetting($ruleKey)
+	{
+		$rules = self::model()->find(' `key` = :key ',[":key"=>'cargoProcess']);
+		return $rules->mdata[$ruleKey];
+	}
+
+	public static function getAupostFuelChargeSetting()//
+	{
+		// $rules = self::model()->find(' `key` = :key ',[":key"=>'AupostFuelCharge']);//{"2019-10":2.2,"2019-09":2.1,"2019-08":2.5,"2019-07":2.3,"2019-06":2.2,"2019-05":1.8,"2019-04":1.5,"2019-03":1.6,"2019-02":2.5,"2019-01":3}
+		$rules = self::getSetting('AupostFuelCharge');
+		if (is_array($rules)) {
+			$rules = new SystemSetting;
+			$rules->mdata = self::getSetting('AupostFuelCharge');
+		}
+		krsort($rules->mdata);
+		return $rules->mdata;
+	}
+
+	public static function setAupostFuelChargeSetting($data)
+	{
+		$rules = self::model()->find(' `key` = :key ', [':key' => 'AupostFuelCharge']);
+		$rules->mdata[$data['month']] = $data['rate'];
+		$rules->updateMeta();
+	}
+
+	public static function deleteAupostFuelChargeSetting($month)
+	{
+		$rules = self::model()->find(' `key` = :key ', [':key' => 'AupostFuelCharge']);
+		unset($rules->mdata[$month]);
+		$rules->updateMeta();
+	}
+
+	public static function getChangeLabelChargeSetting($key = false)//{"unit_price":1}
+	{
+		return self::getSetting('LabelChange',$key);
+	}
+
+	public static function getWeightDiffChargeSetting($key = false)//{"big":0.15,"small":0.05}
+	{
+		return self::getSetting('WeightDiffCharge',$key);
+	}
+
+	public static function getCargoProcessPodSetting($key = false)//{"106":{"id":1,"pod_id":106,"pod":"Sydney","postcode":"2%","cargo_driver":1}}
+	{
+		return self::getSetting('CargoProcessPod',$key);
+	}
+
+	public static function getFBARegionSetting($key = false)//{"3175":{"street":["NATIONAL DRIVE","DANDENONG SOUTH"]},"2170":{"suburb":["Centenary Ave","Moorebank"]}}
+	{
+		return self::getSetting('FBARegion',$key);
+	}
+
+	public static function getAupostZoneCategorySetting($key = false)//{"N0":"Metro","N1":"Metro","GF":"Major Regional","WG":"Major Regional","NC":"Major Regional"}
+	{
+		return self::getSetting('AupostZoneCategory',$key);
+	}
+
+	public static function getSurchargeChargeRate($key = false)//{"RED":[0.5,"ipercent"],"OS0":[20,"pkg"],"OS1":[50,"pkg"],"MHP":[10,"pkg"]}
+	{
+		return self::getSetting('surchargeChargeRate',$key);
+	}
+
+	public static function getPodSetting($pod = "",$key = false)
+	{
+		$regionName = self::getSetting("RegionName",$pod);//{"AU":"Australia","CN":"China","HK":"Hong Kong","TW":"Taiwan","NZ":"New Zealand","VN":"Vietnam"}
+		$result = self::getSetting($pod.'POD',$key);////{"TWACH":["Hsin-chuang","KHH"],"TWANG":["Nangang","KHH"]}
+		$result[0] = $result[0].", ".$regionName;
+		return $result;
+	}
+
+	public static function getCorrectAddressFee($key = false)
+	{
+		return self::getSetting('CorrectAddressFee',$key);
+	}
+
+	public static function getWinitAddress($key = false)
+	{
+		return self::getSetting('WinitAddress',$key);
+	}
+
+	public static function getWinitBookingAgentArr($key = false)
+	{
+		return self::getSetting('WinitBookingAgentArr',$key);
+	}
+
+	public static function getWinitDeliveryAddressArr($key = false)
+	{
+		return self::getSetting('WinitDeliveryAddressArr',$key);
+	}
+	
+	public static function get4PXDeliveryAddressArr($key = false)
+	{
+		return self::getSetting('4PXDeliveryAddressArr',$key);
+	}
+
+	public static function getPadstowDeliveryAddressArr($key = false)
+	{
+		return self::getSetting('PadstowDeliveryAddressArr',$key);
+	}
+
+	public static function getGoodCangDeliveryAddressArr($key = false)
+	{
+		return self::getSetting('GoodCangDeliveryAddressArr',$key);
+	}
+
+	public static function getWarehouseCNameArr($key = false)
+	{
+		return self::getSetting('WarehouseCNameArr', $key);
+	}
+
+	
+
+	public static function getIntZone($key = false)
+	{
+		return self::getSetting('INTZONE',$key);
+	}
+
+	public static function getCustomsMessageSetting()
+	{
+		return self::getSetting('CUSTOMS','sendEmail');
+	}
+
+	public static function getAirportOriginalSetting($key)
+	{
+		return self::getSetting('AirportOriginal',$key);
+	}
+
+	public static function getAirlineAgentSetting()
+	{
+		return self::getSetting('AirlineAgent');
+	}
+
+
+
+	public static function getDateWorkTime($key = false)
+	{
+		$rulesData = Yii::app()->cache->get('dateWorkingTime');
+		if(empty($key))
+		{
+			return $rulesData;
+		}else
+		{
+			return $rulesData[$key];
+		}
+	}
+
+	public static function setDateWorkTime($date,$workingTime)
+	{
+		$rulesData = Yii::app()->cache->get('dateWorkingTime');
+		$rulesData[$date] = $workingTime;
+		Yii::app()->cache->set('dateWorkingTime',$rulesData);
+	}
+
+
+	public static function getDFERequestTimes($prefix = "")
+	{
+		$timesArr = Yii::app()->cache->get('DFERequestTimes'.$prefix);
+		return $timesArr['times'];
+	}
+
+	public static function setDFERequestTimes($times,$prefix)
+	{
+		$timesArr = Yii::app()->cache->get('DFERequestTimes'.$prefix);
+		if(empty($timesArr['date'])||$timesArr['date']!=date('Y-m-d'))
+		{
+			$timesArr['times'] = 1;
+			$timesArr['date'] = date('Y-m-d');
+		}else
+		{
+			$timesArr['times'] = $times;
+		}
+		Yii::app()->cache->set('DFERequestTimes'.$prefix,$timesArr);
+	}
+
+	public static function setTNTResponse($data,$key)
+	{
+		$allData = [];
+		$data = json_encode($data);
+		$allData['data'] = $data;
+		$allData['time'] = date('Y-m-d');
+		$saver = json_encode($allData);
+		Yii::app()->cache->set('tnt_resp:'.$key,$saver);
+		return true;
+	}
+
+	public static function getTNTResponse($key)
+	{
+		$allData = json_decode(Yii::app()->cache->get('tnt_resp:'.$key),true);
+		if(!empty($allData))
+		{
+			if(strtotime($allData['time'])<strtotime('-3 day',strtotime(date('Y-m-d'))))
+			{
+				return [];
+			}else
+			{
+				return json_decode($allData['data'],true);
+			}
+		}
+		return [];
+	}
+
+
+	public static function setConsolTotCost($data)
+	{
+		$data = json_encode($data);
+		Yii::app()->cache->set('ConsolTotCost',$data);
+		return true;
+	}
+
+	public static function getCountrys()
+	{
+		return self::getSetting('Countrys');
+	}
+
+	public static function getConsolTotCost()
+	{
+		$allData = json_decode(Yii::app()->cache->get('ConsolTotCost'),true);
+		if(!empty($allData))
+		{
+			return $allData;
+		}
+		return [];
+	}
+
+	public static function getInvoiceRegions()
+	{
+		$setting = self::getSetting('FINANCE');
+		return $setting['region'];
+	}
+
+	public static function getCargoReceptAddress()
+	{
+		return self::getSetting('CargoReceptAddress');
+	}
+
+	public static function getCourierInspectionPercentage($courierId)
+	{
+		$setting = self::getSetting('CourierInspectionPercentage');
+		return $setting[$courierId];
+	}
+
+	public static function getHeldInspectionPercentage()
+	{
+		$setting = self::getSetting('HeldInspectionPercentage');
+		return $setting["held"];
+	}
+
+	public static function getTLDLimitSetting($key)
+	{
+		$setting = self::getSetting('TLDLimitSetting');
+		return $setting[$key];
+	}
+
+	public static function getCreditLimitValue($key=106)
+	{
+		$setting = self::getSetting('CreditLimitValue');
+		return @$setting[$key];
+	}
+
+	public static function getTLDChargecode($key)
+	{
+		$setting = self::getSetting('TLDChargecode',$key);
+		return $setting;
+	}
+
+	public static function getWhPickupNoticeEmail($key)
+	{
+		$setting = self::getSetting('WhPickupNoticeEmail',$key);
+		return $setting;
+	}
+
+	public static function getBrownwaysInvoiceRates()
+	{
+		$setting = self::getSetting('BrownwaysInvoiceRates');
+		return $setting;
+	}
+
+
+	public static function getSetting($key1,$key2 = false)
+	{
+		$rulesData = Yii::app()->cache->get($key1); // caching the system setting
+		if(!empty($rulesData))
+		{
+			$rulesData = json_decode($rulesData,true);
+			if(!empty($key2))
+			{
+				return @$rulesData[$key2];
+			}
+
+			return $rulesData;
+		}
+
+		$rules = self::model()->find(' `key` = :key ',[":key"=>$key1]);
+		if(!empty($rules))
+		{
+			Yii::app()->cache->set($key1,json_encode($rules->mdata),3000);
+			if(!empty($key2))
+			{
+				return @$rules->mdata[$key2];
+			}
+
+			return $rules->mdata;
+		}else
+		{
+			return [];
+		}
+	}
+
+	public static function getNameValidationCustomers()
+	{
+		return self::getSetting('word_replace_clients', 'org_ids');
+	}
+
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return SystemSetting the static model class
+	 */
+	public static function model($className=__CLASS__)
+	{
+		return parent::model($className);
+	}
+}

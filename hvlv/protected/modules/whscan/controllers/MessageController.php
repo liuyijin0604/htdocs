@@ -1,0 +1,307 @@
+<?php
+
+class MessageController extends WhscanController
+{
+	/**
+	 * Declares class-based actions.
+	 */
+	protected $skipAcl = array('index', 'load', 'create', 'status');
+
+	/**
+	 * Displays a particular model.
+	 * @param integer $id the ID of the model to be displayed
+	 */
+	public function actionStatus($id){
+		$model = $this->loadModel($id);
+		if($model && !empty($_GET['status'])){
+			$model->status = $_GET['status'];
+			$model->save();
+		}
+		echo 'done';
+	}
+	
+	public function actionLoad(){
+		$rt = array();
+		$rs = Message::model()->findAll('to_id = :id AND status < 2', array(':id' => Yii::app()->user->id));
+		$shown = empty($_POST['ids'])? array() : $_POST['ids'];
+		foreach($rs as $r){
+			if(in_array($r->id, $shown)) continue;
+			$o = new StdClass;
+			$o->id = $r->id;
+			$o->msg = $r->msg;
+			$o->from = $r->getFrom();
+			$o->type = $r->from_id > 0? 'msg' : 'notify';
+			$rt[] = $o;
+		}
+		echo json_encode($rt);
+	}
+
+	/**
+	 * Creates a new model.
+	 * If creation is successful, the browser will be redirected to the 'view' page.
+	 */
+	public function actionCreate(){
+		$model=new Message;
+
+		// Uncomment the following line if AJAX validation is needed
+		// $this->performAjaxValidation($model);
+
+		if(isset($_POST['Message'])){
+			$model->attributes=$_POST['Message'];
+			$model->from_id = Yii::app()->user->id;
+			$model->status = 0;
+			$model->save();
+			$this->ajaxResult($model);
+		}
+	}
+
+	/**
+	 * Lists and search.
+	 */
+	public function actionIndex(){
+		$_GET['tabid'] = 1111;
+		$model=new Message('search');
+		$model->unsetAttributes();  // clear any default values
+		if(isset($_GET['Message']))
+			$model->attributes=$_GET['Message'];
+			
+		if(isset($_GET['tab'])){
+			if($_GET['tab']=='inbox')
+			{
+				$filtersForm=new FiltersForm;
+				if (isset($_GET['FiltersForm'])) {
+					$filtersForm->filters=$_GET['FiltersForm'];
+				}
+
+				$provide=TlaTaskService::getUserMessageProvide();
+				$filterData=$filtersForm->filter($provide);
+				$dataProvider=new CArrayDataProvider($filterData);
+				$dataProvider->pagination=['pageSize'=>10];
+				$sort=new CSort();
+				$sort->defaultOrder = "pod";
+				$dataProvider->sort=$sort;
+				$this->render('tab_'.$_GET['tab'], array('model'=>$model,'dataProvider'=>[$dataProvider,$filtersForm]));
+				return;
+
+
+
+			}
+			$this->render('tab_'.$_GET['tab'], array('model'=>$model));
+		}else{
+			$this->render('index',array('model'=>$model));
+		}
+	}
+
+	public function actionOpSuggest()
+	{
+		$this->opSuggest();
+	}
+	private function opSuggest($grp = '')
+	{
+		if (empty($grp)) {
+			$rs = User::model()->findAll(array(
+				'condition' => 'active = 1  AND (fname LIKE :n OR lname LIKE :n OR id = :tn)',
+				'params' => array(':n' => '%' . $_GET['term'] . '%', ':tn' => $_GET['term']),
+				'order' => 'fname',
+				'limit' => 20,
+			));
+		} elseif (is_array($grp)) {
+			$rs = User::model()->findAll(array(
+				'condition' => 'active = 1 AND type IN (' . implode(',', $grp) . ') AND (fname LIKE :n OR lname LIKE :n OR id = :tn)',
+				'params' => array(':n' => '%' . $_GET['term'] . '%', ':tn' => $_GET['term']),
+				'order' => 'fname',
+				'limit' => 20,
+			));
+		} else {
+			$rs = User::model()->findAll(array(
+				'condition' => 'active = 1 AND type = :grp AND (fname LIKE :n OR lname LIKE :n OR id = :tn)',
+				'params' => array(':n' => '%' . $_GET['term'] . '%', ':grp' => $grp, ':tn' => $_GET['term']),
+				'order' => 'fname',
+				'limit' => 20,
+			));
+		}
+		$a = array();
+
+		foreach ($rs as $r) {
+			$a[] = array(
+				'value' => $r->id,
+				'label' => $r->id.":".$r->fname . ' ' . $r->lname,
+			);
+		}
+		echo json_encode($a);
+	}
+	
+	public function actionNotice(){
+		$count = Message::model()->count('to_id = :id AND status = 0', array(':id' => Yii::app()->user->id));
+		echo $count;
+	}
+
+	public function actionGetWarehouseTasks()
+	{
+		$_GET['tabid'] = 111;
+		$filtersForm=new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+		
+		$tlaTask=new TlaTask('search');
+		$tlaTask->unsetAttributes();
+		$tlaTask->type = [TlaTask::WAREHOUSETASK,NoteTask::$my_type];
+		$tlaTask->searchingAssigned = true;
+		$tlaTask->isIms = true;
+		if(!empty($_GET['TlaTask']))
+		{
+			$tlaTask->setAttributes($_GET['TlaTask']);
+		}
+		$tlaTaskService = new TlaTaskService();
+		$types = [TlaTask::WAREHOUSETASK];
+		$provide=$tlaTaskService->getMyTlaTaskProvide(User::currentUserID(),$types);
+		$filteredData=$filtersForm->filter($provide);
+		$dataProvider=new CArrayDataProvider($filteredData);
+		$dataProvider->pagination=['pageSize' =>10,];
+		$sort=new CSort();
+		$sort->attributes=[
+			'number'=>[
+				'asc'=>'number ASC',
+				'desc'=>'number DESC',
+			],
+			'status'=>[
+				'asc'=>'status ASC',
+				'desc'=>'status DESC',
+			],
+		];
+		$sort->defaultOrder = "status ASC";
+		$dataProvider->sort=$sort;
+
+		if (isset($_GET['status'])) 
+		{
+
+		$this->render('_sub_tla_task', [
+				'tlaTask' => $tlaTask,
+				'name' => 'All']);
+		} else {
+			$this->render('tla_task_list', ['dataProvider'=>[$dataProvider,$filtersForm],'tlaTask'=>$tlaTask,'user_id'=>User::currentUserID()]);
+		}
+	}
+
+	public function actionOperation()
+	{
+		$id = $_GET["id"];
+		$_GET["tabid"] = "123456";
+		$result =[];
+		$result['model'] = TlaTask::model()->findByPk($id);
+		$this->render('operation_tab', $result);
+	}
+
+	public function actionUpdate()
+	{
+		$id = $_GET["id"];
+		$this->updateTlaTask($id);
+		echo "done";
+	}
+
+	public function actionUpdateStatus()
+	{
+		$tlaTaskService = new TlaTaskService();
+		$id = $_GET['id'];
+		$model=TlaTask::model()->findByPk($id);
+		$tlaTaskService->updateStatus($model,$_GET["status"]);
+		echo 'done';
+	}
+
+	public function actionRejectTask()
+	{
+		$tlaTaskService = new TlaTaskService();
+		$id = $_POST['id'];
+		$model=TlaTask::model()->findByPk($id);
+		if(empty($model->mdata['reject_reason']))
+		{
+			echo 'Requiring reject reason';
+			return;
+		}
+		$tlaTaskService->updateStatus($model,TlaTask::REJECT);
+		echo 'done';
+	}
+
+	public function actionCloseTask()
+	{
+		$tlaTaskService = new TlaTaskService();
+		$id = $_POST['id'];
+		$model=TlaTask::model()->findByPk($id);
+
+		$tlaTaskService->updateStatus($model,TlaTask::CLOSE);
+		echo 'done';
+	}
+
+	private function updateTlaTask($id)
+	{
+
+		$model= TlaTask::model()->findByPk($id);
+		if(isset($_POST["comment"]))
+		{
+			$model->comment = $_POST["comment"];
+		}
+
+		if(isset($_POST['reject_reason'])&&$_POST['reject_reason']!="Please input the reject reason. For example, I can't meet the deadline, please delay it to be xxxx-xx-xx. Please don't put meaningless reasons, the task creator will mark the task after it is finished.")
+		{
+			$model->mdata['reject_reason'] = $_POST['reject_reason'];
+		}
+
+
+		$model->save();
+
+		if(isset($_POST["user_id"]))
+		{
+			$userId = $_POST["user_id"];
+			$tlaTaskService = new TlaTaskService();
+			$tlaTaskService->assignTlaTaskToUser($model, $userId);
+		}
+	}
+
+	public function actionUploadTaskFile()
+	{
+		foreach ($_GET as $key => $value) {
+			$hash = $key;
+			break;
+		}
+		$f = $_FILES['file'];
+		$filename = $f['tmp_name'];
+		$name = $f['name'];
+		if(!is_uploaded_file($filename)) return false;
+		$thisHash = $hash;
+		$filesize = filesize($filename);
+		$date = date('Y-m-d H:i:s');
+		$fileHash = hash_file('crc32b', $filename).hash('crc32b', $filesize);
+		$finfo = finfo_open(FILEINFO_MIME_TYPE);
+		$mime = finfo_file($finfo, $f['tmp_name']);
+		$fr = Service::updateUploadSingleFile($filesize,$date,$fileHash,$finfo,$mime,$filename,$name, $thisHash,false,false,false,true);
+		$tlaTask = TlaTask::model()->findByPk($fr->fid);
+		$tlaTask->log("uploadPOD");
+		echo 'DONE';
+	}
+
+
+
+	/**
+	 * Returns the data model based on the primary key given in the GET variable.
+	 * If the data model is not found, an HTTP exception will be raised.
+	 * @param integer the ID of the model to be loaded
+	 */
+	public function loadModel($id){
+		$model=Message::model()->findByPk($id);
+		if($model===null)
+			throw new CHttpException(404,'The requested page does not exist.');
+		return $model;
+	}
+
+	/**
+	 * Performs the AJAX validation.
+	 * @param CModel the model to be validated
+	 */
+	protected function performAjaxValidation($model){
+		if(isset($_POST['ajax']) && $_POST['ajax']==='message-form'){
+			echo CActiveForm::validate($model);
+			Yii::app()->end();
+		}
+	}
+}

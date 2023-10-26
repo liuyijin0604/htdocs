@@ -1,0 +1,35 @@
+<?php
+spl_autoload_unregister(array('YiiBase','autoload'));
+include_once(Yii::app()->basePath.DIRECTORY_SEPARATOR.'vendor_Ray/autoload.php');
+spl_autoload_register(array('YiiBase','autoload'));
+
+class GoogleAuthenticator extends CApplicationComponent
+{
+    protected $tfa;
+
+    public function init()
+    {
+        parent::init();
+        $this->tfa = new RobThree\Auth\TwoFactorAuth('Google_code_generator');
+    }
+
+    public function generateSecret()
+    {
+        $this->init();
+        return $this->tfa->createSecret();
+    }
+
+    public function verifyCode($secret, $code)
+    {
+        $this->init();
+        return $this->tfa->verifyCode($secret, $code);
+    }
+
+    public function getQRCodeGoogleUrl($name, $secret,$username)
+    {
+        $issuer = $username;
+        $otpauth_url = 'otpauth://totp/' . urlencode($name) . '?secret=' . urlencode($secret) . '&issuer=' . urlencode($issuer);
+        $qr_code_url = 'https://chart.googleapis.com/chart?chs=200x200&chld=M|0&cht=qr&chl=' . urlencode($otpauth_url);
+        return $qr_code_url;
+    }
+}

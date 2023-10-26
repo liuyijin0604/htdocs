@@ -1,0 +1,34 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="wkhtmltopdf" content="--dpi 100 --page-width 102 --page-height 152 -T 3 -R 3 -B 3 -L 3 -O Portrait" win-only="--disable-smart-shrinking" />
+<meta name="wkhtmltoimage" content="--disable-smart-width --zoom 0.6 --width 420 --quality 80" />
+
+<title>PCA Express Label</title>
+<style type="text/css">
+*{ margin: 0; padding: 0; letter-spacing: normal !important; }
+body{ font-family: Verdana, Geneva, sans-serif; font-size: 20px; text-rendering: optimize-speed; width: 700px; }
+p.logo { text-align: center; padding-bottom: 30px; }
+.barcode{ font-family: IDAutomationHC39M; font-size: 42px; padding: 30px; text-align: center; }
+h1.dest { padding: 30px; font-size: 60px; text-align: center; }
+h4 { font-size: 26px; }
+small { font-size: 16px; }
+div.page-break { page-break-after: always; }
+h2.connote { text-align: center; padding: 30px;}
+.sender { font-size: 17px; }
+table td{ padding: 10px; }
+table td table td { padding: 5px; }
+.dto{ font-size: 22px; }
+hr { border: none; border-top: #000 1px solid;}
+</style>
+</head>
+<body width="700">
+<?php
+foreach($rs as $label){
+	include((empty($tpl)?  '_label' : dirname(__FILE__).'/'.$tpl).'.php');
+	echo '<div class="page-break"></div>';
+}
+?>
+</body>
+</html>

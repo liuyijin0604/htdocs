@@ -1,0 +1,950 @@
+<?php
+?>
+<!Doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-MrcW6ZMFYlzcLA8Nl+NtUVF0sA7MsXsP1UyJoMp4YLEuNSfAP+JcXn/tWtIaxVXM" crossorigin="anonymous"></script>
+    <!-- jQuery CSS -->
+    <link rel="stylesheet" href="//code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+    <!-- jQuery -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.js"></script>
+    <!-- reCaptcha  -->
+    <!-- <script src="https://www.google.com/recaptcha/api.js"></script> -->
+    <!-- Custom CSS -->
+    <style>
+        body {
+            background: #ece7dc;
+        }
+
+        .btn-danger
+        {
+            background-color: rgb(226, 116, 112);
+        }
+
+        .slots-4 {
+            height: 220px;
+            margin-bottom: 108px;
+        }
+
+        .slots-2 {
+            height: 110px;
+            margin-bottom: -2px;
+        }
+
+        .slots-1 {
+            height: 55px;
+            margin-bottom: -54px;
+        }
+
+        #timeslot-container {
+            text-align: center;
+        }
+
+        .timeslot {
+            margin-bottom: 0px;
+        }
+
+        /* Absolute Center Spinner */
+        .loading {
+            position: fixed;
+            z-index: 999;
+            height: 2em;
+            width: 2em;
+            overflow: visible;
+            margin: auto;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+        }
+
+        /* Transparent Overlay */
+        .loading:before {
+            content: '';
+            display: block;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.3);
+        }
+
+        /* :not(:required) hides these rules from IE9 and below */
+        .loading:not(:required) {
+            /* hide "loading..." text */
+            font: 0/0 a;
+            color: transparent;
+            text-shadow: none;
+            background-color: transparent;
+            border: 0;
+        }
+
+        .loading:not(:required):after {
+            content: '';
+            display: block;
+            font-size: 10px;
+            width: 1em;
+            height: 1em;
+            margin-top: -0.5em;
+            -webkit-animation: spinner 1500ms infinite linear;
+            -moz-animation: spinner 1500ms infinite linear;
+            -ms-animation: spinner 1500ms infinite linear;
+            -o-animation: spinner 1500ms infinite linear;
+            animation: spinner 1500ms infinite linear;
+            border-radius: 0.5em;
+            -webkit-box-shadow: rgba(0, 0, 0, 0.75) 1.5em 0 0 0, rgba(0, 0, 0, 0.75) 1.1em 1.1em 0 0, rgba(0, 0, 0, 0.75) 0 1.5em 0 0, rgba(0, 0, 0, 0.75) -1.1em 1.1em 0 0, rgba(0, 0, 0, 0.5) -1.5em 0 0 0, rgba(0, 0, 0, 0.5) -1.1em -1.1em 0 0, rgba(0, 0, 0, 0.75) 0 -1.5em 0 0, rgba(0, 0, 0, 0.75) 1.1em -1.1em 0 0;
+            box-shadow: rgba(0, 0, 0, 0.75) 1.5em 0 0 0, rgba(0, 0, 0, 0.75) 1.1em 1.1em 0 0, rgba(0, 0, 0, 0.75) 0 1.5em 0 0, rgba(0, 0, 0, 0.75) -1.1em 1.1em 0 0, rgba(0, 0, 0, 0.75) -1.5em 0 0 0, rgba(0, 0, 0, 0.75) -1.1em -1.1em 0 0, rgba(0, 0, 0, 0.75) 0 -1.5em 0 0, rgba(0, 0, 0, 0.75) 1.1em -1.1em 0 0;
+        }
+
+        /* Animation */
+
+        @-webkit-keyframes spinner {
+            0% {
+                -webkit-transform: rotate(0deg);
+                -moz-transform: rotate(0deg);
+                -ms-transform: rotate(0deg);
+                -o-transform: rotate(0deg);
+                transform: rotate(0deg);
+            }
+
+            100% {
+                -webkit-transform: rotate(360deg);
+                -moz-transform: rotate(360deg);
+                -ms-transform: rotate(360deg);
+                -o-transform: rotate(360deg);
+                transform: rotate(360deg);
+            }
+        }
+
+        @-moz-keyframes spinner {
+            0% {
+                -webkit-transform: rotate(0deg);
+                -moz-transform: rotate(0deg);
+                -ms-transform: rotate(0deg);
+                -o-transform: rotate(0deg);
+                transform: rotate(0deg);
+            }
+
+            100% {
+                -webkit-transform: rotate(360deg);
+                -moz-transform: rotate(360deg);
+                -ms-transform: rotate(360deg);
+                -o-transform: rotate(360deg);
+                transform: rotate(360deg);
+            }
+        }
+
+        @-o-keyframes spinner {
+            0% {
+                -webkit-transform: rotate(0deg);
+                -moz-transform: rotate(0deg);
+                -ms-transform: rotate(0deg);
+                -o-transform: rotate(0deg);
+                transform: rotate(0deg);
+            }
+
+            100% {
+                -webkit-transform: rotate(360deg);
+                -moz-transform: rotate(360deg);
+                -ms-transform: rotate(360deg);
+                -o-transform: rotate(360deg);
+                transform: rotate(360deg);
+            }
+        }
+
+        @keyframes spinner {
+            0% {
+                -webkit-transform: rotate(0deg);
+                -moz-transform: rotate(0deg);
+                -ms-transform: rotate(0deg);
+                -o-transform: rotate(0deg);
+                transform: rotate(0deg);
+            }
+
+            100% {
+                -webkit-transform: rotate(360deg);
+                -moz-transform: rotate(360deg);
+                -ms-transform: rotate(360deg);
+                -o-transform: rotate(360deg);
+                transform: rotate(360deg);
+            }
+        }
+
+        .loading-container {
+            position: absolute;
+            height: 100vh;
+            width: 100vw;
+            z-index: 1000;
+            display: none;
+        }
+    </style>
+    <title>TLA Container Pickup Booking</title>
+</head>
+
+<body>
+    <div class="loading-container" id="loading-container">
+        <div class="loading">Loading&#8230;</div>
+    </div>
+    <!-- Modal -->
+    <div class="modal fade" id="terms" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1" aria-labelledby="staticBackdropLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-scrollable modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="terms_label">Terms of Use</h5>
+                </div>
+                <div class="modal-body">
+                    <h1 style="color:navy">Top Logistics Australia(TLA)</h1>
+                    <h1 style="color:navy">Site Access Rules (SAR)</h1>
+                    <br />
+                    <p><i>Last Updated: August 2022</i></p>
+                    <br />
+                    <ol type="1">
+                        <b>
+                            <li>Overview</li>
+                        </b>
+                        <p>TLA is committed to the highest principles and standards of safety, operational excellence, customer focus and continuous improvement.</p>
+                        <b>
+                            <li>Site Safety Requirements</li>
+                        </b>
+                        <p>TLA places the utmost importance on site safety for all employees, contractors and visitors who access the facility. We take a stance of zero tolerance to any behaviours that contribute to workplace incidents which have a negative impact to the business.</p>
+                        <p>Safety is a fundamental component of operations and it will be incorporated into all business relationships and processes.</p>
+                        <b>
+                            <li>Personal Protective Equipment (PPE) Requirements</li>
+                        </b>
+                        <ul type="disc">
+                            <li>Drivers entering the facility are required to wear steel capped boots.</li>
+                            <li>Drivers entering the facility are required to wear Hi Visibility Garments, with a minimum being a vest to be worn as an outer layer of clothing (Compliant to Australian Standard AS 4602)</li>
+                        </ul>
+                        <b>
+                            <li>Traffic Management</li>
+                        </b>
+                        <ul type="disc">
+                            <li>Vehicle drivers must adhere to traffic flow and follow any internal traffic signs.</li>
+                            <li>Vehicles must give way to pedestrians.</li>
+                            <li>Vehicles must give way to forklifts operating in the facility.</li>
+                            <li>Vehicle drivers / Visitors are not to wander around the facility.</li>
+                            <li>Vehicle drivers must not walk behind or around forklifts while being loaded or unloaded.</li>
+                            <li>Pedestrians must use designated walkways at all times.</li>
+                            <li>Maximum speed limit in the facility is 10 km/hr.</li>
+                            <li>Vehicle driver is to remain in their vehicle whist being loaded or unloaded.</li>
+                            <li>Drivers are not permitted to perform maintenance or cleaning activities on any vehicle whilst in the facility.</li>
+                            <li>Drivers must be licensed to operate the vehicle and its configurations.</li>
+                            <li>The vehicle must be registered, road worthy and maintained to a condition as per Vic Roads / Manufacturers recommendations.</li>
+                            <li>Intoxicants, illegal narcotics and persons under the influence of are not permitted in the facility.</li>
+                            <li>Any plant or property damage must be reported immediately to the office.</li>
+                            <li><b>OFFENSIVE OR AGGRESSIVE BEHAAVOUR TOWARDS TLA STAFF WILL NOT BE TOLERATED FOR ANY REASON.</b> Drivers engaging in this behaviour will be asked to leave, and police may be called. </li>
+                        </ul>
+                        <b>
+                            <li>Facility Access</li>
+                        </b>
+                        <ul type="disc">
+                            <li>Transport Operator (TO) access to TLA is by pre-advised “Booking” through <a href="www.toplogistics.com.au/booking">www.toplogistics.com.au/booking</a></li>
+                            <li>All freight being picked up from TLA will require a "Pick Up Booking" transaction to be completed by the TO in <a href="www.toplogistics.com.au/booking">www.toplogistics.com.au/booking</a> prior to the vehicle arriving at the facility. One Booking per lowest House Bill Of Lading. </li>
+                            <li>All freight being picked up from TLA will require a "Booking" to be made by the TO in <a href="www.toplogistics.com.au/booking">www.toplogistics.com.au/booking</a> prior to the vehicle arriving at the facility. </li>
+                            <li>All "Bookings" will require the vehicle registration number to be recorded by the TO prior to the vehicle arriving at the facility.</li>
+                            <li>Wrapped pallets will not be broken down.</li>
+                            <li><b>CHEP pallets will be required for exchange for all wrapped pallets.</b></li>
+                        </ul>
+                        <b>
+                            <li>Booking Times information</li>
+                        </b>
+                        <ul type="disc">
+                            <li>Booking times will be list on website, booking window will be 1 hour, or otherwise as determined by the facility.</li>
+                            <li>Bookings will be made available 7 days ahead.</li>
+                        </ul>
+                        <b>
+                            <li>Booking Fees</li>
+                        </b>
+                        <ul type="disc">
+                            <li>A Booking Fee is applicable for each Booking</li>
+                            <li>The Booking Fee applicable for TLA is $20.00 + GST per Booking.</li>
+                            <li>The Booking fee will be reviewed periodically and subject to CPI and business cost increases, whichever is greater.</li>
+                        </ul>
+                        <b>
+                            <li>Vehicle Arrival Procedure</li>
+                        </b>
+                        <ul type="disc">
+                            <li>Based on Safety and operational considerations, TLA have an expectation that vehicles will arrive during the nominated "Booking Window". </li>
+                            <li>When a vehicle driver arrives at TLA's site, the driver will be required to quote either the <b>"Booking Number"</b> or their vehicle <b>"Registration number"</b> to the warehouse stuff. This information is used to identify and activate the transaction in the site operating system. Upon verification of a valid Booking, the vehicle driver will then be directed into the facility. </li>
+                            <li>If a vehicle arrives at TLA earlier than the nominated "Booking Window", based on safety and operational considerations, TLA may request the driver to exit TLA and return during the nominated "Booking Window". </li>
+                            <li>If a vehicle arrives at TLA later than the nominated "Booking Window", based on safety and operational considerations, TLA may request the driver to exit TLA and re notify for a subsequent "Booking Window". In this case further Booking fees will apply. </li>
+                            <li>If a vehicle is serviced during the nominated "Booking Window", the TLA booking system will indicate the performance of the TO in respect of that "Booking" as being "On Time". </li>
+                            <li>If a vehicle is serviced before the commencement of the nominated "Booking Window", the TLA booking system will indicate the performance of the CTO in respect of that "Booking" as being "Early". </li>
+                            <li>If a vehicle is serviced after the expiration of the nominated "Booking Window", the TLA booking system will indicate the performance of the CTO in respect of that "Booking" as being "Late" </li>
+                        </ul>
+                        <b>
+                            <li>Failure to Arrive for a Booking</li>
+                        </b>
+                        <ul type="disc">
+                            <li>If a vehicle fails to arrive on the day of the "Booking", for reporting purposes, the performance of the TO in respect of that "Booking" will be considered "Unutilised". </li>
+                            <li>"Unutilised Bookings" will be charged the "Booking Fee"</li>
+                        </ul>
+                        <b>
+                            <li>Arrival Without a Booking</li>
+                        </b>
+                        <ul type="disc">
+                            <li>If a vehicle arrives at TLA without a "Booking" TLA will not be able to service the vehicle.</li>
+                        </ul>
+                        <b>
+                            <li>Cancelled Bookings</li>
+                        </b>
+                        <ul type="disc">
+                            <li>A "Booking" can be cancelled by a TO up to 60 minutes prior to the commencement of a "Booking Window" and the "Booking Fee" will not be charged.</li>
+                            <li>If a "Booking" is cancelled by a TO after this time the "Container Fee" will still be charged.</li>
+                            <li>TLA may also be required to cancel a "Booking" on behalf of a TO due to internal operational issues. If this occurs the TO will be advised by email and the corresponding "Booking Fee" will not be charged.</li>
+                        </ul>
+                        <b>
+                            <li>Invoicing</li>
+                        </b>
+                        <ul type="disc">
+                            <li>Booking Fees will be invoiced to TO's by Inbound each Monday for the previous week's activity.</li>
+                        </ul>
+                        <b>
+                            <li>Dispute Resolution</li>
+                        </b>
+                        <ul type="disc">
+                            <li>
+                                If the intended freight drop off or pick up from a "Booking" does not occur due to a contributing factor from TLA, the TO is required to log the issue with <a href="www.toplogistics.com.au/booking">www.toplogistics.com.au/booking</a> support team within 60 minutes of the vehicle departing TLA. This is to enable any potential invoice dispute regarding the "Booking" to be addressed.
+                            </li>
+                            <li>Disputed invoices must be raised with the Inbound support team on 1300 803 873.</li>
+                        </ul>
+                        <b>
+                            <li>Liability and Indemnity</li>
+                        </b>
+                        <p>The TO must indemnify and keep indemnified TLA in respect of any loss or damage or death or injury to any person as a consequence of:</p>
+                        <ol type="a">
+                            <li>any breach of this arrangement by the carrier, its drivers, agents or contractors;</li>
+                            <li>any negligent act or omission or wilful misconduct of the carrier, its drivers, agents or contractors; and</li>
+                            <li>any damage to TLA property where such damage is the fault of the carrier, its drivers, agents or contractors, </li>
+                        </ol>
+                        <p>Except to the extent that such loss or damage is caused by a breach of this arrangement or an act or omission constituting negligence or wilful misconduct by TLA, TLA must indemnify and keep indemnified the carrier in respect of and loss or damage or death or injury to any person as a consequence of: </p>
+                        <ol type="a">
+                            <li>any breach of this arrangement by TLA; </li>
+                            <li>any negligent act or omission or wilful misconduct of TLA; and </li>
+                            <li>any damage to the carrier's property where such damage is the fault of TLA.
+                                except to the extent that such loss or damage is caused by a breach of this arrangement or an act or omission constituting negligence or wilful misconduct by the carrier, its drivers, agents or contractors.
+                            </li>
+                        </ol>
+                        <b>
+                            <li>Fatigue Management </li>
+                        </b>
+                        <ul type="disc">
+                            <li>TO's are required by law to ensure drivers do not exceed their maximum regulated hours for driving and working. TLA will assist in every way to notify carriers of current and possible delays. These Bookings will be sent via the 'Inbound Community Message System' which sends emails to all registered users. </li>
+                            <li>All TO's are responsible for managing their drivers' hours and TO's must change over drivers who have worked their maximum number of hours. If the carrier is unable to change drivers then the TO must withdraw and move the vehicle away from TLA</li>
+                        </ul>
+                        <b>
+                            <li>Facility Opening Hours</li>
+                        </b>
+                        <ul type="disc">
+                            <li>Day to Day Operations-Monday to Friday 7am to 5:30pm (excluding public holidays) or as otherwise advertised on <a href="www.toplogistics.com.au/booking">www.toplogistics.com.au/booking</a></li>
+                        </ul>
+                        <b>
+                            <li>Alterations to these Site Access Rules</li>
+                        </b>
+                        <ul type="disc">
+                            <li>TLA reserves the right to alter these Site Access Rules at any time. </li>
+                            <li>TO's will be advised of alterations to this arrangement by email and all alterations will be posted on the Inbound website. </li>
+                        </ul>
+                    </ol>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" data-bs-dismiss="modal">I agree</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <br />
+    <!-- Form -->
+    <div class="container-md">
+        <form class="row g-3 needs-validation" id="bookingForm" method="POST" action="<?php $this->createUrl('customerService/containerPickupBooking'); ?>" enctype="multipart/form-data">
+            <div class="card">
+                <div class="card-header">
+                    <h3 style="color:green"><i class="bi bi-calendar2-check"></i>Pickup List Summary</h3>
+                </div>
+                <div class="card-body">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Container#</th>
+                                <th scope="col">House BL</th>
+                                <th scope="col">Number of Pallets</th>
+                                <th scope="col">Number of Packages</th>
+                                <th scope="col">Weight(kg)</th>
+                                <th scope="col">Volume(M<sup>3</sup>)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><?php echo $container_no; ?></td>
+                                <td><?php echo $house_bl; ?></td>
+                                <td><?php echo $pallets; ?></td>
+                                <td><?php echo $packages; ?></td>
+                                <td><?php echo number_format((float)$weight, 2, '.', ''); ?></td>
+                                <td><?php echo number_format((float)$volume, 3, '.', ''); ?></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="col-md-6" style="display: none;">
+                <label for="container_no" class="form-label">Container Number</label>
+                <input type="text" class="form-control" id="container_no" name="container_no" value="<?php echo $container_no; ?>" autocomplete="off" required>
+            </div>
+            <div class="col-md-6" style="display: none;">
+                <label for="house_bl" class="form-label">House BL</label>
+                <input type="text" class="form-control" id="house_bl" name="house_bl" value="<?php echo $house_bl; ?>" autocomplete="off" required>
+            </div>
+            <div class="col-md-6" style="display: none;">
+                <label for="depot" class="form-label">Depot</label>
+                <input type="text" class="form-control" id="depot" name="depot" value="<?php echo $depot; ?>" autocomplete="off" required>
+            </div>
+            <div class="col-md-6">
+                <label for="booking_date" class="form-label">Pickup Date</label>
+                <input type="text" class="form-control" id="booking_date" name="booking_date" autocomplete="off" required>
+            </div>
+            <div class="col-md-6">
+                <label for="booking_time" class="form-label">Pickup Time</label>
+                <input type="text" class="form-control readonly" id="booking_time" name="booking_time" autocomplete="off" required>
+            </div>
+            <br />
+            <div class="container-sm" id="timeslot-container" style="display: none;">
+                <div class="timeslot">
+                        <?php  $thisIndex=1;
+                        foreach ($staticTimeSlot as $sku1 => $sv){ ?>
+                        <div class="btn-group-vertical">
+                             <?php  
+                             foreach ($sv as $sku2 => $svv){ 
+                                if(empty($svv))
+                                {
+                                    echo "<div class=\"btn-timeslot btn-sm\">&nbsp;</div>";
+                                }else
+                                {
+                                    echo "<button type=\"button\" class=\"btn btn-success btn-timeslot btn-sm time_{$sku1}\" id=\"time_{$thisIndex}\" onclick=\"setBookingTime('{$svv}', '#time_{$thisIndex}')\">{$svv}</button>";
+                                    $thisIndex++;
+                                }
+                                
+                            } ?>
+                        </div>
+                        <?php } ?>
+                   
+                    <div class="btn-group-vertical" role="group" style="margin-left: 120px;">
+                        <button type="button" class="btn btn-success" id="btn-example-available">Available Slot</button>
+                        <button type="button" class="btn btn-info" id="btn-example-selected">Selected Slot</button>
+                        <button type="button" class="btn btn-danger" id="btn-example-occupied" disabled>Occupied Slot</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <label for="name" class="form-label">Driver Name</label>
+                <input type="text" class="form-control" id="name" name="name" value="<?=@$driver_name?>" required>
+            </div>
+            <div class="col-md-6">
+                <label for="rego" class="form-label">Rego</label>
+                <input type="text" class="form-control" id="rego" name="rego" value="<?=@$rego?>" required>
+            </div>
+            <div class="col-md-6">
+                <label for="company_name" class="form-label">Company Name</label>
+                <input type="text" class="form-control" id="company_name" name="company_name" value="<?=@$company_name?>" required>
+            </div>
+            <div class="col-md-6">
+                <label for="phone" class="form-label">Company Emails(split by ;)</label>
+                <input type="text" class="form-control" id="email" name="email" value="<?=@$company_email?>" required>
+            </div>
+            <b>
+            <div class="col-12">
+                <button type="submit" class="btn btn-primary" id="form_submit">Submit Adjustion</button>
+            </div>
+        </form>
+        <br />
+    </div>
+
+    <script type="text/javascript">
+        var fileCount = 1;
+
+        $(window).on('load', function() {
+            $('#terms').modal('show');
+        });
+
+        $(".readonly").on('keydown paste focus mousedown', function(e) {
+            if (e.keyCode != 9) // ignore tab
+                e.preventDefault();
+        });
+
+        function getNextMonday(date = new Date()) {
+            //debugger;
+            const dateCopy = new Date(date.getTime());
+
+            const temp = new Date(
+                dateCopy.setDate(
+                dateCopy.getDate() + ((7 - dateCopy.getDay() + 1) % 7 || 7),
+                ),
+            );
+            const nextMonday = dateFormat(temp, 'yyyy-MM-dd');
+            //console.log(nextMonday);
+            return nextMonday;
+        }
+
+        function isEmail(strEmail)
+        {
+            var emails = strEmail.split(';');
+            for (var i = emails.length - 1; i >= 0; i--)
+            {
+               if (emails[i].search(/^\w+((-\w+)|(\.\w+))*\@[A-Za-z0-9]+((\.|-)[A-Za-z0-9]+)*\.[A-Za-z0-9]+$/) != -1)
+                {
+                    
+                }
+                else
+                {
+                    return false;
+                }
+            }
+            
+            return true;
+        }
+
+        // Convert date format
+        function dateFormat(inputDate, format) {
+            //parse the input date
+            const date = new Date(inputDate);
+
+            //extract the parts of the date
+            const day = date.getDate();
+            const month = date.getMonth() + 1;
+            const year = date.getFullYear();
+
+            //replace the month
+            format = format.replace("MM", month.toString().padStart(2, "0"));
+
+            //replace the year
+            if (format.indexOf("yyyy") > -1) {
+                format = format.replace("yyyy", year.toString());
+            } else if (format.indexOf("yy") > -1) {
+                format = format.replace("yy", year.toString().substr(2, 2));
+            }
+
+            //replace the day
+            format = format.replace("dd", day.toString().padStart(2, "0"));
+
+            return format;
+        }
+
+        $(document).on('change', '.file_uploader', function() {
+            var fileExtension = ['jpeg', 'jpg', 'png', 'gif', 'bmp', 'pdf'];
+            if ($.inArray($(this).val().split('.').pop().toLowerCase(), fileExtension) == -1) {
+                alert("Only formats are allowed : " + fileExtension.join(', '));
+                $(this).val('');
+            }
+        });
+
+        function addFile() {
+            fileCount++;
+            var strHtmlFile = '<input class="form-control file_uploader" type="file" id="file_' + fileCount + '" name="file_' + fileCount + '">';
+            $('#file_upload_container').append(strHtmlFile);
+        }
+
+        $(function() {
+            var availableDate = <?php echo json_encode($availableDate, JSON_HEX_TAG); ?>;
+            var endDate = <?php echo json_encode($endDate, JSON_HEX_TAG); ?>;
+            availableDate = new Date(availableDate);
+            endDate = new Date(endDate);
+            endDate.setDate(endDate.getDate() - 1);
+            /* var today = new Date();
+            if (availableDate.getTime() < today.getTime()) {
+                availableDate = today;
+            } */
+            var exclude = <?php if($depot == 'Melbourne') {
+                 echo '["' . implode('", "', ["22-09-2022", "23-09-2022"]) . '"]'; 
+                } else {
+                    echo '["' . implode('", "', ["22-09-2022"]) . '"]';
+
+                }
+                ?>;
+            //console.log(exclude);
+            $("#booking_date").datepicker({
+                minDate: availableDate,
+                maxDate: endDate,
+                changeMonth: true,
+                beforeShowDay: function(date) {
+                    var day = jQuery.datepicker.formatDate('dd-mm-yy', date);
+                    return [!~$.inArray(day, exclude) && (date.getDay() != 0) && (date.getDay() != 6)];
+                },
+                dateFormat: "dd MM yy"
+            });
+        });
+
+        /**
+         * Display timeslots based on selected date.
+         * Set pickup time.
+         */
+        $("#booking_date").change(function() {
+            $("#booking_time").val(''); // Clear booking time on booking date change.
+            $("#timeslot-container").show();
+            $(".btn-info").addClass("btn-success");
+            $(".btn-info").removeClass("btn-info");
+            $(".btn-danger").addClass("btn-success");
+            $(".btn-danger").attr('disabled', false);
+            $(".btn-danger").removeClass("btn-danger");
+
+            $("#btn-example-selected").removeClass("btn-success");
+            $("#btn-example-selected").addClass("btn-info");
+            $("#btn-example-occupied").removeClass("btn-success");
+            $("#btn-example-occupied").addClass("btn-danger");
+            var datePicked = $("#booking_date").val();
+
+            datePicked = dateFormat(datePicked, 'yyyy-MM-dd'); // Convert date format
+            
+            /**
+             * Disable all slot buttons have hours <= current hour + 2 hours
+             * If booking hour > 17:00, disable next working day first 2 hours' slots
+             */
+            var today = new Date();
+            var todayStr = undefined;
+            if(today.getDate()<10)
+            {
+                var todayStr = "0"+today.getDate();
+            }else
+            {
+                var todayStr = today.getDate();
+            }
+
+            var todayMonthStr = undefined;
+            if((today.getMonth()+1)<10)
+            {
+                var todayMonthStr = "0"+(today.getMonth()+1);
+            }else
+            {
+                var todayMonthStr = (today.getMonth()+1);
+            }
+
+            var currentDate = today.getFullYear()+'-'+todayMonthStr+'-'+todayStr;
+            var tomr = new Date();
+            tomr.setDate(today.getDate()+1);
+
+            var tomrStr = undefined;
+            if(tomr.getDate()<10)
+            {
+                var tomrStr = "0"+tomr.getDate();
+            }else
+            {
+                var tomrStr = tomr.getDate();
+            }
+
+            var tomorrow = tomr.getFullYear()+'-'+todayMonthStr+'-'+tomrStr;
+
+
+            var nextMonday = getNextMonday(today);
+            var currentHour = today.getHours();
+            if (datePicked == currentDate) {
+                for (let i = 7; i <= 17; i++) {
+                    if (i <= currentHour+2) {
+                        $(".time_"+i).removeClass("btn-success");
+                        $(".time_"+i).addClass("btn-danger");
+                        $(".time_"+i).attr('disabled', true);
+                    }
+                }
+            } else if (datePicked == tomorrow || ((today.getDay() === 5 || today.getDay() === 6) && datePicked == nextMonday)) {
+                //debugger;
+                if (currentHour >= 17) {
+                    //console.log(depot);
+                    //debugger;
+                    switch (depot) {
+                        case "Sydney":
+                            for (let i = 7; i < 9; i++) {
+                                $(".time_"+i).removeClass("btn-success");
+                                $(".time_"+i).addClass("btn-danger");
+                                $(".time_"+i).attr('disabled', true);
+                            }
+                            break;
+                        case "Melbourne":
+                        case "Brisbane":
+                            //debugger;
+                            for (let i = 7; i < 11; i++) {
+                                $(".time_"+i).removeClass("btn-success");
+                                $(".time_"+i).addClass("btn-danger");
+                                $(".time_"+i).attr('disabled', true);
+                            }
+                            break; 
+                    }
+                }
+            } else {
+                // Initialize all buttons
+                for (let i = 7; i <= 17; i++) {
+                    $(".time_"+i).removeClass("btn-danger");
+                    $(".time_"+i).addClass("btn-success");
+                    $(".time_"+i).attr('disabled', false);
+                }
+            }
+
+
+            // Read occupied slots array on selected date
+            var occupiedSlots = <?php echo json_encode($occupiedSlots, JSON_HEX_TAG); ?>;
+            var staticTimeSlot = '<?=json_encode($staticTimeSlot)?>';
+            staticTimeSlot = JSON.parse(staticTimeSlot);
+            //console.log(occupiedSlots);
+            var slots = occupiedSlots[datePicked];
+            //console.log(slots);
+            // Set occupied slots to red and disable them
+            if (slots !== undefined && slots.length > 0) {
+                for (let i = 0; i < slots.length; i++)
+                {
+                    var timeButtonId = "#time";
+                    var getId = 0;
+                    var thisIndex = 1;
+                    var keyMaps = Object.keys(staticTimeSlot);
+                    // console.log(keyMaps);
+                    // console.log(staticTimeSlot);
+                    for(var j = 0; j<keyMaps.length;j++)
+                    {
+                        // console.log(staticTimeSlot[keyMaps[j]].length);
+                        for(var ji = 0; ji<staticTimeSlot[keyMaps[j]].length;ji++)
+                        {
+                            if(staticTimeSlot[keyMaps[j]][ji]!="")
+                            {
+                                var sarr = staticTimeSlot[keyMaps[j]][ji].split(":");
+                                if(sarr[0]<10)
+                                {
+                                    sarr[0] = "0"+sarr[0];
+                                }
+                                var checkTime = sarr[0]+":"+sarr[1]+":00";
+                                // console.log(checkTime);
+                                // console.log(slots[i]);
+                                if(checkTime==slots[i])
+                                {
+                                    timeButtonId = timeButtonId+"_"+thisIndex;
+                                    getId = 1;
+                                    break;
+                                }
+                                thisIndex++;
+                            }
+                        }
+                        if(getId==1)
+                        {
+                            break;
+                        }
+                    }
+                    // console.log(timeButtonId);
+                    $(timeButtonId).removeClass("btn-success");
+                    $(timeButtonId).addClass("btn-danger");
+                    $(timeButtonId).attr('disabled', true);
+
+                }
+            }
+
+            // timeslot component
+            //var strHtmlTimeslot = '<div class="timeslot">';
+            /* for (let i = 0; i < slots.length; i++) {
+                switch (i) {
+                    case 0:
+                        if (slots[i] > 2) {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-success slots-4" onclick="setTimeslot(' + i + ')">7:00<br>' + slots[i] + ' availabel</button></div>&nbsp;&nbsp;';
+                        } else if (slots[i] > 0 && slots[i] <= 2) {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-warning slots-4" onclick="setTimeslot(' + i + ')">7:00<br>' + slots[i] + ' availabel</button></div>&nbsp;&nbsp;';
+                        } else {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-danger slots-4" disabled>7:00<br>Fully booked</button></div>&nbsp;&nbsp;';
+                        }
+                        break;
+                    case 1:
+                        if (slots[i] > 2) {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-success slots-4" onclick="setTimeslot(' + i + ')">8:00<br>' + slots[i] + ' availabel</button></div>&nbsp;&nbsp;';
+                        } else if (slots[i] > 0 && slots[i] <= 2) {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-warning slots-4" onclick="setTimeslot(' + i + ')">8:00<br>' + slots[i] + ' availabel</button></div>&nbsp;&nbsp;';
+                        } else {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-danger slots-4" disabled>8:00<br>Fully booked</button></div>&nbsp;&nbsp;';
+                        }
+                        break;
+                    case 2:
+                        if (slots[i] > 2) {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-success slots-4" onclick="setTimeslot(' + i + ')">9:00<br>' + slots[i] + ' availabel</button></div>&nbsp;&nbsp;';
+                        } else if (slots[i] > 0 && slots[i] <= 2) {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-warning slots-4" onclick="setTimeslot(' + i + ')">9:00<br>' + slots[i] + ' availabel</button></div>&nbsp;&nbsp;';
+                        } else {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-danger slots-4" disabled>9:00<br>Fully booked</button></div>&nbsp;&nbsp;';
+                        }
+                        break;
+                    case 3:
+                        if (slots[i] > 1) {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-success slots-2" onclick="setTimeslot(' + i + ')">10:00<br>' + slots[i] + ' availabel</button></div>&nbsp;&nbsp;';
+                        } else if (slots[i] == 1) {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-warning slots-2" onclick="setTimeslot(' + i + ')">10:00<br>' + slots[i] + ' availabel</button></div>&nbsp;&nbsp;';
+                        } else {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-danger slots-2" disabled>10:00<br>Fully booked</button></div>&nbsp;&nbsp;';
+                        }
+                        break;
+                    case 4:
+                        if (slots[i] > 1) {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-success slots-2" onclick="setTimeslot(' + i + ')">11:00<br>' + slots[i] + ' availabel</button></div>&nbsp;&nbsp;';
+                        } else if (slots[i] == 1) {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-warning slots-2" onclick="setTimeslot(' + i + ')">11:00<br>' + slots[i] + ' availabel</button></div>&nbsp;&nbsp;';
+                        } else {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-danger slots-2" disabled>11:00<br>Fully booked</button></div>&nbsp;&nbsp;';
+                        }
+                        break;
+                    case 5:
+                        if (slots[i] > 1) {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-success slots-2" onclick="setTimeslot(' + i + ')">12:00<br>' + slots[i] + ' availabel</button></div>&nbsp;&nbsp;';
+                        } else if (slots[i] == 1) {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-warning slots-2" onclick="setTimeslot(' + i + ')">12:00<br>' + slots[i] + ' availabel</button></div>&nbsp;&nbsp;';
+                        } else {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-danger slots-2" disabled>12:00<br>Fully booked</button></div>&nbsp;&nbsp;';
+                        }
+                        break;
+                    case 6:
+                        if (slots[i] >= 1) {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-success slots-1" onclick="setTimeslot(' + i + ')">13:00<br>' + slots[i] + ' availabel</button></div>&nbsp;&nbsp;';
+                        } else {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-danger slots-1" disabled>13:00<br>Fully booked</button></div>&nbsp;&nbsp;';
+                        }
+                        break;
+                    case 7:
+                        if (slots[i] >= 1) {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-success slots-1" onclick="setTimeslot(' + i + ')">14:00<br>' + slots[i] + ' availabel</button></div>&nbsp;&nbsp;';
+                        } else {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-danger slots-1" disabled>14:00<br>Fully booked</button></div>&nbsp;&nbsp;';
+                        }
+                        break;
+                    case 8:
+                        if (slots[i] > 2) {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-success slots-4" onclick="setTimeslot(' + i + ')">15:00<br>' + slots[i] + ' availabel</button></div>&nbsp;&nbsp;';
+                        } else if (slots[i] > 0 && slots[i] <= 2) {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-warning slots-4" onclick="setTimeslot(' + i + ')">15:00<br>' + slots[i] + ' availabel</button></div>&nbsp;&nbsp;';
+                        } else {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-danger slots-4" disabled>15:00<br>Fully booked</button></div>&nbsp;&nbsp;';
+                        }
+                        break;
+                    case 9:
+                        if (slots[i] > 2) {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-success slots-4" onclick="setTimeslot(' + i + ')">16:00<br>' + slots[i] + ' availabel</button></div>&nbsp;&nbsp;';
+                        } else if (slots[i] > 0 && slots[i] <= 2) {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-warning slots-4" onclick="setTimeslot(' + i + ')">16:00<br>' + slots[i] + ' availabel</button></div>&nbsp;&nbsp;';
+                        } else {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-danger slots-4" disabled>16:00<br>Fully booked</button></div>&nbsp;&nbsp;';
+                        }
+                        break;
+                    case 10:
+                        if (slots[i] > 1) {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-success slots-2" onclick="setTimeslot(' + i + ')">17:00<br>' + slots[i] + ' availabel</button></div>&nbsp;&nbsp;';
+                        } else if (slots[i] == 1) {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-warning slots-2" onclick="setTimeslot(' + i + ')">17:00<br>' + slots[i] + ' availabel</button></div>&nbsp;&nbsp;';
+                        } else {
+                            strHtmlTimeslot += '<div class="btn-group" role="group" aria-label="time_slot"><button type="button" class="btn btn-danger slots-2" disabled>17:00<br>Fully booked</button></div>&nbsp;&nbsp;';
+                        }
+                        break;
+                }
+            } */
+            //strHtmlTimeslot += '</div>';
+            //$("#timeslot-container").append(strHtmlTimeslot);
+        });
+
+        /* function setTimeslot(i) {
+            switch (i) {
+                case 0:
+                    $("#booking_time").val("7:00:00");
+                    break;
+                case 1:
+                    $("#booking_time").val("8:00:00");
+                    break;
+                case 2:
+                    $("#booking_time").val("9:00:00");
+                    break;
+                case 3:
+                    $("#booking_time").val("10:00:00");
+                    break;
+                case 4:
+                    $("#booking_time").val("11:00:00");
+                    break;
+                case 5:
+                    $("#booking_time").val("12:00:00");
+                    break;
+                case 6:
+                    $("#booking_time").val("13:00:00");
+                    break;
+                case 7:
+                    $("#booking_time").val("14:00:00");
+                    break;
+                case 8:
+                    $("#booking_time").val("15:00:00");
+                    break;
+                case 9:
+                    $("#booking_time").val("16:00:00");
+                    break;
+                case 10:
+                    $("#booking_time").val("17:00:00");
+                    break;
+            }
+            console.log($("#booking_time").val());
+        } */
+
+        /**
+         * Set booking time value, adjust display
+         */
+        function setBookingTime(bookingTime, btn_id) {
+            $("#booking_time").val(bookingTime);
+            $(".btn-info").addClass("btn-success");
+            $(".btn-info").removeClass("btn-info");
+
+            $(btn_id).removeClass("btn-success");
+            $(btn_id).addClass("btn-info");
+            $("#btn-example-selected").removeClass();
+            $("#btn-example-selected").addClass("btn btn-info");
+            $("#btn-example-occupied").removeClass();
+            $("#btn-example-occupied").addClass("btn btn-danger");
+        }
+
+        $(document).ready(function() {
+            $("form#bookingForm").submit(function(event) {
+                if(!isEmail($('#email').val()))
+                {
+                    $('#email').focus();
+                    alert("Company Email is invalid");
+                    return false;
+                }
+                $('#form_submit').prop('disabled', true);
+                $('#loading-container').show();
+                event.preventDefault();
+                $("#booking_date").val(dateFormat($("#booking_date").val(), 'yyyy-MM-dd'));
+                var formData = new FormData(this);
+                $.ajax({
+                    url: "https://ims.toplogistics.com.au/customerService/editBookingInfo?booking_number=<?=$booking_number?>&&token=<?=$token?>",
+                    type: 'POST',
+                    data: formData,
+                    enctype: 'multipart/form-data',
+                    cache: false,
+                    contentType: false,
+                    processData: false,
+                    success: function(res) {
+                        //console.log(formData);
+                        console.log(res);
+                        //alert('Success');
+                        if (res != "Slot has been occupied, please pick another time slot.") {
+                            alert("Adjustment has been submitted. You will receive the confirmation email.");
+                            $('#form_submit').prop('disabled', false);
+                            $("#loading-container").hide();
+                            //window.location.href = "https://www.toplogistics.com.au";
+                        } else {
+                            alert(res);
+                            $('#form_submit').prop('disabled', false);
+                            $("#loading-container").hide();
+                        }
+
+                    },
+                });
+            });
+
+            $("#booking_date").datepicker( "setDate", new Date('<?=$booking_date?>'));
+            $('#booking_time').val('<?=$booking_time?>');
+            // $('#booking_date').datepicker({ defaultDate: new Date() });
+            // $("#booking_date").val('<?=$booking_date?>')
+        })
+    </script>
+</body>
+
+</html>

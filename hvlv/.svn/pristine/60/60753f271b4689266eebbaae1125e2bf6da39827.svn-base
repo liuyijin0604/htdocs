@@ -1,0 +1,2660 @@
+<?php 
+class ImConsolService extends Service
+{
+	public function doUbiManifest($ss)
+	{
+		$err = [];
+		$mani = null;
+		if (!empty($ss)) {
+			$tempShipments = [];
+			foreach ($ss as $key => $s) {
+				$tempShipments[$s->ref] = $s;
+			}
+
+			foreach ($ss as $key => $sObj)
+			{
+				$ubi=new UbiAPI(false, false);
+				$re = $ubi->updateShipmentWeight([$sObj]);
+				if (is_object($re))
+				{
+					if ($re->status=="Succeeded")
+					{
+						$sObj->mdata['updated_ubi_weight'] = 1;
+						$sObj->save();
+						$result=$ubi->manifest([$sObj]);
+						if (is_object($result)) {
+							if ($result->status=="Failure"||$result->status=='Failed'||$result->status=="Partial Success") {
+								$err[]=$result->message;
+							}else
+							{
+								$shipmentRef = $result->data[0];
+								$transaction = Yii::app()->db->beginTransaction();
+								try {
+									$ref= substr($shipmentRef->trackingNo, 0, -11);
+									$s=$tempShipments[$ref];
+									$trans = $s->trans;
+									$tranship = end($trans);
+									$orgId = $tranship->org_id;
+									$tranship->mdata['oid'] = Org::ORGID_COURIER_UBI;
+									$tranship->cost= number_format($ubi->getCost($s), 2, '.', '');
+									$tranship->save();
+
+									if(empty($mani))
+									{
+										$mani = new Manifest;
+										$mani->type = 90;
+										$mani->fwd_id = $orgId;
+										$mani->ref = date('Y-m-d');
+										$mani->save();
+									}
+									$mm = new ManiMap;
+									$mm->mani_id = $mani->id;
+									$mm->fid = $s->id;
+									$mm->model = 'ImParcel';
+									$mm->status = 10;
+									$mm->mdata['mani_time'] = date('Y-m-d H:i:s');
+									$mm->save();
+									$s->mdata['manifest_weight'] = ceil($s->weight);
+									$s->save();
+									$transaction->commit();
+								} catch (Exception $ex) {
+									$transaction->rollback();
+									Log::log2file("UBI".$cn->no."=>".$ex->getMessage(), "transaction_err_log", "transaction");
+									throw $ex;
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		return $err;
+	}
+
+	public function doUbiAupostManifest($ssa)
+	{
+		$ss = [];
+		$err = [];
+		foreach ($ssa as $s) {
+			$isRTS = ShipmentRtsRecordConfirm::model()->count("new_id = :nid",[":nid"=>$s->id]);
+			if ((((in_array($s->status, ImParcel::$allow_manifest_states)&&$s->getOutPkg() > 0)|| $cn->owner_id == Org::ORGID_CLIENT_TLA)&&!empty($s->trans)) ||$isRTS>0)
+			{
+				$trans = $s->trans;
+				$tran = end($trans);
+
+			  if ($tran->connote==$s->ref&&!isset($tran->mdata['oid'])&&($tran->org_id==Org::ORGID_COURIER_UBI)) { // if upload manifest before, we don't send again
+					$orgRate = OrgRate::model()->findByPk($s->mdata['org_rate_id']);
+					if(preg_match('/TOLL/i', $orgRate->code)) continue;
+				  	$ss[] = $s;
+			  }
+		  	}
+		}
+		$max_ppg = 300;
+		$pgs = ceil(count($ss) / $max_ppg);
+		for($pg = 0; $pg < $pgs; $pg++){
+			$shipments = array_slice($ss, $pg * $max_ppg, $max_ppg);
+			$err = array_merge($err, $this->doUbiManifest($shipments));
+		}
+		return $err;
+	}
+
+	public function doFLHunterManifest($ssa){
+		if(empty($ssa)) return [];
+		$err = [];
+		if(!empty($ssa)){
+			$tempShipments = [];
+			$ss = [];
+			foreach ($ssa as $key => $s) {
+				if(!empty($s->trans))
+				{
+					$trans = $s->trans;
+					$endTrans = end($trans);
+					if($endTrans->org_id ==Org::ORGID_COURIER_FL)
+					{
+						$tempShipments[$s->ref] = $s;
+						$ss[] = $s;
+					}
+				}
+			}
+			if(empty($ss)) return [];
+			try{
+				$transaction = Yii::app()->db->beginTransaction();
+				$flhunter = new FLHunterFTP();
+				$csvNamePath = $flhunter->manifest($ss);
+				if(!empty($csvNamePath)){
+					$flhunter->connect();
+					//$strUrlPrefix = 'https://' . $_SERVER['HTTP_HOST'];
+					$strCsvFile = 'FLLPTL'.date('Y-m-dH-i-s').'.csv';
+					if($flhunter->put($strCsvFile,$csvNamePath)){
+						foreach($ss as $key =>$s){
+							$orgId = $s->trans[0]->org_id;
+							$orgRate = OrgRate::model()->findByPk($s->mdata['org_rate_id']);
+							//$code = $orgRate->code;
+							if(empty($mani)){
+								$mani = new Manifest;
+								$mani->type = 90;
+								$mani->fwd_id = $orgId;
+								$mani->ref = date('Y-m-d');
+								$mani->save();
+							}
+							$mm = new ManiMap;
+							$mm->mani_id = $mani->id;
+							$mm->fid = $s->id;
+							$mm->model = 'ImParcel';
+							$mm->status = 10;
+							$mm->mdata['mani_time'] = date('Y-m-d H:i:s');
+							$mm->save();
+							$trans = $s->trans;
+							$tranship = end($trans);
+							$tranship->mdata['oid'] = $strCsvFile;
+							$tranship->status = 11;
+							$tranship->save();
+							//$tranship->cost= number_format($mytollAPI->getCost($s->mdata['org_rate_id'], $s->cnee->suburb, $s->cnee->postcode, $s->weight)->data, 2, '.', '');
+							$s->mdata['manifest_weight'] = ceil($s->weight);
+							$s->save();
+						}
+						$transaction->commit();
+						return [];
+					}else{
+						return [$flhunter->get_error()];
+					}
+				}	
+			}catch(Exception $ex){
+				$transaction->rollback();
+				Log::log2file("FLHunter =>".$ex->getMessage(), "transaction_err_log", "transaction");
+				Emailog::sendEmailTo(Emailog::NOTIFY_OP_EMAIL, "FLHunter =>".$ex->getMessage(), "FL Hunter Manifest ERROR");
+			}
+		}
+		return $err;
+	}
+
+	public function doUbiTollManifest($ss)
+	{
+		return $this->doUbiCourierManifest($ss);
+	}
+	public function doUbiCourierManifest($ssa)
+	{
+		$err = [];
+		if (!empty($ssa)) {
+			$tempShipments = [];
+			$ss = [];
+			foreach ($ssa as $key => $s) {
+				if(!empty($s->trans))
+				{
+					$trans = $s->trans;
+					$endTrans = end($trans);
+					if($endTrans->org_id ==Org::ORGID_COURIER_UBI_TOLL)
+					{
+						$orgRate = OrgRate::model()->findByPk($s->mdata['org_rate_id']);
+						if(preg_match('/LOCAL/i', $orgRate->code)) continue;
+						$tempShipments[$s->ref] = $s;
+						$ss[] = $s;
+					}
+				}
+			}
+			if(empty($ss)) return $err;
+			$ubi=new EtowerAPI(false, false);
+			// $ubi->updateShipment($ss);
+			$result=$ubi->manifest($ss);
+			if (is_object($result)) {
+				if ($result->status=="Failure"||$result->status=="Partial Success") {
+					$err[]=$result->message;
+				}else
+				{
+					$result = $result->data;
+					$transaction = Yii::app()->db->beginTransaction();
+					try {
+						
+						foreach ($result as $shipmentRef) {
+							$ref= $shipmentRef->trackingNo;
+							$pb = ParcelBarcode::model()->find('sub_ref=:subRef',[":subRef"=>$ref]);
+							if(empty($pb))
+							{
+								$s=$tempShipments[$ref];
+							}else
+							{
+								$s=$tempShipments[$pb->main_ref];
+							}
+							$trans = $s->trans;
+							$tranship = end($trans);
+							$orgId = $tranship->org_id;
+							$tranship->mdata['oid'] = Org::ORGID_COURIER_UBI;
+							$cost = $ubi->getCost($s->mdata['org_rate_id'], $s->cnee->suburb, $s->cnee->postcode, $s->getCubeWeight());
+							if($cost->code == 0)
+							{
+								$tranship->cost= number_format($cost->data, 2, '.', '');
+							}
+							$tranship->save();
+
+							if(empty($mani))
+							{
+								$mani = new Manifest;
+								$mani->type = 90;
+								$mani->fwd_id = $orgId;
+								$mani->ref = date('Y-m-d');
+								$mani->save();
+							}
+							$mm = new ManiMap;
+							$mm->mani_id = $mani->id;
+							$mm->fid = $s->id;
+							$mm->model = 'ImParcel';
+							$mm->status = 10;
+							$mm->mdata['mani_time'] = date('Y-m-d H:i:s');
+							$mm->save();
+							$s->mdata['manifest_weight'] = ceil($s->weight);
+							$s->save();
+
+
+
+						}
+						$transaction->commit();
+					} catch (Exception $ex) {
+						$transaction->rollback();
+						Log::log2file("UBI".$cn->no."=>".$ex->getMessage(), "transaction_err_log", "transaction");
+						Emailog::sendEmailTo(Emailog::NOTIFY_OP_EMAIL, "UBI".$cn->no."=>".$ex->getMessage(), "UBI COURIER Manifest ERROR");
+						throw $ex;
+					}
+				}
+			}
+		}
+		if(!empty($err))
+		{
+			Emailog::sendEmailTo(Emailog::NOTIFY_OP_EMAIL, join(',',$err), "UBI COURIER Manifest ERROR");
+		}
+		return $err;
+	}
+
+	public function doMyTollManifest($ss)
+	{
+		$ssSyd = [];
+		$ssMel = [];
+		$ssBne = [];
+		$ssPer = [];
+		$err = [];
+		if (!empty($ss)) {
+			foreach ($ss as $key => $s) {
+				foreach ($s->trans as $key => $t) {
+					if(in_array($t->org_id,[Org::ORGID_COURIER_TOLL_IPEC]))
+					{
+						$orgRate = OrgRate::model()->findByPk($s->mdata['org_rate_id']);
+						$code = $orgRate->code;
+						switch ($code) {
+							case ImportChargeCode::MYTOLL_SYD_CODE:
+								$ssSyd[] = $s;
+								break;
+							case ImportChargeCode::MYTOLL_MEL_CODE:
+								$ssMel[] = $s;
+								break;
+							case ImportChargeCode::MYTOLL_BNE_CODE:
+								$ssBne[] = $s;
+								break;
+							case ImportChargeCode::MYTOLL_PER_CODE:
+								$ssPer[] = $s;
+								break;
+							default:
+								break;
+						}
+
+						break;
+					}
+					# code...
+				}
+			}
+			if(!empty($ssSyd))
+			{
+				$thisErr = $this->doMyTollManifestSS($ssSyd);
+				$err = array_merge($err,$thisErr);
+			}
+
+			if(!empty($ssMel))
+			{
+				$thisErr = $this->doMyTollManifestSS($ssMel);
+				$err = array_merge($err,$thisErr);
+			}
+
+			if(!empty($ssBne))
+			{
+				$thisErr = $this->doMyTollManifestSS($ssBne);
+				$err = array_merge($err,$thisErr);
+			}
+
+			if(!empty($ssPer))
+			{
+				$thisErr = $this->doMyTollManifestSS($ssPer);
+				$err = array_merge($err,$thisErr);
+			}
+
+		}
+		return $err;
+	}
+	
+	public function doMyTollManifestSS($ss)
+	{
+		$err = [];
+		foreach ($ss as $key => $s) {
+			$orgId = $s->trans[0]->org_id;
+			$orgRate = OrgRate::model()->findByPk($s->mdata['org_rate_id']);
+			$code = $orgRate->code;
+			$mytollAPI=MyTollAPI::getAPIInstanceByCode($code);
+			$result=$mytollAPI->manifestShipment([$s]);
+			foreach ([$s] as $key => $s) {
+				if(empty($result->TollMessage->ResponseMessages)||empty($result->TollMessage->ResponseMessages->ResponseMessage[0])||empty($result->TollMessage->ResponseMessages->ResponseMessage[0]->ResponseID)||empty($result->TollMessage->ResponseMessages->ResponseMessage[0]->ResponseID->Value)||$result->TollMessage->ResponseMessages->ResponseMessage[0]->ResponseID->Value!="200"||!empty($result->TollMessage->ErrorMessages))
+				{
+					$err[]=$s->ref.json_encode($result->TollMessage->ErrorMessages)."Failed";
+				}else
+				{   
+					if(empty($mani))
+					{
+						$mani = new Manifest;
+						$mani->type = 90;
+						$mani->fwd_id = $orgId;
+						$mani->ref = date('Y-m-d');
+						$mani->save();
+					}
+					$transaction = Yii::app()->db->beginTransaction();
+					try {
+							$mm = new ManiMap;
+							$mm->mani_id = $mani->id;
+							$mm->fid = $s->id;
+							$mm->model = 'ImParcel';
+							$mm->status = 10;
+							$mm->mdata['mani_time'] = date('Y-m-d H:i:s');
+							$mm->save();
+							$trans = $s->trans;
+							$tranship = end($trans);
+							$tranship->mdata['oid'] = Org::ORGID_COURIER_TOLL_IPEC;
+							$tranship->status = 11;
+							$tranship->cost= number_format($mytollAPI->getCost($s->mdata['org_rate_id'], $s->cnee->suburb, $s->cnee->postcode, $s->weight)->data, 2, '.', '');
+							$s->mdata['manifest_weight'] = ceil($s->weight);
+							$s->save();
+							$tranship->save();
+							$transaction->commit();
+					} catch (Exception $ex) {
+						$transaction->rollback();
+						Log::log2file("MyToll".$cn->no."=>".$ex->getMessage(), "transaction_err_log", "transaction");
+						Emailog::sendEmailTo(Emailog::NOTIFY_OP_EMAIL, "MyToll".$cn->no."=>".$ex->getMessage(), "My TOLL Manifest ERROR");
+						throw $ex;
+					}
+				}
+			}
+		}
+		
+		if(!empty($err))
+		{
+			Emailog::sendEmailTo(Emailog::NOTIFY_OP_EMAIL, join(',',$err), "My TOLL Manifest ERROR");
+		}
+			
+		return $err;
+	}
+
+	public function doMyBorderManifest($ssr)
+	{
+		$ss = [];
+		foreach ($ssr as $key1 => $s)
+		{
+			$trans = $s->trans;
+			$endTrans = end($trans);
+			if(in_array($endTrans->org_id,[Org::ORGID_COURIER_BORDER]))
+			{
+				$ss[] = $s;
+			}
+		}
+
+		if(!empty($ss))
+		{
+			[$sftp,$loginResult] = BorderAPI::getSFTP();
+		}
+		$err = [];
+		foreach ($ss as $index => $s) {
+			$myborderAPI=BorderAPI::getAPIInstance($s->mdata['org_rate_id']);
+			$man_no=$myborderAPI->ftpManifest($s,$index,$sftp,$loginResult);
+			if(!empty($man_no))
+			{
+				//update tranship
+				$transaction = Yii::app()->db->beginTransaction();
+				try{
+					$trans = $s->trans;
+					$endTrans = end($trans);
+					if($endTrans->status == 10) $endTrans->status = 19;
+					$endTrans->mdata['oid'] = $man_no;
+					$endTrans->save();
+
+					$mani = new Manifest;
+					$mani->type = 90;
+					$mani->fwd_id = Org::ORGID_COURIER_BORDER;
+					$mani->ref = $man_no;
+					$mani->save();
+
+					$mm = new ManiMap;
+					$mm->mani_id = $mani->id;
+					$mm->fid = $s->id;
+					$mm->model = 'ImParcel';
+					$mm->save();
+
+
+					$transaction->commit();
+				} catch (Exception $ex) {
+					$transaction->rollback();
+					throw $ex;
+				}
+
+			}else
+			{
+				$err[] = $s->ref." unknown manifest error";
+			}
+		}
+		
+		if(!empty($err))
+		{
+			Emailog::sendEmailTo(Emailog::NOTIFY_OP_EMAIL, join(',',$err), "My Border Manifest ERROR");
+		}
+			
+		return $err;
+	}
+
+	public function doHvlvJavaManifest($ssr)
+	{
+		$err = [];
+		$ssArr = [];
+		foreach ($ssr as $key1 => $s)
+		{
+			$trans = $s->trans;
+			$endTrans = end($trans);
+			if(!empty($endTrans->mdata['java_gen']))
+			{
+				$orgRate = OrgRate::model()->findByPk($s->mdata['org_rate_id']);
+				$type = HvlvJavaAPI::RATE_TYPE[$orgRate->mdata['ddpt_id']];
+				$courier = $orgRate->mdata['courier'];
+				$ssArr[$type."_".$courier][] = $s;
+			}
+		}
+
+		$err = [];
+		$mani = null;
+		foreach ($ssArr as $key => $ss) {
+			$type = explode("_",$key)[0];
+			$courier = explode("_",$key)[1];
+			$javaApi = new HvlvJavaAPI($type,$courier);
+			foreach ($ss as $i => $s) {
+				$result=$javaApi->manifestShipment($s);
+				if($result['code']!="60000")
+				{
+					$err[] = $s->ref." unknown manifest error:".join(',',$result['data']);
+				}else
+				{
+					$trans = $s->trans;
+					$endTrans = end($trans);
+					if($endTrans->status == 10) $endTrans->status = 19;
+					if(!empty($result['data']['jobNumber']))
+					{
+						$endTrans->mdata['oid'] = $result['data']['jobNumber'];
+					}else
+					{
+						$endTrans->mdata['oid'] = $courier."_java_manifest";
+					}
+					$endTrans->save();
+
+					if(empty($mani))
+					{
+						$mani = new Manifest;
+						$mani->type = 90;
+						$mani->fwd_id = Org::ORGID_COURIER_ALLIED_TOP;
+						$mani->ref = "YmdHis".$key;
+						$mani->save();
+					}
+				}
+			}
+
+		}
+		
+		if(!empty($err))
+		{
+			//Emailog::sendEmailTo(Emailog::NOTIFY_OP_EMAIL, join(',',$err), "My Allied Manifest ERROR");
+		}
+			
+		return $err;
+	}
+
+
+	public function doDfeManifest($ss)
+	{
+		return [];
+		$ssSyd = [];
+		$ssSydTop = [];
+		$ssMelTop = [];
+		$ssBneTop = [];
+		$err = [];
+		if (!empty($ss)) {
+			foreach ($ss as $key => $s) {
+				foreach ($s->trans as $key => $t) {
+					if(in_array($t->org_id,[Org::ORGID_COURIER_DFE,Org::ORGID_COURIER_DFE_TOP])&&$s->ref == '2475110006115')
+					{
+						$orgRate = OrgRate::model()->findByPk($s->mdata['org_rate_id']);
+						$code = $orgRate->code;
+						switch ($code) {
+							case ImportChargeCode::DFE_SYD_CODE:
+								$ssSyd[] = $s;
+								break;
+							case ImportChargeCode::DFE_TOP_SYD_CODE:
+							    $ssSydTop[] = $s;
+								break;
+							case ImportChargeCode::DFE_TOP_MEL_CODE:
+								$ssMelTop[] = $s;
+								break;
+							case ImportChargeCode::DFE_TOP_BNE_CODE:
+								$ssBneTop[] = $s;
+								break;
+							default:
+								$ssSydTOP[] = $s;
+								break;
+						}
+
+						break;
+					}
+					# code...
+				}
+			}
+			if(!empty($ssSyd))
+			{
+				$thisErr = $this->doDFEManifestSS($ssSyd);
+				$err = array_merge($err,$thisErr);
+			}
+			if(!empty($ssSydTop))
+			{
+				$thisErr = $this->doDFEManifestSS($ssSydTop);
+				$err = array_merge($err,$thisErr);
+			}
+			if(!empty($ssMelTop))
+			{
+				$thisErr = $this->doDFEManifestSS($ssMelTop);
+				$err = array_merge($err,$thisErr);
+			}
+			if(!empty($ssBneTop))
+			{
+				$thisErr = $this->doDFEManifestSS($ssBneTop);
+				$err = array_merge($err,$thisErr);
+			}
+		}
+		return $err;
+	}
+
+	public function doDFEManifestSS($ss)
+	{
+		return [];
+		$err = [];
+		$orgId = $ss[0]->trans[0]->org_id;
+			$orgRate = OrgRate::model()->findByPk($ss[0]->mdata['org_rate_id']);
+			$code = $orgRate->code;
+			switch ($code) {
+				case ImportChargeCode::DFE_SYD_CODE:
+					$dfe=new DFEAPI('syd');
+					break;
+				case ImportChargeCode::DFE_TOP_SYD_CODE:
+				    $dfe=new DFEAPI('syd_top');
+					break;
+				case ImportChargeCode::DFE_TOP_MEL_CODE:
+					$dfe=new DFEAPI('mel_top');
+					break;
+				case ImportChargeCode::DFE_TOP_BNE_CODE:
+					$dfe=new DFEAPI('bne_top');
+					break;
+				default:
+					$dfe=new DFEAPI('syd');
+					break;
+			}
+
+			$result=$dfe->manifest($ss);
+			if(!$result['status']) {
+				$err[]=$result['msg'];
+			}else
+			{
+				$transaction = Yii::app()->db->beginTransaction();
+				try {
+						$mani = new Manifest;
+						$mani->type = 90;
+						$mani->fwd_id = $orgId;
+						$mani->ref = $result['filename'];
+						$mani->save();
+						foreach ($ss as $shipment) 
+						{
+							$mm = new ManiMap;
+							$mm->mani_id = $mani->id;
+							$mm->fid = $shipment->id;
+							$mm->model = 'ImParcel';
+							$mm->status = 10;
+							$mm->mdata['mani_time'] = date('Y-m-d H:i:s');
+							$mm->save();
+							$trans = $shipment->trans;
+							$tranship = end($trans);
+							$tranship->mdata['oid'] = $orgId;
+							$tranship->status = 11;
+							$tranship->cost= number_format($dfe->getCost($shipment->mdata['org_rate_id'], $shipment->cnee->suburb, $shipment->cnee->postcode, $shipment->weight)->data, 2, '.', '');
+							$shipment->mdata['manifest_weight'] = ceil($shipment->weight);
+							$tranship->save();
+						}
+						$transaction->commit();
+				} catch (Exception $ex) {
+					$transaction->rollback();
+					Log::log2file("DFE".$cn->no."=>".$ex->getMessage(), "transaction_err_log", "transaction");
+					throw $ex;
+				}
+			}
+			return $err;
+	}
+
+	public function doEizManifest($ss)
+	{
+		$ssSyd = [];
+		$ssMel = [];
+		$ssBne = [];
+		$ssAlliedSyd = [];
+		$ssAlliedMel = [];
+		$ssAlliedBne = [];
+		$ssAlliedPer = [];
+		$ssAlliedAdl = [];
+		$err = [];
+		if (!empty($ss)) {
+			foreach ($ss as $key => $s) {
+				foreach ($s->trans as $key => $t) {
+					if(in_array($t->org_id,[Org::ORGID_COURIER_EIZ]))
+					{
+						$orgRate = OrgRate::model()->findByPk($s->mdata['org_rate_id']);
+						$code = $orgRate->code;
+						switch ($code) {
+							case ImportChargeCode::EIZ_TOLL_SYD_CODE:
+								$ssSyd[] = $s;
+								break;
+							case ImportChargeCode::EIZ_TOLL_MEL_CODE:
+								$ssMel[] = $s;
+								break;
+							case ImportChargeCode::EIZ_TOLL_BNE_CODE:
+								$ssBne[] = $s;
+								break;
+							case ImportChargeCode::EIZ_ALLIED_SYD_CODE:
+								$ssAlliedSyd[] = $s;
+								break;
+							case ImportChargeCode::EIZ_ALLIED_MEL_CODE:
+								$ssAlliedMel[] = $s;
+								break;
+							case ImportChargeCode::EIZ_ALLIED_BNE_CODE:
+								$ssAlliedBne[] = $s;
+								break;
+							case ImportChargeCode::EIZ_ALLIED_PER_CODE:
+								$ssAlliedPer[] = $s;
+								break;
+							case ImportChargeCode::EIZ_ALLIED_ADL_CODE:
+								$ssAlliedAdl[] = $s;
+								break;
+							default:
+								break;
+						}
+
+						break;
+					}
+					# code...
+				}
+			}
+			if(!empty($ssSyd))
+			{
+				$thisErr = $this->doEizManifestSS($ssSyd);
+				$err = array_merge($err,$thisErr);
+			}
+
+			if(!empty($ssMel))
+			{
+				$thisErr = $this->doEizManifestSS($ssMel);
+				$err = array_merge($err,$thisErr);
+			}
+
+			if(!empty($ssBne))
+			{
+				$thisErr = $this->doEizManifestSS($ssBne);
+				$err = array_merge($err,$thisErr);
+			}
+
+			if(!empty($ssAlliedSyd))
+			{
+				$thisErr = $this->doEizManifestSS($ssAlliedSyd);
+				$err = array_merge($err,$thisErr);
+			}
+
+			if(!empty($ssAlliedMel))
+			{
+				$thisErr = $this->doEizManifestSS($ssAlliedMel);
+				$err = array_merge($err,$thisErr);
+			}
+
+
+			if(!empty($ssAlliedBne))
+			{
+				$thisErr = $this->doEizManifestSS($ssAlliedBne);
+				$err = array_merge($err,$thisErr);
+			}
+
+
+			if(!empty($ssAlliedPer))
+			{
+				$thisErr = $this->doEizManifestSS($ssAlliedPer);
+				$err = array_merge($err,$thisErr);
+			}
+
+
+			if(!empty($ssAlliedAdl))
+			{
+				$thisErr = $this->doEizManifestSS($ssAlliedAdl);
+				$err = array_merge($err,$thisErr);
+			}
+		}
+		return $err;
+	}
+
+	public function doEizManifestSS($ss)
+	{
+		$err = [];
+		$orgId = $ss[0]->trans[0]->org_id;
+			$orgRate = OrgRate::model()->findByPk($ss[0]->mdata['org_rate_id']);
+			$code = $orgRate->code;
+			$allied=EizAPI::getAPIInstanceByCode($code);
+			$manifestId = [];
+			$mani = null;
+			foreach ($ss as $key => $s) {
+				$result=$allied->manifestShipment([$s]);
+				if(empty($result->data)||empty($result->data[0]->manifestId))
+				{
+					print_r($result);
+					$err[]=$result->message."Failed";
+				}else
+				{
+					if(empty($mani))
+					{
+						$mani = new Manifest;
+						$mani->type = 90;
+						$mani->fwd_id = $orgId;
+						$mani->ref = date('Y-m-d');
+						$mani->save();
+					}
+					$manifestId[] = $result->data[0]->manifestId;
+					$transaction = Yii::app()->db->beginTransaction();
+					try {
+							$mm = new ManiMap;
+							$mm->mani_id = $mani->id;
+							$mm->fid = $s->id;
+							$mm->model = 'ImParcel';
+							$mm->status = 10;
+							$mm->mdata['mani_time'] = date('Y-m-d H:i:s');
+							$mm->save();
+							$trans = $s->trans;
+							$tranship = end($trans);
+							$tranship->mdata['oid'] = $result->data[0]->manifestId;
+							$tranship->status = 11;
+							$tranship->cost= number_format($allied->getCost($s->mdata['org_rate_id'], $s->cnee->suburb, $s->cnee->postcode, $s->weight)->data, 2, '.', '');
+							$s->mdata['manifest_weight'] = ceil($s->weight);
+							$s->save();
+							$tranship->save();
+							$transaction->commit();
+					} catch (Exception $ex) {
+						$transaction->rollback();
+						Log::log2file("DFE".$cn->no."=>".$ex->getMessage(), "transaction_err_log", "transaction");
+						throw $ex;
+					}
+				}
+			}
+			if(!empty($mani))
+			{
+				$mani->mdata['manifestId'] =$manifestId; 
+				$mani->save();
+			}
+			
+			return $err;
+	}
+
+
+	public function doChukou1Manifest($ss)//
+	{
+		$chukou1 = new CK1API();
+		$err = [];
+		$orgId = $ss[0]->trans[0]->org_id;
+		$orgRate = OrgRate::model()->findByPk($ss[0]->mdata['org_rate_id']);
+		$result=$chukou1->manifest($ss);
+		if(!$result['status']) {
+			$err[]=$result['msg'];
+		}else
+		{
+			$transaction = Yii::app()->db->beginTransaction();
+			try {
+					$mani = new Manifest;
+					$mani->type = 90;
+					$mani->fwd_id = $orgId;
+					$mani->ref = $result['filename'];
+					$mani->save();
+					foreach ($ss as $shipment) 
+					{
+						$mm = new ManiMap;
+						$mm->mani_id = $mani->id;
+						$mm->fid = $shipment->id;
+						$mm->model = 'ImParcel';
+						$mm->status = 10;
+						$mm->mdata['mani_time'] = date('Y-m-d H:i:s');
+						$mm->save();
+						$trans = $shipment->trans;
+						$tranship = end($trans);
+						$tranship->mdata['oid'] = $orgId;
+						$tranship->status = 11;
+						$tranship->cost= number_format($chukou1->getCost($shipment->mdata['org_rate_id'], $shipment), 2, '.', '');
+						$shipment->mdata['manifest_weight'] = ceil($shipment->weight);
+						$tranship->save();
+					}
+					$transaction->commit();
+			} catch (Exception $ex) {
+				$transaction->rollback();
+				Log::log2file("DFE".$cn->no."=>".$ex->getMessage(), "transaction_err_log", "transaction");
+				throw $ex;
+			}
+		}
+		return $err;
+	}
+
+	public function doSFManifest($ss)//
+	{
+		$err = [];
+		if(!empty($ss))
+		{
+				$mani = new Manifest;
+				$mani->type = 90;
+				$mani->fwd_id = Org::ORGID_COURIER_SF;
+				$mani->ref = date('Y-m-d H:i:s');
+				$mani->save();
+				foreach ($ss as $shipment) 
+				{
+					$orgRate = OrgRate::model()->findByPk($shipment->mdata['org_rate_id']);
+					$sfAPI = new SFAPI(false,false,'',$orgRate,$orgRate->mdata['api_type']);
+					$result=$sfAPI->createOneShipment($shipment);
+					if($result['status']==true)
+					{
+						$mm = new ManiMap;
+						$mm->mani_id = $mani->id;
+						$mm->fid = $shipment->id;
+						$mm->model = 'ImParcel';
+						$mm->status = 10;
+						$mm->mdata['mani_time'] = date('Y-m-d H:i:s');
+						$mm->save();
+						$trans = $shipment->trans;
+						$tranship = end($trans);
+						$tranship->mdata['oid'] = Org::ORGID_COURIER_SF;
+						$tranship->status = 11;
+						$tranship->cost= number_format($sfAPI->getCost($shipment->mdata['org_rate_id'], $shipment), 2, '.', '');
+						$shipment->mdata['manifest_weight'] = ceil($shipment->weight);
+						$tranship->save();
+					}else
+					{
+						$err[] = $shipment->ref." manifest failed ".@$result['msg'];
+					}
+				}
+		}
+		return $err;
+	}
+
+
+
+
+
+	/**
+	 *  create special invoice based on AWB weight and Chargable weight
+	 * @param bool $debug
+	 * @param bool $weUpdate
+	 *  in case we try to update console invoice, we don't care about what ever invoice current status is
+	 * @return array
+	 */
+	public function genClearanceInvoice($imConsol,$debug = false, $weUpdate = false)
+	{
+		$errors = [];
+		$msg = [];
+		
+		// because multiple orgs in console
+		// we need to create invoice for each org
+		// following the below steps
+		// step 1
+		// split shipments by Org
+		$orgShipments = [];
+		foreach ($imConsol->shipments as $shipment) {
+			//if cancelled,not calculate the cost
+			if ($shipment->status==100) {
+				continue;
+			}
+			if (!isset($orgShipments[$shipment->agent_id])) {
+				$orgShipments[$shipment->agent_id] = [
+					'owner' => $shipment->agent,
+					'shipments' => []
+				];
+			}
+			$orgShipments[$shipment->agent_id]['shipments'][] = $shipment;
+		}
+
+		foreach ($orgShipments  as $id =>  $org) 
+		{
+			
+			$owner = $org['owner'];
+			// check to see if we should including GST (default 10%)
+			$includingGST = false;
+			if (isset($owner->extra['incl_gst']) && $owner->extra['incl_gst'] == 1) {
+				$includingGST = true;
+			}
+
+			// if existing or not checking
+			$inv = null;
+			$oldPaymentsList = [];
+			$oldInv=null;
+			if($owner->by >1){
+				$to_id = $owner->by;
+				$inv= Invoice::model()->with('lines')->find(['order'=>'t.id DESC','condition'=>'type = 103 AND to_id = :id AND lines.model = :m AND lines.fid = :fid AND t.status != 10 AND json_value(t.meta, "$.suborg") = :suborg','params'=>[':id' => $to_id, ':m' => 'ImcoConsol', ':fid' => $imConsol->id, ':suborg' => $owner->id]]);
+			}else{
+				$to_id = $owner->id;
+				$inv= Invoice::model()->with('lines')->find(['order'=>'t.id DESC','condition'=>'type = 103 AND to_id = :id AND lines.model = :m AND lines.fid = :fid AND t.status != 10 AND json_value(t.meta, "$.suborg") IS NULL','params'=>[':id' => $to_id, ':m' => 'ImcoConsol', ':fid' => $imConsol->id]]);
+			}
+			if (!empty($inv)) {
+				if ($inv->isInvoiceClosed()) {
+					// in case invoice frozen and create credit for it
+					$oldInv=$inv; //store inv  and created credit to it when we successfully 
+					$invRef = 'Original Invoice : ' . $inv->no;
+					$oldInvoiceNo = $inv->no;
+					$inv = new Invoice;
+					$inv->no =Invoice::genNewInvoiceNo($oldInvoiceNo); //$oldInvoiceNo . '-1';
+					$inv->ref = $invRef;
+					$inv->date = date('Y-m-d');
+					$inv->posted = $inv->date;
+					$inv->status = Invoice::INVOICE_STATUS_PENDING; // set as posted which means will send to client for paying
+				}
+			}
+			// if not existing or not pending(1) or posted(2) or overdue(3) we create a new one
+			$isUpdate = true;
+			if (empty($inv) || (!$weUpdate && $inv->status > 3)) {
+				$inv = new Invoice;
+				$isUpdate = false;
+				$inv->date = date('Y-m-d'); // for update we shouldn't change invoice data
+				$inv->status = Invoice::INVOICE_STATUS_PENDING; // set as pending which means will send to client for paying via email at night
+			}
+
+			$inv->type = Invoice::INVOICE_TYPE_WEIGHT_AQIS; // for import parcels
+			$inv->dpmt = Invoice::DPMT_IMPORT;
+			$inv->to_id = $to_id;
+			if($owner->by >1) $inv->mdata['suborg'] = $owner->id;
+			$inv->consol_id = $imConsol->id;
+			$inv->man_id = 0; // in case there is no manifest now
+			$inv->dpt_id = $imConsol->dpt_id;
+
+			// try to get org price rate
+			$orgRate = OrgRate::model()->find('org_id = :oid AND type = 40', [':oid' => $owner->id]);
+			if (empty($orgRate)) {
+				//  $errors[] = 'Owner: ' . $owner->id . ' price rate is not available yet';
+				$inv->currency = 1; // default as AUD
+			} else {
+				$inv->currency = $orgRate['currency'];
+			}
+
+			// calculate price based on awb weight
+			$items = [];
+			$tot = 0;
+
+			$rate = $imConsol->getChargeRate($owner);
+
+			// in case need to charge for Australia local delivery fee
+			if ($rate[3]) {
+				$shipments = $org['shipments'];
+				$result = $this->genClearanceInvoicePro($owner, $orgRate, $shipments);
+				if ($result[0] > 0) {
+					$tot = $result[0];
+					$items = $result[1];
+				}
+				foreach ($shipments as $theShipment) {
+					if (!empty($theShipment->tempErrors)) {
+						$errors[]=$theShipment->tempErrors;
+					}
+				}
+			}
+
+			if (!empty($errors)) {
+				return $errors;
+			}
+			
+			// if including GST we add GST
+			$gst = 0;
+			if ($includingGST) {
+				$gst = round($tot * 10 / 100, 2);
+				$tot += $gst;
+			}
+
+
+			$tot = round($tot, 2);
+			$inv->mdata['awb'] = $imConsol->awb;
+			$inv->mdata['name'] = $owner->name;
+			$inv->mdata['address'] = $owner->getAddress();
+			$inv->mdata['payterm'] = empty($owner->extra['payterm']) ? '2 days' : $owner->extra['payterm'] . ' days';
+			$inv->due = Invoice::calcDue($inv->date, $inv->mdata['payterm']);
+			$inv->total = $tot;
+			$inv->gst = $gst;
+
+			$new_items = $items;
+			$new_items_processed = [];
+			foreach ($new_items as $item) {
+				$new_items_processed[$item[0].$item[1]] = $item;
+			}
+
+			// old invoice items
+			$old_total = 0;
+			$old_items_processed = [];
+			// the first invoice
+			if($owner->by >1){
+				$old_invoices = Invoice::model()->with('lines')->findAll('type = 103 AND to_id = :id AND lines.model = :m AND lines.fid = :fid AND t.status IN '.(preg_match('/-/', $inv->no)? '(1,2,3,6,7,9,11)':'(2,3,6,7,9,11)').' AND json_value(t.meta, "$.suborg") = :suborg', [':id' => $to_id, ':m' => 'ImcoConsol', ':fid' => $imConsol->id, ':suborg' => $owner->id]);
+			}else{
+				$old_invoices = Invoice::model()->with('lines')->findAll('type = 103 AND to_id = :id AND lines.model = :m AND lines.fid = :fid AND t.status IN '.(preg_match('/-/', $inv->no)? '(1,2,3,6,7,9,11)':'(2,3,6,7,9,11)'), [':id' => $to_id, ':m' => 'ImcoConsol', ':fid' => $imConsol->id]);
+			}
+			foreach ($old_invoices as $invoice) {
+				$old_items = $invoice->lines[0]->mdata['items'];
+				if (empty($old_items)) continue;
+				foreach ($old_items as $item) {
+					if (empty($item[9])) $item[9] = $item[8];
+					if (empty($old_items_processed[$item[0].$item[1]])) {
+						$old_items_processed[$item[0].$item[1]] = $item;
+					} else {
+						$old_items_processed[$item[0].$item[1]][9] = $item[9];
+						$old_items_processed[$item[0].$item[1]][5] += $item[5];
+					}
+				}
+				$old_total += $invoice->total;
+			}
+
+
+			$diff = [];
+			foreach ($old_items_processed as $ref => $item) {
+				if (empty($new_items_processed[$ref])) {
+					$diff[] = [$item, []];
+				} else if (round($item[5], 2) != round($new_items_processed[$ref][5], 2)) {
+					$diff[] = [$item, $new_items_processed[$ref]];
+				}
+			}
+			foreach ($new_items_processed as $ref => $item) {
+				if (empty($old_items_processed[$ref])) {
+					$diff[] = [[], $item];
+				}
+			}
+
+			if (!empty($diff)) {
+				$new_items = [];
+				foreach ($diff as $item) {
+					if (empty($item[0])) {
+						$new_items[] = $item[1];
+					} else if (empty($item[1])) {
+						$item[0][5] = '-' . $item[0][5];
+						$new_items[] = $item[0];
+					}
+				}
+			}
+
+			if ($inv->total - $old_total >= 0.01) {
+				$inv->total = $inv->total - $old_total;
+				if ($includingGST) {
+					$inv->gst = round($inv->total / 11, 2);
+				}
+				$inv->save();
+				$il = InvLine::model()->find('inv_id = :id', [':id' => $inv->id]);
+				if(empty($il)){
+					$il = new InvLine;
+					$il->inv_id = $inv->id;
+				}
+				$il->amount = round($inv->total, 2);
+				$il->gst = $inv->gst;
+				$il->qty = 1;
+				if ($inv->gst > 0) {
+					$il->tax = 'OUTPUT';
+				}
+				$il->mdata['items'] = $new_items;
+				$il->model = 'ImcoConsol';
+				$il->fid = $imConsol->id;
+				$il->save();
+
+				$msg[] = 'Invoice created';
+			} else if ($inv->total == 0) {
+				$msg[] = 'Total Amount is 0';
+			} else {
+				$msg[] = 'Total Amount does not changed';
+			}
+		}
+
+
+		if (empty($errors)) $errors = [];
+		if (empty($msg)) $msg = [];
+		return array_unique(array_merge($errors, $msg));
+	}
+
+	/**
+	 * create invoice for org and shipments
+	 * @param $owner
+	 * @param $orgRate
+	 * @param $shipments
+	 * @return array
+	 */
+	public function genClearanceInvoicePro(&$owner, &$orgRate, &$shipments)
+	{
+		$items = [];
+		$tot = 0;
+
+		foreach ($shipments as $p) {
+			$ss = new OrgRate('search');
+			if (($p->bwf&ImParcel::EMPPCODE)>0) {
+				$cus_services = $ss->getCustomerServicePlans($p->agent_id);
+				if (isset($cus_services['services']->AU->empp_fee)) {
+					$emppFee = $cus_services['services']->AU->empp_fee;
+					$invEmpp = $emppFee;
+					$p->mdata['empp_charge_client']=$invEmpp;
+					$items[] = [$p->ref, 'EMPP Handling Fee',0, 0, 0, $invEmpp, 0, 0, 0, 0];
+					$tot += $invEmpp;
+				}
+			}
+
+			if ($p->isRealAQIS()) {
+				$cus_services = $ss->getCustomerServicePlans($p->agent_id);
+				if (isset($cus_services['services']->AU->aqis_fee)) {
+					$aqisFee = $cus_services['services']->AU->aqis_fee;
+					$invAqis = $aqisFee;
+					$p->mdata['aqis_charge_client']=$invAqis;
+					$items[] = [$p->ref, 'AQIS Handling Fee',0, 0, 0, $invAqis, 0, 0, 0, 0];
+					$tot += $invAqis;
+				}
+			}
+		}
+		$items = array_filter($items, function($v) {
+			return !empty($v);
+		});
+		return [$tot,$items];
+	}
+
+	/**
+	 * import a gatepass file for manifesting them to courier
+	 * @param $owner
+	 * @param $orgRate
+	 * @param $shipments
+	 * @return array
+	 */
+	public function importGatePassForManifest($gatepassFile)
+	{
+		$data = $this->getFileData($gatepassFile);
+		if(empty($data))
+		{
+			return $this->getResult(0,'empty file');
+		}
+		$data = $data[0];
+		unset($data[1]);
+		$sst = [];
+		$pces = [];
+
+		foreach ($data as $key => $d) {
+			$hbn = $d[1];
+			$s = ImParcel::model()->find("hbn = :hbn and status != 100",[":hbn"=>$hbn]);
+
+			if(empty($s))
+			{
+				$pces[] = $s->hbn.'not found';
+				continue;
+			}
+			$sst[] = $s;
+		}
+		$pces = $this->shipmentsForManifest($sst,$pces);
+		if(!empty($pces))
+		{
+			Emailog::sendEmailTo("imports@toplogistics.com.au", "Manifest Error ".join(",",$pces), "Manifest ERROR");
+		}
+		
+		$pces[] = 'done';
+		return $this->getResult(0,implode('|', $pces));
+	}
+
+	/**
+	 * import a gatepass file for manifesting them to courier
+	 * @param $owner
+	 * @param $orgRate
+	 * @param $shipments
+	 * @return array
+	 */
+	public function gatepassShipmentsForManifest($shipmentIds)
+	{
+		$sst = [];
+		$pces = [];
+
+		foreach ($shipmentIds as $key => $shipmentId) {
+			$s = ImParcel::model()->findByPk($shipmentId);
+			if(empty($s))
+			{
+				$pces[] = $s->hbn.'not found';
+				continue;
+			}
+
+			if(!empty($s->trans))
+			{
+				$trans = $s->trans;
+				$endTran = end($trans);
+				if(!empty($endTran->mdata['oid']))
+				{
+					if(($s->cbwf&32)>0)
+					{
+						$s->cbwf = $s->cbwf;
+						$s->cbwf = ($s->cbwf^32)|64;
+						$s->update(['cbwf']);
+					}
+				}
+			}
+
+			$sst[] = $s;
+		}
+		$pces = $this->shipmentsForManifest($sst,$pces);
+		$pces[] = 'done';
+		return $this->getResult(0,implode('|', $pces));
+	}
+
+	public function changeToClear($shipmentIds)
+	{
+		foreach ($shipmentIds as $key => $shipmentId) {
+			$s = ImParcel::model()->findByPk($shipmentId);
+			if($s->status=ImParcel::STATE_CLEAR_WAIT)
+			{
+				$s->status = ImParcel::STATE_CLEAR;
+				$s->update('status');
+			}
+		}
+	}
+
+	/**
+	 * import a gatepass file for manifesting them to courier
+	 * @param $owner
+	 * @param $orgRate
+	 * @param $shipments
+	 * @return array
+	 */
+	public function shipmentsForManifest($sst,$pces)
+	{
+		$pces = [];
+		if(!empty($sst))
+		{
+			$pces = $this->doAuspostManifest($sst,$pces);
+			$pces = $this->doFastwayManifest($sst,$pces);
+			$pces = $this->doTntManifest($sst,$pces);
+			//$pces[] = join(',',$this->doEizManifest($sst));
+			$pces[] = join(',',$this->doUbiAupostManifest($sst));
+			$pces[] = join(',',$this->doUbiTollManifest($sst));
+			$pces[] = join(',',$this->doMyTollManifest($sst));
+			$pces[] = join(',',$this->doMyBorderManifest($sst));
+			$pces[] = join(',',$this->gvAupostManifest($sst));
+			$pces[] = join(',',$this->doFLHunterManifest($sst));
+			$pces[] = join(',',$this->doHvlvJavaManifest($sst));
+			// $this->doDfeManifest($sst);
+		}
+		return $pces;
+	}
+
+	public function importFileForGP($cargoReceiptFile,$no)
+	{
+		//$image = $cargoReceiptFile['tmp_name'];
+		//$gatepass = GatePass::model()->with('lines')->find('ref = :ref',[":ref"=>$no]);
+		$gatepass = Manifest::model()->with('lines')->findByPk($no);
+		
+		$shipments = [];
+		$pces = [];
+		if(empty($gatepass))
+		{
+			$pces[] = 'GatePass Not Found!';
+			return $this->getResult(0,implode('|', $pces));
+		}
+		else{
+			foreach ($gatepass->lines as $key => $line)
+			{
+				$shipments[] = $line->shipment;
+			}
+			$f = $cargoReceiptFile;
+			$filename = $f['tmp_name'];
+			$name = $f['name'];
+			//if(!is_uploaded_file($filename)) return false;
+			//$hashArray = explode(CargoProcess::IP_SEPERATOR,$hash);
+			$filesize = filesize($filename);
+			$date = date('Y-m-d H:i:s');
+			$fileHash = hash_file('crc32b', $filename).hash('crc32b', $filesize);
+			$finfo = finfo_open(FILEINFO_MIME_TYPE);
+			$mime = finfo_file($finfo, $f['tmp_name']);
+		}
+
+		foreach ($shipments as $key => $shipmentModel)
+		{
+			$uploadType = 25;
+			$pphash = FileRepo::uploadHash($shipmentModel, $uploadType);
+			$fr = CargoProcess::updateUploadSingleFile($filesize,$date,$fileHash,$finfo,$mime,$filename,$name, $pphash,false,false,false,true);
+		}
+		$pces[] = 'done';
+		return $this->getResult(0,implode('|', $pces));
+	}
+
+	/**
+	 * import a gatepass file for manifesting them to courier
+	 * @param $owner
+	 * @param $orgRate
+	 * @param $shipments
+	 * @return array
+	 */
+	public function importCargoReceiptForGP($cargoReceiptFile,$no)
+	{
+		$image = $cargoReceiptFile['tmp_name'];
+		//$gatepass = GatePass::model()->with('lines')->find('ref = :ref',[":ref"=>$no]);
+		$gatepass = GatePass::model()->with('lines')->findByPk($no);
+		
+		$shipments = [];
+		$pces = [];
+		if(empty($gatepass))
+		{
+			$c= Consol::model()->find(' no =:no or awb = :no or json_value(meta,"$.container_no")=:no',[":no"=>$no]);
+			$shipments = $c->shipments;
+			$uploadType = FileRepo::CONSOL_CARGO_RECEIPT;
+			$pphash = FileRepo::uploadHash($c, $uploadType);
+			$image = new FileRepo();
+			$image->store($cargoReceiptFile,$pphash);
+		}else
+		{
+			foreach ($gatepass->lines as $key => $line)
+			{
+				$shipments[] = $line->shipment;
+			}
+			$uploadType = 25;
+			$pphash = FileRepo::uploadHash($gatepass, $uploadType);
+			$image = new FileRepo();
+			$image->store($cargoReceiptFile,$pphash);
+		}
+		/*upload pdfs to every shipment*/
+		foreach ($shipments as $key => $shipmentModel)
+		{
+			
+
+			if(preg_match('/33G78/i', $shipmentModel->ref)) continue;
+			if(($shipmentModel->status<ImParcel::STATE_CLEAR && $shipmentModel->status != ImParcel::STATE_LOCAL_ARRIVAL) || $shipmentModel->scanCount()==0) continue;
+			$filename = $shipmentModel->id."pod";
+			$pdfPath = "";
+			$pdfPath = oPDF::renderPDF('cargo_receipt_1', ['model' => $shipmentModel, 'image' => $image], 2, $filename . '.pdf');
+
+			$uploadType = 25;
+			$pphash = FileRepo::uploadHash($shipmentModel, $uploadType);
+			$filesize = filesize($pdfPath);
+			$date = date('Y-m-d H:i:s');
+			$filename = $filename.".pdf";
+			$name= "pod.pdf";
+			$fileHash = hash_file('crc32b', $pdfPath).hash('crc32b', $filesize);
+			$finfo = finfo_open(FILEINFO_MIME_TYPE);
+			$mime = finfo_file($finfo, $pdfPath);
+			$fr = CargoProcess::updateUploadSingleFile($filesize,$date,$fileHash,$finfo,$mime,$pdfPath,$name,$pphash,true);
+		}
+		$pces[] = 'done';
+		return $this->getResult(0,implode('|', $pces));
+	}
+
+	public function doAuspostManifest($sst,$pces)
+	{
+		$ss = [];
+		$ss_stone = [];
+		$ss_mel = [];
+		$ss_d2z = [];
+		$ss_ini = [];
+		$ss_per = [];
+		$ars = [];
+		$aes = [];
+		foreach ($sst as $key => $s) {
+				if (preg_match('/^(AMQ|33EVH|33EVJ|333UF|34AWE|LH|CH)/', $s->ref) && empty($s->trans)) { // make sure it is aupost parcel
+				$s->cnee->checkPostcode();
+				if (!preg_match('/[A-z]+/i', $s->cnee->name)) {
+					$pces[] = $s->hbn.': consignee name has not English characters';
+					continue;
+				}
+				if(strlen($s->cnee->suburb) > 40){
+					$pces[] = $s->hbn.' suburb too long!';
+					continue;
+				}
+				if(!empty($s->mdata['aupost_return'])){
+					if(empty($s->mdata['ap_sid'])) $ars[$s->hbn] = $s;
+					continue;
+				} elseif(!empty($s->mdata['aupost_exp'])) {
+					if (empty($s->mdata['ap_sid'])) $aes[$s->hbn] = $s;
+					continue;
+				}elseif (preg_match("/^AMQ\d{7}/", $s->ref)) {
+					$ss[] = $s;
+				} elseif (preg_match("/^333UF\d{7}/", $s->ref)) {
+					$ss_stone[]=$s;
+				} elseif (preg_match("/^33EVH\d{7}/", $s->ref)) {
+					$ss_mel[]=$s;
+				} elseif (preg_match("/^33EVJ\d{7}/", $s->ref)) {
+					$ss_bri[]=$s;
+				} elseif (preg_match("/^34AWE\d{7}/", $s->ref)) {
+					$ss_per[]=$s;
+				} elseif (preg_match("/^LH/", $s->ref)) {
+					$ss_ini[]=$s;
+				}elseif (preg_match("/^CH/", $s->ref)) {
+					$ss_ini[]=$s;
+				}
+			}
+		}
+
+		if (!empty($ss)) {
+			$apa = new AusPostAPI('syd');
+			$error = $this->funcDoAuspostManifest($ss, $apa,$pces);
+			if(!empty($error))
+			{
+				$pces[] = $error;
+			}
+		}
+		if (!empty($ss_stone)) {
+			$apa= new AusPostAPI('stone');
+			$error = $this->funcDoAuspostManifest($ss_stone, $apa,$pces);
+			if(!empty($error))
+			{
+				$pces[] = $error;
+			}
+		}
+		if (!empty($ss_mel)) {
+			$apa= new AusPostAPI('mel');
+			$error = $this->funcDoAuspostManifest($ss_mel, $apa,$pces);
+			if(!empty($error))
+			{
+				$pces[] = $error;
+			}
+		}
+		if (!empty($ss_bri)) {
+			$apa= new AusPostAPI('bne');
+			$error = $this->funcDoAuspostManifest($ss_bri, $apa,$pces);
+			if(!empty($error))
+			{
+				$pces[] = $error;
+			}
+		}
+		if (!empty($ss_per)) {
+			$apa= new AusPostAPI('per');
+			$error = $this->funcDoAuspostManifest($ss_per, $apa,$pces);
+			if(!empty($error))
+			{
+				$pces[] = $error;
+			}
+		}
+		if (!empty($ss_ini)) {
+			$error = $this->funcDoAuspostIntManifest($ss_ini,$pces);
+			if(!empty($error))
+			{
+				$pces[] = $error;
+			}
+		}
+
+		if (!empty($ars)) {
+			$arrayPrefix2ShipmentArray = $this->funcArrayPrefix2ShipmentArray($ars);
+			foreach($arrayPrefix2ShipmentArray as $Prefix => $ShipmentArray){
+				$this->doAupostReturnManifest($ShipmentArray,$Prefix);
+			}
+		}
+
+
+		if (!empty($aes)) {
+			// $this->doAupostExpressManifest($aes, $cn);
+			$arrayPrefix2ShipmentArray = $this->funcArrayPrefix2ShipmentArray($aes);
+			foreach($arrayPrefix2ShipmentArray as $Prefix => $ShipmentArray){
+				$this->doAupostExpressManifest($ShipmentArray,$Prefix);
+			}
+		}
+
+		return $pces;
+	}
+
+	public function funcArrayPrefix2ShipmentArray($arrayShipment){
+		$arrayPrefix2ShipmentArray = [];
+		foreach ($arrayShipment as $s) {
+			preg_match('/^(AMQ|333UF|33EVH|33EVJ|34AWE)\d{7}/', $s->ref, $m);
+			$arrayPrefix2ShipmentArray[$m[1]][] = $s;
+		}
+		return $arrayPrefix2ShipmentArray;
+	}
+
+	public function gvAupostManifest($sss)
+	{
+		//auspost lodgement
+		$ss = [];
+		$transaction=Yii::app()->db->beginTransaction();
+		$err = [];
+		$ars = [];
+		
+		try {
+			foreach ($sss as $s) {
+				if (preg_match('/^(34KHX|34KG6|34KHY|34KHW|34WMP)\d{7}/', $s->ref, $m) && ($s->cbwf&ImParcel::CBWF_DIRECT_CONSOL_BASE)==0) { // only for eParcel shipment and Not sent yet
+					// check if manifested
+					if (!empty($s->trans)) {
+						foreach ($s->trans as $tran) {
+							if ($tran->connote == $s->ref) continue 2;
+						}
+					}
+
+					if(!empty($s->mdata['aupost_return'])){
+						if(empty($s->mdata['ap_sid'])) $ars[$s->hbn] = $s;
+						continue;
+					} else if (!empty($s->mdata['aupost_exp'])) {
+						if (empty($s->mdata['ap_sid'])) $aes[$s->hbn] = $s;
+						continue;
+					}
+					// add a feature for logment eparcel before report custom port
+					$direct_eparcel=false; //set a flag
+					if (!empty($s->mdata['chargecode'])) {
+						$chargecodeInfo= ImportChargeCode::model()->find('chargecode=:chargecode AND status=1', [":chargecode"=>$s->mdata['chargecode']]);
+						if (!empty($chargecodeInfo)) {
+							if (!empty($chargecodeInfo->mdata['direct_courier'])) {
+								$direct_eparcel=true;
+								$s->mdata['direct_courier']=2;// direct log eparcel 2 means a flag when success we will change it to 1
+								$s->updateMeta();
+							}
+						}
+					}
+
+					$s->cnee->checkPostcode();
+					if(strlen($s->cnee->suburb) > 40){
+						$err[] = $s->hbn.' suburb too long!';
+					}else{
+						$ss[$m[1]][] = $s;
+					}
+				}
+			}
+			$transaction->commit();
+		} catch (Exception $ex) {
+			$transaction->rollback();
+			throw $ex;
+		}
+
+		if (!empty($err)) {
+			return $err;
+		}
+
+		$consoleIds=[];
+		$cn = new stdClass();
+		$cn->no="directManifest".date("YmdHis");
+		foreach($ss as $k => $ps){
+			$err=array_merge($err, $this->doGVAupostManifest($ps, $k, $consoleIds, $cn));
+		}
+		return $err;
+	}
+	/**
+	 *
+	 * @param $ss  Array of shipments
+	 * @param $apa  AupostApi Interface for each mild
+	 * @return $err Array
+	 */
+	public function doGVAupostManifest($sst, $mlid, &$consoleIds, $cn)
+	{
+		$acc = GvAusPostAPI::mlid2acc($mlid);
+		if(empty($acc)) return false;
+		$apa = new GvAusPostAPI($acc);
+		$err=[];
+		$shipment_created = in_array($mlid, ['33MBQ']);
+		$chargeCode =$apa->charge_code_pod;
+
+		if (!empty($sst)) {
+
+			$max_ppg = 1000;
+			$pgs = ceil(count($sst) / $max_ppg);
+			$consoleIds = [];
+			for($pg = 0; $pg < $pgs; $pg++){
+				$ss = array_slice($sst, $pg * $max_ppg, $max_ppg);
+				$r = $apa->createOrderIncludingShipments($ss, $cn->no.($pgs>1? '-'.$pg : ''), $chargeCode);
+				if($r===false) continue;
+				$transaction= Yii::app()->db->beginTransaction();
+				try {
+					if (!empty($r->order)) {
+						$oid = $r->order->order_id;
+						$mani = Manifest::model()->find('type = 90 and ref = :ref',[':ref'=>$oid]);
+						if(empty($mani))
+						{	
+							$mani = new Manifest();
+							$mani->fwd_id=Org::ORGID_COURIER_GV_AUPOST;
+							$mani->type = 90;
+							$mani->created = date('Y-m-d H:i:s');
+							$mani->ref = $oid;
+						}else
+						{
+							$mani->created = date('Y-m-d H:i:s');
+						}
+						$mani->save();
+
+						// because aupost returned shipment is not the same order with our sending order
+						// so here we need to order by HBN again
+						$auPostShipments = [];
+						foreach ($r->order->shipments as $aushipment) {
+							$auPostShipments[$shipment_created? $aushipment->shipment_id : $aushipment->shipment_reference] = $aushipment;
+						}
+
+						foreach ($ss as $i => $s) {
+							$maniMap = ManiMap::model()->find("mani_id = :mani_id and model = 'ImParcel' and fid = :fid",[":mani_id"=>$mani->id,":fid"=>$s->id]);
+							if(empty($maniMap))
+							{
+								$maniMap = new ManiMap();
+							}
+
+							$maniMap->mani_id = $mani->id;
+							$maniMap->model = 'ImParcel';
+							$maniMap->fid = $s->id;
+							$maniMap->status = 10;
+							$maniMap->mdata['mani_time'] = date('Y-m-d H:i:s');
+							$maniMap->save();
+
+
+							$ts = new Tranship;
+							$ts->pid = $s->id;
+							$ts->org_id = Org::ORGID_COURIER_GV_AUPOST;  // for Australia post office
+							$ts->man_id = $s->man_id;
+							$ts->type = 80;  // shipment transfer to a different delivery courier
+							$ts->status = 19; // in finally moving status
+							$ts->connote = $s->ref;
+							$ts->time = date('Y-m-d H:i:s');
+							$ts->mdata['oid'] = $oid;
+							if($shipment_created){
+								$aushipment = $auPostShipments[$s->mdata['ap_sid']];
+							}else{
+								$aushipment = $auPostShipments[$s->hbn];
+							}
+							$ts->mdata['sid'] = $aushipment->shipment_id;
+
+							$costValue = floatval($aushipment->shipment_summary->total_cost - $aushipment->shipment_summary->total_gst);
+							if(!empty($s->mdata['org_rate_id']))
+							{
+								$orgRate = OrgRate::model()->findByPk($s->mdata['org_rate_id']);
+								$cost = ImcoConsol::getCourierCostPrice($orgRate, $s->cnee->postcode, $s->weight, $s->pkg, true, $s->cnee->suburb);
+								$cost = $cost==99999?0:$cost;
+								$ts->cost = round($cost, 2);
+							}else
+							{
+								$ts->cost = round($costValue, 2);
+							}
+
+							$ts->save();
+							if (!empty($s->mdata['direct_courier'])&&$s->mdata['direct_courier']==2) {
+								$s->cbwf=($s->cbwf^32)&$s->cbwf;
+								$s->cbwf=$s->cbwf|64;
+								$s->mdata['direct_courier']=1;
+								$s->updateMeta();
+								$s->update(['cbwf']);
+							}
+							// save all related console's id so that we can update their delivery cost
+							if ($s->consol_id  > 0) {
+								array_push($consoleIds, $s->consol_id);
+							}
+						}
+					} else {
+						foreach ($apa->err as $e) {
+							$msg = $e->message;
+							if (!empty($e->field) && preg_match('/shipments\[(\d+)\]/', $e->field, $m)) {
+								$msg .= ': '.$ss[$m[1]]->hbn;
+							}
+							$err[] = $msg;
+						}
+					}
+					$transaction->commit();
+				} catch (Exception $ex) {
+					$transaction->rollback();
+					Log::log2file("Aupost Manifest".$cn->no."=>".$ex->getMessage(), "transaction_err_log", "transaction");
+					throw $ex;
+				}
+			}
+		}
+		return  $err;
+	}
+
+	public function funcDoAuspostIntManifest($sst,$pces)
+	{
+		$ss = [];
+		$err=[];
+		foreach($sst as $s){
+			if(!empty($s->mdata['ap_sid']) && $s->cnee->country != 'AU' && (empty($s->trans) || empty($s->trans[0]->mdata['oid']))){
+				$ss[$s->mdata['ap_sid']] = $s;
+			}
+		}
+
+		if(!empty($ss)){
+			$apa = new AusPostAPI('syd', true, false);
+			$r = $apa->createOrderFromShipments($ss,date('YmdHis').'ini');
+			if (!empty($r->order)) {
+				$transaction= Yii::app()->db->beginTransaction();
+				try {
+					$oid = $r->order->order_id;
+					$mani = Manifest::model()->find('type = 90 and ref = :ref',[':ref'=>$oid]);
+					if(empty($mani)){
+						$mani = new Manifest();
+						$mani->fwd_id=101;
+						$mani->type = 90;
+						$mani->created = date('Y-m-d H:i:s');
+						$mani->ref = $oid;
+					}else
+					{
+						$mani->created = date('Y-m-d H:i:s');
+					}
+					$mani->save();
+
+					$auPostShipments = [];
+					foreach ($r->order->shipments as $aushipment) {
+						$auPostShipments[$aushipment->shipment_id] = $aushipment;
+					}
+
+					foreach ($ss as $i => $s) {
+						$maniMap = ManiMap::model()->find("mani_id = :mani_id and model = 'ImParcel' and fid = :fid",[":mani_id"=>$mani->id,":fid"=>$s->id]);
+						if(empty($maniMap))
+						{
+							$maniMap = new ManiMap();
+						}
+
+						$maniMap->mani_id = $mani->id;
+						$maniMap->model = 'ImParcel';
+						$maniMap->fid = $s->id;
+						$maniMap->status = 10;
+						$maniMap->mdata['mani_time'] = date('Y-m-d H:i:s');
+						$maniMap->save();
+
+						$ts = new Tranship;
+						$ts->pid = $s->id;
+						$ts->org_id = 101;  // for Australia post office
+						$ts->man_id = $s->man_id;
+						$ts->type = 80;  // shipment transfer to a different delivery courier
+						$ts->status = 19; // in finally moving status
+						$ts->connote = $s->ref;
+						$ts->time = date('Y-m-d H:i:s');
+						$ts->mdata['oid'] = $oid;
+						$aushipment = $auPostShipments[$s->mdata['ap_sid']];
+						$ts->mdata['sid'] = $aushipment->shipment_id;
+						$costValue = floatval($aushipment->shipment_summary->total_cost - $aushipment->shipment_summary->total_gst);
+						$ts->cost = round($costValue, 2);
+						$ts->save();
+
+						$s->mdata['manifest_weight'] = $s->weight;
+						$s->update('meta');
+					}
+					
+					$transaction->commit();
+				} catch (Exception $ex) {
+					$transaction->rollback();
+					Log::log2file("Aupost Manifest".$cn->no."=>".$ex->getMessage(), "transaction_err_log", "transaction");
+					throw $ex;
+				}
+			} else {
+				foreach ($apa->err as $e) {
+					$msg = $e->message;
+					if (!empty($e->field) && preg_match('/shipments\[(\d+)\]/', $e->field, $m)) {
+						$msg .= ': '.$ss[$m[1]]->hbn;
+					}
+					$pces[] = $msg;
+				}
+				Emailog::sendEmailTo(Emailog::NOTIFY_OP_EMAIL, json_encode($apa->err), "Direct Manifest Error");
+				return $pces;
+			}
+		}
+		return  $pces;
+	}
+
+	public function doAupostReturnManifest($sst, $strPrefix)
+	{
+		$acc = AusPostAPI::mlid2acc($strPrefix);
+		if(empty($acc)) return false;
+		$apa = new AusPostAPI($acc);
+		// $apa = new AusPostAPI('syd');
+		$max_ppg = 1000;
+		$pgs = ceil(count($sst) / $max_ppg);
+		for($pg = 0; $pg < $pgs; $pg++){
+			$ss = array_slice($sst, $pg * $max_ppg, $max_ppg);
+			$transaction = Yii::app()->db->beginTransaction();
+			try {
+				$r = $apa->createOrderIncludingShipments($ss, date('YmdHis') . '-return' . ($pgs > 1 ? '-' . $pg : ''), 'PR');
+				if (!empty($r->order)) {
+					$oid = $r->order->order_id;
+					$mani = Manifest::model()->find('type = 90 and ref = :ref',[':ref'=>$oid]);
+					if(empty($mani))
+					{	
+						$mani = new Manifest();
+						$mani->fwd_id=101;
+						$mani->type = 90;
+						$mani->created = date('Y-m-d H:i:s');
+						$mani->ref = $oid;
+					}else
+					{
+						$mani->created = date('Y-m-d H:i:s');
+					}
+					$mani->save();
+
+					// because aupost returned shipment is not the same order with our sending order
+					// so here we need to order by HBN again
+					$auPostShipments = [];
+					foreach ($r->order->shipments as $aushipment) {
+						$auPostShipments[$shipment_created? $aushipment->shipment_id : $aushipment->shipment_reference] = $aushipment;
+					}
+
+					foreach ($ss as $i => $s) {
+						$maniMap = ManiMap::model()->find("mani_id = :mani_id and model = 'ImParcel' and fid = :fid",[":mani_id"=>$mani->id,":fid"=>$s->id]);
+						if(empty($maniMap))
+						{
+							$maniMap = new ManiMap();
+						}
+
+						$maniMap->mani_id = $mani->id;
+						$maniMap->model = 'ImParcel';
+						$maniMap->fid = $s->id;
+						$maniMap->status = 10;
+						$maniMap->mdata['mani_time'] = date('Y-m-d H:i:s');
+						$maniMap->save();
+
+
+						$ts = new Tranship;
+						$ts->pid = $s->id;
+						$ts->org_id = 101;  // for Australia post office
+						$ts->man_id = $s->man_id;
+						$ts->type = 80;  // shipment transfer to a different delivery courier
+						$ts->status = 19; // in finally moving status
+						$ts->connote = $s->ref;
+						$ts->time = date('Y-m-d H:i:s');
+						$ts->mdata['oid'] = $oid;
+						if($shipment_created){
+							$aushipment = $auPostShipments[$s->mdata['ap_sid']];
+						}else{
+							$aushipment = $auPostShipments[$s->hbn];
+						}
+						$ts->mdata['sid'] = $aushipment->shipment_id;
+
+						$costValue = floatval($aushipment->shipment_summary->total_cost - $aushipment->shipment_summary->total_gst);
+						$ts->cost = round($costValue, 2);
+						$ts->save();
+						if (!empty($s->mdata['direct_courier'])&&$s->mdata['direct_courier']==2) {
+							$s->cbwf=($s->cbwf^32)&$s->cbwf;
+							$s->cbwf=$s->cbwf|64;
+							$s->mdata['direct_courier']=1;
+							$s->updateMeta();
+							$s->update(['cbwf']);
+						}
+						// save all related console's id so that we can update their delivery cost
+						// if ($s->consol_id  > 0) {
+						// 	array_push($consoleIds, $s->consol_id);
+						// }
+					}
+				} else {
+					foreach ($apa->err as $e) {
+						$msg = $e->message;
+						if (!empty($e->field) && preg_match('/shipments\[(\d+)\]/', $e->field, $m)) {
+							$msg .= ': '.$ss[$m[1]]->hbn;
+						}
+						$err[] = $msg;
+					}
+				}
+				$transaction->commit();
+			} catch (Exception $ex) {
+				$transaction->rollback();
+				Log::log2file("Aupost Return Manifest".date('YmdHis')."=>".$ex->getMessage(), "transaction_err_log", "transaction");
+				throw $ex;
+			}
+		}
+	}
+
+	public function funcDoAuspostManifest($sst, $apa, $pces=[])
+	{
+		if (!empty($sst)) {
+			$errors = '';
+			$max_ppg = 1000;
+			$pgs = ceil(count($sst) / $max_ppg);
+
+			for($pg = 0; $pg < $pgs; $pg++){
+				$ss = array_slice($sst, $pg * $max_ppg, $max_ppg);
+				$r = $apa->createOrderIncludingShipments($ss, date('YmdHis').($pgs>1? '-'.$pg : ''), AusPostAPI::CHARGE_CODE_POD);
+				if (!empty($r->order)) {
+					$oid =$r->order->order_id;
+					$mani = Manifest::model()->find('type = 90 and ref = :ref',[':ref'=>$oid]);
+					if(empty($mani))
+					{	
+						$mani = new Manifest();
+						$mani->fwd_id = 101;
+						$mani->type = 90;
+						$mani->created = date('Y-m-d H:i:s');
+						$mani->ref = $oid;
+					}else
+					{
+						$mani->created = date('Y-m-d H:i:s');
+					}
+					$mani->save();
+
+					$auPostShipments = [];
+					foreach ($r->order->shipments as $aushipment) {
+						$auPostShipments[$aushipment->shipment_reference] = $aushipment;
+					}
+					$transaction=Yii::app()->db->beginTransaction();
+					try {
+						foreach ($ss as $i => $s) {
+							$maniMap = ManiMap::model()->find("mani_id = :mani_id and model = 'ImParcel' and fid = :fid",[":mani_id"=>$mani->id,":fid"=>$s->id]);
+							if(empty($maniMap))
+							{
+								$maniMap = new ManiMap();
+							}
+
+							$maniMap->mani_id = $mani->id;
+							$maniMap->model = 'ImParcel';
+							$maniMap->fid = $s->id;
+							$maniMap->status = 10;
+							$maniMap->mdata['mani_time'] = date('Y-m-d H:i:s');
+							$maniMap->save();
+							
+							$ts = new Tranship;
+							$ts->pid = $s->id;
+							$ts->org_id = 101;
+							$ts->type = 80;
+							$ts->status = 19;
+							$ts->connote = $s->ref;
+							$ts->time = date('Y-m-d H:i:s');
+							$ts->mdata['oid'] = $oid;
+							$aushipment = $auPostShipments[$s->hbn];
+							$ts->mdata['sid'] = $aushipment->shipment_id;
+							$costValue = floatval($aushipment->shipment_summary->total_cost - $aushipment->shipment_summary->total_gst);
+							if(!empty($s->mdata['org_rate_id']))
+							{
+								$orgRate = OrgRate::model()->findByPk($s->mdata['org_rate_id']);
+								$cost = ImcoConsol::getCourierCostPrice($orgRate, $s->cnee->postcode, $s->weight, $s->pkg, true, $s->cnee->suburb);
+								$cost = $cost==99999?0:$cost;
+								if(!empty($cost))
+								{
+									$costValue = $cost;
+								}
+							}
+
+							$ts->cost = round($costValue, 2);
+							$ts->save();
+						}
+						$transaction->commit();
+					} catch (Exception $ex) {
+						$transaction->rollback();
+						throw $ex;
+					}
+				}
+				if (!empty($pces) || empty($r->order)) {
+					//make a log for err
+					if(is_array($apa->err)){
+						foreach ($apa->err as $i=>$err) {
+							if (!empty($err->field) && preg_match('/shipments\[(\d+)\]/', $err->field, $m) && !empty($ss[$m[1]])) {
+								$apa->err[$i]->hbn = $ss[$m[1]]->hbn;
+							}
+						}
+					}
+					Emailog::sendEmailTo(Emailog::NOTIFY_OP_EMAIL, (empty($pces)? '' : implode("<br /\n", $pces)).json_encode($apa->err), "Direct Manifest Error");
+					return json_encode($apa->err);
+				}
+			}
+		}
+		return "";
+
+	}
+
+	public function doAupostExpressManifest($sst,$strPrefix, $cn=null)
+	{
+		$acc = AusPostAPI::mlid2acc($strPrefix);
+		if(empty($acc)) return false;
+		$apa = new AusPostAPI($acc);
+		// $apa = new AusPostAPI('syd');
+		$max_ppg = 1000;
+		$pgs = ceil(count($sst) / $max_ppg);
+		for($pg = 0; $pg < $pgs; $pg++){
+			$ss = array_slice($sst, $pg * $max_ppg, $max_ppg);
+			$transaction = Yii::app()->db->beginTransaction();
+			try {
+				$r = $apa->createOrderIncludingShipments($ss, date('YmdHis'). '-express' . ($pgs > 1 ? '-' . $pg : ''), AusPostAPI::CHARGE_CODE_EXPRESS);
+				if (!empty($r->order)) {
+					$oid = $r->order->order_id;
+					$mani = Manifest::model()->find('type = 90 and ref = :ref',[':ref'=>$oid]);
+					if(empty($mani))
+					{	
+						$mani = new Manifest();
+						$mani->fwd_id=101;
+						$mani->type = 90;
+						$mani->created = date('Y-m-d H:i:s');
+						$mani->ref = $oid;
+					}else
+					{
+						$mani->created = date('Y-m-d H:i:s');
+					}
+					$mani->save();
+
+					// because aupost returned shipment is not the same order with our sending order
+					// so here we need to order by HBN again
+					$auPostShipments = [];
+					foreach ($r->order->shipments as $aushipment) {
+						$auPostShipments[$shipment_created? $aushipment->shipment_id : $aushipment->shipment_reference] = $aushipment;
+					}
+
+					foreach ($ss as $i => $s) {
+						$maniMap = ManiMap::model()->find("mani_id = :mani_id and model = 'ImParcel' and fid = :fid",[":mani_id"=>$mani->id,":fid"=>$s->id]);
+						if(empty($maniMap))
+						{
+							$maniMap = new ManiMap();
+						}
+
+						$maniMap->mani_id = $mani->id;
+						$maniMap->model = 'ImParcel';
+						$maniMap->fid = $s->id;
+						$maniMap->status = 10;
+						$maniMap->mdata['mani_time'] = date('Y-m-d H:i:s');
+						$maniMap->save();
+
+
+						$ts = new Tranship;
+						$ts->pid = $s->id;
+						$ts->org_id = 101;  // for Australia post office
+						$ts->man_id = $s->man_id;
+						$ts->type = 80;  // shipment transfer to a different delivery courier
+						$ts->status = 19; // in finally moving status
+						$ts->connote = $s->ref;
+						$ts->time = date('Y-m-d H:i:s');
+						$ts->mdata['oid'] = $oid;
+						if($shipment_created){
+							$aushipment = $auPostShipments[$s->mdata['ap_sid']];
+						}else{
+							$aushipment = $auPostShipments[$s->hbn];
+						}
+						$ts->mdata['sid'] = $aushipment->shipment_id;
+
+						$costValue = floatval($aushipment->shipment_summary->total_cost - $aushipment->shipment_summary->total_gst);
+						$ts->cost = round($costValue, 2);
+						$ts->save();
+						if (!empty($s->mdata['direct_courier'])&&$s->mdata['direct_courier']==2) {
+							$s->cbwf=($s->cbwf^32)&$s->cbwf;
+							$s->cbwf=$s->cbwf|64;
+							$s->mdata['direct_courier']=1;
+							$s->updateMeta();
+							$s->update(['cbwf']);
+						}
+						// save all related console's id so that we can update their delivery cost
+						// if ($s->consol_id  > 0) {
+						// 	array_push($consoleIds, $s->consol_id);
+						// }
+					}
+				} else {
+					foreach ($apa->err as $e) {
+						$msg = $e->message;
+						if (!empty($e->field) && preg_match('/shipments\[(\d+)\]/', $e->field, $m)) {
+							$msg .= ': '.$ss[$m[1]]->hbn;
+						}
+						$err[] = $msg;
+					}
+				}
+				$transaction->commit();
+			} catch (Exception $ex) {
+				$transaction->rollback();
+				Log::log2file("Aupost Return Manifest".date('YmdHis')."=>".$ex->getMessage(), "transaction_err_log", "transaction");
+				throw $ex;
+			}
+		}
+	}
+
+	public function doTntManifest($sst,$pces)
+	{//TNT manifest remove strict
+		$ss=['syd' => [], 'mel' => [], 'bne' => [],'syd_top'=>[],'mel_top'=>[],'per_top'=>[]];//manifest shipments;
+		foreach ($sst as $s) {
+			if (preg_match("/^(LMA|TLS|TBC|LPC)\d{9}$/i", $s->ref)&&empty($s->trans)&&($s->cbwf&ImParcel::CBWF_DIRECT_CONSOL_BASE)==0) {
+				if(preg_match("/TLS\d{9}/i", $s->ref)){
+					$ss['syd_top'][] = $s;
+				}else if(preg_match("/LMA\d{9}/i", $s->ref)){
+					$ss['mel_top'][] = $s;
+				}else if(preg_match("/TBC\d{9}/i", $s->ref)){
+					$ss['bne_top'][] = $s;
+				}else if(preg_match("/LPC\d{9}/i", $s->ref)){
+					$ss['per_top'][] = $s;
+				}
+			}
+		}
+
+		foreach($ss as $o => $oss){
+			if(empty($oss)) continue;
+			$tnt= TntAPI::getTntInterface($o);
+			if ($tnt->preEt12File($oss)) {
+			} else {
+				$pces[] = $o." TNT manifest Failed";
+			}
+		}
+		Emailog::sendEmailTo(Emailog::NOTIFY_OP_EMAIL, join(',',$pces), " TNT Manifest ERROR");
+		return $pces;
+	}
+
+	public function doFastwayManifest($sst,$pces){
+		$fw = new FastwayAPI(true);
+		//lodge manifest
+		$ms = [];
+		foreach($sst as $s){
+			if(empty($s->trans[0]->mdata['oid'])&& $s->trans[0]->org_id == Org::ORGID_COURIER_FASTWAY){
+				$ms[] = $s;
+			}
+		}
+		if(!empty($ms))
+		{
+			if(!$fw->ftpManifest($ms))
+			{
+				Emailog::sendEmailTo(Emailog::NOTIFY_OP_EMAIL, $ms[0]->ref, " Fastway Manifest ERROR");
+			}
+
+			$transaction=Yii::app()->db->beginTransaction();
+			try { //push events
+				foreach($sst as $s){
+					$result = $fw->addTracking($s->ref, 'PP2', time() - rand(1800, 3600));
+					$result = $fw->addTracking($s->ref, 'PP5', time());
+				}
+				$transaction->commit();
+			} catch (Exception $ex) {
+				$transaction->rollback();
+				throw $ex;
+			}
+		}
+		return $pces;
+	}
+
+	public  function getBagScanData($imConsol)
+	{
+		$bagNumbers=$bagScanned=$bagUnscan = 0;
+		$checkData = [];
+		foreach ($imConsol->shipments as $key => $p) {
+			if(!empty($p->bag_tag)&&!isset($checkData[$p->bag_tag->bag_tag]))
+			{
+				$bagNumbers++;
+				$checkData[$p->bag_tag->bag_tag] = 0;
+			}
+			if(!empty($p->bag_tag)&&empty($checkData[$p->bag_tag->bag_tag]))
+			{
+				$shipmentScans = ShipmentScan::model()->count('pid = :pid and type = 5',[":pid"=>$p->bag_tag->import_bag_id]);
+				if($shipmentScans>0||$p->scanCount()>0)
+				{
+					$checkData[$p->bag_tag->bag_tag] = 1;
+				}else
+				{
+					$checkData[$p->bag_tag->bag_tag] = 0;
+				}
+			}
+		}
+		$bagScanned = array_sum($checkData);
+		$bagUnscan = $bagNumbers-$bagScanned;
+		return [$bagNumbers,$bagScanned,$bagUnscan];
+	}
+
+	public function getConsolBagTagsPrint($id,$tempDirectory = '',$isOnlyBagTag = false,$isOnlyData=false,$isCheckClient = true){
+		$consol = ImcoConsol::model()->findByPk($id);
+		if($isOnlyBagTag&&$consol->shipments[0]->agent_id!=Org::ORGID_COURIER_UBI_CLIENT&&$isCheckClient)// only for UBI client now
+		{
+			return "";
+		}
+
+		$shipments = [];
+		$org = [];
+		$result = [];
+		$sum = [];
+		$bagTagRow = [];
+		foreach ($consol->shipments as $key => $p) {
+			$importBagTag = ImportBagTag::model()->find('shipment_id = :shipment_id',[":shipment_id"=>$p->id]);
+			if(empty($importBagTag))
+			{
+				continue;
+			}
+			$scanBags = ShipmentScan::model()->count('pid = :pid and type = 5',[":pid"=>$p->bag_tag->import_bag_id]);
+			$isScan = 0;
+			// $result[] = [$importBagTag->bag_tag,$p->ref];
+			if($scanBags>0)
+			{
+				$isScan =1;
+			}
+
+			if($p->scanCount()>0)
+			{
+				$isScan =1;
+			}
+			
+			if(isset($sum[$importBagTag->bag_tag]))
+			{
+				$sum[$importBagTag->bag_tag][1] += $p->pkg;
+				if($isScan>0)
+				{
+					$sum[$importBagTag->bag_tag][2] = $isScan;
+				}
+			}else
+			{
+				$sum[$importBagTag->bag_tag] = [$importBagTag->bag_tag,$p->pkg,$isScan];
+			}
+			if(!$isOnlyBagTag)
+			{
+				$bagTagRow[] = [$p->hbn,$p->ref,$p->getStatus(),$p->pkg,$p->weight,$importBagTag->bag_tag,$p->can,join('|',$p->getWarnings(false))];
+			}
+		}
+
+		if($isOnlyData)
+		{
+			$provide = [];
+			foreach ($sum as $key => $s) {
+				$provide[] =["id"=>$key,"bag_tag"=>$s[0],"total_packages"=>$s[1],"scan_status"=>$s[2]];
+			}
+			return $provide;
+		}
+
+		if(empty($sum)&&$isOnlyBagTag)//only for sending outturn
+		{
+			return "";
+		}
+
+		$xls = new oExcel;
+		$i = 1;
+		$xls->addRow($i++, ['Bag Tag', 'Packages Number','Scan']);
+		foreach ($sum as $key => $row) {
+			$xls->addRow($i++, $row);
+		}
+
+		$xls->addRow($i++, []);
+
+		if(!$isOnlyBagTag)
+		{
+			$xls->addRow($i++, ['Connote', 'Shipment Number','Status','pcs','weight','Bag Tag','memo','Extra Info']);
+
+			foreach ($bagTagRow as $key => $row) {
+				$xls->addRow($i++, $row);
+			}
+		}
+		$fileName="";
+		if(!empty($tempDirectory))
+		{
+			$fileName=$tempDirectory.DIRECTORY_SEPARATOR.$consol->no.'_bag_tag.xlsx';
+			$xls->output($fileName, null, false);
+			return $fileName;
+		}else
+		{
+			$fileName = $consol->no.'_bag_tag.xlsx';
+			$xls->output($fileName);
+			return "";
+		}
+	}
+
+
+	public function sendB2BBookingNotice($consolId){
+		$consolModel = Consol::model()->findByPk($consolId);
+		$shipmentModels = $consolModel->shipments;
+		$arrCustomerList = [];
+		foreach($shipmentModels as $shipmentModel){
+			if($shipmentModel->isB2bShipment()&&$shipmentModel->status!=100&&$shipmentModel->agent_id!=2619){
+				$arrCustomerList[$shipmentModel->agent_id] = $shipmentModel->agent_id;
+			}
+		}
+		if(!empty($arrCustomerList)){
+			foreach($arrCustomerList as $customerId){
+				self::noticeClientBooking($customerId);
+			}
+		}
+	}
+
+	public function noticeClientBooking($orgId)
+	{
+			//$email = 'nero@toplogistics.com.au';
+			$org = Org::model()->findByPk($orgId);
+			if (!empty($org->extra['outturn_email'])) {
+				$email = trim($org->extra['outturn_email']);
+			}
+			$emailLog = new Emailog();
+			$emailLog->to_id = $orgId;
+			$emailLog->type= Emailog::B2B_BOOKING_NOTICE;
+			$emailLog->dt = date('Y-m-d H:i:s');
+			$emailLog->status = 10;
+			$emailLog->prepTemplate();
+			$emailLog->tpl->assignSubject('SHIPMENT_NO', "temp");
+			$emailLog->tpl->assignThese([
+				'BOOKING_TIME' => $this->mdata['delivery_booking_time'],
+			]);
+			$emailLog->subject = $emailLog->tpl->subject;
+			$emailLog->body = $emailLog->tpl->getContent();
+			$emailLog->mdata['to']=$email;
+			$emailLog->mdata['fromName']=Org::IM_COMPANY_NAME;
+			$emailLog->mdata['from']=Org::IM_EMAIL;
+			$emailLog->mdata['cc']=Org::IM_EMAIL;
+			$emailLog->sendEmail();
+	}
+
+	public function doAUKTollManifest($ss = "111")
+	{
+		$err = [];
+		if($ss=="111")
+		{
+			$trs = Tranship::model()->with(['imparcel','imparcel.consol'])->findAll('t.org_id = :orgId and (json_value(t.meta,"$.oid") is not null and json_value(t.meta,"$.oid") !="") ',[":orgId"=>Org::ORGID_COURIER_AUK]);
+
+			$ss = [];
+			foreach ($trs as $key => $tr)
+			{
+				if(!empty($tr->imparcel->consol))
+				{
+					if(empty($tr->mdata['non_manifest'])) 
+					{ 
+						$s = $tr->imparcel;
+					   	if((in_array($s->status, ImParcel::$allow_manifest_states)&&$s->getOutPkg() > 0)|| $cn->owner_id == Org::ORGID_CLIENT_TLA)
+						{
+							$ss[] = $s;
+						}
+				  	}
+				}
+
+			}
+		}
+
+		if(empty($ss))
+		{
+			return false;
+		}
+
+		if(!AukAPI::manifest($ss))
+		{
+			$refs = array_column($ss, 'ref');
+			Emailog::sendEmailTo(Emailog::NOTIFY_OP_EMAIL, "AUK ".join(',',$refs), "AUK COURIER Manifest ERROR");
+			return false;
+		}
+
+		$oid = Org::ORGID_COURIER_AUK;
+		$mani = Manifest::model()->find('type = 90 and ref = :ref',[':ref'=>$oid]);
+		if(empty($mani))
+		{	
+			$mani = new Manifest();
+			$mani->fwd_id = $oid;
+			$mani->type = 90;
+			$mani->created = date('Y-m-d H:i:s');
+			$mani->ref = $oid;
+		}else
+		{
+			$mani->created = date('Y-m-d H:i:s');
+		}
+		$mani->save();
+
+		$transaction=Yii::app()->db->beginTransaction();
+		try 
+		{
+			foreach($ss as $key => $s)
+			{
+				$aukAPI = AukAPI::getAPIInstance($s->mdata['org_rate_id']);
+				$trans = $s->trans;
+				$tranship = end($trans);
+				$orgId = $tranship->org_id;
+				$tranship->mdata['oid'] = Org::ORGID_COURIER_AUK;
+				$cost = $aukAPI->getCost($s->mdata['org_rate_id'], $s->cnee->suburb, $s->cnee->postcode, $s->getCubeWeight());
+				if($cost->code==0)
+				{
+					$tranship->cost= number_format($cost->data, 2, '.', '');
+				}
+				$tranship->save();
+				if(empty($mani))
+				{
+					$mani = new Manifest;
+					$mani->type = 90;
+					$mani->fwd_id = $orgId;
+					$mani->ref = date('Y-m-d');
+					$mani->save();
+				}
+
+				$mm = new ManiMap;
+				$mm->mani_id = $mani->id;
+				$mm->fid = $s->id;
+				$mm->model = 'ImParcel';
+				$mm->status = 10;
+				$mm->mdata['mani_time'] = date('Y-m-d H:i:s');
+				$mm->save();
+				$s->mdata['manifest_weight'] = ceil($s->getCubeWeight());
+				$s->save();
+			}
+			$transaction->commit();
+		} catch (Exception $ex) {
+			$transaction->rollback();
+			Log::log2file("AUK".$cn->no."=>".$ex->getMessage(), "transaction_err_log", "transaction");
+			Emailog::sendEmailTo(Emailog::NOTIFY_OP_EMAIL, "AUK".$ex->getMessage(), "AUK COURIER Manifest ERROR");
+		}
+		return  $err;
+	}
+
+	public function pushingAllScanedConsolToAoutAndManifest($dptId)
+	{
+		$consol=new Consol('search');
+		$consol->unsetAttributes();
+		$consol->dpt_id=$dptId;
+		$consol->isBackend = true;
+		$consol->service = Consol::AIRCONSOL;
+		$consol->process_statuses=[ConsolProcess::STATE_WAITING_WH_SCAN];
+		$consol->process_types=[ConsolProcess::TYPE_FULL_PROCESS, ConsolProcess::TYPE_LOCAL_PROCESS,ConsolProcess::TYPE_DIRECT_AIR_CONSOL];// ConsolProcess::TYPE_DIRECT_SEA_CONSOL, ConsolProcess::TYPE_CONSOL_SEA];
+		$dataArr = $consol->search(false, 30)->data;
+		$resultArr = [];
+		$totalConsol = 0;
+		$totalShipment = 0;
+		$totalPkg = 0;
+		$totalScanCount = 0;
+
+		foreach($dataArr as $key => $d)
+		{
+			echo $d->no."|";
+			$shadowId = $d->id;
+			$real= $d->getReal();
+			
+			if($real->totLeftPacks()==0)
+			{
+				if($real->getAOutStatus()=="")
+				{
+					$d->process->status = ConsolProcess::STATE_WAITING_AIR_MANI;
+					$d->process->save();
+					// pushing consol to airout and manifest
+					if(empty($real->mdata['aoutreject']))
+					{
+						$_GET['to_cus'] = true;
+					}
+					Yii::import('application.controllers.ImcoConsolController');
+					$cc = new ImcoConsolController('default');
+					$cc->actionAirout($real->id);
+				}
+			}
+		}
+
+
+
+		$consol=new Consol('search');
+		$consol->unsetAttributes();
+		$consol->dpt_id=$dptId;
+		$consol->isBackend = true;
+		$consol->service = Consol::AIRCONSOL;
+		$consol->process_statuses=[ConsolProcess::STATE_WAITING_AIR_MANI];
+		$consol->process_types=[ConsolProcess::TYPE_FULL_PROCESS, ConsolProcess::TYPE_LOCAL_PROCESS,ConsolProcess::TYPE_DIRECT_AIR_CONSOL];// ConsolProcess::TYPE_DIRECT_SEA_CONSOL, ConsolProcess::TYPE_CONSOL_SEA];
+		$dataArr = $consol->search(false, 30)->data;
+		$resultArr = [];
+		$totalConsol = 0;
+		$totalShipment = 0;
+		$totalPkg = 0;
+		$totalScanCount = 0;
+
+		foreach($dataArr as $key => $d)
+		{
+			echo $d->no."|";
+			$shadowId = $d->id;
+			$real= $d->getReal();
+
+			if($real->totLeftPacks()==0)
+			{
+				if($real->getAOutStatus()=="Y[D]")
+				{
+					$d->process->status = ConsolProcess::STATE_WAITING_CREATE_INVOICE;
+					$d->process->save();
+					if($shadowId!=$real->id)
+					{
+						// pushing consol to airout and manifest
+						$_GET['to_cus'] = true;
+						Yii::import('application.controllers.ImcoConsolController');
+						$cc = new ImcoConsolController('default');
+						$cc->actionAirout($real->id);
+					}
+				}
+
+				if($real->getAOutStatus()!="Y")
+				{
+					// pushing consol to airout and manifest
+					if(empty($real->mdata['aoutreject']))
+					{
+						$_GET['to_cus'] = true;
+					}
+					Yii::import('application.controllers.ImcoConsolController');
+					$cc = new ImcoConsolController('default');
+					$cc->actionAirout($real->id);
+				}
+			}
+		}
+		
+
+	
+	}
+
+	public function exportUnpackList($model) {
+		$totalPkg =0;
+		$totalWeight =0;
+		$totalCbm =0;
+		$title = [];
+		// array_push($title, 'Air');
+		
+		if($model->service != 20){ // Air
+			array_push($title, Consol::AIR_TYPE[@$model->mdata['air_type']]." ".@$model->awb);
+		}
+		else{ //Sea
+			if (isset($model->mdata['sea_type'])) {
+				$contaTypes = explode(" ", DmawbConsol::$containerTypes[@$model->mdata['sea_type']]);
+			}
+			else{
+				$contaTypes = [];
+			}
+			array_push($title, $contaTypes[0]."  ".@$model->owner->code."  ".@$model->mdata['container_no']." Seal ".@$model->mdata['sea_seal']);			
+			// array_push($title, $contaTypes[0]."  ".$model->mdata['cargo_type']."  ".@$model->mdata['container_no']." Seal ".@$model->mdata['sea_seal']);
+		}
+		$xls = new oExcel;
+		$i = 1;
+		$xls->setColWidth(array_fill(0, 30, 15));
+		$xls->getActiveSheet()->mergeCells('A1:F1');
+		$xls->addRow($i++, $title);
+		$xls->addRow($i++, ['Connote', 'Ref','Customer Reference', 'PCS', 'Weight', 'Volumn', 'Status', 'CNEE Name', 'CNEE Address', 'Marks And Numbers', 'Memo', 'Extra Info']);
+		$xls->setFont('A1:F1', array('bold' => true));
+
+		$heldShipments = ImParcel::model()->findAll(['condition'=>'status = 55 AND consol_id = :cid','params'=>[":cid"=>$model->id], "order"=>'json_value(meta,"$.org_rate_id") DESC,weight DESC']);
+
+		$auShipments = ImParcel::model()->findAll(['condition'=>'status != 55 AND json_value(meta,"$.org_rate_id") IN (730,775,805,811,684,686,687,688) AND consol_id = :cid','params'=>[":cid"=>$model->id], "order"=>'json_value(meta,"$.org_rate_id") DESC,weight DESC']);
+
+		$shipments = ImParcel::model()->findAll(['condition'=>'status != 55 AND (json_value(meta,"$.org_rate_id") is null or json_value(meta,"$.org_rate_id") NOT IN (730,775,805,811,684,686,687,688)) AND consol_id = :cid','params'=>[":cid"=>$model->id], "order"=>'json_value(meta,"$.org_rate_id") DESC,weight DESC']);
+
+		$courierOrgIds = array(3466, 4429, 3079, 3752, 140);
+		foreach ($shipments as $key => $shipment) {
+			if(isset($shipments[$key]->mdata['org_id'])&&in_array($shipments[$key]->mdata['org_id'], $courierOrgIds)&&$shipments[$key]->status==60){
+				unset($shipments[$key]);
+				continue;
+			}			
+		}
+
+		foreach ($auShipments as $shipment) {
+			$data = array(		
+				$shipment->pkg,
+				$shipment->weight,
+				$shipment->getTotalCBM()
+			);
+			//$xls->addRow($i++, $data);
+			$totalPkg +=$shipment->pkg;
+			$totalWeight +=$shipment->weight;
+			$totalCbm +=$shipment->getTotalCBM();
+		}
+		$xls->addRow($i++, ['AU Post', ' ', ' ', $totalPkg, $totalWeight, number_format((float)$totalCbm, 2, '.', '')]);
+
+		if(!empty($this->searchOtherCourierClearItems($model, 3466, "TNT"))){
+			$xls->addRow($i++, $this->searchOtherCourierClearItems($model, 3466, "TNT"));
+		}
+		if(!empty($this->searchOtherCourierClearItems($model, 4429, "Allied"))){
+			$xls->addRow($i++, $this->searchOtherCourierClearItems($model, 4429, "Allied"));
+		}if(!empty($this->searchOtherCourierClearItems($model, 3079, "UBI"))){
+			$xls->addRow($i++, $this->searchOtherCourierClearItems($model, 3079, "UBI"));
+		}
+		if(!empty($this->searchOtherCourierClearItems($model, 3752, "TOLL"))){
+			$xls->addRow($i++, $this->searchOtherCourierClearItems($model, 3752, "TOLL"));
+		}
+		if(!empty($this->searchOtherCourierClearItems($model, 3447, "Border"))){
+			$xls->addRow($i++, $this->searchOtherCourierClearItems($model, 3447, "Border"));
+		}if(!empty($this->searchOtherCourierClearItems($model, 140, "TNT"))){
+			$xls->addRow($i++, $this->searchOtherCourierClearItems($model, 140, "Hunter"));
+		}
+
+		foreach ($shipments as $shipment) {
+			$data = array(				
+				$shipment->hbn,
+				$shipment->ref,
+				$shipment->cref,
+				$shipment->pkg,
+				$shipment->weight,
+				number_format((float)$shipment->getTotalCBM(), 2, '.', ''),
+				$shipment->getStatus(),
+				@$shipment->cnee->name.'  '.@$shipment->cnee->company,
+				@$shipment->cnee->address,
+				@$shipment->mdata['sea_mark_number'],
+				@$shipment->can,
+				$this->outputClearReason($shipment->bwf)
+			);
+			$xls->addRow($i++, $data);
+			$totalPkg +=$shipment->pkg;
+			$totalWeight +=$shipment->weight;
+			$totalCbm +=$shipment->getTotalCBM();
+		}
+
+		foreach ($heldShipments as $shipment) {
+			$data = array(				
+				$shipment->hbn,
+				$shipment->ref,
+				$shipment->cref,
+				$shipment->pkg,
+				$shipment->weight,
+				number_format((float)$shipment->getTotalCBM(), 2, '.', ''),
+				$shipment->getStatus(),
+				$shipment->cnee->name.'  '.$shipment->cnee->company,
+				$shipment->cnee->address,
+				@$shipment->mdata['sea_mark_number'],
+				@$shipment->can,
+				$this->outputClearReason($shipment->bwf)
+			);
+			$xls->addRow($i++, $data);
+			$totalPkg +=$shipment->pkg;
+			$totalWeight +=$shipment->weight;
+			$totalCbm +=$shipment->getTotalCBM();
+		}
+
+		$xls->addRow($i++, ['Total', ' ', ' ', $totalPkg, $totalWeight, number_format((float)$totalCbm, 2, '.', '')]);
+
+		$xls->output('unpack_list'.$model->awb.'.xlsx');
+	}
+
+	public function searchOtherCourierClearItems($model, $orgId, $cName){
+		$totalPkg =0;
+		$totalWeight =0;
+		$totalCbm =0;
+		$shipments = ImParcel::model()->findAll(['condition'=>'status = 60 AND json_value(meta,"$.org_id") = :org_id AND consol_id = :cid','params'=>[":cid"=>$model->id, ":org_id"=>$orgId]]);
+		foreach ($shipments as $shipment) {
+			$data = array(		
+				$shipment->pkg,
+				$shipment->weight,
+				$shipment->getTotalCBM()
+			);
+
+			$totalPkg +=$shipment->pkg;
+			$totalWeight +=$shipment->weight;
+			$totalCbm +=$shipment->getTotalCBM();
+		}
+		if($totalPkg>0){
+			return [$cName, ' ', ' ', $totalPkg, $totalWeight, number_format((float)$totalCbm, 2, '.', ''), 'Cleared'];
+		}
+		else{
+			return null;
+		}
+	}
+
+	public function outputClearReason($bwf){
+		$SelectedReason='';
+        if(($bwf&4)>0) $SelectedReason .= 'High Value, ';
+        if(($bwf&8)>0) $SelectedReason .= 'Non-Sac, ';
+        if(($bwf&16)>0) $SelectedReason .='Border, ';
+        if(($bwf&32)>0) $SelectedReason .='AQIS, ';
+        if(($bwf&64)>0) $SelectedReason .='D D P, ';
+        if(($bwf&128)>0) $SelectedReason .='D D U, ';
+        if(($bwf&512)>0) $SelectedReason .='E M P P, ';
+        if(($bwf&1024)>0) $SelectedReason .='O T H E R, ';
+        if(($bwf&8192)>0) $SelectedReason .='自清, ';
+        if(($bwf&16384)>0) $SelectedReason .='SAC, ';        
+        return substr($SelectedReason, 0, -2);
+	}
+}
+?>

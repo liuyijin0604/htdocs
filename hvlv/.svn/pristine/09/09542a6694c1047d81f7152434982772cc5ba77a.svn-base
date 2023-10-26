@@ -1,0 +1,81 @@
+<h3>Operation</h3>
+<div class="form">
+<?php 
+	$id = $model->id;
+	$furl = $this->createUrl($url);
+	$form=$this->beginWidget('CActiveForm', array(
+	'id'=>'si-reconciliation-acr_form',
+	'enableAjaxValidation'=>false,
+	'action'=> $furl."?id=".$id)
+	);
+?>
+<?php echo CHtml::hiddenField('id',$id)?>
+<?php if($action=="confirm"):?>
+<div class="row buttons">
+	<?php  echo CHtml::submitButton('confirm',array('class'=>'confirm'));?>
+</div>
+<?php endif;?>
+<script type="text/javascript">
+	$(function(){
+			var win = $('#jqmw_<?=$_GET["tabid"];?>');
+			var tab = $('#<?=$_GET["tabid"];?>');
+			var panel = $('#<?=$_GET["tabid"];?>').data('panel');
+
+			tab.unbind('reload_reconcile_grid').bind('reload_reconcile_grid', function(){
+				$('#<?=$_GET["tabid"];?>_reconcile_grid', tab.data('panel')).yiiGridView('update');
+				return false;
+			});
+
+			tab.unbind('reload_excofile_grid').bind('reload_excofile_grid', function(){
+				$('#<?=$_GET["tabid"];?>_excofile-grid', win).yiiGridView('update');
+				return false;
+			});
+			tab.data('panel').off('change', 'select.pfile_status').on('change', 'select.pfile_status', function(){
+				$.post('files/status', {'id': $(this).data('id'), 'status': $(this).val() });
+			});
+						win.unbind('reload_cargo_invoice_grid').bind('reload_cargo_invoice_grid',function(){
+								$('#cargo_invoice_grid_<?=$_GET['tabid']?>',win).yiiGridView('update');
+						});
+
+			$('.confirm',win).on('click',function(){
+				if( confirm('Are you sure to confirm the diff?')){	
+					save('confirm','reload_reconcile_grid');	
+				}
+				return false;
+			});
+
+			 
+			function save($action,$trigger)
+			{
+				var form = new FormData(document.getElementById("si-reconciliation-acr_form"));
+				$.ajax({
+				            url: '<?=$this->createUrl($url)."?id=".$id?>'+"&&action="+$action,
+				            type: "post",
+				            data: form,
+				            processData: false,
+				            contentType: false,
+				            success: function(r) {
+				            	r = JSON.parse(r);
+				                if(r.done)
+				                 {
+									myApp.notice(r.msg, 5000);
+								 }else
+								 {
+									myApp.alert(r.msg, false);   
+					             }
+					             tab.trigger($trigger);
+					         },
+				            error: function(e) {
+				                console.log(e);
+				            }
+				        });	
+			}
+
+
+
+	});
+</script>
+
+
+<?php $this->endWidget();?>
+		

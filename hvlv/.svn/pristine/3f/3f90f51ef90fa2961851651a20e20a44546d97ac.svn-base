@@ -1,0 +1,49 @@
+<?php
+
+/**
+ * This is the model class for table "tla_log".
+ *
+ * The followings are the available columns in table 'log':
+ * @property integer $id
+ * @property string $time
+ * @property integer $type
+ * @property string $model
+ * @property integer $lid
+ * @property string $meta
+ * @property integer $user_id
+ *
+ * The followings are the available model relations:
+ * @property User $user
+ */
+class TlaLog extends Log
+{	
+		/**
+	 * Returns the static model of the specified AR class.
+	 * @param string $className active record class name.
+	 * @return Log the static model class
+	 */
+	public static function model($className=__CLASS__){
+		return parent::model($className);
+	}
+	
+	public static function add($model, $type, $extra=array()){
+		$log = new TlaLog;
+		$log->attributes = array(
+			'type' => $type,
+			'model' => get_class($model),
+			'lid' => $model->id,
+		);
+		if(!empty($extra)){
+			$log->extra = $extra;
+		}
+		$log->save();
+		return $log;
+	}
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName(){
+		return 'tla_log';
+	}
+
+}

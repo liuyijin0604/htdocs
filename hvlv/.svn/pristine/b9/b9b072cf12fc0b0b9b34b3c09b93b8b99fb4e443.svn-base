@@ -1,0 +1,245 @@
+<?php
+
+/**
+ * This is the model class for table "sell_rate".
+ *
+ * The followings are the available columns in table 'sell_rate':
+ * @property string $id
+ * @property string $org_id
+ * @property string $by_id
+ * @property string $code
+ * @property integer $type
+ * @property string $vfrom
+ * @property string $vto
+ * @property integer $currency
+ * @property string $wt_lo
+ * @property string $wt_hi
+ * @property string $base
+ * @property string $item
+ * @property string $perkg
+ * @property string $nkg
+ * @property string $min
+ * @property integer $gst
+ * @property string $levy
+ * @property string $meta
+ */
+class SellRate extends CActiveRecord
+{	
+	public static $types = array(
+		10 => 'Import Rate',
+		20 => 'Export Rate',
+		25 => 'Export Discount',
+		30 => 'Courier Rate',
+	);
+
+    /**
+	 * @return string the associated database table name
+	 */
+	public function tableName()
+	{
+		return 'sell_rate';
+	}
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('org_id, code, type, currency', 'required'),
+			array('by_id, wt_lo, wt_hi, vfrom, vto, base, item, perkg, nkg, min, gst, levy, meta', 'safe'),
+			array('type, currency, gst', 'numerical', 'integerOnly'=>true),
+			array('org_id, by_id', 'length', 'max'=>11),
+			array('code', 'length', 'max'=>20),
+			array('vfrom, vto', 'default', 'setOnEmpty' => true, 'value' => null),
+			array('wt_lo, wt_hi, base, item, perkg, nkg, min, levy', 'length', 'max'=>10),
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, org_id, by_id, code, type, vfrom, vto, currency, wt_lo, wt_hi, base, item, perkg, nkg, min, gst, levy, meta', 'safe', 'on'=>'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+		);
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return array(
+			'id' => 'ID',
+			'org_id' => 'Org',
+			'by_id' => 'By',
+			'code' => 'Code',
+			'type' => 'Type',
+			'vfrom' => 'Valid From',
+			'vto' => 'Valid To',
+			'currency' => 'Currency',
+			'wt_lo' => 'Weight Low',
+			'wt_hi' => 'Weight High',
+			'base' => 'Base',
+			'item' => 'Per Item',
+			'perkg' => 'Per kg',
+			'nkg' => 'N kg',
+			'min' => 'Minimum',
+			'gst' => 'GST',
+			'levy' => 'Levy',
+			'meta' => 'Meta',
+		);
+	}
+
+	public static function getRates($org_id, $type, $date=false){
+		if(!$date) $date = date('Y-m-d');
+		$rs = self::model()->findAll('org_id = :id AND `type` = :t AND vfrom <= :d AND (vto >= :d OR vto IS NULL)', [':id' => $org_id, ':t' => $type, ':d' => $date]);
+		$a = [];
+		foreach($rs as $r){
+			$a[$r->code] = $r;
+		}
+		return $a;
+	}
+
+    /**
+     * get consumables price setting for the customer
+     * @param $orgId
+     * @return array
+     */
+    public static function getCgoodsRates($orgId){
+        $ratesInfo = ['found' => false,'box' => 0 , 'tape' => 0];
+        $date = date('Y-m-d');
+        $type = 20;
+        $rs = self::model()->findAll('org_id = :id AND `type` = :t AND vfrom <= :d AND (vto >= :d OR vto IS NULL)', [':id' => $orgId, ':t' => $type, ':d' => $date]);
+        foreach($rs as $r){
+            if ( $r->code == 'C1' ) {
+                if ( $r->item > 0 ) {
+                    $ratesInfo['found'] = true;
+                    $ratesInfo['box'] = round($r->item,2);
+                }
+            } else if ( $r->code == 'C2' ) {
+                if ( $r->item > 0 ) {
+                    $ratesInfo['found'] = true;
+                    $ratesInfo['tape'] = round($r->item,2);
+                }
+            }
+        }
+        return $ratesInfo;
+    }
+
+	public static function hasExRate($org_id, $code){
+		return self::model()->count('org_id = :id AND `type` = 20 AND `code` = :c AND vfrom <= CURDATE() AND (vto >= CURDATE() OR vto IS NULL)', [':id' => $org_id, ':c' => $code]) > 0;
+	}
+
+	public static function getExRate($org_id, $code){
+		$r = self::model()->find('org_id = :id AND `type` = 20 AND `code` = :c AND vfrom <= CURDATE() AND (vto >= CURDATE() OR vto IS NULL)', [':id' => $org_id, ':c' => $code]);
+		return $r;
+	}
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search()
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('t.id',$this->id);
+		$criteria->compare('t.org_id',$this->org_id);
+		$criteria->compare('by_id',$this->by_id);
+		$criteria->compare('code',$this->code);
+		$criteria->compare('type',$this->type);
+		$criteria->compare('vfrom',$this->vfrom,true);
+		$criteria->compare('vto',$this->vto,true);
+		$criteria->compare('currency',$this->currency);
+		$criteria->compare('wt_lo',$this->wt_lo,true);
+		$criteria->compare('wt_hi',$this->wt_hi,true);
+		$criteria->compare('base',$this->base,true);
+		$criteria->compare('item',$this->item,true);
+		$criteria->compare('perkg',$this->perkg,true);
+		$criteria->compare('nkg',$this->nkg,true);
+		$criteria->compare('min',$this->min,true);
+		$criteria->compare('gst',$this->gst);
+		$criteria->compare('levy',$this->levy,true);
+		$criteria->compare('meta',$this->meta,true);
+
+		return new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+			'sort'=>array(
+    			'defaultOrder'=>'vfrom DESC',
+  			),
+			'pagination'=>array(
+				'pageSize'=>'30',
+            ),
+		));
+	}
+
+    /**
+     * get org price template A or B information
+     * @param $type
+     * @return validate price template or false
+     */
+    public function getValidPriceTpl($type){
+        $allTpls = $this->findAll('type = :type AND org_id = :oid',array(':type' => $type,':oid' => $this->org_id));
+
+        // based on validate from and to time get currently used one
+        $currentTime = time();
+        foreach ( $allTpls as $tpl) {
+            $fromDate = strtotime($tpl->vfrom);
+            $toDate = strtotime($tpl->vto);
+            if ( $fromDate > $currentTime ) continue;
+            if ( $fromDate <= $currentTime && ( empty($toDate) || $toDate >= $currentTime ) ) return $tpl;
+        }
+        return false;
+    }
+
+
+    /**
+     * get customer's applied cost plans
+     * @param $orgId
+     */
+    public function getCustomerCostSettings(){
+        // based on org ID
+        // retrieve all related applied cost plan
+        // if not applied we just show system default one so that customer can select them
+        $plans = array();
+
+        foreach ( self::$COST_TYPE as $code => $name ) {
+            $plans[$code]['applied'] = 1; // it is default setting for all customer , so always applied
+            $plans[$code]['info'] = $this->getCostplansByCode(0,$code);
+        }
+
+        return $plans;
+    }
+
+
+
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return SellRate the static model class
+	 */
+	public static function model($className=__CLASS__)
+	{
+		return parent::model($className);
+	}
+}

@@ -1,0 +1,265 @@
+<?php
+
+class ShipmentScanController extends Controller
+{
+	protected $nonAjax=[];
+
+	/**
+	 * Lists the report
+	 */
+	public function actionIndex()
+	{
+		$filtersForm=new FiltersForm;
+		$sort=new CSort();
+		$sort->attributes=[
+			'user'=>[
+				'asc'=>'user ASC',
+				'desc'=>'user DESC',
+			],
+			'rate_weight'=>[
+				'asc'=>'rate_weight ASC',
+				'desc'=>'rate_weight DESC',
+			],
+			'rate_packs'=>[
+				'asc'=>'rate_packs ASC',
+				'desc'=>'rate_packs DESC',
+			],
+			'time'=>[
+				'asc'=>'time ASC',
+				'desc'=>'time DESC',
+			],
+			'weight'=>[
+				'asc'=>'weight ASC',
+				'desc'=>'time DESC',
+			],
+			'packs'=>[
+				'asc'=>'packs ASC',
+				'desc'=>'packs DESC',
+			],
+			'figure'=>[
+				'asc'=>'figure ASC',
+				'desc'=>'figure DESC',
+			]
+		];
+		$provide=[];
+
+		$filtersForm1=new FiltersForm1;
+		$seaProvide=[];
+
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+		if (!empty($_GET['start_date'])&&!empty($_GET['end_date'])) {
+			$start_time=$_GET['start_date'];
+			$end_time=$_GET['end_date'];
+			$criteria = new CDbCriteria;
+			$criteria->select="user_id";
+			$criteria->group="user_id";
+			$criteria->addCondition("scan_time>:start AND scan_time<:end");
+			$criteria->params+=[':start'=>$start_time,':end'=>$end_time];
+			$user_ids= ShipmentScan::model()->findAll($criteria);
+			if(empty($_GET['daily']))
+			{
+				$totalScanInfo=['total_packs'=>0,'total_weight'=>0,'today_left_packs'=>0,'today_left_weight'=>0,'packs_percent'=>0,'weight_percent'=>0];
+				$scaninfo=ShipmentScanOverview::model()->findAll('dpt_id=106 AND date>=:start AND date<:end', [':start'=>$start_time,':end'=>$end_time]);
+				foreach ($scaninfo as $oneInfo) {
+					$totalScanInfo['total_packs']+=$oneInfo->pre_left_packs;
+					$totalScanInfo['total_packs']+=$oneInfo->today_packs;
+					$totalScanInfo['total_weight']+=$oneInfo->pre_left_weight;
+					$totalScanInfo['total_weight']+=$oneInfo->today_weight;
+					$totalScanInfo['today_left_packs']+=$oneInfo->today_left_packs;
+					$totalScanInfo['today_left_weight']+=$oneInfo->today_left_weight;
+				}
+				$totalScanInfo['packs_percent']= number_format($totalScanInfo['total_packs']>0?(($totalScanInfo['total_packs']-$totalScanInfo['today_left_packs'])/ $totalScanInfo['total_packs'])*100:0, 2, '.', '');
+				$totalScanInfo['weight_percent']= number_format($totalScanInfo['total_weight']>0?(($totalScanInfo['total_weight']-$totalScanInfo['today_left_weight'])/ $totalScanInfo['total_weight'])*100:0, 2, '.', '');
+				foreach ($user_ids as $user) {
+					$uid=$user['user_id'];
+					$temp=[];
+					$criteria = new CDbCriteria;
+					$criteria->addCondition("type IN (0,1) AND scan_time>:start AND scan_time<:end AND user_id=:uid order by scan_time");
+					$criteria->params+=[':start'=>$start_time,':end'=>$end_time,':uid'=>$uid];
+					$rs=ShipmentScan::model()->findAll($criteria);
+					if (!empty($rs)) {
+						$temp['user']=$rs[0]->user->getFullName();
+						$packs=0;
+						$weight=0;
+						$gap=300;//need to change later
+						$time=1;
+						$start=$rs[0]->scan_time;
+						$scan_count = [];
+						foreach ($rs as $r) {
+							if (abs(strtotime($start)-strtotime($r->scan_time))<$gap) {
+								$time+=abs(strtotime($start)-strtotime($r->scan_time));
+							} else {
+								$time+=1;//if gap>10 min, we just add 1 second.
+							}
+							$start=$r->scan_time;
+							$packs+=$r->pkg;
+							$weight+=$r->weight;
+							if(!isset($scan_count[$r->type])) $scan_count[$r->type] = 0;
+							$scan_count[$r->type]++;
+						}
+						
+						$hrs = round($time/3600, 5);
+						$packRate=round($packs/$hrs, 0);
+						$figure= $packs<50? '' : $this->getfigure($packRate*100, $weight/$packs);
+						$provide[]=['id'=>$rs[0]->user->id,'user'=>$rs[0]->user->getFullName(),'packs'=>$packs.' ('.implode(', ', $scan_count).')','weight'=>$weight,'time'=>$hrs, 'rate_weight'=>round($weight/$hrs, 2),'rate_packs'=>$packRate,'figure'=>$figure];
+					}
+				}
+			}else
+			{
+				$totalScanInfo = [];
+				$thisStartTime=$_GET['start_date'];
+				$thisEndTime=$_GET['end_date'];
+				$dates = HolidayHelper::getDatesBetweenTwoDays($thisStartTime,$thisEndTime);
+				foreach ($dates as $key1 => $date) {
+					$scaninfo=ShipmentScanOverview::model()->find('dpt_id=106 AND date=:start and type = 1', [':start'=>$date]);
+					if(!empty($scaninfo))
+					{
+						$total_packs = $scaninfo->pre_left_packs+$scaninfo->today_packs;
+						$total_weight = $scaninfo->pre_left_weight+$scaninfo->today_weight;
+						$hrs =empty(SystemSetting::getDateWorkTime($date))?1:SystemSetting::getDateWorkTime($date);
+
+						$provide[]=['id'=>$key1,'date'=>$date,'weight'=>$total_weight."(".$scaninfo->pre_left_weight."+".+$scaninfo->today_weight.")",'packs'=>$total_packs."(".$scaninfo->pre_left_packs."+".$scaninfo->today_packs.")",'out_weight'=>$scaninfo->mdata['todayScanInfo']['weight'],'out_packs'=>$scaninfo->mdata['todayScanInfo']['packs'],'rate_weight'=>round($scaninfo->mdata['todayScanInfo']['weight']/$hrs, 2),'rate_packs'=>round($scaninfo->mdata['todayScanInfo']['packs']/$hrs, 2),'time'=>$hrs,'resorting_weight'=>$scaninfo->mdata['todayResortingInfo']['weight'],'resorting_packs'=>$scaninfo->mdata['todayResortingInfo']['packs']];
+					}
+				}
+
+				foreach ($dates as $key1 => $date) {
+					$scaninfo=ShipmentScanOverview::model()->find('dpt_id=106 AND date=:start and type = 2', [':start'=>$date]);
+					if(!empty($scaninfo))
+					{
+						$total_packs = $scaninfo->pre_left_packs+$scaninfo->today_packs;
+						$total_weight = $scaninfo->pre_left_weight+$scaninfo->today_weight;
+						$hrs =empty(SystemSetting::getDateWorkTime($date))?1:SystemSetting::getDateWorkTime($date);
+
+						$seaProvide[]=['id'=>$key1,'date'=>$date,'weight'=>$total_weight."(".$scaninfo->pre_left_weight."+".+$scaninfo->today_weight.")",'packs'=>$total_packs."(".$scaninfo->pre_left_packs."+".$scaninfo->today_packs.")",'out_weight'=>$scaninfo->mdata['todayScanInfo']['weight'],'out_packs'=>$scaninfo->mdata['todayScanInfo']['packs'],'rate_weight'=>round($scaninfo->mdata['todayScanInfo']['weight']/$hrs, 2),'rate_packs'=>round($scaninfo->mdata['todayScanInfo']['packs']/$hrs, 2),'time'=>$hrs,'resorting_weight'=>$scaninfo->mdata['todayResortingInfo']['weight'],'resorting_packs'=>$scaninfo->mdata['todayResortingInfo']['packs']];
+					}
+				}
+
+				$sort=new CSort();
+				$sort->attributes=[
+					'date'=>[
+						'asc'=>'date ASC',
+						'desc'=>'date DESC',
+					],
+					'rate_weight'=>[
+						'asc'=>'rate_weight ASC',
+						'desc'=>'rate_weight DESC',
+					],
+					'rate_packs'=>[
+						'asc'=>'rate_packs ASC',
+						'desc'=>'rate_packs DESC',
+					],
+					'out_weight'=>[
+						'asc'=>'out_weight ASC',
+						'desc'=>'out_weight DESC',
+					],
+					'out_packs'=>[
+						'asc'=>'out_packs ASC',
+						'desc'=>'out_packs DESC',
+					],
+					'resorting_weight'=>[
+						'asc'=>'resorting_weight ASC',
+						'desc'=>'resorting_weight DESC',
+					],
+					'resorting_packs'=>[
+						'asc'=>'resorting_packs ASC',
+						'desc'=>'resorting_packs DESC',
+					],
+					'time'=>[
+						'asc'=>'time ASC',
+						'desc'=>'time DESC',
+					],
+					'weight'=>[
+						'asc'=>'weight ASC',
+						'desc'=>'time DESC',
+					],
+					'packs'=>[
+						'asc'=>'packs ASC',
+						'desc'=>'packs DESC',
+					],
+					'figure'=>[
+						'asc'=>'figure ASC',
+						'desc'=>'figure DESC',
+					]
+				];
+			}
+		}
+	   
+	  
+		$filteredData=$filtersForm->filter($provide);
+		$dataprovider=new CArrayDataProvider($filteredData);
+
+		$seaFilteredData=$filtersForm1->filter($seaProvide);
+		$seaDataprovider=new CArrayDataProvider($seaFilteredData);
+		
+		$sort->defaultOrder = "user DESC";
+		$dataprovider->sort=$sort;
+		$dataprovider->pagination=['pageSize' => 30,];
+
+		$seaDataprovider->sort=$sort;
+		$seaDataprovider->pagination=['pageSize' => 30,];
+
+		if (!empty($_GET['partial'])) {
+			$this->renderPartial('_search1', [
+				'dataProvider'=>[$dataprovider,$filtersForm],
+				'seaDataProvider'=>[$seaDataprovider,$filtersForm1],
+				'totalInfo'=>$totalScanInfo,
+				'isDaily'=>@$_GET['daily']
+			]);
+			return;
+		}
+		$this->render('index', ['dataProvider'=>[$dataprovider,$filtersForm]]);
+	}
+
+	public function actionWorkTimeChange()
+	{
+		$date = $_POST['date'];
+		$workTime = $_POST['workTime'];
+		SystemSetting::setDateWorkTime($date,$workTime);
+		echo "done";
+	}
+
+	/*$this function used to combine the pack rate the average weight of packs.
+	* @params $x pack rage   $y weight/pack
+	* @return  figures ( normal 1);
+	*/
+	private function getfigure($x, $y)
+	{
+		$z = sprintf("%.2f", ($x * exp($y / 8.199)) / 750);
+		if ($z>100&&$z<200) {
+			$z=0.3*$z+70;
+		} elseif ($z>200) {
+			$z=130+round($z/1000, 2);
+		}
+		return $z;
+	}
+
+	/**
+	 * Returns the data model based on the primary key given in the GET variable.
+	 * If the data model is not found, an HTTP exception will be raised.
+	 * @param integer $id the ID of the model to be loaded
+	 * @return ShipmentScan the loaded model
+	 * @throws CHttpException
+	 */
+	public function loadModel($id)
+	{
+		$model=ShipmentScan::model()->findByPk($id);
+		if ($model===null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		return $model;
+	}
+
+	/**
+	 * Performs the AJAX validation.
+	 * @param ShipmentScan $model the model to be validated
+	 */
+	protected function performAjaxValidation($model)
+	{
+		if (isset($_POST['ajax']) && $_POST['ajax']==='shipment-scan-form') {
+			echo CActiveForm::validate($model);
+			Yii::app()->end();
+		}
+	}
+}

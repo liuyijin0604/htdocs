@@ -1,0 +1,25 @@
+<?php
+$g = include('default.php');
+return array_merge($g,array(
+	'User Name' => '用户名', 
+	'Captcha' => '验证码',
+	'Login' => '登录',
+	'Logout' => '登出',
+	'Help' => '帮助',
+	'Connection error, please try again later.' => '链接错误，请稍候再试。',
+	'Tracking Result' => '追踪结果',
+	'Consignment not found' => '没有此追踪号码',
+	'Consignment' => '包裹',
+	'Service' => '服务',
+	'Express' => '快递',
+	'Economic' => '经济',
+	'Departure Depot' => '发出地',
+	'Departure Date' => '发出时间',
+	'Delivery Depot' => '目的地',
+	'Estimated Dispatch Date' => '预计派送时间',
+	'Status' => '状态',
+	'Last Scan' => '最近更新时间',
+	'Date &amp; Time' => '日期时间',
+	'Description' => '描述',
+	'Depot' => '地点',
+));

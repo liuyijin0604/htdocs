@@ -1,0 +1,150 @@
+<?php
+
+class SiteController extends Controller
+{
+	/**
+	 * Declares class-based actions.
+	 */
+	protected $nonAjax=array('index','captcha','error','logout','voice');
+	
+	public function filterAccessControl($filterChain){
+		$filterChain->run();
+	}
+	
+	public function actions(){
+		return array(
+			// captcha action renders the CAPTCHA image displayed on the contact page
+			'captcha'=>array(
+				'class'=>'CCaptchaAction',
+				'backColor'=>0xEBF0FA,
+				'maxLength' => 4,
+				'minLength' => 4,
+			),
+		);
+	}
+
+	public function actionVoice($file){
+		$p = explode('-', $file);
+		$d = dirname(Yii::app()->basePath).DIRECTORY_SEPARATOR.'sounds'.DIRECTORY_SEPARATOR;
+		$ts = 0;
+		$fl = array();
+		foreach($p as $f){
+			if(is_file($d.$f.'.mp3')){
+				$ts += filesize($d.$f.'.mp3');
+				$fl[] = $f.'.mp3';
+			}elseif($f > 20){
+				if($f >= 1000){
+					$k = floor($f / 1000);
+					$fl[] = $k.'.mp3';
+					$ts += filesize($d.$k.'.mp3');
+					$fl[] = '_thousand.mp3';
+					$ts += filesize($d.'_thousand.mp3');
+					$f = $f-($k*1000);
+				}
+				if($f > 0){
+					if($f >= 100){
+						$h = floor($f / 100);
+						$fl[] = $h.'.mp3';
+						$ts += filesize($d.$h.'.mp3');
+						$fl[] = '_hundred.mp3';
+						$ts += filesize($d.'_hundred.mp3');
+						$f = $f-($h*100);
+					}
+					if($f > 0){
+						if($f<20){
+							$fl[] = $f.'.mp3';
+							$ts += filesize($d.$f.'.mp3');
+						}else{
+							$t = floor($f/10)*10;
+							$fl[] = $t.'.mp3';
+							$ts += filesize($d.$t.'.mp3');
+							if($f-$t > 0){
+								$fl[] = ($f-$t).'.mp3';
+								$ts += filesize($d.($f-$t).'.mp3');
+							}
+						}
+					}
+				}
+			}
+		}
+		header('Content-Type: audio/mpeg');
+		header('Content-Disposition: filename="'.$file.'.mp3"');
+		header('Content-length: '.$ts);
+		header('Expires: '.gmdate('D, d M Y H:i:s', time() + Yii::app()->params['fileCacheTTL']) . ' GMT');
+		header('Pragma: cache');
+		header('Cache-Control: max-age='.Yii::app()->params['fileCacheTTL']);
+		header('Cache-Control: private', false);
+		header("Content-Transfer-Encoding: chunked");
+		foreach($fl as $f){
+			readfile($d.$f);
+		}
+	}
+
+	/**
+	 * This is the default 'index' action that is invoked
+	 * when an action is not explicitly requested by users.
+	 */
+	public function actionIndex(){
+		$this->layout = '//layouts/main';
+		$this->render('index');
+	}
+	
+	/**
+	 * Authenticate
+	 */
+	public function actionAuth(){
+		$auth = array();
+		/*dev login*/
+		if(in_array(Yii::app()->getRequest()->serverName, array('localhost', 'hvlv.test'))){
+			$ca = $this->createAction('captcha');
+			$_POST['LoginForm'] = array(
+				'user' => 'gero@s1pcaex', //admin
+				'pwd' => 'password',
+				'vvc' => $ca->getVerifyCode(),
+			);
+		}
+		if(isset($_POST['LoginForm'])){
+			$model=new LoginForm;
+			$model->attributes=$_POST['LoginForm'];
+			if($model->validate()) $model->login();
+		}
+
+		if(Yii::app()->user->isGuest){
+			$auth['valid'] = false;
+		}else{
+			$auth['valid'] = true;
+			$auth['name'] = Yii::app()->user->name;
+			$auth['rpc'] = Yii::app()->user->rpc;
+		}
+		echo json_encode($auth);
+	}
+	
+	/**
+	 * Check Session
+	 */
+	public function actionCheckSession(){
+		echo time() - Yii::app()->session['last_action'];
+	}
+
+	/**
+	 * Logs out the current user and redirect to homepage.
+	 */
+	public function actionLogout(){
+		Yii::app()->user->logout();
+		$this->redirect(Yii::app()->homeUrl);
+	}
+
+	/**
+	 * This is the action to handle external exceptions.
+	 */
+	public function actionError(){
+	    if($error=Yii::app()->errorHandler->error)
+	    {
+	    	if(Yii::app()->request->isAjaxRequest){
+	    		echo $error['message'];
+	    	}else{
+				$this->render('error', $error);
+			}
+	    }
+	}
+}

@@ -1,0 +1,244 @@
+<style>
+    /* Absolute Center Spinner */
+.loading {
+  position: fixed;
+  z-index: 999;
+  height: 2em;
+  width: 2em;
+  overflow: visible;
+  margin: auto;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+}
+
+/* Transparent Overlay */
+.loading:before {
+  content: '';
+  display: block;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0,0,0,0.3);
+}
+
+/* :not(:required) hides these rules from IE9 and below */
+.loading:not(:required) {
+  /* hide "loading..." text */
+  font: 0/0 a;
+  color: transparent;
+  text-shadow: none;
+  background-color: transparent;
+  border: 0;
+}
+
+.loading:not(:required):after {
+  content: '';
+  display: block;
+  font-size: 10px;
+  width: 1em;
+  height: 1em;
+  margin-top: -0.5em;
+  -webkit-animation: spinner 1500ms infinite linear;
+  -moz-animation: spinner 1500ms infinite linear;
+  -ms-animation: spinner 1500ms infinite linear;
+  -o-animation: spinner 1500ms infinite linear;
+  animation: spinner 1500ms infinite linear;
+  border-radius: 0.5em;
+  -webkit-box-shadow: rgba(0, 0, 0, 0.75) 1.5em 0 0 0, rgba(0, 0, 0, 0.75) 1.1em 1.1em 0 0, rgba(0, 0, 0, 0.75) 0 1.5em 0 0, rgba(0, 0, 0, 0.75) -1.1em 1.1em 0 0, rgba(0, 0, 0, 0.5) -1.5em 0 0 0, rgba(0, 0, 0, 0.5) -1.1em -1.1em 0 0, rgba(0, 0, 0, 0.75) 0 -1.5em 0 0, rgba(0, 0, 0, 0.75) 1.1em -1.1em 0 0;
+  box-shadow: rgba(0, 0, 0, 0.75) 1.5em 0 0 0, rgba(0, 0, 0, 0.75) 1.1em 1.1em 0 0, rgba(0, 0, 0, 0.75) 0 1.5em 0 0, rgba(0, 0, 0, 0.75) -1.1em 1.1em 0 0, rgba(0, 0, 0, 0.75) -1.5em 0 0 0, rgba(0, 0, 0, 0.75) -1.1em -1.1em 0 0, rgba(0, 0, 0, 0.75) 0 -1.5em 0 0, rgba(0, 0, 0, 0.75) 1.1em -1.1em 0 0;
+}
+
+/* Animation */
+
+@-webkit-keyframes spinner {
+  0% {
+    -webkit-transform: rotate(0deg);
+    -moz-transform: rotate(0deg);
+    -ms-transform: rotate(0deg);
+    -o-transform: rotate(0deg);
+    transform: rotate(0deg);
+  }
+  100% {
+    -webkit-transform: rotate(360deg);
+    -moz-transform: rotate(360deg);
+    -ms-transform: rotate(360deg);
+    -o-transform: rotate(360deg);
+    transform: rotate(360deg);
+  }
+}
+@-moz-keyframes spinner {
+  0% {
+    -webkit-transform: rotate(0deg);
+    -moz-transform: rotate(0deg);
+    -ms-transform: rotate(0deg);
+    -o-transform: rotate(0deg);
+    transform: rotate(0deg);
+  }
+  100% {
+    -webkit-transform: rotate(360deg);
+    -moz-transform: rotate(360deg);
+    -ms-transform: rotate(360deg);
+    -o-transform: rotate(360deg);
+    transform: rotate(360deg);
+  }
+}
+@-o-keyframes spinner {
+  0% {
+    -webkit-transform: rotate(0deg);
+    -moz-transform: rotate(0deg);
+    -ms-transform: rotate(0deg);
+    -o-transform: rotate(0deg);
+    transform: rotate(0deg);
+  }
+  100% {
+    -webkit-transform: rotate(360deg);
+    -moz-transform: rotate(360deg);
+    -ms-transform: rotate(360deg);
+    -o-transform: rotate(360deg);
+    transform: rotate(360deg);
+  }
+}
+@keyframes spinner {
+  0% {
+    -webkit-transform: rotate(0deg);
+    -moz-transform: rotate(0deg);
+    -ms-transform: rotate(0deg);
+    -o-transform: rotate(0deg);
+    transform: rotate(0deg);
+  }
+  100% {
+    -webkit-transform: rotate(360deg);
+    -moz-transform: rotate(360deg);
+    -ms-transform: rotate(360deg);
+    -o-transform: rotate(360deg);
+    transform: rotate(360deg);
+  }
+}
+
+.loading-container {
+    position: absolute;
+    height: 100vh;
+    width: 100vw;
+    z-index: 1000;
+    display: none;
+}
+</style>
+
+<?php 
+$this->widget('zii.widgets.CBreadcrumbs', array(
+    'homeLink' => CHtml::link('Home', array('site/index/org_id/' . Yii::app()->session['org_id'])),
+	'links' => array(
+		'Reports',
+	),
+));
+?>
+<br />
+<div class="form">
+    <?php
+   $form=$this->beginWidget('CActiveForm', array(
+	'id'=>'report_name_validation_form',
+)); ?>
+    <div class="row">
+        <div class="col col-md-2 col-sm-4">
+            <div class="form-group">
+                <label for="from">From</label><br />
+                <input type="date" name="from" id="from" class="form-control"/>
+            </div>
+        </div>
+        <div class="col col-md-2 col-sm-4">
+            <div class="form-group">
+                <label for="to">To</label><br />
+                <input type="date" name="to" id="to" class="form-control"/>
+            </div>
+        </div>
+    </div>
+    <?php $this->endWidget(); ?>
+</div>
+
+<input class="btn btn-primary" id="btn_search" type="submit" value="Search" onclick="funcSearch()">
+<br />
+<br />
+<h1>Name Validation Usage Report</h1>
+<h3>Summary</h3>
+<div class="container" id="summary" style="display:none; margin-left:-16px;">
+  <table class="table table-striped table-bordered">
+    <thead>
+      <tr>
+        <th>Number of Words Replaced</th>
+        <th>Saved Amount</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td id="number_of_words"></td>
+        <td id="amount"></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+<h3>Details</h3>
+<table class="table table-striped table-bordered">
+    <thead>
+        <tr>
+            <th>Ref</th>
+            <th>Consol No.</th>
+            <th>Original Word</th>
+            <th>Replaced Word</th>
+            <th>Process Time</th>
+        </tr>
+    </thead>
+    <tbody id="table_records">
+
+    </tbody>
+</table>
+
+<div class="loading-container" id="loading-container">
+    <div class="loading">Loading&#8230;</div>
+</div>
+
+<script type="text/javascript">
+    function funcSearch() {
+      // clear results
+      $("#table_records").empty();
+        let from = $('#from').val();
+        let to = $('#to').val();
+        $('#btn_search').attr('disabled', true);
+        $('#loading-container').show();
+        let formData = new FormData;
+        formData.append('from', from);
+        formData.append('to', to);
+        $.ajax({
+            url: "<?= $this->createUrl('reports/searchNameValidationUsage')?>",
+            data: formData,
+            type: 'POST',
+            cache: false,
+            contentType: false,
+            processData: false,
+            success: function(response) {
+                $('#btn_search').attr('disabled', false);
+                $('#loading-container').hide();
+                let res = jQuery.parseJSON(response);
+                if (res.success == true) {
+                    if (res.records.length > 0) {
+                        $("#summary").show();
+                        $("#number_of_words").html(res.wordsCount);
+                        $("#amount").html("$"+res.amount);
+                        for (let i = 0; i < res.records.length; i++) {
+                            let strHtml = '';
+                            strHtml += '<tr><td>' + res.records[i].ref + '</td><td>' + res.records[i].consolNo + '</td><td>' + res.records[i].original_word + '</td><td>' + res.records[i].replace_word + '</td><td>' + res.records[i].process_time + '</td></tr>'
+                            $('#table_records').append(strHtml);
+                        }
+                    } else {
+                      $("#summary").hide();
+                      let strHtml = '<tr><td>' + res.message + '</td></tr>';
+                      $('#table_records').append(strHtml);
+                    }
+                }
+            }
+        })
+    }
+</script>

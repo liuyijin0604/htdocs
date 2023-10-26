@@ -1,0 +1,116 @@
+<div style="right: 20px;position: absolute;">
+    <a href="<?= $this->createUrl('cargoProcessPlan/create') ?>" class="tab_link" title="Create">
+        <div style="background-position:-48px -688px" class="icon"></div>Create
+    </a>
+</div>
+<h1><?= $this->t('Pallet Delivery Request'); ?></h1>
+<div class="row" style="display: none;">
+    <?php echo CHtml::checkbox('auto_refresh', ''), $this->t(' <b>Auto refresh</b>'); ?>
+</div>
+<?php
+$this->widget('zii.widgets.grid.CGridView', array(
+    'id' => 'cargo-process-plan-grid',
+    'selectableRows' => 2,
+    'cssFile' => false,
+    'dataProvider' => $model->search(true, 30, $ec),
+    'filter' => $model,
+    'columns' => array(
+        array('name' =>'schedule_time','htmlOptions'=>array('style'=>'width: 120px')),
+        array('name' =>'ref','htmlOptions'=>array('style'=>'width: 150px')),
+        array('name' => 'dpt_id', 'value' => '$data->getBranch()', 'htmlOptions'=>array('style'=>'width: 80px'),'filter'=>CHtml::dropDownList('CargoProcessPlan[dpt_id]', $model->dpt_id, Org::dptList3PL(), ['prompt'=>$this->t('All'),'class' => 'form-control']),),
+        array('name' => 'pallets_note','htmlOptions'=>array('style'=>'width: 300px')),
+        array('header' => 'Delivery Status','value'=>'$data->getCjobStatus()','htmlOptions'=>array('style'=>'width: 200px'),'filter'=>CHtml::dropDownList('CargoProcessPlan[status]', $model->status, CargoProcessPlan::$cargoplanlist_states, ['prompt'=>$this->t('All'),'class' => 'form-control']),),
+        //array('name' => 'status', 'value' => '$data->getStatus()','htmlOptions'=>array('style'=>'width: 80px'), 'filter'=>CHtml::dropDownList('CargoProcessPlan[status]', $model->status, CargoProcessPlan::$cargoplan_states, ['prompt'=>$this->t('All'),'class' => 'form-control']),),
+        array('header' => 'Delivery Date','value'=>'$data->getCjobTime()','htmlOptions'=>array('style'=>'width: 120px')),
+        array('header' => 'Driver','value'=>'$data->getCjobDriver()'),
+        array('name' => 'creater', 'value' => '$data->getCreaterName()','filter'=>CHtml::dropDownList('CargoProcessPlan[creater]',$model->creater,$arrUser,['prompt'=>$this->t('All')]),'htmlOptions'=>array('style'=>'width: 120px')),
+        array('header' => 'Invoice No','value'=>'$data->getInvoiceNo()','htmlOptions'=>array('style'=>'width: 90px')),
+        array('header' => 'Consol Number', 'value' => '$data->getConsolNumber()'),
+        array(
+            'class' => 'oButtonColumn',
+            'template' => '{update}',
+            'buttons' => array(
+                // 'view' => array(
+                //     'imageUrl' => false,
+                //     'options' => array('class' => 'jqm_link grid_view_btn'),
+                // ),
+                'update' => array(
+                    'imageUrl' => false,
+                    'visible' => 'true',
+                    'options' => array('class' => 'tab_link grid_edit_btn', 'label'=>$this->t('Update'), 'title' => '$data->getNo()'),
+                ),
+            ),
+        ),
+    ),
+));
+?>
+<script type="text/javascript">
+    $(function() {
+        var tab = $("#<?= $_GET['tabid']; ?>");
+        var panel = tab.data('panel');
+        $('.search-button', panel).click(function() {
+            $('.search-form', panel).toggle();
+            return false;
+        });
+        $('.search-form form', panel).on('submit', function() {
+            var refs = $('#CargoProcessPlan_refs').val();
+            refs = refs.split(/[\s,;]+/);
+            if (refs.length > 200) {
+                myApp.alert('refs is too long', false);
+                return false;
+            }
+            $.fn.yiiGridView.update('cargo-process-plan-grid', {
+                data: $(this).serialize()
+            });
+            return false;
+        });
+        tab.bind('onOpen', function() {
+            $('#cargo-process-plan-grid', panel).yiiGridView('update');
+        });
+
+        $('#auto_refresh', panel).on('change', function() {
+            if ($('#auto_refresh', panel).prop('checked') == true) {
+                window.clearInterval(window.interval);
+                window.interval = setInterval(function() {
+                    $('#cargo-process-plan-grid', panel).yiiGridView('update');
+
+                    tab.on('close', function() {
+                        window.clearInterval(window.interval);
+                    });
+                }, 10000);
+            } else {
+                window.clearInterval(window.interval);
+            }
+        });
+
+        $('a.export_search', panel).on('mousedown', function() {
+            var q = $('.filters input, .filters select', panel).serialize();
+            var href = $(this).data('baseurl') + '&' + q;
+            href = href.replace('.app&', '?');
+            $(this).attr('href', href);
+        });
+
+        $('a.export', panel).on('mousedown', function() {
+            var href = $(this).data('baseurl');
+            $('.select-on-check', panel).each(function() {
+                if ($(this).prop('checked') === true) {
+                    href += '&ids[]=' + $(this).val();
+                }
+            });
+            href = href.replace('/.app?', '?');
+            $(this).attr('href', href);
+        });
+
+        $('a.batch_export_search', panel).on('mousedown', function() {
+            var q = $('.filters input, .filters select', panel).serialize();
+            var href = $(this).data('baseurl') + '&' + q;
+            $('.select-on-check', panel).each(function() {
+                if ($(this).prop('checked') === true) {
+                    href += '&ids[]=' + $(this).val();
+                }
+            });
+            href = href.replace('/.app?', '?');
+            $(this).attr('href', href);
+        });
+    });
+</script>

@@ -1,0 +1,129 @@
+<style type="text/css">
+.modal-wide {
+  width: 80%;
+}
+.modal-wide .modal-body {
+  overflow-y: auto;
+}
+</style>
+<?php
+$this->widget('zii.widgets.CBreadcrumbs', array(
+	'homeLink'=>CHtml::link('Home', array('site/index')),
+	'links' => array(
+		'Accounting',
+	),
+));
+?>
+<h2>Invoices</h2>
+
+<!-- <a class="export_search_Excel" target="_blank" href="<?=$this->createUrl('accounts/exportCurrentSearch');?>"><div style="background-position:-48px -688px" class="icon"></div> Export Current Search Excel</a> &nbsp; -->
+<a class="export_statement_Excel" target="_blank" href="<?=$this->createUrl('accounts/exportCurrentStatement');?>"><div style="background-position:-48px -688px" class="icon"></div> Export Current Search Excel Statement</a> &nbsp;
+<a class="export_search_PDF" target="_blank" href="<?=$this->createUrl('accounts/exportCurrentSearch');?>"><div style="background-position:-48px -688px" class="icon"></div> Export Current Search PDF</a> &nbsp;
+
+<div class="account-credit-info" style="margin-top: -100px;">
+    <b>Credit Information</b> <br>
+    --------------------------- <br>
+    Limits : <span class="credit-limits"><?php echo $credit['limit']; ?></span> <span class="currency"><?php echo $credit['currency']; ?> <span>  <br>
+        Balance : <span class="credit-balance <?php if ( $credit['balance_warning']  ) echo 'warning' ; ?>"><?php echo $credit['balance']; ?> </span><?php echo $credit['currency']; ?> <br>
+        <br>
+        Terms : <span class="credit-terms"><?php echo $credit['terms']; ?></span> Days <br>
+        Left : <span class="credit-terms-left <?php if ( $credit['left_warning']  ) echo 'warning' ; ?>" ><?php echo $credit['left']; ?></span> Days
+</div>
+
+<div class="row" style="margin-top: 100px;">
+<?php
+
+$model = new Invoice('search');
+$model->unsetAttributes();
+if(!empty($_GET['Invoice'])){
+    $model->attributes=$_GET['Invoice'];
+}
+$model->to_id = Yii::app()->user->org;
+
+$this->widget('application.extensions.booster.TbExtendedGridView', array(
+	'fixedHeader' => true,
+	'headerOffset' => 40,
+	'type' => 'striped',
+	'dataProvider' => $model->search(true, empty($owner->extra['pager_size'])? 50 : $owner->extra['pager_size']),
+	'responsiveTable' => true,
+	'template' => "{summary}\n{items}\n{pager}",
+	'filter'=>$model,
+	'selectableRows' => 2,
+	'columns' => array(
+	array('name' => 'no', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->createURL("ims/accounts/export", array("id" => $data->id))."\" target=\"_blank\">".$data->no."</a>"'),
+        array('name' => 'currency', 'value' => '$data->getCurrency()'),
+        array('name'=>'consol_awb','header'=>'AWB','value'=>'@$data->consol->awb'),
+       'total',
+		array('name' => 'status', 'value' => '$data->getStatus()', 
+			'filter'=>CHtml::dropDownList('Invoice[status]', $model->status, $this->t($model::$states), array('prompt'=>$this->t('All'), 'class' => 'form-control')),),
+		'date',
+		'due',
+		array(
+			'class'=>'application.extensions.booster.TbButtonColumn',
+			'template'=>'{print} &nbsp; {export}',
+			'header' => 'Actions',
+			'buttons'=>array(
+				'print' => array(
+					'visible'=>'true',
+					'icon' => 'print',
+					'url' => 'Yii::app()->createUrl("ims/accounts/export",["id" => $data->id])',
+					'options' => array('label'=>$this->t('PDF'), 'title' => 'PDF', 'target' => '_blank'),
+				),
+				'export' => array(
+					'visible'=>'false',
+					'icon' => 'file',
+					'url' => 'Yii::app()->createUrl("ims/accounts/export",["id" => $data->id, "xls" => "1"])',
+					'options' => array('label'=>$this->t('Export'), 'title' => 'Export', 'target' => '_blank'),
+				),
+			),
+		),
+	),
+)
+);
+?>
+
+    </div>
+
+<!-- View Modal -->
+<!--
+<div class="modal fade" id="modal-view" tabindex="-1" role="dialog" aria-labelledby="modal-view-label" aria-hidden="true">
+  <div class="modal-dialog modal-wide">
+	<div class="modal-content">
+	  <div class="modal-body">
+	  </div>
+	  <div class="modal-footer">
+		<button type="button" class="btn btn-default" data-dismiss="modal"><?=$this->t('Close');?></button>
+	  </div>
+	</div>
+  </div>
+</div>
+-->
+
+<?php ob_start(); ?>
+<script type="text/javascript">
+
+$(function(){
+	$('a.export_search_Excel').on('mousedown', function(){
+		var q = $('.filters input, .filters select').serialize();
+		$(this).attr('href', '<?=$this->createUrl("accounts/exportCurrentSearch")?>' + '?' + q);
+	});
+
+});
+
+$(function(){
+	$('a.export_statement_Excel').on('mousedown', function(){
+		var q = $('.filters input, .filters select').serialize();
+		$(this).attr('href', '<?=$this->createUrl("accounts/exportCurrentStatement")?>' + '?' + q);
+	});
+
+});
+
+$(function(){
+	$('a.export_search_PDF').on('mousedown', function(){
+		var q = $('.filters input, .filters select').serialize();
+		$(this).attr('href', '<?=$this->createUrl("accounts/exportCurrentSearchPDF")?>' + '?' + q);
+	});
+
+});
+</script>
+<?php $this->registerJS(ob_get_clean()); ?>

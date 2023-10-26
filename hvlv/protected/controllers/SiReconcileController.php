@@ -1,0 +1,1100 @@
+<?php
+
+class SiReconcileController extends Controller
+{
+	protected $nonAjax = ['exportRateDiff','exportErrorList','exportSurchargeDiff','exportWeightDiff','ajaxImportReconciliationConfirmList','exportCanDispute','exportEizInfo','export'];
+	protected $skipAcl = [];
+
+	
+	public function actionIndex()
+	{
+		$filtersForm1=new FiltersForm1;
+		if (isset($_GET['FiltersForm1'])) {
+			$filtersForm1->filters=$_GET['FiltersForm1'];
+		}
+
+		$types=SiReconcile::$types;
+		$provide1 = [];
+		foreach ($types as $key => $value) {
+			$provide1[] = ["id"=>$key,"type"=>$value];
+		}
+		$filterData1=$filtersForm1->filter($provide1);
+		$dataprovider1=new CArrayDataProvider($filterData1);
+		$dataprovider1->pagination=['pageSize'=>10];
+		$sort=new CSort();
+		$sort->defaultOrder = "id";
+		$dataprovider1->sort=$sort;
+		$this->render('index', ['dataProvider1'=>[$dataprovider1,$filtersForm1],'name'=>'Select The Type!']);
+	}
+	/**
+	* show add invoice page
+	*/
+	public function actionAddInvoicePage()
+	{
+		$type = $_GET['type'];
+		$model = new SupplierInvoice();
+		switch ($type) {
+			case 1:
+				$this->render('add_invoice',['type'=>$type,'model'=>$model]);
+				break;
+			case 2:
+				$this->render('add_invoice_broker',['type'=>$type,'model'=>$model]);
+				break;
+			case 3:			
+				$this->render('add_invoice',['type'=>$type,'model'=>$model]);
+				break;
+			case 4:
+			case 5:
+				$this->render('add_invoice_manual',['type'=>$type,'model'=>$model]);
+				break;
+			default:
+				# code...
+				break;
+		}
+	}
+
+	/**
+	**@param type the type of invoice courier, broker or terminal
+	**@param file the invoice file
+	**@param currency the currenct of the invoice
+	**@param rate_option this is the code of org_rate
+	**@param invoice_amount the amount of invoice for double check
+	**@param invoice_date the date of the invoice
+	**@param invoice_no the number of the invoice
+	*/
+	public function actionAddInvoice()
+	{
+		$type = $_POST['type'];
+		$file = $_FILES['inv_file'];
+		$orgRateCode = $_POST['rate_option'];
+		$currency = $_POST['currency'];
+		$invoiceAmount = $_POST['invoice_amount'];
+		$invoiceDate = $_POST['invoice_date'];
+		$invoiceTemplate = $_POST['invoice_template'];
+		$invoiceNo = $_POST['invoice_no'];
+		$orgId = @$_POST['org_id'];
+		$si = SupplierInvoice::model()->find('t.inv_no = :inv_no AND t.org_id = :org_id AND t.status < 100', [':inv_no' => $invoiceNo, ':org_id' => $orgId]);
+		if (!empty($si)) {
+			echo json_encode(['done' => false, 'msg' => 'Invoice existed']);
+			return;
+		}
+		$reconcileService = new ReconcileService();
+		$result = $reconcileService->addInvoice($type,$file,$currency,$invoiceAmount,$invoiceDate,$invoiceTemplate,$invoiceNo,$orgId);
+		echo json_encode($result);
+		return;
+	}
+
+
+	public function actionGetReconcileList()
+	{
+		$type = $_GET['type'];
+		$status = @$_GET['status'];
+		$model = new SiReconcile();
+		$model->unsetAttributes();
+		$model->type = $type;
+		if (isset($_GET['SiReconcile'])) {
+			$model->attributes = $_GET['SiReconcile'];
+		}
+		if(!empty($_GET['SiReconcile']['refs']))
+		{
+			$model->refs = $_GET['SiReconcile']['refs'];
+		}
+		if(!empty($status))
+		{
+			$model->status = $status;
+		}
+
+		if(!empty($status))
+		{
+			$this->render('_sub_reconciles',['model'=>$model,'type'=>$type,'status'=>$status]);
+			return;
+		}	
+
+		if(!empty($_GET['SiReconcile']))
+		{
+			$model->setAttributes($_GET['SiReconcile']);
+			$model->inv_no = empty($_GET['SiReconcile']['inv_no'])?"":$_GET['SiReconcile']['inv_no'];
+			$model->org_id = empty($_GET['SiReconcile']['org_id'])?null:$_GET['SiReconcile']['org_id'];
+			$model->confirm_status = empty($_GET['SiReconcile']['confirm_status'])?"":$_GET['SiReconcile']['confirm_status'];
+			$this->render('_sub_reconciles',['model'=>$model,'type'=>$type,'status'=>$status]);
+			return;
+		}
+
+
+		$filtersForm=new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm->filters=$_GET['FiltersForm'];
+		}
+		$sql ="SELECT (@i :=@i + 1) AS id, t.status, (SELECT count(*) FROM `si_reconcile` s WHERE s.type = $type and s.status = t.status AND DATEDIFF(NOW(),(SELECT inv_date FROM supplier_invoice WHERE id = supplier_invoice_id)) <= 7 group by s.status) as day1, (SELECT count(*) FROM `si_reconcile` s WHERE s.type = $type and s.status = t.status AND DATEDIFF(NOW(),(SELECT inv_date FROM supplier_invoice WHERE id = supplier_invoice_id)) > 7 AND DATEDIFF(NOW(),(SELECT inv_date FROM supplier_invoice WHERE id = supplier_invoice_id)) <= 14 group by s.status) as day2, (SELECT count(*) FROM `si_reconcile` s WHERE s.type = $type and s.status = t.status AND DATEDIFF(NOW(),(SELECT inv_date FROM supplier_invoice WHERE id = supplier_invoice_id)) > 14 group by s.status) as day3 FROM (SELECT @i := 0) AS it ,`si_reconcile` t  WHERE t.type = $type group by t.status";
+		if(Yii::app()->name=="TLA")
+		{
+			$provide=Yii::app()->db_tla->createCommand($sql)->queryAll();
+		}else
+		{
+			$provide=Yii::app()->db->createCommand($sql)->queryAll();
+		}
+		$filteredData=$filtersForm->filter($provide);
+		$dataprovider=new CArrayDataProvider($filteredData);
+		$dataprovider->pagination=['pageSize' =>10,];
+		$sort=new CSort();
+		$sort->attributes=[
+			'number'=>[
+				'asc'=>'number ASC',
+				'desc'=>'number DESC',
+			],
+			'status'=>[
+				'asc'=>'status ASC',
+				'desc'=>'status DESC',
+			],
+		];
+		$sort->defaultOrder = "status ASC";
+		$dataprovider->sort=$sort;
+
+
+		$filtersForm2=new FiltersForm;
+		if (isset($_GET['FiltersForm'])) {
+			$filtersForm2->filters=$_GET['FiltersForm'];
+		}
+		$sql = "SELECT (@i :=@i + 1) AS id, (SELECT name FROM org WHERE id = t.org_id) AS org_name, (SELECT count(*) FROM `si_reconcile` s WHERE s.type = $type AND s.org_id = t.org_id AND DATEDIFF(NOW(),(SELECT inv_date FROM supplier_invoice WHERE id = supplier_invoice_id)) <= 7 group by s.org_id) as day1, (SELECT count(*) FROM `si_reconcile` s WHERE s.type = $type AND s.org_id = t.org_id AND DATEDIFF(NOW(),(SELECT inv_date FROM supplier_invoice WHERE id = supplier_invoice_id)) > 7 AND DATEDIFF(NOW(),(SELECT inv_date FROM supplier_invoice WHERE id = supplier_invoice_id)) <= 14 group by s.org_id) as day2, (SELECT count(*) FROM `si_reconcile` s WHERE s.type = $type AND s.org_id = t.org_id AND DATEDIFF(NOW(),(SELECT inv_date FROM supplier_invoice WHERE id = supplier_invoice_id)) > 14 group by s.org_id) as day3 FROM (SELECT @i := 0) AS it ,`si_reconcile` t  WHERE t.type = $type group by t.org_id";
+		if(Yii::app()->name=="TLA")
+		{
+			$provide2=Yii::app()->db_tla->createCommand($sql)->queryAll();
+		}else
+		{
+			$provide2=Yii::app()->db->createCommand($sql)->queryAll();
+		}
+		$filteredData2=$filtersForm2->filter($provide2);
+		$dataprovider2=new CArrayDataProvider($filteredData2);
+		$dataprovider2->pagination=['pageSize' =>10,];
+		$sort2=new CSort();
+		$sort2->attributes=[
+			'org_name'=>[
+				'asc'=>'org_name ASC',
+				'desc'=>'org_name DESC',
+			],
+		];
+		$sort2->defaultOrder = "org_name ASC";
+		$dataprovider2->sort=$sort2;
+
+
+		$this->render('reconcile_list',['model'=>$model,'dataProvider'=>[$dataprovider,$filtersForm],'dataProvider2'=>[$dataprovider2,$filtersForm2],'type'=>$type,'status'=>$status]);
+	}
+
+	public function actionExport()
+	{
+		$type = $_GET['type'];
+		$model = new SiReconcile();
+		$model->unsetAttributes();
+		$model->type = $type;
+		if(!empty($_GET['SiReconcile']))
+		{
+			$model->setAttributes($_GET['SiReconcile']);
+		}
+
+		if(!empty($_GET['SiReconcile']))
+		{
+			$model->setAttributes($_GET['SiReconcile']);
+			$model->inv_no = empty($_GET['SiReconcile']['inv_no'])?"":$_GET['SiReconcile']['inv_no'];
+			$model->org_id = empty($_GET['SiReconcile']['org_id'])?null:$_GET['SiReconcile']['org_id'];
+			$model->confirm_status = empty($_GET['SiReconcile']['confirm_status'])?"":$_GET['SiReconcile']['confirm_status'];
+			$search = $model->search(false);
+			$data = $search->data;
+			$xls = new oExcel;
+			$i = 1;
+			// $xls->addRow($i++, ['WBN', 'Ref','Awb','Packages', 'Weight', 'Status', 'Agent', 'Sender', 'Sender Tel', 'Cnee Name', 'Cnee Tel', 'Address', 'State', 'Date', 'Delay','Extra Info']);
+			$xls->addRow($i++, ['Inv No', 'Supplier','Status','Error Type', 'Confirm Status','Total','Total Gst', 'Total Ex Gst', 'Inv Date',  'Create']);
+
+			foreach ($data as $r) {
+				$xls->addRow($i++, [$r->parent->inv_no, $r->org_id,$r->getFullStatus(),$r->getSubErrorType(),$r->getFullConfirmStatus(),$r->total,$r->total_gst,$r->total_ex_gst,$r->parent->inv_date,$r->create]);
+			}
+			$xls->output('imp_search_export_'.time().'.xlsx');
+		}
+
+	}
+
+	public function actionGetReconcileDpmt()
+	{
+		Yii::app()->name = "TLA";
+		$id = $_GET['id'];
+		$model = SiReconcile::model()->findByPk($id);
+
+		$this->render('si_reconcile_dpmt',['model'=>$model]);
+	}
+
+	public function actionGetReconcileDetail()
+	{
+		$id = $_GET['id'];
+		$model = SiReconcileLine::model();
+		$model->unsetAttributes();
+		$model->rec_id = $id;
+		if(isset($_GET['SiReconcileLine']))
+		{
+			$model->setAttributes($_GET['SiReconcileLine']);
+		}
+
+		if($model->parent->parent->type == SiReconcile::TYPE_COURIER)
+		{
+			$model->dpmt = $_GET['tab'];
+			if($model->parent->status == SiReconcile::ERROR_CHECKING_STATUS&&$model->parent->org_id == Org::ORGID_COURIER_AUPOST)
+			{
+				$model->itemCodesNot =  ['item','fuel'];
+			}else
+			{
+				if($model->parent->status < SiReconcile::SURCHARGE_CHECKING_STATUS&&$model->parent->parent->mdata['template'] != 'AUSPOST-item')
+				{
+					$model->item_code = 'item';
+				}else if($model->parent->status < SiReconcile::SURCHARGE_CHECKING_STATUS&&$model->parent->parent->mdata['template'] != 'AUSPOST-item')
+				{
+					$model->itemCodesNot = ['item'];
+				}else if($model->parent->status < SiReconcile::SURCHARGE_CHECKING_STATUS&&$model->parent->parent->mdata['template'] == 'AUSPOST-item')
+				{
+					$model->itemCodes = ['eparcel','letter'];
+				}else if($model->parent->status == SiReconcile::SURCHARGE_CHECKING_STATUS&&$model->parent->parent->mdata['template'] == 'AUSPOST-item')
+				{
+					$model->itemCodesNot =  ['eparcel','letter','item','fuel'];
+				}else if($model->parent->status > SiReconcile::SURCHARGE_CHECKING_STATUS&&$model->parent->parent->mdata['template'] == 'AUSPOST-item')
+				{
+					$model->itemCodesNot =  ['item','fuel'];
+				}
+			}
+			$this->render('si_reconcile_detail',['model'=>$model]);
+		}else if($model->parent->parent->type == SiReconcile::TYPE_MANUAL||$model->parent->parent->type == SiReconcile::TYPE_EXPENSE)
+		{
+			$this->render('si_reconcile_detail_manual',['model'=>$model]);
+		}else if($model->parent->parent->type == SiReconcile::TYPE_BROKER)
+		{
+			$this->render('si_reconcile_detail_broker',['model'=>$model]);
+		}else if($model->parent->parent->type == SiReconcile::TYPE_TERMINAL)
+		{
+			$this->render('si_reconcile_detail_terminal',['model'=>$model]);
+		}
+	}
+
+	public function actionGetApmanifestDetail()
+	{
+		$id = $_GET['id'];
+		$siRmodel = SiReconcileLine::model()->findByPk($id);
+		$model = SiReconcileLine::model();
+		$model->unsetAttributes();
+		$model->rec_id = $siRmodel->rec_id;
+		$model->inline_pid = $id;
+		if(isset($_GET['SiReconcileLine']))
+		{
+			$model->setAttributes($_GET['SiReconcileLine']);
+		}
+
+		$this->render('si_reconcile_apmanifest_detail',['model'=>$model]);
+	}
+
+	public function actionCancelReconciliation()
+	{
+		$id = $_GET['id'];
+		$model = $this->loadModel($id);
+		$reconcileService = new ReconcileService();
+		$result = $reconcileService->cancelReconciliation($type,$file,$rate);
+		$this->ajaxResult($model);
+	}
+
+	public function actionUpdateReconciliationStatus()
+	{
+		$id = $_GET['id'];
+		$model = $this->loadModel($id);
+		$status = $_GET['status'];
+		$reconcileService = new ReconcileService();
+		$reconcileService->updateReconciliationStatus($model,$status);
+		$this->ajaxResult($model);
+	}
+
+
+	public function actionAjaxImportReconciliationConfirmList()
+	{
+		$hash = $_GET['pphash'];
+		$dpmt = @$_GET['dpmt'];
+		$f = $_FILES['file'];
+		$filename = $f['tmp_name'];
+		$name = $f['name'];
+		$sup = Yii::app()->session['uploads'][$hash];
+		$model = $this->loadModel($sup[1]);
+		$model->log("import confirm file");
+		$reconcileService = new ReconcileService();
+		$result = $reconcileService->importReconciliationConfirmList($model,$f,$dpmt);
+		if(!is_uploaded_file($filename)) return false;
+		$sup = Yii::app()->session['uploads'][$hash];
+		$fr = new FileRepo();
+		$fr->store($f,$hash);
+
+		echo json_encode($result);
+		return true;
+	}
+
+	public function actionExportReconciliationLine()
+	{
+		$id = $_GET['id'];
+		$model = $this->loadModel($id);
+		$reconcileService = new ReconcileService();
+		$reconcileService->exportReconciliationLine($model);
+		return;
+	}
+
+	public function actionUpdateStatus()
+	{
+		$id = $_GET['id'];
+		$status = $_GET['status'];
+		$dpmt = @$_GET['dpmt'];
+		$model = $this->loadModel($id);
+		$reconcileService = new ReconcileService();
+		$result = $reconcileService->updateSiReconciliationStatus($model,$status,$dpmt);
+		echo json_encode($result);
+		return;
+	}
+
+
+	public function actionUpdateStatusDirect()
+	{
+		$id = $_GET['id'];
+		$status = $_GET['status'];
+		$dpmt = @$_GET['dpmt'];
+		$modelDpmt = $this->loadModel($id,$dpmt);
+		$modelDpmt->status = $status;
+		$modelDpmt->save();
+
+		$model = $this->loadModel($id);
+		if(!empty($_POST['invoice_date'])&&$_POST['invoice_date']!=$model->parent->inv_date)
+		{
+			$model->parent->inv_date = $_POST['invoice_date'];
+			$model->parent->save();
+		}
+		if(!empty($_POST['note']))
+		{
+			$model->note = $_POST['note'];
+			$model->save();
+		}
+
+		if(!empty($_POST['gst']))
+		{
+			$model->total_gst = number_format($_POST['gst'],4,'.','');
+			$model->total = ($model->total_gst+$model->total_ex_gst);
+
+			$model->parent->gst = number_format($_POST['gst'],4,'.','');
+			$model->parent->total = ($model->parent->gst+$model->parent->total_ex_gst);
+			$model->parent->save();
+		}
+		echo json_encode(["done"=>$model->save(),"msg"=>"Done"]);
+		return;
+	}
+
+
+	public function actionLinkBilling()
+	{
+		$id = $_GET['id'];
+		$dpmt =  @$_GET['dpmt'];
+		$model = $this->loadModel($id);
+		$reconcileService = new ReconcileService();
+		$result = $reconcileService->linkBilling($model,$dpmt);
+		echo json_encode($result);
+		return;
+	}
+
+	public function actionCreateDisputeCase()
+	{
+		$reconcileService = new ReconcileService();
+		if(!empty($_POST['ids'])||!empty($_FILES['dispute_file']))
+		{
+			$file = !empty($_FILES['dispute_file'])?$_FILES['dispute_file']:null;
+			$ids = explode(',',empty($_POST['ids'])?'':$_POST['ids']);
+			$disputeAmountExGsts = explode(',',empty($_POST['disputeAmountExGsts'])?'':$_POST['disputeAmountExGsts']);
+			$notes = explode(',',empty($_POST['note'])?'':$_POST['note']);
+			$dpmt = empty($_POST['dpmt'])?'':$_POST['dpmt'];
+			$data = [];
+			foreach ($ids as $key => $value) {
+				$data[$value]['dispute_amount_ex_gst'] = $disputeAmountExGsts[$key];
+				$data[$value]['note'] = @$notes[$key];
+			}
+			$result = $reconcileService->createDisputeCase($ids,$data,$file,$dpmt);
+			echo json_encode($result);
+			return;
+		}
+		$model = new SiReconcileLine();
+		$model->unsetAttributes();
+		$model->rec_id = $_GET['id'];
+		$model->dpmt = $_GET['dpmt'];
+		$model->isDispute = true;
+		if($model->parent->org_id==Org::ORGID_COURIER_AUPOST)
+		{
+			$model->itemCodesNot = ['fuel','item'];
+		}
+
+		if($model->parent->org_id==Org::ORGID_COURIER_EIZ)
+		{		
+			[$ids,$surcharges] = $reconcileService->getEizNeedDisputeLineId($_GET['id']);
+			if(!empty($ids))
+			{
+				$model->id = $ids;
+			}
+		}
+		$this->render('dispute_page',["model"=>$model]);
+	}
+
+	public function actionUpdateDisputeStatus()
+	{
+		$disputeId = $_GET['id'];
+		$model = new DisputeLine();
+		$model->unsetAttributes();
+		$model->dispute_id = $disputeId;
+		$this->render('update_dispute_status',["model"=>$model]);
+	}
+
+	public function actionUpdateCreditedAmount()
+	{
+		if(!empty($_POST['ids']))
+		{
+			$ids = explode(',',$_POST['ids']);
+			$creditAmountExGst = explode(',',$_POST['creditAmountExGst']);
+			$data = [];
+			foreach ($ids as $key => $value) {
+				$data[$value]['creditAmountExGst'] = $creditAmountExGst[$key];
+			}
+			$reconcileService = new ReconcileService();
+			$result = $reconcileService->updateDisputeStatus($ids,$data);
+			echo json_encode($result);
+			return;
+		}
+	}
+
+	public function actionGenerateDisputeInvoiceToCustomer()
+	{
+		if(!empty($_POST['ids']))
+		{
+			$reconcileService = new ReconcileService();
+			$result = $reconcileService->generateUnknownSurchargeInvoice(0,$_POST['disputeAmountExGsts'],$_POST['ids'],$_POST['disputeInvoiceDets']);
+			echo json_encode($reconcileService->getResult(true,"success"));
+			return;
+		}
+	}
+
+	public function actionExportRateDiff()
+	{
+		if(isset($_GET['id']))
+		{
+			$id = $_GET['id'];
+			$dpmt = @$_GET['dpmt'];
+			$model = $this->loadModel($id);
+			$reconcileService = new ReconcileService();
+			$reconcileService->exportRateDiffExcel($model,$model->parent->inv_no,$dpmt);
+		}else if(isset($_GET['inline_pid']))
+		{
+			$id = $_GET['inline_pid'];
+			$model = SiReconcileLine::model()->findByPk($id);
+			$reconcileService = new ReconcileService();
+			$reconcileService->exportRateDiffExcel($model,$model->ref);
+		}
+		return;
+	}
+
+	public function actionExportCanDispute()
+	{
+		if(isset($_GET['id']))
+		{
+			$id = $_GET['id'];
+			$dpmt = $_GET['dpmt'];
+			$model = $this->loadModel($id);
+			$reconcileService = new ReconcileService();
+			$reconcileService->exportDisputeExcel($model,$model->parent->inv_no,$dpmt);
+		}else if(isset($_GET['inline_pid']))
+		{
+			$id = $_GET['inline_pid'];
+			$model = SiReconcileLine::model()->findByPk($id);
+			$reconcileService = new ReconcileService();
+			$reconcileService->exportDisputeExcel($model,$model->ref);
+		}
+		return;
+	}
+
+	public function actionExportErrorList()
+	{
+		if(isset($_GET['id']))
+		{
+			$id = $_GET['id'];
+			$dpmt = empty($_GET['dpmt'])?"":$_GET['dpmt'];
+			$model = $this->loadModel($id);
+			$reconcileService = new ReconcileService();
+			$reconcileService->exportErrorListExcel($model,$model->parent->inv_no,$dpmt);
+		}else if(isset($_GET['inline_pid']))
+		{
+			$id = $_GET['inline_pid'];
+			$model = SiReconcileLine::model()->findByPk($id);
+			$reconcileService = new ReconcileService();
+			$reconcileService->exportErrorListExcel($model,$model->ref);
+		}
+		return;
+	}
+
+
+	public function actionExportWeightDiff()
+	{
+		if(isset($_GET['id']))
+		{
+			$id = $_GET['id'];
+			$dpmt = $_GET['dpmt'];
+			$model = $this->loadModel($id);
+			$reconcileService = new ReconcileService();
+			$reconcileService->exportWeightDiffExcel($model,$model->parent->inv_no,$dpmt);
+		}else if(isset($_GET['inline_pid']))
+		{
+			$id = $_GET['inline_pid'];
+			$model = SiReconcileLine::model()->findByPk($id);
+			$reconcileService = new ReconcileService();
+			$reconcileService->exportWeightDiffExcel($model,$model->ref);
+		}
+		return;
+	}
+
+	public function actionExportSurchargeDiff()
+	{
+		if(isset($_GET['id']))
+		{
+			$id = $_GET['id'];
+			$dpmt = $_GET['dpmt'];
+			$model = $this->loadModel($id);
+			$reconcileService = new ReconcileService();
+			$reconcileService->exportSurchargeDiff($model,$model->parent->inv_no,$dpmt);
+		}else if(isset($_GET['inline_pid']))
+		{
+			$id = $_GET['inline_pid'];
+			$model = SiReconcileLine::model()->findByPk($id);
+			$reconcileService = new ReconcileService();
+			$reconcileService->exportSurchargeDiff($model,$model->ref);
+		}
+		return;
+	}
+
+	public function actionExportEizInfo()
+	{
+		if(isset($_GET['id']))
+		{
+			$id = $_GET['id'];
+			$dpmt = $_GET['dpmt'];
+			$model = $this->loadModel($id);
+			$reconcileService = new ReconcileService();
+			$reconcileService->exportEizInfo($model,$model->parent->inv_no,$dpmt);
+		}
+		return;
+	}
+
+	public function actionUpdateLine()
+	{
+		if(!empty($_POST['id']))
+		{
+			$id = $_GET['id'];
+			$action = $_GET['action'];
+			$model = SiReconcileLine::model()->findByPk($id);
+			$reconcileService = new ReconcileService();
+			if($action=='refresh')
+			{
+				$result = $reconcileService->updateLine($model,$action);
+				echo json_encode($result);
+			}else if($action=='save')
+			{
+				$ref = $_POST['SiReconcileLine']['ref'];
+				$result = $reconcileService->updateLine($model,$action,$ref);
+				echo json_encode($result);
+			}
+			return;
+		}
+		$id = $_GET['id'];
+		$model = SiReconcileLine::model()->findByPk($id);
+		$this->render('operation_tab',['model'=>$model]);
+		return;
+	}
+
+	public function actionConfirmBrokerDiff()
+	{
+		if(!empty($_GET['id']))
+		{
+			$id = $_GET['id'];
+			// $action = $_GET['action'];
+			$model = SiReconcileLine::model()->findByPk($id);
+			$reconcileService = new ReconcileService();
+			$result = $reconcileService->confirmBrokerDiff($model);
+			echo json_encode($result);
+			// if($action=='confirm')
+			// {
+			// 	$result = $reconcileService->confirmBrokerDiff($model);
+			// 	echo json_encode($result);
+			// }
+			return;
+		}
+		// $id = $_GET['id'];
+		// $model = SiReconcileLine::model()->findByPk($id);
+		// $this->render('simple_operation_tab',['model'=>$model,'url'=>'siReconcile/confirmBrokerDiff','action'=>'confirm']);
+		// return;
+	}
+	
+	public function actionTerminalRefreshCurrentSearch()
+	{
+		$model = new SiReconcile();
+		$model->unsetAttributes();
+		$model->type = SiReconcile::TYPE_TERMINAL;
+		if(!empty($_GET['SiReconcile']))
+		{
+			$model->setAttributes($_GET['SiReconcile']);
+		}
+		if(!empty($_GET['SiReconcile']))
+		{
+			$model->setAttributes($_GET['SiReconcile']);
+			$model->inv_no = empty($_GET['SiReconcile']['inv_no'])?"":$_GET['SiReconcile']['inv_no'];
+			$model->org_id = empty($_GET['SiReconcile']['org_id'])?null:$_GET['SiReconcile']['org_id'];
+			$model->confirm_status = empty($_GET['SiReconcile']['confirm_status'])?"":$_GET['SiReconcile']['confirm_status'];
+			$search = $model->search(false);
+			$datas = $search->data;
+			foreach ($datas as $key => $data)
+			{
+				foreach ($data->lines as $key => $line) {
+					if(($line->type&SiReconcileLine::EMPTY_CONSOL)>0||$line->my_value==0)
+					{
+						$reconcileService = new ReconcileService();
+						$result = $reconcileService->updateLine($line,'refresh');
+					}
+				}
+			}
+			echo "done";
+			return;
+		}
+		echo "search before refresh";
+		return;
+	}
+
+	public function actionBrokerLinkingBillingCurrentSearch()
+	{
+		$type = SiReconcile::TYPE_BROKER;
+		$model = new SiReconcile();
+		$model->unsetAttributes();
+		$model->type = $type;
+		if(!empty($_GET['SiReconcile']))
+		{
+			$model->setAttributes($_GET['SiReconcile']);
+		}
+
+		if(!empty($_GET['SiReconcile']))
+		{
+			$model->setAttributes($_GET['SiReconcile']);
+			$model->inv_no = empty($_GET['SiReconcile']['inv_no'])?"":$_GET['SiReconcile']['inv_no'];
+			$model->org_id = empty($_GET['SiReconcile']['org_id'])?null:$_GET['SiReconcile']['org_id'];
+			$model->confirm_status = empty($_GET['SiReconcile']['confirm_status'])?"":$_GET['SiReconcile']['confirm_status'];
+			$search = $model->search(false);
+			$data = $search->data;
+			$reconcileService = new ReconcileService();
+			$result = $reconcileService->brokerLinkingBilling($data);
+			echo json_encode($result);
+			return;
+		}
+	}
+	public function actionManualErrorCheckingCurrentSearch()
+	{
+		$type = $_GET['type'];
+		$model = new SiReconcile();
+		$model->unsetAttributes();
+		$model->type = $type;
+		if(!empty($_GET['SiReconcile']))
+		{
+			$model->setAttributes($_GET['SiReconcile']);
+		}
+
+		if(!empty($_GET['SiReconcile']))
+		{
+			$model->setAttributes($_GET['SiReconcile']);
+			$model->inv_no = empty($_GET['SiReconcile']['inv_no'])?"":$_GET['SiReconcile']['inv_no'];
+			$model->org_id = empty($_GET['SiReconcile']['org_id'])?null:$_GET['SiReconcile']['org_id'];
+			$model->confirm_status = empty($_GET['SiReconcile']['confirm_status'])?"":$_GET['SiReconcile']['confirm_status'];
+			$search = $model->search(false);
+			$data = $search->data;
+			$reconcileService = new ReconcileService();
+			$result = $reconcileService->manualErrorChecking($data);
+			echo json_encode($result);
+			return;
+		}
+	}
+
+	public function actionManualLinkingBillingCurrentSearch()
+	{
+		$type = $_GET['type'];
+		$model = new SiReconcile();
+		$model->unsetAttributes();
+		$model->type = $type;
+		if(!empty($_GET['SiReconcile']))
+		{
+			$model->setAttributes($_GET['SiReconcile']);
+		}
+
+		if(!empty($_GET['SiReconcile']))
+		{
+			$model->setAttributes($_GET['SiReconcile']);
+			$model->inv_no = empty($_GET['SiReconcile']['inv_no'])?"":$_GET['SiReconcile']['inv_no'];
+			$model->org_id = empty($_GET['SiReconcile']['org_id'])?null:$_GET['SiReconcile']['org_id'];
+			$model->confirm_status = empty($_GET['SiReconcile']['confirm_status'])?"":$_GET['SiReconcile']['confirm_status'];
+			$search = $model->search(false);
+			$data = $search->data;
+			$reconcileService = new ReconcileService();
+			$result = $reconcileService->manualLinkingBilling($data);
+			echo json_encode($result);
+			return;
+		}
+	}
+
+
+	public function actionDiffInvoiceCheck($id)
+	{
+		$model = SiReconcileLine::model()->findByPk($id);
+
+		$weight = $model->getCdeadwtOrWeight();
+		$csChargeWeight = $model->ourChargeWeight();
+		$courierWeightByChargeCode = $model->getCourierWeightByChargeCode();
+		$diffWeight = $courierWeightByChargeCode-$csChargeWeight;
+		$courierWeightInvoiceByChargeCode =  $model->getCourierWeightInvoiceByChargeCode();
+		$chargedInvoice = $model->getChargedInvoice();
+		$payInBack = $courierWeightInvoiceByChargeCode-$chargedInvoice;
+		$cubicRate = $model->getShipmentCubicRate();
+		$this->render('invoice_check', ['model' => $model,'cubicRate'=>$cubicRate,'weight'=>$weight,'csChargeWeight'=>$csChargeWeight,'courierWeightByChargeCode'=>$courierWeightByChargeCode,'diffWeight'=>$diffWeight, 'courierWeightInvoiceByChargeCode'=>$courierWeightInvoiceByChargeCode, 'chargedInvoice'=>$chargedInvoice,'payInBack' => $payInBack]);
+	}
+
+	public function actionViewWeightDiffReport()
+	{
+		$id = $_GET['rec_id'];
+		$dpmt = @$_GET['dpmt'];
+		$model = SiReconcile::model()->findByPk($id);
+		$report = $model->getReconciliationWeightDiffInvoiceReport($dpmt);
+		$this->render('weightDiffReport', ['model' => $model,'report'=>$report,'title'=>'Weight_Diff','url'=>'siReconcile/generateAllReWDInv']);
+	}
+
+
+	public function actionViewSurchargeReport()
+	{
+		$id = $_GET['rec_id'];
+		$dpmt = @$_GET['dpmt'];
+		$model = SiReconcile::model()->findByPk($id);
+		$report = $model->getReconciliationSurchargeInvoiceReport($dpmt);
+		$this->render('weightDiffReport', ['model' => $model,'report'=>$report[0],'unKnownline'=>@$report[1],'title'=>'Surcharge','url'=>'siReconcile/generateAllReSurchargeInv','dpmt'=>$dpmt]);
+	}
+
+
+	public function actionViewRTSReport()
+	{
+		$id = $_GET['rec_id'];
+		$dpmt = @$_GET['dpmt'];
+		$model = SiReconcile::model()->findByPk($id);
+		$report = $model->getReconciliationRTSInvoiceReport($dpmt);
+		$this->render('weightDiffReport', ['model' => $model,'report'=>$report,'title'=>'RTS','url'=>'siReconcile/generateAllRTSInv']);
+	}
+
+	public function actionGenerateReconciliationWeightDiffInvoice($id)
+	{
+		$recId = $_GET['rec_id'];
+		return $this->ajaxResult(ReconcileService::generateReconciliationWeightDiffInvoice($id, $recId), ['id']);
+	}
+
+	public function actionGenerateAllReWDInv()
+	{
+		$parentId = $_POST['rec_id'];
+		$consolIds = $_POST['consolIds'];
+		$ids = $_POST['ids'];
+		return $this->ajaxResult(ReconcileService::generateReconciliationWeightDiffInvoice(null, $parentId, $consolIds, $ids));
+	}
+
+
+	public function actionGenerateAllReSurchargeInv()
+	{
+		$parentId = $_POST['rec_id'];
+		$consolIds = $_POST['consolIds'];
+		$ids = $_POST['ids'];
+		return $this->ajaxResult(ReconcileService::generateReconciliationSurchargeInvoice(null, $parentId, $consolIds, $ids));
+	}
+
+	public function actionGenerateAllRTSInv()
+	{
+		$parentId = $_POST['rec_id'];
+		$consolIds = $_POST['consolIds'];
+		$ids = $_POST['ids'];
+		return $this->ajaxResult(ReconcileService::generateReconciliationRTSInvoice($parentId, $consolIds, $ids));
+	}
+
+
+	public function actionGenerateUnknownSurchargeInvoice()
+	{
+		$parentId = $_POST['rec_id'];
+		$charges = $_POST['charges'];
+		$invoice_dets = $_POST['invoice_dets'];
+		$ids = $_POST['ids'];
+		return $this->ajaxResult(ReconcileService::generateUnknownSurchargeInvoice($parentId, $charges, $ids,$invoice_dets));
+	}
+
+
+	public function actionBrokerLinkingBillingPage()
+	{
+		$this->render('weightDiffReport', ['model' => $model,'report'=>$report]);
+	}
+
+
+	public function actionLog($id)
+	{
+		$model = $this->loadModel($id);
+		if ($model==null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		if(!empty($_POST))
+		{
+			$model->note = $_POST['notes'];
+			$model->save();
+			$this->ajaxResult($model);
+		}
+		$this->render('log', [
+			'model'=>$model,
+		]);
+	}
+
+	public function actionTopay($id)
+	{
+		$model = $this->loadModel($id);
+		if (in_array($model->type,[SiReconcile::TYPE_COURIER])) {
+			$model->toPay();
+		} else {
+			$model->toPay(true);
+		}
+		$this->ajaxResult($model);
+	}
+
+	public function actionManualToPayCurrentSearch()
+	{
+		$type = $_GET['type'];
+		$model = new SiReconcile();
+		$model->unsetAttributes();
+		$model->type = $type;
+		if(!empty($_GET['SiReconcile']))
+		{
+			$model->setAttributes($_GET['SiReconcile']);
+		}
+
+		if(!empty($_GET['SiReconcile']))
+		{
+			$model->setAttributes($_GET['SiReconcile']);
+			$model->inv_no = empty($_GET['SiReconcile']['inv_no'])?"":$_GET['SiReconcile']['inv_no'];
+			$model->org_id = empty($_GET['SiReconcile']['org_id'])?null:$_GET['SiReconcile']['org_id'];
+			$model->confirm_status = empty($_GET['SiReconcile']['confirm_status'])?"":$_GET['SiReconcile']['confirm_status'];
+			$search = $model->search(false);
+			$data = $search->data;
+			foreach ($data as $key => $d) {
+				if(($d->confirm_status & SiReconcile::BLILLING_LINKED)> 0)
+				{
+					if ($d->type == SiReconcile::TYPE_COURIER) {
+						$d->toPay();
+					} else {
+						$d->toPay(true);
+					}
+				}
+			}	
+			echo json_encode(['done'=>true,'msg'=>'Success']);
+			return;
+		}
+	}
+
+	public function actionBrokerToPayCurrentSearch()
+	{
+		$type = SiReconcile::TYPE_BROKER;
+		$model = new SiReconcile();
+		$model->unsetAttributes();
+		$model->type = $type;
+		if(!empty($_GET['SiReconcile']))
+		{
+			$model->setAttributes($_GET['SiReconcile']);
+		}
+
+		if(!empty($_GET['SiReconcile']))
+		{
+			$model->setAttributes($_GET['SiReconcile']);
+			$model->inv_no = empty($_GET['SiReconcile']['inv_no'])?"":$_GET['SiReconcile']['inv_no'];
+			$model->org_id = empty($_GET['SiReconcile']['org_id'])?null:$_GET['SiReconcile']['org_id'];
+			$model->confirm_status = empty($_GET['SiReconcile']['confirm_status'])?"":$_GET['SiReconcile']['confirm_status'];
+			$search = $model->search(false);
+			$data = $search->data;
+			foreach ($data as $key => $d) {
+				if(($d->confirm_status & SiReconcile::BLILLING_LINKED)> 0)
+				{
+					if ($d->type == SiReconcile::TYPE_COURIER) {
+						$d->toPay();
+					} else {
+						$d->toPay(true);
+					}
+				}
+			}	
+			echo json_encode(['done'=>true,'msg'=>'Success']);
+			return;
+		}
+	}
+
+	public function actionDelete($id)
+	{
+		$siReconcile = SiReconcile::model()->findByPk($id);
+		$reconcileService = new ReconcileService();
+		$result = $reconcileService->deleteSiReconcile($siReconcile);
+		return;
+	}
+
+	public function actionUpdateDisputeRef()
+	{
+		$model = DisputeLine::model()->findByPk($_POST['DisputeLine']['id']);
+		$oldRef = $model->line->ref;
+		$shipment = Shipment::model()->find('ref = :n OR hbn = :n', [':n' => $_POST['DisputeLine']['line_ref']]);
+		if (empty($shipment)) {
+			$model->addError('id', 'Cannot find shipment');
+		} else {
+			$siReconcileLines = SiReconcileLine::model()->findAll('ref = :ref and rec_id = :rec_id',[":ref"=>$model->line->ref,":rec_id"=>$model->line->rec_id]);
+			foreach ($siReconcileLines as $key => $line)
+			{
+				$dmodel = DisputeLine::model()->find("si_reconcile_line_id = :sid and dispute_id = :did",[":sid"=>$line->id,":did"=>$model->dispute_id]);
+				if(!empty($dmodel))
+				{
+					$dmodel->note = $oldRef;
+					$dmodel->update('note');
+					$line->ref = $_POST['DisputeLine']['line_ref'];
+					$line->fid = $shipment->id;
+					$line->update('ref', 'fid');
+				}
+			}
+		}
+		$this->ajaxResult($model);
+	}
+
+	public function actionBulkUpdateLine()
+	{
+		$reconcileService = new ReconcileService();
+		$type = SiReconcile::TYPE_BROKER;
+		$model = new SiReconcile();
+		$model->unsetAttributes();
+		$model->type = $type;
+		if(!empty($_GET['SiReconcile']))
+		{
+			$model->setAttributes($_GET['SiReconcile']);
+		}
+
+		if(!empty($_GET['SiReconcile']))
+		{
+			$model->setAttributes($_GET['SiReconcile']);
+			$model->inv_no = empty($_GET['SiReconcile']['inv_no'])?"":$_GET['SiReconcile']['inv_no'];
+			$model->org_id = empty($_GET['SiReconcile']['org_id'])?null:$_GET['SiReconcile']['org_id'];
+			$model->confirm_status = empty($_GET['SiReconcile']['confirm_status'])?"":$_GET['SiReconcile']['confirm_status'];
+			$search = $model->search(false);
+			$data = $search->data;
+			$done = true;
+			foreach ($data as $key => $d) {
+				foreach ($d->lines as $key2 => $line) {
+					if (!$line->isInBrokerField()) {
+						$result = $reconcileService->updateLine($line,"save",$line->ref);
+						if(!$result['done']){
+							echo json_encode(['done'=>false,'msg'=>$d->parent->inv_no.'|no is not found']);
+						}
+					}					
+					
+				}
+				
+			}
+
+			echo json_encode(['done'=>true,'msg'=>'Process Done']);
+			
+			return;
+		}
+
+	}
+	
+	/**
+	* show add invoice page
+	*/
+	public function actionImportUnmanifestList()
+	{
+		$this->render('adjust_si_reconcile_ref',["title"=>"Import Unmanifest List","url"=>"siReconcile/ajaxImportUnmanifestList","templateLabel"=>"get unmanifest list Template","templateUrl"=>"ims/unmanifest_list.xlsx"]);
+	}
+
+	/**
+	* show add invoice page
+	*/
+	public function actionAdjustSiReconcileRef()
+	{
+		$this->render('adjust_si_reconcile_ref',["title"=>"Add Invoice","url"=>"siReconcile/ajaxAdjustSiReconcileRef","templateLabel"=>"get adjust_si_reconcile_ref Template","templateUrl"=>"ims/adjust_si_reconcile_ref.xlsx"]);
+	}
+
+	/**
+	**@param type the type of invoice courier, broker or terminal
+	**@param file the invoice file
+	**@param currency the currenct of the invoice
+	**@param rate_option this is the code of org_rate
+	**@param invoice_amount the amount of invoice for double check
+	**@param invoice_date the date of the invoice
+	**@param invoice_no the number of the invoice
+	*/
+	public function actionAjaxAdjustSiReconcileRef()
+	{
+		$file = $_FILES['inv_file'];
+		$reconcileService = new ReconcileService();
+		$result = $reconcileService->adjustSiReconcileRef($file);
+		echo json_encode($result);
+		return;
+	}
+
+	public function actionAjaxImportUnmanifestList()
+	{
+		$file = $_FILES['inv_file'];
+		$reconcileService = new ReconcileService();
+		$result = $reconcileService->importUnmanifestList($file);
+		echo json_encode($result);
+		return;
+	}
+
+	public function actionCreateUnknownSurchargeDisputeCase()
+	{
+		$reconcileService = new ReconcileService();
+		if(!empty($_POST['ids']))
+		{
+			$file = !empty($_FILES['dispute_file'])?$_FILES['dispute_file']:null;
+			$ids = explode(',',empty($_POST['ids'])?'':$_POST['ids']);
+			$disputeAmountExGsts = explode(',',empty($_POST['charges'])?'':$_POST['charges']);
+			$notes = explode(',',empty($_POST['invoice_dets'])?'':$_POST['invoice_dets']);
+			$dpmt = empty($_POST['dpmt'])?'':$_POST['dpmt'];
+			$data = [];
+			foreach ($ids as $key => $value) {
+				$data[$value]['dispute_amount_ex_gst'] = $disputeAmountExGsts[$key];
+				$data[$value]['note'] = @$notes[$key];
+			}
+			$result = $reconcileService->createDisputeCase($ids,$data,$file,$dpmt);
+			echo json_encode($result);
+			return;
+		}
+
+	}
+
+
+	/**
+	 * Returns the data model based on the primary key given in the GET variable.
+	 * If the data model is not found, an HTTP exception will be raised.
+	 * @param integer the ID of the model to be loaded
+	 */
+	public function loadModel($id,$dpmt=false)
+	{
+		if(!empty($dpmt))
+		{
+			$model = SiReconcileDpmt::model()->find('si_reconcile_id = :sid and dpmt=:dpmt',[":sid"=>$id,':dpmt'=>$dpmt]);
+			if ($model===null) {
+				$model=SiReconcile::model()->findByPk($id);
+				if ($model===null) {
+					throw new CHttpException(404, 'The requested page does not exist.');
+				}
+				return $model;
+			}
+			return $model;
+		}
+
+		$model=SiReconcile::model()->findByPk($id);
+		if ($model===null) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		return $model;
+	}
+
+}

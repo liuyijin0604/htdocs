@@ -1,0 +1,170 @@
+<?php
+
+/**
+ * This is the model class for table "wms_rack_shipment".
+ *
+ * The followings are the available columns in table 'wms_rack_shipment':
+ * @property integer $id
+ * @property integer $shipment_id
+ * @property integer $sno
+ * @property integer $rack_id
+ */
+class WmsRackShipment extends CActiveRecord
+{
+	const REMOVED = 1;
+	const ACTIVE = 0;
+	public $qty,$status,$wid,$hbn,$ref,$location_code,$ground_label,$ground_label_in_time,$memo,$searchRemove,$noRemove;
+	
+	/**
+	 * @return string the associated database table name
+	 */
+	public function tableName()
+	{
+		return 'wms_rack_shipment';
+	}
+
+
+	public function defaultScope()
+	{
+		return !empty($this->searchRemove)? [] : ['condition' => $this->dbConnection->quoteColumnName($this->getTableAlias(false, false).'.status').'='.static::ACTIVE];
+	}
+
+
+	/**
+	 * @return array validation rules for model attributes.
+	 */
+	public function rules()
+	{
+		// NOTE: you should only define rules for those attributes that
+		// will receive user inputs.
+		return array(
+			array('shipment_id, rack_id', 'required'),
+			array('id, shipment_id, sno, rack_id', 'numerical', 'integerOnly'=>true),
+			// The following rule is used by search().
+			// @todo Please remove those attributes that should not be searched.
+			array('id, shipment_id, sno, rack_id,status,wid,hbn,ref,memo,location_code,barcode,ground_label,ground_label_in_time', 'safe', 'on'=>'search'),
+		);
+	}
+
+	/**
+	 * @return array relational rules.
+	 */
+	public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return array(
+			'location' => [self::BELONGS_TO, 'WmsLocation', 'rack_id'],
+			'shipment' => [self::BELONGS_TO, 'Shipment', 'shipment_id'],
+		);
+	}
+
+	/**
+	 * @return array customized attribute labels (name=>label)
+	 */
+	public function attributeLabels()
+	{
+		return array(
+			'id' => 'ID',
+			'shipment_id' => 'Shipment',
+			'sno' => 'Sno',
+			'rack_id' => 'Rack',
+		);
+	}
+
+
+	public function getLocation($isHtml = false)
+	{
+		if(!empty($this->isScanned))
+		{
+			$n = $this->location->code."{S}";
+			if($isHtml) $n="<font style='color:green'>{$n}</font>";
+			return $n;
+		}
+
+		return $this->location->code;
+	}
+
+
+	/**
+	 * Retrieves a list of models based on the current search/filter conditions.
+	 *
+	 * Typical usecase:
+	 * - Initialize the model fields with values from filter form.
+	 * - Execute this method to get CActiveDataProvider instance which will filter
+	 * models according to data in model fields.
+	 * - Pass data provider to CGridView, CListView or any similar widget.
+	 *
+	 * @return CActiveDataProvider the data provider that can return the models
+	 * based on the search/filter conditions.
+	 */
+	public function search($pgn = true, $ps = 50)
+	{
+		// @todo Please modify the following code to remove attributes that should not be searched.
+
+		$criteria=new CDbCriteria;
+
+		$criteria->compare('id',$this->id);
+		$criteria->compare('shipment_id',$this->shipment_id);
+		$criteria->compare('sno',$this->sno);
+		$criteria->compare('rack_id',$this->rack_id);
+		$criteria->compare('barcode',$this->rack_id);
+		$with = [];
+		$with[] = "location";
+		if(!empty($this->hbn)||!empty($this->ref)||!empty($this->status)||!empty($this->memo))
+		{
+			$with[] = "shipment";
+			$criteria->compare('shipment.hbn',$this->hbn);
+			$criteria->compare('shipment.ref',$this->ref);
+			$criteria->compare('shipment.status',$this->status);
+			$criteria->compare('shipment.can',$this->memo);
+		}
+		
+		if(!empty($this->wid)||!empty($this->location_code||!empty($this->ground_label)||!empty($this->ground_label_in_time)))
+		{
+			$criteria->compare('location.wid',$this->wid);
+			$criteria->compare('location.code',$this->location_code,true);
+			$criteria->compare('location.ground_label',$this->ground_label,true);
+			$criteria->compare('location.ground_label_in_time',$this->ground_label_in_time,true);
+		}
+
+		$criteria->with = $with;
+		$criteria->together = true;
+		$sort = new CSort();
+		$sort->attributes = [
+				'created'=>[
+				'asc'=>'t.created ASC',
+				'desc'=>'t.created DESC',
+				],
+				'ground_label_in_time'=>[
+				'asc'=>'location.ground_label_in_time ASC',
+				'desc'=>'location.ground_label_in_time DESC',
+				],
+		 	];
+			$sort->defaultOrder ='t.created DESC';
+
+
+		// in case sub-gridview, we need consol_id set by parent grid view
+		$pagerparams = $_GET;
+
+		return new CActiveDataProvider($this, array(
+			'criteria'=>$criteria,
+			'sort' => $sort,
+			'pagination' => $pgn ? [
+				'pageSize' => $ps,
+				'params' => $pagerparams,
+			] : false,
+		));
+	}
+
+	/**
+	 * Returns the static model of the specified AR class.
+	 * Please note that you should have this exact method in all your CActiveRecord descendants!
+	 * @param string $className active record class name.
+	 * @return wmsRackShipment the static model class
+	 */
+	public static function model($className=__CLASS__)
+	{
+		return parent::model($className);
+	}
+}

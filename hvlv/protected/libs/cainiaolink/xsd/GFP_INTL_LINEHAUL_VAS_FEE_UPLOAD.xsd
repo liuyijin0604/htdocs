@@ -1,0 +1,45 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<!--Created with Liquid Studio 2018 (https://www.liquid-technologies.com)-->
+<xs:schema attributeFormDefault="unqualified" elementFormDefault="qualified" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+    <xs:element name="request">
+        <xs:complexType>
+            <xs:sequence>
+                <xs:element name="orderCode" type="xs:string" minOccurs="1" />
+                <xs:element name="serialNum" type="xs:string" minOccurs="1" />
+                <xs:element name="chargeList" minOccurs="1">
+                    <xs:complexType>
+                        <xs:sequence>
+                            <xs:element name="charge" minOccurs="1" maxOccurs="unbounded">
+                                <xs:complexType>
+                                    <xs:sequence>
+                                        <xs:element name="chargeCode" type="xs:string" minOccurs="1" />
+                                        <xs:element name="qty" type="xs:unsignedInt" minOccurs="0" />
+                                        <xs:element name="uom" minOccurs="0">
+                                            <xs:simpleType>
+                                                <xs:restriction base="xs:string">
+                                                    <xs:enumeration value="PLT" />
+                                                    <xs:enumeration value="CTN" />
+                                                    <xs:enumeration value="CBM" />
+                                                    <xs:enumeration value="PIECE" />
+                                                </xs:restriction>
+                                            </xs:simpleType>
+                                        </xs:element>
+                                        <xs:element name="cost" type="xs:decimal" minOccurs="0" />
+                                        <xs:element name="currency" type="xs:string" minOccurs="0" />
+                                        <xs:element name="remark" minOccurs="0">
+                                            <xs:simpleType>
+                                                <xs:restriction base="xs:string">
+                                                    <xs:maxLength value="256" />
+                                                </xs:restriction>
+                                            </xs:simpleType>
+                                        </xs:element>
+                                    </xs:sequence>
+                                </xs:complexType>
+                            </xs:element>
+                        </xs:sequence>
+                    </xs:complexType>
+                </xs:element>
+            </xs:sequence>
+        </xs:complexType>
+    </xs:element>
+</xs:schema>

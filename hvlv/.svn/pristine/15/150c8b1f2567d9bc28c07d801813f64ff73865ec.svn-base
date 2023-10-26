@@ -1,0 +1,293 @@
+<h3>Edit C-Job <?= $model->job_name ?></h3>
+<style>
+	.cloumn_red {
+		background-color: pink;
+	}
+
+	.column_direct {
+		color: green;
+		font-weight: bold;
+	}
+</style>
+<div style="right: 20px;position: absolute;">
+	<a class="jqm_link" href="<?= $this->createUrl('topCourierService/addCargosIntoJob', ['id' => $model->id]); ?>">
+		<div style="background-position:-48px -688px" class="icon"></div>Add Cargos Into Job
+	</a>
+	<a onclick="funcExportCitoExcel<?= $model->id ?>()">
+		<div style="background-position:-48px -688px" class="icon"></div>Export Cito Excel
+	</a>
+</div>
+
+<?php
+// $chargeCodeId = CargoProcessJobService::getChargeCodeByCargoProcessId($model->id);
+// if(!preg_match('/2492|3230|8888/i',$chargeCodeId)){
+// 	$hasForkLift = 1;
+// }
+// $orgRateId = CargoProcessJobService::getDriverOrgRateIdByCDriverId($model->type,$model->driver->id,0,$hasForkLift);
+//
+$this->widget('application.extensions.CSpanableGridView.CSpanableGridView', [
+	'id' => $_GET["tabid"] . '_cargo_process_for_job_grid',
+	'cssFile' => false,
+	'dataProvider' => $cargo->search(false, 30, false, true, null),
+	'filter' => $cargo,
+	'columns' => [
+		['header' => 'select', 'type' => 'raw', 'value' => 'CHtml::button("remove",["value"=>"remove","data"=>$data->job_relation->id,"onClick"=>"return removeCargo({$data->job_relation->id})"]).CHtml::hiddenField("job_relation_id",$data->job_relation->id)'],
+		['header' => 'sequence', 'type' => 'raw', 'value' => 'CHtml::numberField($data->job_relation->id."cargo_sequence",$data->job_relation->sequence,array("style"=>"width:50px;"))'],
+		['header' => 'job_pallet_no', 'type' => 'raw', 'value' => 'CHtml::textField($data->job_relation->id."job_pallet_no",@$data->mdata["job_pallet_no"],array("style"=>"width:50px;"))'],
+		array('name' => 'hbn', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->createURL("imParcel/update", array("id" => $data->shipment_id))."\" class=\"tab_link\" title=\"".$data->shipment->hbn."\">".$data->shipment->hbn."</a>"',),
+		array('name' => 'ref', 'value' => '$data->getRef()'),
+		['name' => 'agent_id', 'value' => '$data->shipment->agent_id'],
+
+		['name' => 'shipment.consol_no', 'type' => 'raw', 'value' => 'empty($data->shipment->consol_id)? "" : "<a href=\"".Yii::app()->createURL(Consol::getTheConsolType($data->shipment->consol_id)==70?"dmawbConsol/update":"imcoConsol/update", array("id" => $data->shipment->consol_id))."\" class=\"tab_link\" title=\"".@$data->shipment->consol->no."\">".@$data->shipment->consol->no."</a>"', 'filter' => CHtml::textField('ImParcel[consol_no]', $cargo->consol_no)],
+		['name' => 'shipment.consol.awb', 'filter' => CHtml::hiddenField('CargoProcess[status]', @$cargo->status) . CHtml::textField('CargoProcess[awb]', @$cargo->awb)],
+		['name' => 'shipment.cnee.suburb', 'filter' => CHtml::textField('CargoProcess[suburb]', @$cargo->suburb)],
+		['name' => 'shipment.cnee.postcode', 'filter' => CHtml::textField('CargoProcess[postcode]', @$cargo->postcode)],
+		//array('header'=>'Revenue','value'=>'$data->getCargoProcessRevenueFee()'),
+		array('header' => 'Cost', 'value' => '$data->getCargoProcessFee()'), //'$data->getCargoProcessFee('.$orgRateId.')'
+		//['name'=>'shipment.can','filter'=>CHtml::textField('CargoProcess[memo]',@$cargo->memo)],	
+		array('name' => 'assignedAgent', 'filter' => CHtml::dropDownList('CargoProcess[assignedUser]', @$cargo->assignedUser, @User::getTruckUsers(), array('prompt' => 'Select'))),
+		['name' => 'status', 'type' => 'raw', 'value' => '$data->getFullStatus()', 'filter' => false],
+		['name' => 'shipment.status', 'value' => '$data->shipment->getStatus()', 'cssClassExpression' => '$data->getShowColor("held")'],
+		['header' => 'Unpacking Date', 'value' => '@$data->shipment->consol->mdata["ContainerUnloadDate"]'],
+		['name' => 'deliveryBookingTime', 'value' => '$data->getDeliveryBookingTime()', 'cssClassExpression' => '$data->getShowColor()', 'filter' => CHtml::textField('CargoProcess[deliveryBookingTime]', @$cargo->getBookingTime())],
+		'note',
+		array('header' => 'distance', 'value' => '$data->shipment->getDeliveryDistance().\'km\''),
+		array('header' => 'region', 'value' => '$data->getRegion(' . $model->dpt_id . ')'),
+		array('header' => 'zone', 'value' => '$data->getZone()'),
+		['header' => 'First Process Time', 'value' => '$data->getFirstProcessTime()', 'cssClassExpression' => '$data->getShowColor("last_process_time")'],
+		['header' => 'Last Process Time', 'value' => '$data->getLastProcessTime()', 'cssClassExpression' => '$data->getShowColor("last_process_time")'],
+		['header' => 'goods available address', 'type' => 'raw', 'value' => '$data->shipment->getAvailabelLabel()', 'filter' => CHtml::textField('CargoProcess[goodsAvailableAddress]', @$cargo->goodsAvailableAddress)],
+		['name' => 'shipment.pkg', 'cssClassExpression' => '$data->getShowColor("pkg")', 'filter' => CHtml::textField('CargoProcess[pkg]', @$cargo->pkg), 'value' => '$data->getPackages()'],
+		['name' => 'plt', 'type' => 'raw', 'value' => '$data->getPltStr()'],
+		['name' => 'shipment.weight', 'filter' => CHtml::textField('CargoProcess[weight]', @$cargo->weight), 'value' => '$data->getWeight()'],
+		['header' => 'location', 'type' => 'raw', 'value' => '$data->shipment->getRackName()'],
+		['name' => 'shipment.cbm', 'value' => '$data->getTotalCBM()', 'filter' => CHtml::textField('CargoProcess[cbm]', @$cargo->cbm)],
+		['name' => 'shipment.cnee.name', 'filter' => CHtml::textField('CargoProcess[cname]', @$cargo->cname)],
+		['name' => 'shipment.cnee.tel', 'filter' => CHtml::textField('CargoProcess[tel]', @$cargo->tel)],
+		['name' => 'shipment.cnee.address', 'filter' => CHtml::textField('CargoProcess[address]', @$cargo->address)],
+		['name' => 'shipment.cnee.state', 'filter' => CHtml::textField('CargoProcess[state]', @$cargo->state)],
+		['header' => 'extra Info', 'type' => 'raw', 'value' => '$data->shipment->getDGWarnings().($data->shipment->isOversize()?"<label style=\"color:red\">Oversize</label>":"")', 'filter' => CHtml::dropDownList('CargoProcess[exInfo]', $cargo->exInfo, $this->t(ImParcel::$exInfos), ['prompt' => 'All'])],
+		['header' => 'is_3pl', 'type' => 'raw', 'value' => '$data->shipment->is3PL()?"3PL":"Imports"', 'filter' => CHtml::dropDownList('CargoProcess[is_3pl]', $cargo->is_3pl, [false => 'Imports', true => '3PL'], ['prompt' => 'All'])],
+		[
+			'class' => 'application.extensions.CSpanableGridView.oSpanableButtonColumn',
+			'template' => '{operate}',
+			'buttons' => [
+				'operate' => [
+					'url' => 'Yii::app()->createURL("topCourierService/operation")."?id=".$this->ids',
+					'imageUrl' => false,
+					'visible' => 'true',
+					'options' => ['class' => 'jqm_link grid_edit_btn', 'label' => $this->t('Operation'), 'title' => '$data->id'],
+				],
+			],
+			'spanable' => true, 'spanDepands' => ['$data->status']
+		],
+		[
+			'class' => 'oButtonColumn',
+			'template' => '{operate}&nbsp;{log}',
+			'buttons' => [
+				'operate' => [
+					'url' => ' Yii::app()->createURL("topCourierService/operation")."?id=".$data->id',
+					'imageUrl' => false,
+					'visible' => 'true',
+					'options' => ['class' => 'jqm_link grid_edit_btn', 'label' => $this->t('Operation'), 'title' => '$data->id'],
+				],
+				'log' => [
+					'imageUrl' => false,
+					'options' => ['class' => 'jqm_link grid_view_btn', 'label' => 'Log', 'data-win-class' => 'L'],
+					'visible' => 'true',
+					'url' => 'Yii::app()->createUrl("topCourierService/log", ["id" => $data->id])',
+					'label' => 'Log'
+				],
+			],
+		]
+	],
+]);; ?>
+<div class="row" style="font-size: 2em;font-weight: bold;">
+	<div class="row buttons">
+		<div class="col-block"><?php echo CHtml::label('Job Name', 'Job Name'); ?></div>
+		<div class="col-block"><?php echo CHtml::textField('job_name', $model->job_name, array('id' => 'job_name')); ?></div>
+	</div>
+	<div class="row buttons">
+		<div class="col-block"><?php echo CHtml::label('Vehicle', 'Vehicle'); ?></div>
+		<div class="col-block"><?php echo CHtml::dropDownList('vehicle_id', $model->vehicle_id, $vehicles, array('class' => "datetime_input")); ?></div>
+	</div>
+	<div class="row buttons">
+		<div class="col-block"><?php echo CHtml::label('Assign Driver', 'Assign Driver'); ?></div>
+		<div class="col-block"><?php echo CHtml::dropDownList('driver_id', $model->driver_id, $drivers, array('prompt' => 'Select')); ?></div>
+	</div>
+
+	<!-- 2021/8/27 -->
+	<?php if ($model->type != 6) { ?>
+		<div class="row buttons">
+			<div class="col-block"><?php echo CHtml::label('Direction', 'Direction'); ?></div>
+			<div class="col-block">
+				<?php
+				$ccs = CargoProcessJob::$cargoDirectionList;
+				foreach ($ccs as $k => $v) {
+					echo '<label id ="direction' . $k . '" class="check_label"><input  type="checkbox" onclick="checkboxOnclick(this)" name="directioncheckbox" value="' . $k . '" ' . (!empty($model->mdata[$v]) ? 'checked' : '') . '/> ' . $v . '</label>  |';
+				}
+				?>
+			</div>
+		</div>
+	<?php } ?>
+	<?php if ($model->type == 6) { ?>
+		<div class="row buttons">
+			<div class="col-block"><?php echo CHtml::label('Destination', 'Destination'); ?></div>
+			<div class="col-block"><?php echo CHtml::dropDownList('meta[destination]',  @$model->mdata['destination'], CargoProcessJob::$destination, array('prompt' => 'Select')); ?></div>
+		</div>
+	<?php } ?>
+	<div class="row buttons">
+		<div class="col-block"><?php echo CHtml::label('Time', 'Time'); ?></div>
+		<div class="col-block"><?php echo CHtml::dropDownList('meta[time]', @$model->mdata['time'], CargoProcessJob::$cargoTimes, array('empty' => 'Select')); ?></div>
+	</div>
+
+	<div class="row buttons">
+		<div class="col-block"><?php echo CHtml::label('Effective Distance', 'Effective Distance'); ?></div>
+		<div class="col-block"><?php echo CHtml::textField('meta[distance]', @$model->mdata['distance'] ? @$model->mdata['distance'] : '30'); ?></div>
+	</div>
+
+	<div class="row buttons">
+		<div class="col-block"><?php echo CHtml::label('Effective Date', 'Effective Date'); ?></div>
+		<div class="col-block"><?php echo CHtml::textField('created', $model->created, ['class' => 'datetime_input', 'id' => $_GET['tabid'] . '_dt_crtd']); ?></div>
+	</div>
+
+
+
+	<div class="row buttons">
+		<div class="col-block"><?php echo CHtml::label('Description', 'Description'); ?></div>
+		<div class="col-block"><?php echo CHtml::textarea('description', $model->description, array('id' => 'description', 'cols' => 50, 'rows' => 3)); ?></div>
+	</div>
+	<div class="row buttons">
+		<div class="col-block"><?php echo CHtml::button('save cargo job', array('class' => 'save_cargo_job', 'id' => 'save_cargo_job')); ?></div>
+	</div>
+</div>
+
+<script type="text/javascript">
+	function checkboxOnclick(checkbox) {
+		var panelSi = $('#<?= $_GET["tabid"]; ?>').data('panel');
+		if (checkbox.checked == true) {
+			var temp = $('#direction' + checkbox.value).text();
+			var description = $('#description', panelSi).val();
+			$('#description', panelSi).val(description + temp);
+			//alert(checkbox.value);
+		}
+	};
+
+	function removeCargo($id) {
+		if (confirm('Are you sure to remove cargo?')) {
+			var formData = new FormData();
+			formData.append('id', $id);
+			$.ajax({
+				url: '<?= Yii::app()->createUrl("topCourierService/removeCargoJob") ?>',
+				type: 'POST',
+				data: formData,
+				processData: false,
+				contentType: false,
+				success: function(r) {
+					r = JSON.parse(r);
+					if (r.done) {
+						$('#<?= $_GET["tabid"] ?>_cargo_process_for_job_grid').yiiGridView('update');
+						myApp.notice(r.msg, 5000);
+					} else {
+						myApp.alert(r.msg, false);
+					}
+				},
+				error: function(r) {
+					myApp.alert('System error', false);
+				}
+			});
+		}
+	};
+
+	$(function() {
+		var tab = $('#<?= $_GET["tabid"]; ?>');
+		var panelSi = $('#<?= $_GET["tabid"]; ?>').data('panel');
+
+		function uploading_on(obj) {
+			obj.addClass('uploading');
+			obj.val('    Uploading');
+			obj.prop('disabled', 'disabled');
+		}
+
+		function uploading_off(obj) {
+			obj.removeClass('uploading');
+			obj.val('create cargo job');
+			obj.removeProp('disabled');
+		}
+
+		$('#save_cargo_job', panelSi).on('click', function() {
+			uploading_on($('#save_cargo_job', panelSi));
+			var ids = new Array();
+			var cargoSequence = new Array();
+			var jobPalletNo = new Array();
+			var job_name = $('#job_name', panelSi).val();
+			var vehicle_id = $('#vehicle_id', panelSi).val();
+			var driver_id = $('#driver_id', panelSi).val();
+			var description = $('#description', panelSi).val();
+			var created = $('#<?= $_GET["tabid"]; ?>_dt_crtd').val();
+			//var created = $("*[name='created']").val();
+			var directionforcustomer = "";
+			$('input:checkbox[name=directioncheckbox]:checked').each(function(k) {
+				if (k == 0) {
+					directionforcustomer = $(this).val();
+				} else {
+					directionforcustomer += ',' + $(this).val();
+				}
+			});
+			var distance = $('#meta_distance', panelSi).val();
+			var destination = $('#meta_destination', panelSi).val();
+			var time = $('#meta_time', panelSi).val();
+			
+
+			var jobId = '<?= $model->id ?>';
+
+			$("input[name='job_relation_id']").each(function() {
+				ids.push($(this).val());
+				cargoSequence.push($('#' + $(this).val() + "cargo_sequence").val());
+				jobPalletNo.push($('#' + $(this).val() + "job_pallet_no").val());
+			});
+
+			var formData = new FormData();
+			formData.append('ids', ids);
+			formData.append('cargoSequence', cargoSequence);
+			formData.append('jobPalletNo', jobPalletNo);
+			formData.append('vehicleId', vehicle_id);
+			formData.append('jobName', job_name);
+			formData.append('driverId', driver_id);
+			formData.append('directionforcustomer', directionforcustomer);
+			formData.append('distance', distance);
+			formData.append('destination', destination);
+			formData.append('description', description);
+			formData.append('time', time);
+			formData.append('jobId', jobId);
+			formData.append('created', created);
+			$.ajax({
+				url: '<?= Yii::app()->createUrl("topCourierService/saveCargoJob") ?>',
+				type: 'POST',
+				data: formData,
+				processData: false,
+				contentType: false,
+				success: function(r) {
+					uploading_off($('#save_cargo_job', panelSi));
+					r = JSON.parse(r);
+					if (r.done) {
+						$('#<?= $_GET["tabid"] ?>_cargo_process_for_job_grid').yiiGridView('update');
+						myApp.notice(r.msg, 5000);
+					} else {
+						myApp.alert(r.msg, false);
+					}
+				},
+				error: function(r) {
+					uploading_off($('#save_cargo_job', panelSi));
+					myApp.alert('System error', false);
+				}
+			});
+		});
+
+	});
+
+
+	function funcExportCitoExcel<?= $model->id ?>() {
+		window.open("topCourierService/exportCitoExcel?id=<?= $model->id ?>", '_blank', '');
+	}
+</script>

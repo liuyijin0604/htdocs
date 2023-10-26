@@ -1,0 +1,8 @@
+
+        <?php echo CHtml::label('PCA Test Zone','pca_zone_test_label');?>
+        <?php 
+        foreach ($pcaZoneTestArr as $key => $pcaZoneTest) {
+           echo CHtml::radioButton('pca_zone_test[]',false,array('class'=>'radio_label','value'=>$key)),"&nbsp;&nbsp{$pcaZoneTest}";
+           echo CHtml::button('X', ["class"=>"deleteZoneMapImport","onClick"=>"deleteZoneMapImport({$key},0);"]),"&nbsp;&nbsp";
+        }
+        ?>

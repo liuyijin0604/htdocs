@@ -1,0 +1,605 @@
+<?php
+
+class GatePassController extends Controller
+{
+	protected $nonAjax = array('genGatepassPdf');
+	public function actionIndex()
+	{
+		$title = "";
+		if(!empty($_GET['direct']))
+		{
+			$direct = $_GET['direct'];
+			$title = GatepassCourier::$gatepass_courier[$direct];
+		}
+		$model = new GatepassShipment('search');
+		$model->status = -1;
+		$dptId = @$_GET['dptId'];
+		if (!empty($_GET['warehouse'])) {
+			$model->status = 0;
+			$warehouse = isset($_GET['warehouse']) ? $_GET['warehouse'] : 106;
+			$awb = isset($_GET['awb']) ? $_GET['awb'] : '';
+			$courier = isset($_GET['courier']) ? $_GET['courier'] : '';
+			$search_context = isset($_GET['search_context']) ? $_GET['search_context'] : '';
+			$gatepassNo = empty($_GET['gatepass_no'])?"":$_GET['gatepass_no'];
+			$pickupDate = empty($_GET['pickup_date'])?"":$_GET['pickup_date'];
+			$pickupBookingNumber = empty($_GET['pickupBookingNumber'])?"":$_GET['pickupBookingNumber'];
+			$model->warehouse = $warehouse;
+			$model->awb = $awb;
+			if (!empty($courier)) {
+				if ($courier == 101) {
+					$model->courier_ids = [101, 1426,Org::ORGID_COURIER_GV_AUPOST,Org::ORGID_COURIER_AUSLETTER];
+				}else if($courier == Org::ORGID_COURIER_TNT)
+				{
+					$model->courier_ids = [Org::ORGID_COURIER_TNT, Org::ORGID_COURIER_TNT_TOP];
+				}else if($courier == Org::ORGID_COURIER_DFE)
+				{
+					$model->courier_ids = [Org::ORGID_COURIER_DFE, Org::ORGID_COURIER_DFE_TOP];
+				}
+				else {
+					$model->courier_id = $courier;
+				}
+			}
+
+			if (!empty($search_context)) {
+				$ids = [0];
+				foreach (preg_split("/[;,\n]/", $search_context) as $hbn) {
+					if (empty(trim($hbn))) {
+						continue;
+					}
+					$cStr= '';
+					if($model->courier_id!='moving'&&$model->courier_id!='TP')
+					{
+						$cStr= '(cargo_process.id is null or cargo_process.status = '.CargoProcess::DELETED.') and ';
+					}
+					$shipment = ImParcel::model()->with(["cargo_process"])->find($cStr.'(hbn=:hbn OR ref=:hbn) AND cbwf&:cbwf=0', array(':hbn' => trim($hbn), ':cbwf' => ImParcel::CBWF_D2Z_CONSOL_NOT_FOR_SCAN));
+					if (!empty($shipment)) {
+						$ids[] = $shipment->id;
+					}
+					$model->ids = $ids;
+				}
+
+			}
+
+			if (in_array($model->courier_id ,['TP',4018])) {
+				$gsModel = new GatepassShipment('search');
+				$ids = [];
+				$ids[] = 0;
+				$gsModel->gatepassNo = $gatepassNo;
+				$gsModel->pickupDate = $pickupDate;
+				if(!empty($_GET['gatepassShipment']))$gsModel->setAttributes($_GET['gatepassShipment']);
+				$cargoProcesses = $gsModel->getPreparedTruckOrPickupParcels($search_context,$warehouse,$pickupBookingNumber);
+				foreach ($cargoProcesses as $cargoProcess) {
+					$ids[] = $cargoProcess->id;
+				}
+				$model->ids = [];
+				$model->caIds = $ids;
+				if(!empty($_GET['gatepassShipment']))$model->setAttributes($_GET['gatepassShipment']);
+			}
+
+
+			if ($model->courier_id == 2797) {
+				$ids = [0];
+				$shipments = ImParcel::model()->with('gatepass_shipment')->findAll('(t.hbn like :hbn OR t.ref like :hbn) and t.ref LIKE "CPWPA%" and t.agent_id = 2797 and t.status >= 60 and t.status < 90 and t.created > "2020-01-01" and gatepass_shipment.status = 0',[":hbn"=>"%".trim($search_context)."%"]);
+				$thisShipments = array_column($shipments, 'id');
+				$ids = array_merge($thisShipments,$ids);
+				$model->ids = $ids;
+				$model->courier_id = null;
+			}
+
+			if ($model->courier_id == 2995) {
+				$ids = [0];
+				$shipments = ImParcel::model()->with('gatepass_shipment')->findAll('(t.hbn like :hbn OR t.ref like :hbn) and t.agent_id = 2995 and t.status >= 60 and t.status < 90 and t.created > "2020-01-01" and gatepass_shipment.status = 0',[":hbn"=>"%".trim($search_context)."%"]);
+				$thisShipments = array_column($shipments, 'id');
+				$ids = array_merge($thisShipments,$ids);
+				$model->ids = $ids;
+				$model->courier_id = null;
+			}
+
+			if($model->courier_id=="Other")
+			{
+				$ids = [-1];
+				if(!empty($gatepassNo))
+				{
+					$gatepass = GatePass::model()->findByPk($gatepassNo);
+					if(!empty($gatepass))
+					{
+						$ids  = array_column($gatepass->lines, 'fid');
+					}
+				}
+
+				$model->ids = $ids;
+			}
+
+			$this->render('_sub_shipments', array('model' => $model));
+			return;
+		}
+
+		$this->render('sig_pane', array('model' => $model,'title'=>$title,'direct'=>$direct,'dptId'=>$dptId));
+	}
+
+	public function actionSubmitGatepass()
+	{
+		$resp = array('status' => 1, 'msg' => 'done', 'id' => 0);
+		$model = new GatepassShipment('search');
+		if (!empty($_POST)) {
+			$model->status = 0;
+			$warehouse = isset($_POST['warehouse']) ? $_POST['warehouse'] : 106;
+			$awb = isset($_POST['awb']) ? $_POST['awb'] : '';
+			$courier = isset($_POST['courier']) ? $_POST['courier'] : '';
+			$search_context = isset($_POST['search_context']) ? $_POST['search_context'] : '';
+			$type = isset($_POST['type']) ? $_POST['type'] : 0;
+			$model->warehouse = $warehouse;
+			$driver_name = isset($_POST['driver_name']) ? $_POST['driver_name'] : '';
+			$driver_rego = isset($_POST['driver_rego']) ? $_POST['driver_rego'] : '';
+			$ref = isset($_POST['ref']) ? $_POST['ref'] : '';
+			$selectedIds = isset($_POST['selectedIds']) ? $_POST['selectedIds'] : '';
+			$notselectedIds = isset($_POST['notselectedIds']) ? $_POST['notselectedIds'] : '';
+			$gatepassNo = empty($_POST['gatepass_no'])?"":$_POST['gatepass_no'];
+			$pickupDate = empty($_POST['pickup_date'])?"":$_POST['pickup_date'];
+			$fileText = empty($_POST['fileText'])?"":$_POST['fileText'];
+			$pickupBookingNumber = empty($_POST['pickupBookingNumber'])?"":$_POST['pickupBookingNumber'];
+			$checkdr = null;
+
+			if(!empty($fileText))
+			{
+
+				$checkdr = DriverLicense::model()->find(['condition'=>'rego = :rego and ref =:ref and driver_name=:driver_name and driver_license=:driver_license',"params"=>[":rego"=>$driver_rego,":driver_name"=>$driver_name,":ref"=>$ref,":driver_license"=>$fileText],"order"=>"id desc"]);
+				if(empty($checkdr))
+				{
+					$dr = new DriverLicense();
+					$dr->rego = $driver_rego;
+					$dr->driver_name = $driver_name;
+					$dr->driver_license = $fileText;
+					$dr->ref = $ref;
+					$dr->save();
+				}
+			}
+
+			$isMQ = empty($_POST['isMQ'])?false:true;
+			$model->awb = $awb;
+			if($selectedIds==""&&!$isMQ)
+			{
+				$resp['msg'] = "Select Parcel Firstly";
+				$resp['status'] = 0;
+				echo json_encode($resp);
+				return;
+			}
+
+			if (!empty($courier)) {
+				if ($courier == 101) {
+					$model->courier_ids = [101, 1426,Org::ORGID_COURIER_GV_AUPOST,Org::ORGID_COURIER_AUSLETTER];
+				}else if($courier == Org::ORGID_COURIER_TNT)
+				{
+					$model->courier_ids = [Org::ORGID_COURIER_TNT, Org::ORGID_COURIER_TNT_TOP];
+				}else if($courier == Org::ORGID_COURIER_DFE)
+				{
+					$model->courier_ids = [Org::ORGID_COURIER_DFE, Org::ORGID_COURIER_DFE_TOP];
+				}
+				else {
+					$model->courier_id = $courier;
+				}
+			}
+
+			if (!empty($search_context)) {
+				$ids = [];
+				foreach (preg_split("/[;,\n]/", $search_context) as $hbn) {
+					if (empty(trim($hbn))) {
+						continue;
+					}
+					$cStr= '';
+					if($model->courier_id!='moving'&&$model->courier_id!='TP')
+					{
+						$cStr= '(cargo_process.id is null or cargo_process.status = '.CargoProcess::DELETED.') and  ';
+					}
+					$shipment = ImParcel::model()->with(["cargo_process"])->find($cStr.'(hbn=:hbn OR ref=:hbn) AND cbwf&:cbwf=0', array(':hbn' => trim($hbn), ':cbwf' => ImParcel::CBWF_D2Z_CONSOL_NOT_FOR_SCAN));
+					if (!empty($shipment)) {
+						$ids[] = $shipment->id;
+					}
+					$model->ids = $ids;
+				}
+			}
+
+			if (in_array($model->courier_id ,['TP'])) 
+			{
+				$checkLicense = true;
+				$myIds = explode(',', $selectedIds);
+				if(count($myIds)==1)
+				{
+					$gatepassShipment=GatepassShipment::model()->findByPk($myIds[0]);
+					$imparcel = ImParcel::model()->findByPk($gatepassShipment->fid);
+					if(!empty($imparcel->mdata['org_rate_id']))
+					{
+						$orgRate = OrgRate::model()->findByPk($imparcel->mdata['org_rate_id']);
+						if($orgRate->code == ImportChargeCode::PICKUP_3PL_CODE)
+						{
+							$checkLicense = false;
+						}
+					}
+				}
+				if($checkLicense&&empty($checkdr))
+				{
+					$checkdr = DriverLicense::model()->find(['condition'=>'rego = :rego',"params"=>[":rego"=>$driver_rego],"order"=>"id desc"]);
+					if(empty($checkdr))
+					{
+						$resp['msg'] = "Requiring dirver license photo. Submitting photo was failed, please refresh this APP and try again";
+						$resp['status'] = 0;
+						echo json_encode($resp);
+						return;
+					}
+				}
+			}
+			
+			if (in_array($model->courier_id ,['TP',4018])) 
+			{
+				$gsModel = GatepassShipment::model();
+				$ids = [];
+				$ids[] = 0;
+				$gsModel->gatepassNo = $gatepassNo;
+				$gsModel->pickupDate = $pickupDate;
+				if(!empty($_GET['gatepassShipment']))$gsModel->setAttributes($_GET['gatepassShipment']);
+				$cargoProcesses = $gsModel->getPreparedTruckOrPickupParcels($search_context,$warehouse,$pickupBookingNumber);
+				foreach ($cargoProcesses as $cargoProcess) {
+					$ids[] = $cargoProcess->id;
+				}
+				$model->caIds = $ids;
+				$model->gsIds = explode(',', $selectedIds);
+				if(!empty($_GET['gatepassShipment']))$model->setAttributes($_GET['gatepassShipment']);
+				$gateps = GatepassShipment::model()->findAll(" id in (".join($model->gsIds,',').")");
+				$shipmentIds = "'".join(array_column($gateps, 'fid'),"','")."'";
+
+				//Start Cancel those cargoprocess in cjob which not choosed form gatepass page 
+				if(!empty($notselectedIds) && !empty($gatepassNo)){
+					$gatenotps = GatepassShipment::model()->findAll(" id in (".join(explode(',', $notselectedIds),',').")");
+					$notshipmentIds = "'".join(array_column($gatenotps, 'fid'),"','")."'";
+					$cargoProcessesInCjob = CargoProcess::model()->findAll(" shipment_id in ($notshipmentIds) ");
+					if(!empty($cargoProcessesInCjob)){
+						//$emailService = new EmailService();
+						foreach($cargoProcessesInCjob as $cargoProcessInCjob){
+							if($cargoProcessInCjob->status < 100 && !empty($cargoProcessInCjob->job_relation->job)){
+								$cargoProcessInCjob->status = 20;
+								$cargoProcessInCjob->mdata['NotPickUp']=1;
+								$cargoProcessInCjob->note = $cargoProcessInCjob->note." Last Driver: ".Org::model()->findByPk($cargoProcessInCjob->job_relation->job->driver_id)->name;
+								$cargoProcessInCjob->note = $cargoProcessInCjob->note." Last Cjob Name: ".$cargoProcessInCjob->job_relation->job->job_name;
+								$cargoProcessInCjob->note = $cargoProcessInCjob->note." Login User: ".User::getCurrentUser()->fname;
+								$cargoProcessInCjob->save();
+
+								$reTracking = $cargoProcess->shipment->hasTrackingToday(103);
+								if(!$reTracking){
+									$cargoProcessInCjob->shipment->addTrackingLimited(103,'Delivery delayed. waiting for reschedule.');
+									//send sms notice to customer;
+									$emailService = new EmailService();
+									$emailService->sendNotPickupCargoSms($cargoProcessInCjob);
+								}
+								//$cargoProcessInCjob->shipment->addCargoTracking(102,'Delay Notice');
+								
+								if(!empty($cargoProcessInCjob->job_relation)){
+									// $cargoProcessInCjob->job_relation->sqquence = $cargoProcessInCjob->job_relation->job_id."0".$cargoProcessInCjob->job_relation->cargo_process_id;
+									// $cargoProcessInCjob->job_relation->job_id = 0;
+									// $cargoProcessInCjob->job_relation->cargo_process_id = 0;
+									//$cargoProcessInCjob->job_relation->active = 0;
+									//$cargoProcessInCjob->job_relation->save();
+									$cargoProcessInCjob->job_relation->delete();
+								}
+							}
+						}
+					}
+				}
+
+				//send successful sms and add track.
+				if(!empty($selectedIds) && !empty($gatepassNo)){
+					$gatenotps = GatepassShipment::model()->findAll(" id in (".join(explode(',', $selectedIds),',').")");
+					$shipmentIds = "'".join(array_column($gatenotps, 'fid'),"','")."'";
+					$cargoProcesses = CargoProcess::model()->findAll(" shipment_id in ($shipmentIds) ");
+					if(!empty($cargoProcesses)){
+						foreach($cargoProcesses as $cargoProcess){
+							if(!empty($cargoProcess->job_relation->job->created)){
+								$strDeliveryDate = date('d-m-Y',strtotime($cargoProcess->job_relation->job->created));
+							}
+							if(!empty($strDeliveryDate)){
+								$strTracking = "Loading for delivery. Delivery date is ".$strDeliveryDate;
+							}else{
+								$strTracking = "Loading for delivery.";
+							}
+							$reTracking = $cargoProcess->shipment->hasTrackingToday(76);
+							if(!$reTracking){
+								
+								$emailService = new EmailService();
+								$emailService->sendPickupCargoSms($cargoProcess);
+								if($cargoProcess->type==CargoProcess::INTERSTATE_CARGO){
+									$cargoProcess->shipment->addTrackingLimited(77,"Delivery from ".Cargoprocess::$Depot[$cargoProcess->dpt_id]." Depot");
+								}else{
+									$cargoProcess->shipment->addTrackingLimited(76,$strTracking);
+								}
+							}
+						}
+					}
+				}
+				//End 
+
+				if(!$this->checkCanBeSign($shipmentIds))
+				{
+					$resp['msg'] = "Need to pay all storage fee";
+					$resp['status'] = 0;
+					echo json_encode($resp);
+					return;
+				}
+			}
+
+
+			if ($model->courier_id == 2797) {
+				$ids = [0];
+				$shipments = ImParcel::model()->with('gatepass_shipment')->findAll('(t.hbn like :hbn OR t.ref like :hbn) and t.ref LIKE "CPWPA%" and t.agent_id = 2797 and t.status >= 60 and t.status < 90 and t.created > "2020-01-01" and gatepass_shipment.status = 0',[":hbn"=>"%".trim($search_context)."%"]);
+				foreach ($shipments as $shipment) {
+					$ids[] = $shipment->id;
+				}
+				$model->ids = $ids;
+				$model->courier_id = null;
+			}
+
+			if ($model->courier_id == 2995) {
+				$ids = [0];
+				$shipments = ImParcel::model()->with('gatepass_shipment')->findAll('(t.hbn like :hbn OR t.ref like :hbn) and t.agent_id = 2995 and t.status >= 60 and t.status < 90 and t.created > "2020-01-01" and gatepass_shipment.status = 0',[":hbn"=>"%".trim($search_context)."%"]);
+				$thisShipments = array_column($shipments, 'id');
+				$ids = array_merge($thisShipments,$ids);
+				$model->ids = $ids;
+				$model->courier_id = null;
+			}
+
+			if ($model->courier_id == 140) {
+				$ids = [];
+				$shipments = ImParcel::model()->findAll('ref LIKE "PB%"');
+				foreach ($shipments as $shipment) {
+					$ids[] = $shipment->id;
+				}
+				$model->ids = $ids;
+			}
+
+			if($model->courier_id=="Other")
+			{
+				$ids = [-1];
+				if(!empty($gatepassNo))
+				{
+					$gatepass = GatePass::model()->findByPk($gatepassNo);
+					if(!empty($gatepass))
+					{
+						$ids  = array_column($gatepass->lines, 'fid');
+					}
+				}
+
+				$model->ids = $ids;
+			}
+
+			if (empty($_POST['gatepass_signature'])) {
+				$resp['msg'] = "Not Fetch The Signature";
+				$resp['status'] = 0;
+				echo json_encode($resp);
+				return;
+			}
+			$gatepass_signature = $_POST['gatepass_signature'];
+			if (!$isMQ&&sizeof($model->search()->data) <= 0) {
+				$resp['msg'] = "Not Found Any number of shipments";
+				$resp['status'] = 0;
+				echo json_encode($resp);
+				return;
+			}
+			$resp['id'] = 9;
+			$resp['msg'] = "Submission is processing now";
+			$resp['status'] = 0;
+			// if(function_exists('fastcgi_finish_request')){
+			// 	ignore_user_abort(true);
+			// 	fastcgi_finish_request();
+			// }
+			
+			if($isMQ)
+			{
+				if ($id = GatepassCourier::genGatePassTicket([], $courier, $type, $gatepass_signature, $driver_name, $driver_rego, $ref,$isMQ,$_POST,null,$warehouse)) {
+					$resp['id'] = $id;
+					echo json_encode($resp);
+					return;
+				}
+			}else
+			{
+				if ($id = GatepassCourier::genGatePassTicket($model->search(false,false,true)->data, $courier, $type, $gatepass_signature, $driver_name, $driver_rego, $ref,false,[],$checkdr,$warehouse)) {
+					$resp['id'] = $id;
+					echo json_encode($resp);
+					return;
+				}
+			}
+		}
+		$resp['msg'] = "Failed";
+		$resp['status'] = 0;
+		echo json_encode($resp);
+		return;
+	}
+
+	public function actionCreateSeaStorageInvoice()
+	{
+		$id = $_GET["shipment_id"];
+		$imparcel = ImParcel::model()->findByPk($id);
+		return $this->ajaxResult($imparcel->createSeaStorageInvoice());
+	}
+
+	public function actionGenGatepassPdf($id)
+	{
+		$model = GatepassCourier::model()->findByPk($id);
+		oPDF::renderPDF('gatepass_sig', ['model' => $model]);
+	}
+
+	/**
+	 * List the gatePass
+	 */
+	public function actionList()
+	{
+		$model = new GatepassCourier('search');
+		if (isset($_GET['GatepassCourier'])) {
+			$model->attributes = $_GET['GatepassCourier'];
+		}
+		$this->render('gatepass_list', array('model' => $model));
+	}
+
+
+	/**
+	 * List the parcel needed to be process
+	 */
+	public function actionNeedProcessParcelList()
+	{
+		$warehouseProcessService = new WarehouseProcessService();
+		$cargo = new CargoProcess('search');
+		$cargo->unsetAttributes();
+		$params = [];
+		// $model = new ImParcel('search');
+		// $model->unsetAttributes();
+		$ddpt_id = Org::PCAE_DEPARTMENT_SYDNEY;
+		//$model->ddpt_id = $ddpt_id;
+		if(!empty($_GET['ddpt_id']))
+		{
+			$ddpt_id = $_GET['ddpt_id'];
+			//$model->ddpt_id = $ddpt_id;
+		}
+		$gatepassNo = empty($_GET['gatepass_no'])?"":$_GET['gatepass_no'];
+
+		// if(!empty($_GET['ImParcel']))
+		// {
+		// 	$model->setAttributes($_GET['ImParcel']);
+		// }
+
+		if(!empty($_GET['CargoProcess']))
+		{
+			$cargo->setAttributes($_GET['CargoProcess']);
+			if(isset($_GET['CargoProcess']['assignedUser']))
+			{
+				$cargo->assignedUser = $_GET['CargoProcess']['assignedUser'];
+			}
+			if(isset($_GET['CargoProcess']['driver_id']))
+			{
+				$cargo->driver_id = $_GET['CargoProcess']['driver_id'];
+			}
+			if(isset($_GET['pickup_date']))
+			{
+				$cargo->pickupDate = $_GET['pickup_date'];
+			}
+
+			if(isset($_GET['pkg']))
+			{
+				$cargo->pkg = $_GET['pkg'];
+			}
+
+			if(isset($_GET['pickup_booking_time']))
+			{
+				$cargo->pickupBookingTime = $_GET['pickup_booking_time'];
+			}
+		}
+		if(isset($_GET['ids']))
+		{
+			$cargo->ids =$_GET['ids'];
+			$params['ids'] = $cargo->ids;
+		}
+
+		if(isset($_GET['notSearch']))
+		{
+			$params['notSearch'] = 1;
+			if(!empty($gatepassNo))
+			{
+				$params['gatepassNo'] = $gatepassNo;
+			}
+
+			if(!empty($_GET['cargoType']))
+			{
+				$params['cargoType'] = $_GET['cargoType'];
+			}
+		}
+
+		$cargo->gatepassNo = $gatepassNo;
+
+		$params['cargo'] = $cargo;
+		// $params['model'] = $model;
+		$params['ddpt_id'] = $ddpt_id;
+		if(!empty($_GET['Operation'])&&$_GET['Operation']==1&&!empty($_GET['selected_shipmentIds']))
+		{
+			$selectedCargoProcessIds = explode(',', $_GET['selected_shipmentIds']);
+			foreach ($selectedCargoProcessIds as $key => $value) {
+				if(empty($value))
+				{
+					unset($selectedCargoProcessIds[$key]);
+				}
+			}
+			$allData = $cargo->getNeedPrepareParcel(true, 1000,false,true,$ddpt_id,null,$selectedCargoProcessIds)->getData();
+			foreach ($allData as $key => $data) {
+				$warehouseProcessService->prepareDoneOne($data->id);
+			}
+		}
+		$this->render('truck_or_pickup_parcel_list', $params);
+	}
+
+	public function actionPrepareDone($id)
+	{
+		$warehouseProcessService = new WarehouseProcessService();
+
+		$prepareLog = $warehouseProcessService->prepareDoneOne($id);
+
+		$this->ajaxResult($prepareLog);
+	}
+
+
+
+	public function actionPrepareCancel($id)
+	{
+		$prepareLog = ShipmentWhPrepare::model()->find('cargo_process_id = :id',[':id'=>$id]);
+		if(empty($prepareLog))
+		{
+			$prepareLog = new ShipmentWhPrepare();
+			$prepareLog->cargo_process_id = $id;
+			$prepareLog->shipment_id = $id;
+			$prepareLog->status = ShipmentWhPrepare::CANCELED;
+			$prepareLog->operate_time = date('Y-m-d H:i:s');
+			$prepareLog->uid = User::currentUserID();
+			$prepareLog->save();
+		}else
+		{
+			$prepareLog->status = ShipmentWhPrepare::CANCELED;
+			$prepareLog->save();
+		}
+
+		$this->ajaxResult($prepareLog);
+	}
+
+
+	public function actionCancelPrepare($id)
+	{
+		$prepareLog = ShipmentWhPrepare::model()->find('cargo_process_id = :id',[':id'=>$id]);
+		$prepareLog->operate_time = date('Y-m-d H:i:s');
+		$prepareLog->uid = User::currentUserID();
+		$prepareLog->status = ShipmentWhPrepare::NOTPREPARED;
+		$prepareLog->save();
+	
+		$this->ajaxResult($prepareLog);
+	}
+
+	public function actionSearchDriverLicense()
+	{
+		$rego = $_GET['rego'];
+		$driverLicense = DriverLicense::model()->find(['condition'=>'rego = :rego','params'=>[':rego'=>$rego],'order'=>'id desc']);
+		if(!empty($driverLicense))
+		{
+			$result = ['status'=>1,'ref'=>$driverLicense->ref,'driver_license'=>$driverLicense->driver_license,'driver_name'=>$driverLicense->driver_name];
+		}else
+		{
+			$result = ['status'=>0];
+		}
+		echo json_encode($result);
+	}
+
+	private function checkCanBeSign($ids)
+	{
+		$shipments = ImParcel::model()->findAll(" id in ($ids) ");
+		$status = true;
+		foreach ($shipments as $key => $s) {
+			$thisStatus = $s->checkStorageInvoiceStatus(true);
+			if($thisStatus!=-1&&$thisStatus!=9&&$thisStatus!=11)
+			{
+				$status = false;
+			}
+		}
+		return $status;
+	}
+}

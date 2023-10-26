@@ -1,0 +1,804 @@
+<?php
+class GatepassController extends Controller
+{
+
+    protected $nonAjax = array('print', 'confirm','export');
+
+    /**
+     * Lists and search.
+     */
+    public function actionList()
+    {
+        $model = new GatePass('search');
+        $model->unsetAttributes();  // clear any default values
+        if (isset($_GET['GatePass'])) {
+            $model->setAttributes($_GET['GatePass']);
+        }
+        $this->render('list', array(
+            'model' => $model,
+        ));
+    }
+
+    /**
+     * action for check parcel
+     */
+    public function actionCheck()
+    {
+
+        if (isset($_POST['barcode'])) {
+            $this->checkParcel();
+            return;
+        }
+        $this->render('check');
+    }
+
+    /**
+     * action for searching gate pass and scan time
+     */
+    public function actionDetails()
+    {
+
+        if (isset($_POST['barcode'])) {
+            $this->checkDetails();
+            return;
+        }
+        $this->render('details');
+    }
+
+    private function checkDetails()
+    {
+        $r = new StdClass;
+        $r->msg = 'Not Found';
+        $r->color = '#c00';
+        $r->sound = 'not_found';
+
+        if (preg_match('/019931265099999891([\d\w]{3}|[\d\w]{5})(\d{7})(\d{2})(\d{5})(\d{2})0\d{1}/', $_POST['barcode'], $m)) {
+            $hbn = strtoupper($m[1] . $m[2]);
+            $p = ImParcel::model()->find('hbn = :r OR ref = :r', [':r' => $hbn]);
+        } else {
+            if (preg_match('/-\d+$/', $_POST['barcode'])) {
+                list($hbn, $sn) = explode('-', $_POST['barcode']);
+            } else {
+                $hbn = $_POST['barcode'];
+            }
+            $p = ImParcel::fromBarcode($hbn);
+        }
+
+        if (empty($p) || empty($p->consol_id)) {
+            echo json_encode($r);
+            Yii::app()->end();
+        }
+
+        // get gate pass time and scan time
+        $gatePassTime = '';
+        $gatePassNo = '';
+        $mms = ManiMap::model()->findAll('fid = :fid', [':fid' => $p->id]);
+        foreach ($mms as $mm) {
+            if ($mm->manifest->type == 50) {// for gatepass type
+                $gatePassTime = $mm->manifest->created;
+                $gatePassNo = $mm->manifest->id;
+            }
+        }
+
+        // get scanned out time
+        $scanTime = '';
+        if (isset($p->mdata['gpscan_time'])) {
+            foreach ($p->mdata['gpscan_time'] as $time) {
+                if (!empty($scanTime)) $scanTime .= '<br/>';
+                $scanTime .= $time;
+            }
+        }
+
+        $r->msg = 'Gate Pass No: ' . $gatePassNo . '<br/> Gate Pass at: ' . $gatePassTime . '<br/> Scan at: <br/>' . $scanTime;
+
+        echo json_encode($r);
+        Yii::app()->end();
+    }
+
+
+    /**
+     * check parcel status and all related GatePass
+     */
+    private function checkParcel()
+    {
+        $r = new StdClass;
+        $r->msg = 'Not Found';
+        $r->color = '#c00';
+        $r->sound = 'not_found';
+        $r->stop = 0;
+        $r->gpfound = 0;
+        $r->sid = 0; // shipment id
+
+        //aupost barcode
+        if (preg_match('/019931265099999891([\d\w]{3}|[\d\w]{5})(\d{7})(\d{2})(\d{5})(\d{2})0\d{1}/', $_POST['barcode'], $m)) {
+            $hbn = strtoupper($m[1] . $m[2]);
+            $sn = ltrim($m[3], '0');
+            $p = ImParcel::model()->find('hbn = :r OR ref = :r', [':r' => $hbn]);
+            $_POST['barcode'] = strtoupper($hbn . $m[3]);
+        } else {
+            if (preg_match('/-\d+$/', $_POST['barcode'])) {
+                list($hbn, $sn) = explode('-', $_POST['barcode']);
+            } else {
+                $hbn = $_POST['barcode'];
+                $sn = 0;
+            }
+            $p = ImParcel::fromBarcode($hbn);
+            if (!empty($p)) {
+                $hbn = $p->hbn;
+                $sn = $p->sn;
+            }
+        }
+        $r->hbn = $hbn;
+        if (empty($p) || empty($p->consol_id)) {
+            echo json_encode($r);
+            Yii::app()->end();
+        }
+
+        // check to see if the parcel has been prepared
+        // if prepared the parcel should be in one pending GatePass
+        $gatePass = GatePass::model()->findBySql('Select * from mani_map as mp right join manifest as m on mp.mani_id = m.id where m.type = :mtype and m.status = :status and mp.fid = :sid',
+            array(':mtype' => 50, ':status' => 60, ':sid' => $p->id));
+        if (empty($gatePass)) {
+            $r->msg = 'The shipment : ' . $p->hbn . ' not prepared yet';
+            echo json_encode($r);
+            Yii::app()->end();
+        }
+
+        // in case not found related GatePass yet
+        if ($_POST['gpfound'] == 0) {
+            // will show all prepared parcels waiting for check
+            $gp = GatePass::model()->findByPk($gatePass->id);
+            $allshipments = array();
+            foreach ($gp->lines as $gh => $l) {
+                $rt = $l->mm();
+                $allshipments[] = array(
+                    'id' => $rt->id,
+                    'hbn' => $rt->hbn,
+                    'pkg' => $rt->pkg,
+                    'weight' => $rt->weight,
+                    'status' => $rt->getStatus(),
+                    'cbm' => $rt->cbm
+                );
+            }
+            $r->data = $allshipments;
+            $r->gpid = $gp->id;
+            $r->company = $gp->company;
+            // set flag , don't get again
+            $r->gpfound = 1;
+        }
+
+
+        if ($p && $p->consol->type == 15) { // only for ImcoConsol
+            if ($p->status < 60) {
+                $r->msg = 'HELD' . ', ' . $p->getCarrier() . ', ' . ((isset($p->zrate) && $p->zrate->orgrate->type == 20) ? 'Satchel, ' : '') . $p->getCarrierSeq($sn);
+                $r->sound = strtolower('held_alarm');
+                $r->stop = 1;
+            } else {
+                $r->msg = strtoupper($p->getStatus()) . ', ' . $p->getCarrier() . ', ' . ((isset($p->zrate) && $p->zrate->orgrate->type == 20) ? 'Satchel, ' : '') . $p->getCarrierSeq($sn);
+                $r->sound = strtolower($p->getStatus() . '-' . str_replace(' ', '_', $p->getCarrier()) . '-' . ((isset($p->zrate) && $p->zrate->orgrate->type == 20) ? 'satchel-' : '') . $p->getCarrierSeq($sn));
+                $r->color = '#0c0';
+            }
+            if (!isset($p->mdata['gpscan_time']) ||
+                (isset($p->mdata['gpscan_time']) && !is_array($p->mdata['gpscan_time']))
+            ) {
+                $p->mdata['gpscan_time'] = array();
+            }
+            if (count($p->mdata['gpscan_time']) >= $p->pkg) {
+                $p->mdata['gpscan_time'][$p->pkg - 1] = date('Y-m-d H:i:s');
+            } else {
+                $p->mdata['gpscan_time'][] = date('Y-m-d H:i:s');
+            }
+
+            // we save how many parcels has been scanned
+            $p->scan_data[60][strtoupper($_POST['barcode'])] = date('Y-m-d H:i:s');
+
+            $p->save();
+        }
+        $r->sid = $p->id;
+        echo json_encode($r);
+        Yii::app()->end();
+    }
+
+
+    public function actionGetAllShipments($cid)
+    {
+
+        // only get all cleared shipments in the specified console
+        $shipments = ImParcel::model()->findAll('consol_id = :cid and (status = :status OR status = :status2)', array(':cid' => $cid, ':status' => 60, ':status2' => 70));
+        $console = ImcoConsol::model()->findByPk($cid);
+        $resp = new stdClass();
+        $resp->status = 1;
+        $allShipments = array();
+        foreach ($shipments as $shipment) {
+            $allShipments[] = array(
+                'id' => $shipment->id,
+                'awb' => $console->awb,
+                'hbn' => $shipment->hbn,
+                'status' => $shipment->getStatus(),
+                'pkg' => $shipment->pkg,
+                'weight' => $shipment->weight
+            );
+        }
+        $resp->shipments = $allShipments;
+        echo json_encode($resp);
+
+    }
+
+    public function actionConfirm($id)
+    {
+        $model = GatePass::model()->findByPk($id);
+
+        if (!empty($_POST['GatePass'])) {
+            $model->setAttributes($_POST['GatePass']);
+            $model->setAttribute('status', 65); // confirmed
+            $model->save();
+            $this->ajaxResult($model, array('id'));
+        }
+
+        $this->render('confirm', ['model' => $model]);
+    }
+
+    /**
+     * prepare a gate pass
+     * then we can modify , print , export shipments in the GatePass manifest
+     */
+    public function actionPrepare()
+    {
+        if (isset($_GET['tab'])) {
+            $this->render('tab_' . $_GET['tab']);
+        } else 
+        {
+            $modelGatePass =  new GatePass('create');
+            if (isset($_POST['yt0']) && $_POST['yt0'] == 'Create'||isset($_POST['yt1']) && $_POST['yt1'] == 'generate_cargo_receipt_and_gatepass') {
+                $msg = "";
+                if(isset($_POST['yt1'])&&$_POST['yt1'] == 'generate_cargo_receipt_and_gatepass')
+                {
+                     // generateCargoReceipt
+                    $msg = $this->generateCargoReceipt(@$_POST['st_invoice']);
+                }
+                if(empty($_POST["generate_cargo_receipt"]))
+                {
+                    // save this new prepared GatePass
+                    $this->savePreparedGatePass($modelGatePass,@$_POST['st_invoice']);
+                }
+
+                if(!empty($msg))
+                {
+                    $modelGatePass->addError($msg,$msg);
+                }
+
+                $this->ajaxResult($modelGatePass, ['id']);
+
+            } else {
+                // prepare console and shipments models
+                // show all available import consoles
+                $modelConsole = new Consol();
+                $modelConsole->unsetAttributes();
+                if (isset($_GET['Consol'])) {
+                    $modelConsole->setAttributes($_GET['Consol']);
+                } else {
+                    // set Sydney warehouse as default one
+                    $modelConsole->setAttribute('dpt_id', 106);
+                }
+
+                // for begin show nothing shipments
+                // show all available import shipments
+                $consoleId = 0;
+                $modelShipment = new ImParcel();
+                $modelShipment->unsetAttributes();
+                if (isset($_GET['ImParcel'])) {
+                    $modelShipment->setAttributes($_GET['ImParcel']);
+                }
+                if (isset($_POST['consoleId']) || isset($_GET['consoleId'])) {
+                    if (isset($_POST['consoleId'])) {
+                        $modelShipment->setAttribute('consol_id', $_POST['consoleId']);
+                    } else {
+                        $modelShipment->setAttribute('consol_id', $_GET['consoleId']);
+                    }
+                    $modelShipment->man_id=0;
+                    $modelShipment->searchGatePass = 1;
+                    $this->renderPartial('_sub_shipments', array(
+                        'shipment_model' => $modelShipment,
+                        'consoleId' => $consoleId,
+                    ));
+
+                } else {
+                    $model = new GatePass('create');
+                    // default nothing
+                    $model->setAttribute('dpt_id', 106);
+                    if (!isset($_GET['ImParcel']) && !(!empty($_GET['ajax']) && $_GET['ajax'] == 'gp-imco-shipments-grid')) {
+                        // shipments default show nothing
+                        $modelShipment->setAttribute('id', -1);
+                    }
+                    $this->render('prepare', ['model' => $model, 'modelConsole' => $modelConsole, 'modelShipment' => $modelShipment, 'consoleId' => $consoleId]);
+                }
+            }
+        }
+    }
+
+    /**
+     * prepare a gate pass
+     * then we can modify , print , export shipments in the GatePass manifest
+     */
+    public function actionReleaseClearWait()
+    {
+        if (isset($_GET['tab'])) {
+            $this->render('tab_' . $_GET['tab']);
+        } else 
+        {
+            $modelGatePass =  new GatePass('create');
+            if(isset($_POST['parcels']))
+            {
+                $shipmentIds = explode(',', $_POST['parcels']);
+                $ps =ImParcel::model()->findAll("id in (".join(',',$shipmentIds).")");
+                $eCheck = false;
+                foreach ($ps as $key => $p)
+                {
+                   if($p->consol->dpt_id!=$_POST['GatePass']['dpt_id'])
+                   {
+                        $eCheck = true;
+                        $modelGatePass->addError($p->hbn." is not belong this depot",$p->hbn." is not belong this depot");
+                   }
+                }
+                if($eCheck)
+                {
+                     $this->ajaxResult($modelGatePass, ['id']);
+                }
+            }
+
+
+            if (isset($_POST['yt0']) && $_POST['yt0'] == 'generate_gatepass')
+            {
+                 // save this new prepared GatePass
+                    $this->savePreparedGatePass($modelGatePass,@$_POST['st_invoice']);
+                    if(!empty($modelGatePass->id))
+                    {
+                        $this->changeToClear();
+                    }
+                    $this->ajaxResult($modelGatePass, ['id']);
+            }
+
+            elseif(isset($_POST['yt1']) && $_POST['yt1'] == 'generate_cargo_receipt&gatepass')
+            {
+                // generateCargoReceipt
+                 $msg = $this->generateCargoReceipt(@$_POST['st_invoice']);
+                 // save this new prepared GatePass
+                $this->savePreparedGatePass($modelGatePass,@$_POST['st_invoice']);
+
+                if(!empty($modelGatePass->id))
+                {
+                    $this->changeToClear();
+                }
+
+
+                if(!empty($msg))
+                {
+                    $modelGatePass->addError($msg,$msg);
+                }
+                $this->ajaxResult($modelGatePass, ['id']);
+            }
+
+            elseif(isset($_POST['yt2']) && $_POST['yt2'] == 'only_cargo_receipt')
+            {
+                // generateCargoReceipt
+                 $msg = $this->generateCargoReceipt(@$_POST['st_invoice']);
+                 if(!empty($msg))
+                 {
+                     $modelGatePass->addError($msg,$msg);
+                 }else
+                 {
+                      $this->changeToClear();
+                 }
+                 
+                $this->ajaxResult($modelGatePass, ['id']);
+            }
+            elseif(isset($_POST['yt3']) && $_POST['yt3'] == 'generate_GP&clear&manifest')
+            {
+                // generateCargoReceipt
+                $this->savePreparedGatePass($modelGatePass,@$_POST['st_invoice']);
+                if(!empty($modelGatePass->id))
+                {
+                    $this->changeToClear();
+                    $this->gatepassShipmentsForManifest();
+                }
+                $this->ajaxResult($modelGatePass, ['id']);
+            }
+            elseif(isset($_POST['yt4']) && $_POST['yt4'] == 'change_to_clear_only')
+            {
+                $this->changeToClear();
+                $this->ajaxResult($modelGatePass, ['id']);
+
+
+            } else {
+
+                // for begin show nothing shipments
+                // show all available import shipments
+                $consoleId = 0;
+                $modelShipment = new ImParcel();
+                $modelShipment->unsetAttributes();
+                $modelShipment->status = ImParcel::STATE_CLEAR_WAIT;
+                if(isset($_GET['ImParcel']['ddpt_id']))
+                {
+                     $modelShipment->ddpt_id = Org::TLA_DEPARTMENT_SYDNEY;
+                }
+                if (isset($_GET['ImParcel'])) {
+                    $modelShipment->setAttributes($_GET['ImParcel']);
+                    if(!empty($_GET['ImParcel']['consol_no'])) $modelShipment->consol_no = $_GET['ImParcel']['consol_no'];
+                }
+                $modelShipment->man_id=0;
+                $modelShipment->searchGatePass = 1;
+                if (isset($_GET['ImParcel'])) {
+                    $this->renderPartial('_sub_shipments_clear_wait', array(
+                        'shipment_model' => $modelShipment
+                    ));
+
+                } else {
+                    $model = new GatePass('create');
+                    // default nothing
+                    $model->setAttribute('dpt_id', 106);
+                    if (!isset($_GET['ImParcel']) && !(!empty($_GET['ajax']) && $_GET['ajax'] == 'gp-imco-shipments-grid')) {
+                    }
+                    $this->render('release_clear_wait', ['model' => $model, 'modelShipment' => $modelShipment]);
+                }
+            }
+        }
+    }
+
+    private function gatepassShipmentsForManifest()
+    {
+        $shipmentIds = explode(',', $_POST['parcels']);
+        $imcoConsolService = new ImConsolService();
+        $imcoConsolService->gatepassShipmentsForManifest($shipmentIds);
+    }
+
+    private function changeToClear()
+    {
+        $shipmentIds = explode(',', $_POST['parcels']);
+        $imcoConsolService = new ImConsolService();
+        $imcoConsolService->changeToClear($shipmentIds);
+    }
+
+    /**
+     * save current prepared gatepass
+     */
+    private function savePreparedGatePass(&$modelGatePass,$st_invoice)
+    {
+
+        if (isset($_POST['GatePass'])) {
+        $modelGatePass->setAttributes($_POST['GatePass']);
+        }
+        $modelGatePass->setAttribute('status', 60); // prepare means pending status
+        $modelGatePass->save();
+
+        // save related all shipments
+        $sids = explode(',', $_POST['parcels']);
+
+        /* 3pl parcel
+        if (strtoupper(str_replace(' ', '', $modelGatePass->company)) == 'AUPOST') {
+            $courier = 101;
+        } else if (strtoupper(str_replace(' ', '', $modelGatePass->company)) == 'FASTWAY') {
+            $courier = 115;
+        }
+        $wmstasks = WmsTask::model()->findAll('type in (3010, 3020, 3030) and status = 99 and is_request = 1 and DATE(compl_time) = CURDATE()');
+        foreach ($wmstasks as $wmstask) {
+            if (!empty($wmstask->deliveryTask->mdata['shipment_id']) && $wmstask->deliveryTask->mdata['shipment_courier_id'] == $courier) {
+                $sids = array_merge($sids, $wmstask->deliveryTask->mdata['shipment_id']);
+            }
+        }
+        */
+
+        foreach ($sids as $id) {
+            $p = Shipment::model()->findByPk($id);
+            $attr = array(
+                'mani_id' => $modelGatePass->id,
+                'fid' => $id,
+            );
+            if ($p->type == 10) {
+                $attr['model'] = 'ImParcel';
+                $p->man_id=$modelGatePass->id;
+                $p->update('man_id');
+                $p->updateDeconsolidationTime(true);
+            } elseif ($p->type == 20) {
+                $p = ExParcel::model()->findByPk($id);
+                if (!in_array($p->status, [14, 15, 18, 101, 102])) continue;
+                $attr['model'] = 'ExParcel';
+            }
+            $mm = new ManiMap;
+            $mm->attributes = $attr;
+            $mm->status = 10;
+            $mm->save();
+
+            // create storage fee for the shipment
+            if(empty($p->mdata['rts_org_no'])){
+                if(!empty($p->process)&&($p->bwf&ImParcel::CUSTOM_DDU)>0)  continue; //DDU storage invoice created in the custom prcoess and assign to consignee.
+                if ($st_invoice) {
+                    $imParcelService = new ImParcelService();
+                    $imParcelService->createStorageInvoice($p, $modelGatePass->id);
+                }
+            }
+        }
+    }
+
+        /**
+     * save current prepared gatepass
+     */
+    private function generateCargoReceipt($st_invoice)
+    {
+         // create new gate pass
+        $modelGatePass = new GatePass('create');
+        // save related all shipments
+        $sids = explode(',', $_POST['parcels']);
+        $shipmentModels = ImParcel::model()->findAll(" id in ({$_POST['parcels']}) ");
+        $filename = strtotime(Date("Y-m-d H:i:s")).'tmp_cargo_receipt.pdf';
+        $tempfile = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.$filename;
+        $dlUrl =  $this->createUrl('filerepo/downloadTempFile',["filename"=>$filename]);
+        $resp = '<span>Cargo Receipt is ready , Please <a href="'.$dlUrl.'" target="_blank">click me</a> to download now<span>';
+        oPDF::renderPDF('cargo_receipts_2', ['models' => $shipmentModels], 2, $tempfile);
+        return $resp;
+    }
+
+    public function actionGenerateCargoProcessGatePass()
+    {
+        // create new gate pass
+        $id = $_GET['id'];
+        $imParcelService = new ImParcelService();
+        $modelGatePass = $imParcelService->generateCargoProcessGatePass($id,@$_GET["assignedUser"]);
+
+        if(!isset($_GET["assignedUser"]))
+        {
+            $this->ajaxResult($modelGatePass, ['id']);
+        }
+    }
+
+    public function actionGenerateCargoProcessGatePassByJob()
+    {
+        // create new gate pass
+        $id = $_GET['id'];
+        $imParcelService = new ImParcelService();
+        $modelGatePass = $imParcelService->generateCargoProcessGatePassByJob($id);
+        $topCourierService = new TopCourierService();
+        $topCourierService->noticeWarehouseToPrepareCargosByJob($id);
+        $this->ajaxResult($modelGatePass, ['id']);
+    }
+
+    public function actionCheckstorage()
+    {
+
+        if (isset($_POST['barcode'])) {
+            $checkToDate = empty($_POST['check_to_date'])?"":$_POST['check_to_date'];
+            GatePass::checkStorage($_POST['barcode'],false,false,$checkToDate);
+            return;
+        }
+
+        $this->render('checkstorage');
+    }
+
+    /**
+     * create a new Gate Pass
+     */
+    public function actionCreate()
+    {
+        if (!empty($_POST['barcode'])) {
+            $_POST['barcode'] = strtoupper($_POST['barcode']);
+            //aupost barcode
+            if (preg_match('/019931265099999891([\d\w]{3}|[\d\w]{5})(\d{7})(\d{2})(\d{5})(\d{2})0\d{1}/', $_POST['barcode'], $m) || preg_match('/997\d{5}([\d\w]{3})(\d{7})(\d{2})(\d{4})0\d{4}/', $_POST['barcode'], $m)) {
+                $_POST['barcode'] = $m[1] . $m[2] . '-' . ltrim($m[3], '0');
+            }
+
+            if (strpos($_POST['barcode'], '-') > 0) {
+                list($hbn, $sn) = explode('-', $_POST['barcode']);
+            } else {
+                $hbn = $_POST['barcode'];
+                $sn = 0;
+            }
+
+            $r = new StdClass;
+            $p = Shipment::model()->find('hbn = :n', array(':n' => $hbn));
+
+            if (empty($p) || empty($p->consol_id)) {//try tranship no.
+                $ts = Tranship::model()->find('connote = :hbn', [':hbn' => $hbn]);
+                if ($ts) {
+                    $p = $ts->shipment;
+                    $hbn = $p->hbn . ' (' . $hbn . ')';
+                }
+            }
+
+            if (empty($p)) {
+                $r->msg = "Shipment Not Found: " . $hbn;
+                $r->id = 0;
+                $r->color = '#c00';
+                echo json_encode($r);
+                Yii::app()->end();
+            } else {
+                $r->msg = strtoupper($p->getStatus());
+                $r->id = $p->id;
+                $r->sound = str_replace('.', '', str_replace(' ', '_', strtolower($p->getStatus())));
+                $r->color = '#0c0';
+            }
+
+            if ($p && $p->type == 10) {//import
+                if ($p->status < 50) {
+                    $r->msg = 'HELD' . ', ' . $p->getCarrier();
+                    $r->sound = strtolower('held-' . str_replace(' ', '_', $p->getCarrier()));
+                } else {
+                    $r->msg = strtoupper($p->getStatus()) . ', ' . $p->getCarrier();
+                    $r->sound = strtolower($p->getStatus() . '-' . str_replace(' ', '_', $p->getCarrier()));
+                }
+            } elseif ($p && $p->type == 20) {// export
+                $stay = true;
+                if ($p->odpt_id == '530') {//bne
+                    if ($p->calTariff('CNCA3') > 0) {
+                        $stay = false;
+                    } elseif ($p->status < 18 && $p->cnee->cnid_id == 0 && strtotime($p->billDate()) < time() - 86400 * 5) {
+                        $stay = false;
+                    }
+                }
+
+                if ($stay) {
+                    $r->id = 0;
+                    $r->color = '#c00';
+                    $r->sound = strtolower($p->getStatus()) . '-stay';
+                    $r->msg .= ', STAY';
+                }
+            } elseif ($p && $p->consol->type == 30) {//local
+                $r->msg .= ', ' . $p->getCarrier();
+                $r->sound = strtolower(str_replace(' ', '_', $p->getCarrier()));
+            }
+
+            $r->msg = $hbn . ' ' . $r->msg;
+
+            echo json_encode($r);
+            Yii::app()->end();
+        } elseif (!empty($_POST['GatePass'])) {
+            $m = new GatePass('create');
+            $m->setAttributes($_POST['GatePass']);
+            $m->save();
+            $sids = array_unique(explode(',', trim($_POST['sids'], ',')));
+            foreach ($sids as $id) {
+                $p = Shipment::model()->findByPk($id);
+                $attr = array(
+                    'mani_id' => $m->id,
+                    'fid' => $id,
+                );
+
+                if ($p->type == 10) {
+                    $p = ImParcel::model()->findByPk($id);
+                    $attr['model'] = 'ImParcel';
+                } elseif ($p->type == 20) {
+                    $p = ExParcel::model()->findByPk($id);
+                    if (!in_array($p->status, [14, 15, 18, 101, 102])) continue;
+                    $attr['model'] = 'ExParcel';
+                }
+
+                $sl = StorageLog::findItem($p);
+                if ($sl) {
+                    $sl->out();
+                    $p->custom_log_note = 'moved out ' . $sl->storage->name;
+                    $p->save();
+                }
+
+                $mm = new ManiMap;
+                $mm->attributes = $attr;
+                $mm->status = 10;
+                $mm->save();
+            }
+            $this->ajaxResult($m, ['id']);
+        }
+        if (isset($_GET['tab'])) {
+            $this->render('tab_' . $_GET['tab']);
+        } else {
+            $this->render('create', ['model' => new GatePass('create')]);
+        }
+    }
+
+    public function actionPrint($id)
+    {
+        $m = GatePass::model()->findByPk($id);
+        oPDF::renderPDF('gatepass', ['m' => $m]);
+    }
+
+    public function actionExport($id)
+    {
+        $m = GatePass::model()->findByPk($id);
+        $xls = new oExcel();
+        $i = 1;
+        $xls->addRow($i++, ['Hbn', 'Ref', 'gatepass_no']);
+        foreach ($m->lines as $line) {
+            $p = ImParcel::model()->findByPk($line->fid);
+            if(!empty($p))
+            {
+                $xls->addRow($i++, [$p->hbn, $p->ref, $m->id]);
+            }
+        }
+        $xls->output(time()."_".$m->id."_gatepass.xlsx");
+    }
+
+    public function search()
+    {
+        // @todo Please modify the following code to remove attributes that should not be searched.
+
+        $criteria = new CDbCriteria;
+
+        if (empty($this->status)) $this->status = '<90';
+
+        $criteria->compare('id', $this->id);
+        $criteria->compare('fwd_id', $this->fwd_id);
+        $criteria->compare('dpt_id', $this->dpt_id);
+        $criteria->compare('by_id', $this->by_id);
+        $criteria->compare('created', $this->created, true);
+        $criteria->compare('type', $this->type);
+        $criteria->compare('status', $this->status);
+        $criteria->compare('ref', $this->ref, true);
+        $criteria->compare('total', $this->total, true);
+        $criteria->compare('meta', $this->meta, true);
+        $criteria->compare('bwf', $this->bwf, true);
+
+        return new CActiveDataProvider($this, array(
+            'criteria' => $criteria,
+            'sort' => array(
+                'defaultOrder' => 't.id DESC',
+            ),
+            'pagination' => array(
+                'pageSize' => '30',
+            )
+        ));
+    }
+    public function actionNewGatepassList(){
+        $model=new GatepassCourier('search');
+        if(isset($_GET['GatepassCourier'])){
+            $model->attributes=$_GET['GatepassCourier']; 
+        }
+        $this->render('new_gatepass_list',array('model'=>$model));
+    }
+
+    /**
+     * Lists and search.
+     */
+    public function actionImportManifest()
+    {
+        $this->render('import_gatepass_for_manifest');
+    }
+
+    public function actionImportFileForGP(){
+        $this->render('import_file_for_gp');
+    }
+
+    public function actionAjaxImportFileForGP()
+    {
+        $file = $_FILES['file'];
+        $no = $_POST['no'];
+        $imconsolService = new ImConsolService();
+        $result = $imconsolService->importFileForGP($file,$no);
+        echo json_encode($result);
+        return;
+        $this->render('import_cargo_receipt_for_gp');
+    }
+
+    /**
+     * Lists and search.
+     */
+    public function actionImportCargoReceiptForGP()
+    {
+        $this->render('import_cargo_receipt_for_gp');
+    }
+
+    public function actionAjaxImportCargoReceiptForGP()
+    {
+        $file = $_FILES['cargo_receipt_file'];
+        $no = $_POST['no'];
+        $imconsolService = new ImConsolService();
+        $result = $imconsolService->importCargoReceiptForGP($file,$no);
+        echo json_encode($result);
+        return;
+        $this->render('import_cargo_receipt_for_gp');
+    }
+
+    public function actionAjaxImportGatepassForManifest()
+    {
+        $file = $_FILES['gatepass_file'];
+        $imconsolService = new ImConsolService();
+        $result = $imconsolService->importGatePassForManifest($file);
+        echo json_encode($result);
+        return;
+    }
+}

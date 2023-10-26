@@ -1,0 +1,971 @@
+<?php
+
+class ToolsController extends Controller
+{
+	protected $nonAjax=['downloadManifest', 'downloadLabels','getContainerQuotation','submitContainerQuotationEmail'];
+    protected $skipAcl = ['getContainerQuotation','submitContainerQuotationEmail'];
+    protected $skipLogin = ['getContainerQuotation','submitContainerQuotationEmail'];
+	public $user;
+	public $chargecode;
+	public $currency;
+	public function beforeAction($action)
+	{
+		$this->user=empty(Yii::app()->user->id)? false : User::model()->findByPk(Yii::app()->user->id);
+		return parent::beforeAction($action);
+	}
+
+	public function actionIndex()
+	{
+		$rs = new Manifest('search');
+		$rs->setAttributes([
+			'fwd_id' =>  Yii::app()->user->org,
+			'type' => 10
+		]);
+		if (isset($_GET['Manifest'])) {
+			$rs->setAttributes($_GET['Manifest']);
+		}
+		$rs->isArchive =1;
+		$this->render('index', ['model' => $rs,'credit' =>(empty($rs->owner)?-200:$rs->owner->getCreditDetails())]);
+	}
+	
+	public function actionManifest()
+	{
+		if (!empty($_FILES)) {
+			$is_update = !empty($_POST['action']) && $_POST['action'] == 'update';
+			$isSkipError = !empty($_POST['action']) && $_POST['action'] == 'createAndSkip';
+			if($isSkipError&&$_POST['import_type']!=1)
+			{
+				echo "Skip Error Only For import shipment;只有整单导入可以使用Skip Error功能";
+				return;
+			}
+			$errors=[];
+			$exits=[];
+			$file=empty($_FILES['manifest'])?[]:$_FILES['manifest'];
+			if (empty($file['tmp_name'])) {
+				$errors[]='<span class="fail_result">The File need to be support</span>';
+			} else {
+				if (FileRepo::sameFile($file['tmp_name'])) {
+					$errors[]= '<span class="fail_result">This Manifest file already uploaded.</span>';
+				}
+
+				if(!empty($_POST['import_type'])&&$_POST['import_type']==3)
+				{
+					$imParcelService = new ImParcelService();
+					[$errors,$successes] =$imParcelService->importAustwayPackagesData($file['name'],$file['tmp_name'],true);
+					if(empty($errors))
+					{
+						[$errors,$successes] =$imParcelService->importAustwayPackagesData($file['name'],$file['tmp_name'],false);
+						foreach ($errors as $key => $er) {
+							$errors[$key] = '<span class="fail_result">'.$er.'</span>';
+						}
+						foreach ($successes as $key => $su) {
+							$successes[$key] = '<span class="success_result">'.$su.'</span>';
+						}
+
+						echo "<style>.success_result{color: green;}.fail_result{color:red;}</style>".implode("<br/>", $errors).implode("<br/>", $successes);
+					}else
+					{
+						foreach ($errors as $key => $er) {
+							$errors[$key] = '<span class="fail_result">'.$er.'</span>';
+						}
+						echo "<style>.success_result{color: green;}.fail_result{color:red;}</style>".implode("<br/>", $errors);
+					}
+					return ;
+				}
+
+				$xls = new oExcel;
+				$xls->supported($file['name']);
+				$xls->load($file['tmp_name']);
+				$data = $xls->getAll();
+				if (!isset($data[1][3])||!isset($data[1][4])||$data[1][3]!='WEIGHT'||$data[1][4]!='CNEE') {
+					$errors[]= '<span class="fail_result">Wrong Template Supplied".</span>';
+				}
+			}
+			$this->chargecode=$_POST['chargecode'];
+			$this->currency = empty($_POST['currency'])?"AUD":$_POST['currency'];
+			if(!$is_update)
+			{
+				if (empty($this->chargecode)) {
+					$errors[]='<span class="fail_result">The ChargeCode need to be supplied!</span>';
+				} else {
+					$r=ImportChargeCode::model()->find("chargecode=:chargecode AND status=1", [":chargecode"=>$this->chargecode]);
+					if (empty($r)) {
+						$errors[]='<span class="fail_result">The Chargecode is not valid!</span>';
+					} else {
+						if ($r->org_id!=$this->user->org_id) {
+							$errors[]='<span class="fail_result">The Charge code not belong to your Orgnization!'.'</span>';
+						}
+					}
+				}
+			}
+			if (!empty($errors)) {
+				echo "<style>.success_result{color: green;}.fail_result{color:red;}</style>".implode("<br/>", $errors);
+				return;
+			}
+			unset($data[1]);
+			$checkArray=[];
+			foreach ($data as $index=> $d) {
+				if (empty($d[1])) {
+					continue;
+				}
+
+				if (!empty($d[2])) {
+					if (in_array($d[2], $checkArray)) {
+						{echo  '<div style="color:red;">Line '.$index.": connote ".$d[2]. " duplicate".'</div>'; return;}
+					}
+					$checkArray[]=$d[2];
+				}
+
+				// check name and unit value and weight
+				if (empty($d[15])) {
+					echo '<div style="color:red;">Line ' . $index . ': UNIT VALUE is empty</div>';
+					return;
+				} else if ($d[15] < 0.01) {
+					$data[$index][15] = 0.01;
+				}
+				if (preg_match('/[\x{4e00}-\x{9fa5}·]+/u', $d[13])) {
+					echo '<div style="color:red;">Line ' . $index . ': COMMODITY cannot contain chinese character</div>';
+					return;
+				}
+				if (empty($d[3])) {
+					echo '<div style="color:red;">Line ' . $index . ': WEIGHT is empty</div>';
+					return;
+				}
+			}
+			
+			if($is_update){
+				Yii::import('application.controllers.ApiShipmentAction');
+				$shipapi = new ApiShipmentAction($this, 'tools');
+				$shipapi->user = Yii::app()->user;
+			}
+			$imParcelService = new ImParcelService();
+			$packagesInfo = $imParcelService->getAustwayPackagesData($file['name'],$file['tmp_name'],true);
+			if(!$isSkipError)
+			{
+				foreach ($data as $index=>$d) {
+					if (empty($d[3]) || empty($d[4])) {
+						continue;
+					}
+					$o=$this->prepareData($d,$packagesInfo);
+					if ($o->status) {
+						if(!$is_update){
+							if(!empty($_POST['import_type'])&&$_POST['import_type']==2)
+							{
+								if(!empty($o->shipmentData->cust_ref))
+								{
+									$check = ImParcel::model()->count(['condition'=>'cref = :cref and status !=100','params'=>[':cref'=>$o->shipmentData->cust_ref],'order'=>'id desc']);
+									if($check>0)
+									{
+										if($check>0)
+						                {
+						                   $errors[]='<span class="fail_result">line '.($index) .': '.$o->shipmentData->cust_ref.' is existed</span>';
+						                    continue;
+						                }
+									}
+								}
+							}
+							$reply=ChooseShipment::newShipmentWithChargeCode($o->shipmentData, true);
+						}else{
+							if (!empty($_POST['internalUse']) && $_POST['internalUse'] == 'true') {
+								$reply = $shipapi->updateShipment($o->shipmentData, true, [], true);
+								$reply->success = $reply->status == 1;
+								$reply->error = [$reply->msg];
+							} else {
+								$reply = $shipapi->updateShipment($o->shipmentData, true);
+								$reply->success = $reply->status == 1;
+								$reply->error = [$reply->msg];
+							}
+						}
+						if (!$reply->success) {
+							$errors[]='<span class="fail_result">line '.($index) .': '.implode('; ', $reply->error).'</span>';
+						}
+					} else {
+						$errors[]='<span class="fail_result">line '.($index). ': '.$o->msg.'</span>';
+					}
+				}
+			}
+			if (!empty($errors)) {
+				echo "<style>.success_result{color: green;}.fail_result{color:red;}</style>".implode("<br/>", $errors);
+			} else {
+				$os=[];//success_result_result message;
+				$manifest=new Manifest();
+				$manifest->type=10;
+				$manifest->fwd_id= $this->user->org_id;
+				$manifest->mdata['chargecode'] = $this->chargecode;
+				$manifest->save();
+				FileRepo::storeFile($file['tmp_name'], $file['name'], 10, $manifest->id);
+				foreach ($data as $index=>$d) {
+					if (empty($d[3]) || empty($d[4])) {
+						continue;
+					}
+					// Log::log2file(json_encode($d), "shipment_upload_excel", "manishipment");
+					$o=$this->prepareData($d,$packagesInfo);
+					if ($o->status) {
+						$trans = Yii::app()->db->beginTransaction();
+						try 
+						{
+							if($is_update){
+								if (!empty($_POST['internalUse']) && $_POST['internalUse'] == 'true') {
+									$reply = $shipapi->updateShipment($o->shipmentData, false, ['man_id' => $manifest->id], true);
+									$reply->success = $reply->status == 1;
+									$reply->error = [$reply->msg];
+								} else {
+									$reply = $shipapi->updateShipment($o->shipmentData, false, ['man_id' => $manifest->id]);
+									$reply->success = $reply->status == 1;
+									$reply->error = [$reply->msg];
+								}
+							}else{
+								$reply=ChooseShipment::newShipmentWithChargeCode($o->shipmentData, false, ['man_id' => $manifest->id]);
+							}
+							$trans->commit();
+						} catch (Exception $ex) {
+							$trans->rollback();
+							throw $ex;
+						}
+						if (!$reply->success) {
+							$errors[]='<span class="fail_result">line '.($index) .': '.implode('; ', $reply->error).'</span>';
+						} else {
+							$os[]='<span class="success_result">line '.($index) .': '.$reply->msg.'</span>';
+						}
+					} else {
+						$errors[]='<span class="fail_result">line '.($index). ': '.$o->msg.'</span>';
+					}
+				}
+				echo "<style>.success_result{color: green;}.fail_result{color:red;}</style>".implode("<br/>", $os).'<br/>'.implode("<br/>", $errors);
+
+				if(!empty($_POST['import_type'])&&$_POST['import_type']==2)
+				{
+					$imParcelService = new ImParcelService();
+					[$subShipmentErrors,$successes] = $imParcelService->import3PLSubShipments($file,true,0);
+					if(empty($subShipmentErrors))
+					{
+						$manifest=new Manifest();
+						$manifest->type=10;
+						$manifest->fwd_id= $this->user->org_id;
+						$manifest->mdata['chargecode'] = $this->chargecode;
+						$manifest->save();
+						FileRepo::storeFile($file['tmp_name'], $file['name'], 10, $manifest->id);
+						[$subShipmentErrors,$successes] = $imParcelService->import3PLSubShipments($file,false,$manifest->id);
+						$errors = array_merge($exits,$subShipmentErrors,$successes);
+						if(!empty($errors))
+						{
+							echo "<br/><style>.success_result{color: green;}.fail_result{color:red;}</style>".implode("<br/>", $errors);
+						}else
+						{
+							echo "<br/><style>.success_result{color: green;}.fail_result{color:red;}</style>".implode("<br/>", $successes);
+						}
+					}else
+					{
+						echo "<br/><style>.success_result{color: green;}.fail_result{color:red;}</style>".implode("<br/>", $subShipmentErrors);
+					}
+				}
+			}
+		}
+	}
+
+	private function prepareData($d,$packagesInfo=[])
+	{
+		$ImsService = new ImsService($this->user->org_id,$this->chargecode,$this->currency);
+		return $ImsService->prepareData($d,$packagesInfo);
+	}
+
+	public function actionNewManifest()
+	{
+		$manifest=new Manifest();
+		$manifest->type=10;
+		$manifest->fwd_id= $this->user->org_id;
+		$manifest->save();
+		echo 'done';
+	}
+	public function actionManiHistory()
+	{
+		$rs = Manifest::model()->findAll([
+			'condition' => 'fwd_id = :o AND type = 10',
+			'params' => [':o' => Yii::app()->user->org],
+			'order' => 'id DESC',
+			'limit' => '30',
+		]);
+		foreach ($rs as $r) {
+			echo '<p><a href="'.$this->createUrl('tools/downloadManifest', ['id' => $r->id]).'">'.$r->getFileName().'</a> '.$r->totPacks().' shipments ('.$r->created.') <a href="'.$this->createUrl('tools/downloadLabels', ['id' => $r->id]).'" target="_blank"> <span class="glyphicon glyphicon-download-alt"></span> Parcel Labels</a>  /  <a href="'.$this->createUrl('tools/downloadManifestLabel', ['id' => $r->id]).'" target="_blank"> <span class="glyphicon glyphicon-download-alt"></span> Manifest Label</a></p>';
+		}
+	}
+		
+	public function tarray($as)
+	{
+		$r = [];
+		foreach ($as as $i=>$a) {
+			$r[$i] = $this->t($a);
+		}
+		return $r;
+	}
+
+	public function actionProducts()
+	{
+	}
+
+	public function actionProdUp($id)
+	{
+		$model = ExProdbPrice::model()->findByPk($id);
+		if ($model===null || $model->agt_id != Yii::app()->user->org) {
+			throw new CHttpException(404, 'The requested page does not exist.');
+		}
+		if (!empty($_POST['ExProdbPrice'])) {
+			$model->sn = $_POST['ExProdbPrice']['sn'];
+			$model->name = $_POST['ExProdbPrice']['name'];
+			$model->save();
+			$this->ajaxResult($model);
+		}
+		$this->render('prod_update', ['model' => $model]);
+	}
+
+	public function actionDownloadManifest($id)
+	{
+		$m = Manifest::model()->findByPk($id);
+		if ($m->fwd_id != Yii::app()->user->org) {
+			throw new CHttpException(404, 'Not Found!');
+		}
+		$rs = ImParcel::model()->findAll('man_id = :id', [':id' => $id]);
+		$xls = new oExcel;
+		$xls->setColWidth([10,15,15,15,12,12,40,10,10,10,10,10,12,12,40,10,10,10,10,10,10,10,10,10,40,15,15,10,10,10,15,10,30]);
+		$i = 1;
+		$xls->addRow($i++, ['序号','运单号','转单号','参考号','发货人','电话','地址','区','市','省','邮编','国家','收货人','电话','地址','市/区','洲/省','邮编','国家','包裹数量','毛重(kg)','体积(m3)','英文品名','中文品名','品牌','规格','申报货币','申报单价','件数','HS编码','保费','派送服务','备注']);
+		foreach ($rs as $ri => $r) {
+			foreach ($r->eitems['g'] as $ii => $g) {
+				$row = [$g, isset($r->eitems['g_zh'][$ii])?$r->eitems['g_zh'][$ii]:'',isset($r->eitems['b'][$ii])?$r->eitems['b'][$ii]:'', '="'.(isset($r->eitems['m'][$ii])?$r->eitems['m'][$ii]:'').'"', '', $r->eitems['v'][$ii], $r->eitems['q'][$ii], '="'.(isset($r->eitems['hs'][$ii])?$r->eitems['hs'][$ii]:'').'"'];
+				if ($ii == 0) {
+					$xls->addRow($i++, array_merge([$ri+1, $r->hbn,$r->ref, empty($r->cref)? '' : $r->cref, $r->cnor->name, '="'.$r->cnor->tel.'"', $r->cnor->address, $r->cnor->suburb,$r->cnor->city, $r->cnor->state, '="'.$r->cnor->postcode.'"', $r->cnor->country, $r->cnee->name, '="'.$r->cnee->tel.'"', $r->cnee->address, $r->cnee->suburb, $r->cnee->state, '="'.$r->cnee->postcode.'"', $r->cnee->country, $r->pkg, $r->weight, $r->cbm], $row, [$r->insurance,'', $r->note]));
+				} else {
+					$xls->addRow($i++, array_merge(['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''], $row, ['', '','']));
+				}
+			}
+		}
+		$f = preg_replace('/\..+$/', '', $m->getFileName());
+		$xls->output(urlencode($f.'.xlsx'));
+	}
+
+	public function actionDownloadLabels($id)
+	{
+		$m = Manifest::model()->findByPk($id);
+		if ($m->fwd_id != Yii::app()->user->org) {
+			throw new CHttpException(404, 'Not Found!');
+		}
+		$rs = ImParcel::model()->findAll('man_id = :id and status != :status', [':id' => $id,':status'=>ImParcel::STATE_CANCELLED]);
+		$fn=$m->id;
+		foreach ($rs as $key => $d) {
+			if(!empty($d->consol)&&preg_match('/WDT/i', $d->consol->no))
+			{
+				continue;
+			}
+
+			$apiLabel = ImParcelService::getEizLabel($d);
+			if(!empty($apiLabel))
+			{
+				$ps[] = $apiLabel;
+			}else
+			{
+				$normal[] = $d;
+			}
+		}
+
+		if(!empty($normal))
+		{
+			$normalLabel = oPDF::renderPDF('label_A6', ['tpl' => '_label_1', 'rs' => $normal], 2);
+			$ps[] = $normalLabel;
+		}
+
+		oPDF::mergePDF($ps, 1, true, $fn.'.pdf');
+	}
+
+	public function actionDownloadZWLabels($id)
+	{
+		$model = ImportZwStorage::model()->findByPk($id);
+		oPDF::renderPDF('_zw_storage', ['model' => $model], 1, $model->putcode . '.pdf');
+	}
+
+	public function actionDownloadManifestLabel($id)
+	{
+		$m = Manifest::model()->findByPk($id);
+		if ($m->fwd_id != Yii::app()->user->org) {
+			throw new CHttpException(404, 'Not Found!');
+		}
+		$rs = [$m];
+		oPDF::renderPDF('label_manifest_A6', ['tpl' => '_label-manifest', 'empty' => false, 'rs' => $rs]);
+	}
+
+	public function actionGetZWStorageList()
+	{
+		$model = new ImportZwStorage();
+		if(!empty($_GET))
+		{
+			$model->setAttributes($_GET);
+			if(User::getCurrentUser()->org_id>1)
+			{
+				$model->org_id = User::getCurrentUser()->org_id;
+			}
+			$this->render('zw_storage_sub_list',["model"=>$model]);
+			return;
+		}
+		if(User::getCurrentUser()->org_id>1)
+		{
+			$model->org_id = User::getCurrentUser()->org_id;
+		}
+		$this->render('zw_storage_page',["model"=>$model]);
+	}
+
+	public function actionUpdateZWStorage()
+	{
+		$id = @$_GET['id'];
+		$model = new ImportZwStorage();
+		if(!empty($id))
+		{
+			$model = ImportZwStorage::model()->findByPk($id);
+		}
+
+		if(!empty($_POST))
+		{
+			if(empty($model->putcode))
+			{
+				$model->setAttributes($_POST['ImportZwStorage']);
+				$user = User::getCurrentUser();
+				$model->org_id = $user->org_id;
+				$model->client_id = $user->id;
+				if(empty($model->tlano ))
+				{
+					$model->tlano = ImportZwStorage::generateTlaNo();
+				}
+				$model->memberid = ImportZwStorage::$memberid;
+				$model->arrival_city = ImportZwStorage::$storeCode[$model->store_code];
+				$model->mdata['service']=$_POST['ImportZwStorage']['service'];
+				$model->channel_code = ImportZwStorage::$channelCode[$model->mdata['service']];
+				$model->transport_type = ImportZwStorage::$transportTypeRe[$model->mdata['service']];
+				$model->created = date('Y-m-d H:i:s');
+				$model->updated = date('Y-m-d H:i:s');
+				$model->status = ImportZwStorage::STATE_NEW;
+				foreach($_POST['items'] as $k1 => $colv)
+				{
+					$v2 = [];
+					foreach($colv as $v)
+					{
+						$v2[] = $v;
+					}
+					$_POST['items'][$k1] = $v2;
+				}
+				$model->eitems = $_POST['items'];
+			}
+
+			$transaction = Yii::app()->db->beginTransaction();
+			try 
+			{
+				$model->mdata['hbns']=@$_POST['ImportZwStorage']['hbns'];
+				$model->remark=@$_POST['ImportZwStorage']['remark'];
+
+				$model->save();
+
+				if(empty($model->relations)||$model->mdata['hbns']!=$_POST['ImportZwStorage']['hbns'])
+				{
+					$model->hbns=$_POST['ImportZwStorage']['hbns'];
+					$model->mdata['hbns']=$_POST['ImportZwStorage']['hbns'];
+					$hbnArray = [];
+					foreach (preg_split("/[;,]/i", $model->hbns) as $hbn) {
+						if(!empty($hbn))
+						{
+							$hbnArray[] = trim($hbn);
+						}
+					}
+					if(!empty($hbnArray))
+					{
+						$shipments = ImParcel::model()->findAll("hbn in ('".join("','",$hbnArray)."') or ref in ('".join("','",$hbnArray)."')");
+						$sids = array_column($model->relations, 'shipment_id');
+						ImportZwStorageRelation::model()->deleteAll("shipment_id in ('".join("','",$sids)."')");
+						foreach ($shipments as $key => $s) {
+							$izsr = new ImportZwStorageRelation();
+							$izsr->shipment_id = $s->id;
+							$izsr->parent_id = $model->id;
+							$izsr->save();
+						}
+					}
+				}
+				$transaction->commit();
+			} catch (Exception $ex) {
+				$transaction->rollback();
+				throw $ex;
+			}
+			if(!empty($model->id))
+			{
+				if(empty($model->putcode))
+				{
+					$zwStorageService = new ZwStorageService();
+					$putcode = $zwStorageService->getZWStorage($model);
+				}
+			}
+			
+			$this->ajaxResult($model);
+		}
+
+		if(!empty($model->putcode))
+		{
+			$zwStorageService = new ZwStorageService();
+			$model = $zwStorageService->checkZwStorageRealData($model);
+		}
+		$this->render('zw_storage_form',["model"=>$model]);
+	}
+
+	public function actionUpdateZWStorageHbns()
+	{
+		$id = @$_GET['id'];
+		$model = new ImportZwStorage();
+		if(!empty($id))
+		{
+			$model = ImportZwStorage::model()->findByPk($id);
+		}
+
+		if(!empty($_POST))
+		{
+			$transaction = Yii::app()->db->beginTransaction();
+			try 
+			{
+				$model->mdata['hbns']=$_POST['ImportZwStorage']['hbns'];
+				$model->save();
+
+				if(empty($model->relations)||$model->mdata['hbns']!=$_POST['ImportZwStorage']['hbns'])
+				{
+					$model->hbns=$_POST['ImportZwStorage']['hbns'];
+					$model->mdata['hbns']=$_POST['ImportZwStorage']['hbns'];
+					$hbnArray = [];
+					foreach (preg_split("/[;,]/i", $model->hbns) as $hbn) {
+						if(!empty($hbn))
+						{
+							$hbnArray[] = trim($hbn);
+						}
+					}
+					if(!empty($hbnArray))
+					{
+						$shipments = ImParcel::model()->findAll("hbn in ('".join("','",$hbnArray)."') or ref in ('".join("','",$hbnArray)."')");
+						$sids = array_column($model->relations, 'shipment_id');
+						ImportZwStorageRelation::model()->deleteAll("shipment_id in ('".join("','",$sids)."')");
+						foreach ($shipments as $key => $s) {
+							$izsr = new ImportZwStorageRelation();
+							$izsr->shipment_id = $s->id;
+							$izsr->parent_id = $model->id;
+							$izsr->save();
+						}
+					}
+				}
+				$transaction->commit();
+			} catch (Exception $ex) {
+				$transaction->rollback();
+				throw $ex;
+			}
+			$this->ajaxResult($model);
+		}
+		$this->render('zw_storage_hbns',["model"=>$model]);
+	}
+
+	public function actionCancelZWStorage()
+	{
+		$id = @$_GET['id'];
+		$model = new ImportZwStorage();
+		if(!empty($id))
+		{
+			$model = ImportZwStorage::model()->findByPk($id);
+			$model->updated = date('Y-m-d H:i:s');
+			$model->status = ImportZwStorage::STATE_CANCEL;
+			$model->save();
+			echo '<script type="text/javascript">javascript:history.go(-1);</script>';
+		}
+	}
+
+	public function actionScan()
+	{
+		/*
+		$r = new StdClass;
+		$hbn = $_POST['barcode'];
+		$r->hbn = $hbn;
+		$p = ImParcel::model()->find('hbn = :n', array(':n' => $hbn));
+		echo json_encode($r);*/
+	}
+	public function actionValueAddedService()
+	{
+        // $this->layout = false;
+        $this->render('value_added_service');
+	}
+
+	public function actionSaveValueAddedService()
+	{
+		// print_r($_POST);
+		// Yii::app()->end();
+		if(isset($_POST['org_id'])){
+			if($this->saveOrgInvTemplate($_POST['org_id'],@$_POST['address_validation'], @$_POST['address_valid_active'])){
+				$org=org::model()->findByPk($_POST['org_id']);
+				$org->extra['address_valid_active']=@$_POST['address_valid_active'];
+				$org->extra['address_valid']=@$_POST['address_validation'];
+				if($org->save('meta')){
+					echo '{"done":true}';
+				}				
+	    		return ;
+			}			
+		}
+		// $this->ajaxResult($org);
+	}
+
+	public function saveOrgInvTemplate($orgId,$serviceType=1, $state=1)
+	{
+		$tempId = 0;
+		$detectionTempId=$this->getAddrValidationDetection();
+		$correctiontempId=$this->getAddrValidationCorrection();
+		if($serviceType==1){
+			$tempId=$detectionTempId;
+		}
+		elseif($serviceType==2){
+			$tempId=$correctiontempId;
+		}
+		$criteria = new CDbCriteria();
+		$tempIds = $detectionTempId.",".$correctiontempId;	
+		$today=date("Y-m-d");
+		// $avaChangeDate = date("Y-m-d", strtotime("-1 month", strtotime($today)));		
+		$criteria->addCondition("t.start <= '".$today."'");
+		$criteria->addCondition(" t.status=1 ");
+		$criteria->addCondition(" t.org_id= ".$orgId);
+		$criteria->addCondition(" temp_id= ".$tempId);
+		// $criteria->addCondition(" temp_id in ({$tempIds}) ");
+		$perTemplate = InvTempOrg::model()->findAll($criteria);
+		$model = new InvTempOrg;
+		if(empty($perTemplate) || !$state){
+			$criteria1 = new CDbCriteria();
+			$criteria1->addCondition("t.start <= '".$today."'");
+			$criteria1->addCondition(" t.status=1 ");
+			$criteria1->addCondition(" t.org_id= ".$orgId);
+			$criteria1->addCondition(" temp_id in ({$tempIds}) ");
+			$inactiveTemplate = InvTempOrg::model()->findAll($criteria1);
+			foreach ($inactiveTemplate as $template) {
+			    $template->status = 0;
+			    $template->save('status');
+			}
+
+			if($state){
+				$model->temp_id = $tempId;
+				$model->org_id = $orgId;			
+				$model->start = $today;
+				$model->end = date("Y-m-d", strtotime("+999 month", strtotime($today)));
+				$model->freq = 3;
+				$model->status = $state;
+				$model->save();
+				return true;
+			}
+			else{
+				echo '{"done":false,"msg":"Address Validation inactive"}';
+				return true;
+			}
+			
+		}
+		else{
+			echo '{"done":false,"msg":"Same Service"}';
+			return false;
+		}		
+	}
+
+	public function getAddrValidationDetection()
+	{
+		$templatesModel = InvoiceTemplate::model()->find(['condition' => 'ref=:ref', 'params' => [':ref' => "Monthly Address Validation-Detection"]]);
+		if(isset($templatesModel)){
+			$model = $templatesModel;
+		}
+		else{
+			$model = new InvoiceTemplate;		
+			$model->ref = "Monthly Address Validation-Detection";
+			$model->currency = 1;
+			$model->type = 40;
+			$model->dpt_id = 106;
+			$model->dpmt = 10;
+			$model->status = 1;
+			if(!$model->save()){
+				$model->addError('id', 'Can not save');
+			}
+		}		
+		
+		$line = InvTempLine::model()->find(['condition' => 't.desc=:desc and t.temp_id=:temp_id', 'params' => [':desc' => "Address Validation-Detection", ':temp_id' => $model->id]]);
+		if (!isset($line)) {
+			$line = new InvTempLine;
+			$line->temp_id = $model->id;
+			$line->ccode = "GL15";
+			$line->desc = "Address Validation-Detection";
+			$line->rate = 50;
+			$line->qty = 1;
+			$line->gst = "OUTPUT";
+			$line->save();
+		}		
+		
+		return $model->id;
+	}
+
+	public function getAddrValidationCorrection()
+	{
+		$templatesModel = InvoiceTemplate::model()->find(['condition' => 'ref=:ref', 'params' => [':ref' => "Monthly Address Validation-Correction"]]);
+		if(isset($templatesModel)){
+			$model = $templatesModel;
+		}
+		else{
+			$model = new InvoiceTemplate;		
+			$model->ref = "Monthly Address Validation-Correction";
+			$model->currency = 1;
+			$model->type = 40;
+			$model->dpt_id = 106;
+			$model->dpmt = 10;
+			$model->status = 1;
+			if(!$model->save()){
+				$model->addError('id', 'Can not save');
+			}
+		}		
+		
+		$line = InvTempLine::model()->find(['condition' => 't.desc=:desc and t.temp_id=:temp_id', 'params' => [':desc' => "Address Validation-Correction", ':temp_id' => $model->id]]);
+		if (!isset($line)) {
+			$line = new InvTempLine;
+			$line->temp_id = $model->id;
+			$line->ccode = "GL15";
+			$line->desc = "Address Validation-Correction";
+			$line->rate = 100;
+			$line->qty = 1;
+			$line->gst = "OUTPUT";
+			$line->save();
+		}		
+		
+		return $model->id;
+	}
+
+	public function actionResidentialCheckingPage()
+	{
+        // $this->layout = false;
+        $this->render('residential_checking');
+	}
+
+	public function actionCheckResidentialAddress()
+	{	
+		// print_r($id[0]->id);
+		// Yii::app()->end();
+		if(!Postcode::validateAddress(@$_POST['suburb'],@$_POST['state'],@$_POST['postcode'])){
+			echo '{"done":true,"msg":"This Address is invalid"}';
+			return false;
+		}
+		$shipment = ImParcel::model()->find("id>0");;		
+		
+		$shipment->weight = 5;
+		$shipment->pkg = 1;		
+		$shipment->packages = "";
+		$shipment->packs = [["weight"=>5,"length"=>"10","width"=>"10","height"=>"10"]];
+		$shipment->cnee = new Addr;
+		$shipment->cnee->name="HAHA";
+		$shipment->cnee->company = "";
+		$shipment->cnee->city = "";
+		$shipment->cnee->tel = "";
+		$shipment->cnee->email = "";
+		$shipment->cnee->address = $_POST['address_line'];
+		$shipment->cnee->state = $_POST['state'];
+		$shipment->cnee->postcode = $_POST['postcode'];
+		$shipment->cnee->suburb = $_POST['suburb'];
+		$shipment->cnee->country = 'Australia';
+
+		$courier = new stdClass();
+		if ($_POST['state']=="VIC") {
+			$courier->mdata['ddpt_id'] = Org::TLA_DEPARTMENT_MELBOURNE;
+		}
+		elseif ($_POST['state']=="QLD") {
+			$courier->mdata['ddpt_id'] = Org::TLA_DEPARTMENT_BRISBANE;
+		}
+		else{
+			$courier->mdata['ddpt_id'] = Org::TLA_DEPARTMENT_SYDNEY;			
+		}
+
+		[$check,$alliedHomeSurcharge]=AddressService::isShipmentResidentialForIms($shipment,$courier);
+		if($check){
+			echo '{"done":true,"msg":"This Address is residential"}';
+			return false;
+		}
+		else{
+			if ($alliedHomeSurcharge==9999) {
+				echo '{"done":true,"msg":"This Address is invalid"}';
+			}
+			else{
+				echo '{"done":false,"msg":"This Address is commercial"}';
+			}			
+			return false;			
+		}
+		
+	}
+
+	public function actionContainerQuotationPage()
+	{
+        // $this->layout = false;
+        $this->render('container_quotation');
+	}
+
+	public function actionGetContainerQuotation()
+	{
+		if(empty($_GET['cach'])){
+			Yii::app()->end();
+		}
+		else{
+			$cda = Service::getCacheData("ContQuot".$_GET['cach']);
+			if(empty($cda))
+			{
+				Service::setCacheData("CRR".$_GET['cach'],"CRR".$_GET['cach'],300);
+			}
+			else
+			{
+				Yii::app()->end();
+			}
+		}	
+
+		if(!Postcode::validateAddress(@$_POST['suburb'],@$_POST['state'],@$_POST['postcode'])){
+			if (!empty($_GET['ims'])) {
+				$model = ["invalid"=>true];
+				$this->renderPartial('../priceEnquiry/container_quotation_calculator', ['model' => $model]);
+				return false;
+			}
+			else{
+				echo '{"done":true,"msg":"This Address is invalid"}';
+				return false;
+			}			
+		}
+		$shipment = ImParcel::model()->find("id>0");
+		$ddptId = 0;
+		$distance = 0;
+		$cartageFee = 0;
+		// $sideloader = 0;
+		$fuel = 0;
+		$totalFee = 0;
+		$quatation = [];
+		
+		$shipment->weight = 5;
+		$shipment->pkg = 1;		
+		$shipment->packages = "";
+		$shipment->packs = [["weight"=>5,"length"=>"10","width"=>"10","height"=>"10"]];
+		$shipment->cnee = new Addr;
+		$shipment->cnee->name="HAHA";
+		$shipment->cnee->company = "";
+		$shipment->cnee->city = "";
+		$shipment->cnee->tel = "";
+		$shipment->cnee->email = "";
+		$shipment->cnee->address = $_POST['address_line'];
+		$shipment->cnee->state = $_POST['state'];
+		$shipment->cnee->postcode = $_POST['postcode'];
+		$shipment->cnee->suburb = $_POST['suburb'];
+		$shipment->cnee->country = 'Australia';
+
+		$courier = new stdClass();
+		if ($_POST['state']=="VIC") {
+			$ddptId = Org::TLA_DEPARTMENT_MELBOURNE;
+			$ddpt = 'MEL';
+		}
+		elseif ($_POST['state']=="NSW") {
+			$ddptId = Org::TLA_DEPARTMENT_SYDNEY;
+			$ddpt = 'SYD';			
+		}
+		elseif ($_POST['state']=="QLD") {
+			$ddptId = Org::TLA_DEPARTMENT_BRISBANE;
+			$ddpt = 'BNE';	
+		}
+
+		$standardTrailer = empty($_POST['standard_trailer'])?'20ft_standard':$_POST['standard_trailer'];
+		$distance=GoogleMapAPI::getDistance($shipment,$ddptId);
+		$Rates=SystemSetting::getContainerQuotationRates();
+		$cqRates=$Rates[$ddpt];
+
+		$fuelRate=(double)$cqRates['fuel_rate'];
+		$timeslot=(int)$cqRates['timeslot'];
+		$infrastructure=(int)$cqRates['infrastructure'];
+		$emptyDeHire=(int)$cqRates['empty_de_hire'];
+		$toll=(int)$cqRates['toll'];
+
+		if($distance>0){
+			switch ($distance) {
+				case ($distance>=0&&$distance<10):
+					$cartageFee = (int)$cqRates['0_9'][$standardTrailer];
+					// $sideloader = (int)$cqRates['sideloader'][$standardTrailer];
+					break;
+				case ($distance>=10&&$distance<20):
+					$cartageFee = (int)$cqRates['10_19'][$standardTrailer];
+					// $sideloader = (int)$cqRates['sideloader'][$standardTrailer];
+					break;
+				case ($distance>=20&&$distance<30):
+					$cartageFee = (int)$cqRates['20_29'][$standardTrailer];
+					// $sideloader = (int)$cqRates['sideloader'][$standardTrailer];
+					break;
+				case ($distance>=30&&$distance<40):
+					$cartageFee = (int)$cqRates['30_39'][$standardTrailer];
+					// $sideloader = (int)$cqRates['sideloader'][$standardTrailer];
+					break;
+				case ($distance>=40&&$distance<50):
+					$cartageFee = (int)$cqRates['40_49'][$standardTrailer];
+					// $sideloader = (int)$cqRates['sideloader'][$standardTrailer];
+					break;
+				case ($distance>=50&&$distance<60):
+					$cartageFee = (int)$cqRates['50_59'][$standardTrailer];
+					// $sideloader = (int)$cqRates['sideloader'][$standardTrailer];
+					break;
+				case ($distance>=60&&$distance<70):
+					$cartageFee = (int)$cqRates['60_69'][$standardTrailer];
+					// $sideloader = (int)$cqRates['sideloader'][$standardTrailer];
+					break;
+				
+				default:
+					// code...
+					break;
+			}
+			$fuel = $cartageFee*$fuelRate;
+			$totalFee = $cartageFee+$fuel+$timeslot+$infrastructure+$emptyDeHire+$toll;
+			// $quatation = ["cartageFee"=>$cartageFee, "fuel"=>$fuel, "timeslot"=>$timeslot, "infrastructure"=>$infrastructure, "sideloader"=>$sideloader, "emptyDeHire"=>$emptyDeHire, "toll"=>$toll,"totalFee"=>$totalFee];
+
+			$containerQuotation = new ContainerQuotation();
+			$containerQuotation->user_id = empty(User::currentUserID())?0:User::currentUserID();
+			$containerQuotation->date = date('Y-m-d H:i:s');
+			$containerQuotation->address = $_POST['address_line'];
+			$containerQuotation->suburb = $_POST['suburb'];
+			$containerQuotation->state = $_POST['state'];
+			$containerQuotation->postcode = $_POST['postcode'];
+			$containerQuotation->standard_trailer = $_POST['standard_trailer'];
+			$containerQuotation->quotation_num = time().User::currentUserID();
+			$containerQuotation->distance = $distance;
+			$containerQuotation->amount = $totalFee;
+
+			if ($containerQuotation->save()) {
+				if (!empty($_GET['ims'])) {
+					$model = ["distance"=>$distance, "quotationNum"=>$containerQuotation->quotation_num, "cartageFee"=>$cartageFee, "fuel"=>$fuel, "timeslot"=>$timeslot, "infrastructure"=>$infrastructure, "emptyDeHire"=>$emptyDeHire, "toll"=>$toll,"totalFee"=>$totalFee, "addressLine"=>$shipment->cnee->address, "state"=>$shipment->cnee->state, "postcode"=>$shipment->cnee->postcode, "suburb"=>$shipment->cnee->suburb, "standardTrailer"=>$containerQuotation->standard_trailer,"id"=>$containerQuotation->id];
+					 $this->renderPartial('../priceEnquiry/container_quotation_calculator', ['model' => $model]);
+					 // echo '{
+				  //       "done": true,
+				  //       "msg":"<div class=\"container-md\"><h1 style=\"text-align: center;\">Container Quotation Enquiry</h1><table style=\"border-collapse: collapse; width: 100%;\"><tr><th style=\"border: 1px solid black; padding: 8px;\">Delivery Distance</th><td style=\"border: 1px solid black; padding: 8px;\">'.$distance.' kilometers</td></tr><tr><th style=\"border: 1px solid black; padding: 8px;\">Reference Number</th><td style=\"border: 1px solid black; padding: 8px;\">'.$containerQuotation->quotation_num.'</td></tr><tr><td style=\"border: 1px solid black; padding: 8px;\">Cartage Fee</td><td style=\"border: 1px solid black; padding: 8px;\">$'.$cartageFee.'</td></tr><tr><td style=\"border: 1px solid black; padding: 8px;\">Fuel Surcharge</td><td style=\"border: 1px solid black; padding: 8px;\">$'.$fuel.'</td></tr><tr><td style=\"border: 1px solid black; padding: 8px;\">Timeslot Fee</td><td style=\"border: 1px solid black; padding: 8px;\">$'.$timeslot.'</td></tr><tr><td style=\"border: 1px solid black; padding: 8px;\">Infrastructure Fee</td><td style=\"border: 1px solid black; padding: 8px;\">$'.$infrastructure.'</td></tr><tr><td style=\"border: 1px solid black; padding: 8px;\">Empty De-hire Fee</td><td style=\"border: 1px solid black; padding: 8px;\">$'.$emptyDeHire.'</td></tr><tr><td style=\"border: 1px solid black; padding: 8px;\">Toll Surcharge</td><td style=\"border: 1px solid black; padding: 8px;\">$'.$toll.'</td></tr><tr><td style=\"border: 1px solid black; padding: 8px;\">Total Fee</td><td style=\"border: 1px solid black; padding: 8px;\">$'.$totalFee.'</td></tr><tr><td colspan=\"2\" style=\"border: 1px solid black; padding: 8px;\">For any furterh information, please reach out to our sales team. Or you can submit your enquiry via <a target=\"_blank\" href=\"https://toplogistics.com.au/contact-us/\">Contact us</a>.</td></tr></table></div>"}';
+				}
+				else{					
+					echo '{
+				        "done": true,
+				        "msg":"<div class=\"container-md\"><h1 style=\"text-align: center;\">Container Quotation Enquiry</h1><table style=\"border-collapse: collapse; width: 100%;\"><tr><th style=\"border: 1px solid black; padding: 8px;\">Delivery Distance</th><td style=\"border: 1px solid black; padding: 8px;\">'.$distance.' kilometers</td></tr><tr><th style=\"border: 1px solid black; padding: 8px;\">Reference Number</th><td style=\"border: 1px solid black; padding: 8px;\">'.$containerQuotation->quotation_num.'</td></tr><tr><td style=\"border: 1px solid black; padding: 8px;\">Cartage Fee</td><td style=\"border: 1px solid black; padding: 8px;\">$'.$cartageFee.'</td></tr><tr><td style=\"border: 1px solid black; padding: 8px;\">Fuel Surcharge</td><td style=\"border: 1px solid black; padding: 8px;\">$'.$fuel.'</td></tr><tr><td style=\"border: 1px solid black; padding: 8px;\">Timeslot Fee</td><td style=\"border: 1px solid black; padding: 8px;\">$'.$timeslot.'</td></tr><tr><td style=\"border: 1px solid black; padding: 8px;\">Infrastructure Fee</td><td style=\"border: 1px solid black; padding: 8px;\">$'.$infrastructure.'</td></tr><tr><td style=\"border: 1px solid black; padding: 8px;\">Empty De-hire Fee</td><td style=\"border: 1px solid black; padding: 8px;\">$'.$emptyDeHire.'</td></tr><tr><td style=\"border: 1px solid black; padding: 8px;\">Toll Surcharge</td><td style=\"border: 1px solid black; padding: 8px;\">$'.$toll.'</td></tr><tr><td style=\"border: 1px solid black; padding: 8px;\">Total Fee</td><td style=\"border: 1px solid black; padding: 8px;\">$'.$totalFee.'</td></tr><tr><td colspan=\"2\" style=\"border: 1px solid black; padding: 8px;\">For any furterh information, please reach out to our sales team.</td></tr></table></div>"}';
+	
+				}						
+			}
+			else{
+				echo '{"done":true,"msg":"Can not be saved"}';
+			}
+			return false;			
+		}
+		else{
+			echo '{"done":false,"msg":"Can not check this address"}';			
+			return false;			
+		}
+		
+	}
+
+	public function actionSubmitContainerQuotationEmail()
+	{
+		if (!empty($_GET)) {
+			$containerQuotationModel = ContainerQuotation::model()->findByPk($_GET['id']);
+			$cuEmail = @$_GET['email'];
+			$cuName = @$_GET['name'];
+			$contactNumber = @$_GET['contact_number'];
+			$enquiryDate = @$_GET['enquiry_date'];
+			$containerQuotationService = new ContainerQuotationService();
+			$containerQuotationService->createContainerQuotationEmail($containerQuotationModel,$cuEmail,$cuName,$contactNumber,$enquiryDate);
+			$this->renderPartial('../priceEnquiry/container_quotation_calculator');
+		}
+	}
+
+}

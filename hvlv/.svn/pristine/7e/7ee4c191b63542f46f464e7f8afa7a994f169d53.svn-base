@@ -1,0 +1,207 @@
+<?php
+if ($model->mdata['pallet_requirement'] == 'chep') {
+    $palletFee = 0;
+} else {
+    $palletFee = $numPallets * 20;
+}
+
+if ($model->mdata['shrink_wrap'] == "wrap") {
+    $wrapFee = $numPallets * 5;
+} else {
+    $wrapFee = 0;
+}
+?>
+<!Doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-MrcW6ZMFYlzcLA8Nl+NtUVF0sA7MsXsP1UyJoMp4YLEuNSfAP+JcXn/tWtIaxVXM" crossorigin="anonymous"></script>
+    <!-- jQuery CSS -->
+    <link rel="stylesheet" href="//code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+    <!-- jQuery -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.js"></script>
+    <!-- reCaptcha  -->
+    <!-- <script src="https://www.google.com/recaptcha/api.js"></script> -->
+    <!-- PayPal Button -->
+    <script src="https://www.paypal.com/sdk/js?client-id=AVL9VKfCUXcM4engbDS_5i4Lb0T5nJXo9inEBBh5XJJtS4Gl0EZ6y7sglZYqEwRSrGIrZACU7TFQoQAp&locale=en_AU&currency=AUD" data-sdk-integration-source="button-factory"></script>
+
+    <!-- Custom CSS -->
+    <style>
+        body {
+            background: #ece7dc;
+        }
+    </style>
+</head>
+
+<body>
+    <br />
+    <div class="container-lg">
+        <div class="row">
+            <div class="col-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 style="color:green"><i class="bi bi-calendar2-check"></i>Booking Summary</h3>
+                    </div>
+                    <div class="card-body">
+                        <h5>Details of your booking:</h5>
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Booked Date</th>
+                                    <th scope="col">Booked Time</th>
+                                    <th scope="col">Vehicle Rego</th>
+                                    <th scope="col">Driver Name</th>
+                                    <th scope="col">Company Name</th>
+                                    <th scope="col">Number of Pallets</th>
+                                    <th scope="col">Plain Pallet</th>
+                                    <th scope="col">Shrink Wrap</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><?php echo date('d-m-Y', strtotime($model->booking_time)); ?></td>
+                                    <td><?php echo date('H:i', strtotime($model->booking_time)); ?></td>
+                                    <td><?php echo $model->rego; ?></td>
+                                    <td><?php echo $model->driver_name; ?></td>
+                                    <td><?php echo $model->company_name; ?></td>
+                                    <td><?php echo $numPallets; ?></td>
+                                    <td><?php if ($model->mdata['pallet_requirement'] == 'chep') {
+                                            echo "No";
+                                        } else {
+                                            echo "Yes";
+                                        } ?></td>
+                                    <td><?php if ($model->mdata['shrink_wrap'] == 'wrap') {
+                                            echo "Yes";
+                                        } else {
+                                            echo "No";
+                                        } ?></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="col-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Payment Summary</h3>
+                    </div>
+                    <div class="card-body">
+                        <ul class="list-group list-group-flush">
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                Base Booking Fee:
+                                <span><?php echo "$" . number_format((float)20, 2, '.', ''); ?></span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                Plain Pallet Fee:
+                                <span><?php echo "$" . number_format((float)$palletFee, 2, '.', ''); ?></span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                Shrink Wrap Fee:
+                                <span><?php echo "$" . number_format((float)$wrapFee, 2, '.', ''); ?></span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                Total Amount Ex GST:
+                                <span><?php echo "$" . number_format((float)$model->fee, 2, '.', ''); ?></span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                GST 10%:
+                                <span><?php echo "$" . number_format((float)$model->fee * 0.1, 2, '.', ''); ?></span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                Total Amount Inc GST:
+                                <span><?php echo "$" . number_format((float)$model->fee * 1.1, 2, '.', ''); ?></span>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="card-footer">
+                        <div id="smart-button-container">
+                            <div style="text-align: center">
+                                <div id="paypal-button-container"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        function initPayPalButton() {
+            paypal
+                .Buttons({
+                    style: {
+                        shape: "rect",
+                        color: "gold",
+                        layout: "vertical",
+                        label: "paypal",
+                    },
+
+                    createOrder: function(data, actions) {
+                        return actions.order.create({
+                            "purchase_units": [{
+                                "amount": {
+                                    "currency_code": "AUD",
+                                    "value": "<?php echo number_format((float)$model->fee * 1.1, 2, '.', ''); ?>",
+                                    "breakdown": {
+                                        "item_total": {
+                                            /* Required when including the items array */
+                                            "currency_code": "AUD",
+                                            "value": "<?php echo number_format((float)$model->fee * 1.1, 2, '.', ''); ?>"
+                                        }
+                                    }
+                                },
+                                "items": [{
+                                    "name": "<?php echo $model->booking_number; ?>",
+                                    /* Shows within upper-right dropdown during payment approval */
+                                    "description": "<?php echo $model->booking_number; ?>",
+                                    /* Item details will also be in the completed paypal.com transaction view */
+                                    "unit_amount": {
+                                        "currency_code": "AUD",
+                                        "value": "<?php echo number_format((float)$model->fee * 1.1, 2, '.', ''); ?>"
+                                    },
+                                    "quantity": "1"
+                                }, ]
+                            }]
+                        });
+                    },
+
+                    onApprove: function(data, actions) {
+                        return actions.order.capture().then(function(orderData) {
+                            // Full available details
+                            /* console.log(
+                                "Capture result",
+                                orderData,
+                                JSON.stringify(orderData, null, 2)
+                            ); */
+                            if (orderData['status'] == "COMPLETED") {
+                                window.location.href = "https://imshk.toplogistics.com.au/customerService/bookingPaymentSuccess?pbn=<?php echo $model->booking_number; ?>";
+                            }
+
+                            // Show a success message within this page, e.g.
+                            const element = document.getElementById("paypal-button-container");
+                            element.innerHTML = "";
+                            element.innerHTML = "<h3>Thank you for your payment!</h3>";
+
+                            // Or go to another URL:  actions.redirect('thank_you.html');
+                        });
+                    },
+
+                    onError: function(err) {
+                        /* console.log(err); */
+                    },
+                })
+                .render("#paypal-button-container");
+        }
+        initPayPalButton();
+    </script>
+</body>
+
+</html>

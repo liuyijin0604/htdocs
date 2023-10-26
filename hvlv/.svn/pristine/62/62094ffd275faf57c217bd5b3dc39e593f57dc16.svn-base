@@ -1,0 +1,283 @@
+<style type="text/css">
+	.weightDiffReport
+	{
+		width:100%;
+		height: 100%;
+		border: 1px solid #000;
+	}
+	.weightDiffReport th td
+	{
+		font-size: 2em;
+	}
+
+	.weightDiffReport tr td
+	{
+		height:50px;
+		border: 1px solid #000;
+	}
+
+</style>
+<?php echo CHtml::button('select All consol',array('id'=>$_GET['tabid'].'select_all_consol'));?>
+<?php echo CHtml::button('select all ref',array('id'=>$_GET['tabid'].'select_all_ref'));?>
+<table class="weightDiffReport">
+	<thead>
+		<th>
+			Consol No
+		</th>
+		<?php if($title!='RTS'):?>
+		<th>
+			To Id
+		</th>
+		<?php endif;?>
+		<th>
+		</th>
+		<th>
+			Amount
+		</th>
+	</thead>
+<?php
+if($title=='RTS')
+{
+	foreach ($report as $key => $re) 
+	{
+		?>
+			<tr>
+				<td>
+					<?=CHtml::checkbox('consolIds',$re['consol_id'],["value"=>$re['consol_id']])?>
+					<?=$re['consol_no']?>
+				</td>
+				<td>
+					<table class="weightDiffReport">
+						<thead>
+							<th>
+								Select No
+							</th>
+							<th>
+								Agent Id
+							</th>
+							<th>
+								Error
+							</th>
+							<th>
+								Description
+							</th>
+							<th>
+								<?=$title?> Invoice
+							</th>
+							<th>
+								Invoice No
+							</th>
+						</thead>
+					<?php
+						foreach ($re['lines'] as $key => $line) 
+						{
+							?>
+							<tr>
+								<td><?=CHtml::checkbox('refs',$line['id'],["value"=>$line['id']])?><?=$line['ref']?></td><td><?=$line['to_id']?></td><td><?=$line['error']?></td><td><?=$line['description']?></td><td><?=$line['amount']?></td><td>
+									<?php 
+									foreach($line['invoices'] as $key =>$thisInvoice)
+									{
+										if($thisInvoice->isTLA())
+										{
+											echo "<a href=\"https://os.toplogistics.com.au/top/invoice/print.app?id={$thisInvoice->id}\" target=\"_blank\">Invoice".$thisInvoice->no."</a>";
+										}else
+										{
+											echo "<a href=\"https://os.toplogistics.com.au/invoice/print.app?id={$thisInvoice->id}\" target=\"_blank\">Invoice".$thisInvoice->no."</a>";
+										}
+									}
+									?>	
+								</td>
+							</tr>
+						<?php
+						}
+						?>
+					</table>
+				</td>
+				<td>
+					<?=$re['amount']?>
+				</td>
+
+			</tr>
+	<?php
+	}
+}else
+{
+	foreach ($report as $key => $re) 
+	{
+		?>
+			<tr>
+				<td>
+					<?=CHtml::checkbox('consolIds',$re['consol_id'],["value"=>$re['consol_id']])?>
+					<?=$re['consol_no']?>
+				</td>
+				<td>
+					<?=$re['to_id']?>
+				</td>
+				<td>
+					<table class="weightDiffReport">
+						<thead>
+							<th>
+								Select No
+							</th>
+							<th>
+								Description
+							</th>
+							<th>
+								<?=$title?> Invoice
+							</th>
+							<th>
+								Invoice No
+							</th>
+						</thead>
+					<?php
+						foreach ($re['lines'] as $key => $line) 
+						{
+							?>
+							<tr>
+								<td><?=CHtml::checkbox('refs',$line['id'],["value"=>$line['id']])?><?=$line['ref']?></td><td><?=$line['description']?></td><td><?=$line['amount']?></td><td>
+									<?php
+
+									[$app_name, Yii::app()->name] = [Yii::app()->name, 'TLA'];
+									$srl = SiReconcileLine::model()->findByPk($line['id']);
+									if(!empty($srl))
+									{
+										if($title == 'Surcharge')
+										{
+											$thisInvoice = $srl->getSurchargeInvoice();
+										}else
+										{
+											$thisInvoice = $srl->getWeightDiffInvoice();
+										}
+
+										if(!empty($thisInvoice)&&$thisInvoice->isTLA())
+										{
+											echo "<a href=\"https://os.toplogistics.com.au/top/invoice/print.app?id={$thisInvoice->id}\" target=\"_blank\">Invoice".$thisInvoice->no."</a>";
+										}else
+										{
+											echo "<a href=\"https://os.toplogistics.com.au/invoice/print.app?id={$thisInvoice->id}\" target=\"_blank\">Invoice".$thisInvoice->no."</a>";
+										}
+									}
+									?>	
+								</td>
+							</tr>
+						<?php
+						}
+						?>
+					</table>
+				</td>
+				<td>
+					<?=$re['amount']?>
+				</td>
+
+			</tr>
+	<?php
+	}
+}
+?>
+</table>
+
+ <?php echo CHtml::button('Generate '.$title.' Invoice',array('id'=>$_GET['tabid'].$title.'_invoice'));?>
+
+ <script type="text/javascript">
+ 	$(function(){
+ 	var tab = $("#<?=$_GET['tabid'];?>");
+	var panel = tab.data('panel');
+	var ccheck =0;
+	var rcheck =0;
+	function uploading_on(obj) {
+		obj.addClass('uploading');
+		obj.val('    Uploading');
+		obj.prop('disabled', 'disabled');
+	}
+
+	function uploading_off(obj) {
+		obj.removeClass('uploading');
+		obj.val('Submit');
+		obj.removeProp('disabled');
+	}
+    $('#<?=$_GET['tabid'].$title?>_invoice').on('click',function()
+	{
+		var consolIds = [];
+		var refIds = [];
+
+		var consolStr="";
+		var refStr="";
+
+		$.each($("input[name='consolIds']:checkbox:checked"),function(){
+	        consolIds.push($(this).val());
+	    });
+
+	    $.each($("input[name='refs']:checkbox:checked"),function(){
+	        refIds.push($(this).val());
+	    });
+
+	    for(var i=0;i<consolIds.length;i++){
+	    	consolStr+=consolIds[i]+","
+	    }
+
+	    for(var i=0;i<refIds.length;i++){
+	    	refStr+=refIds[i]+","
+	    }
+
+	    if( confirm('Are you sure to Generate <?=$title?> Invoice?'))
+	    {
+	    	uploading_on($('#<?=$_GET['tabid'].$title?>_invoice'));
+
+	    	var formData = new FormData();
+			formData.append('rec_id', <?=$model->id?>);
+			formData.append('consolIds',consolStr);
+			formData.append('ids', refStr);
+			
+			$.ajax({
+				url: '<?=Yii::app()->createUrl($url)?>',
+				type: 'POST',
+				data: formData,
+				processData: false,
+				contentType: false,
+				success: function(r) {
+					uploading_off($('#<?=$_GET['tabid'].$title?>_invoice'));
+	          		r = JSON.parse(r);
+	            	if(r.done==true){
+	            	     myApp.alert("success");  
+	            	}else{
+	            	    myApp.alert(r, false);   
+	           		}	
+				},
+				error: function(r) {
+					uploading_off($('#<?=$_GET['tabid'].$title?>_invoice'));
+					myApp.alert('System error', false);
+				}
+			});
+	    
+	    }
+	});
+
+	$('#<?=$_GET['tabid'];?>select_all_consol').on('click',function()
+	{
+		if(ccheck==0)
+		{
+			$("input[name='consolIds']").click();
+			ccheck = 1;
+	    }else
+	    {
+	    	$("input[name='consolIds']").removeAttr("checked");
+	    	ccheck = 0;
+	    }
+	});
+
+	$('#<?=$_GET['tabid'];?>select_all_ref').on('click',function()
+	{
+		if(rcheck==0)
+		{
+			$("input[name='refs']").click();
+			rcheck = 1;
+	    }else
+	    {
+	    	$("input[name='refs']").removeAttr("checked");
+	    	rcheck = 0;
+	    }
+	});
+
+
+	});
+ </script>

@@ -1,0 +1,1225 @@
+<?php
+libxml_disable_entity_loader(false);
+class TntAPI
+{
+	/************************Service Type***********/
+	const SERVICE_SYD = "TNT_SYDNEY";
+	const SERVICE_MEL = "TNT_MELBOURNE";
+	const SERVICE_BNE = "TNT_BRISBANE";
+	const SERVICE_SYD_TOP = "TNT_SYDNEY_TOP";
+	const SERVICE_MEL_TOP = "TNT_MELBOURNE_TOP";
+	const SERVICE_BNE_TOP = "TNT_BRISBANE_TOP";
+	const SERVICE_PER_TOP = "TNT_PERTH_TOP";
+
+	const SERVICE_TEST = "TNT_TEST";
+	/*************************************************/
+	const API_USER_ID="CIT00000000000110801";
+	const API_USER_PASSWORD="pcatnt2018";
+
+	const ITEM_UNIQUE_NUMBER='12'; //assigned by TNT for own system
+	
+	const ROAD_SERVICE_CODE=76;
+	const OVERNIGHT_EXPRESS_CODE=75;
+	
+	const PRODUCTION_URL='https://www.tntexpress.com.au/webservices/conservice/ConsignmentService.svc?wsdl'; //web API production
+	const TEST_URL='https://tntuat.pca168.com/Webservices/Conservice/ConsignmentService.svc?wsdl';    //Web API Test API
+	const TRACKING_URL='http://www.tntexpress.com.au/link/Cnmhx2.asp?';   //Tracking API
+	const ROUTING_URL='http://www.tntexpress.com.au/routing/routingservice.svc?wsdl';   //GET ROUTING INFORMATION for SELF OWN SYSTEM;
+	const GET_SERVICE_URL='https://www.tntexpress.com.au/Rtt/inputRequest.asp';   //RTT
+
+	/********************* SYDNEY SERVICE INFORMATION *********/
+	const ACCOUNT_NUMBER="30031521";
+	const SENDER_CODE="PCTLS";
+	const LABEL_PREFIX="TLS";
+	const SYDNEY_SUBURB = "BANKSTOWN AERODROME";
+	const SYDNEY_POSTCODE = "2200";
+	const SYDNEY_ADDRESS = "1/233 Milperra Rd";
+	const SYDNEY_STATE = "NSW";
+	/********************************************************/
+	
+	/****************** MELBOURNE SERVICE INFORMATION *******/
+	// const MEL_ACCOUNT_NUMBER = "30025115";
+	const MEL_ACCOUNT_NUMBER = "30031520";
+	const MEL_SENDER_CODE = "PCTLM";
+	const MEL_LABEL_PREFIX = "LMA";
+	const MEL_SUBURB = "SUNSHINE";
+	const MEL_POSTCODE = "3020";
+	const MEL_ADDRESS = "3B/8 Judge St";
+	const MEL_STATE = "VIC";
+	/********************************************************/
+	public static $api_accounts = [
+		// self::SERVICE_SYD=>[
+		// 	'account_number'=>"30024461",
+		// 	'sender_code'=>"PCAEX",
+		// 	'label_prefix'=>"DKC",
+		// 	'suburb'=>"KINGSGROVE",
+		// 	'postcode'=>"2208",
+		// 	'address'=>"6C The Crescent",
+		// 	'state'=>"NSW"
+
+		// ],
+		// self::SERVICE_MEL=>[
+		// 	'account_number'=> "30025922",
+		// 	'sender_code'=>"PCAXD",
+		// 	'label_prefix'=>"PCD",
+		// 	'suburb'=>"DERRIMUT",
+		// 	'postcode'=>"3026",
+		// 	'address'=>"18 Grimes Court",
+		// 	'state'=>"VIC"
+		// ],
+		// self::SERVICE_BNE=>[
+		// 	'account_number'=>"30027416",
+		// 	'sender_code'=>"PCAXB",
+		// 	'label_prefix'=>"BPC",
+		// 	'suburb'=>"Eagle Farm",
+		// 	'postcode'=>"4009",
+		// 	'address'=>"35 Qantas Drive",
+		// 	'state'=>"QLD"
+		self::SERVICE_SYD_TOP=>[
+			'account_number'=>"30031521",
+			'sender_code'=>"PCTLS",
+			'label_prefix'=>"TLS",
+			'suburb'=>"BANKSTOWN AERODROME",
+			'postcode'=>"2200",
+			'address'=>"1/233 Milperra Rd",
+			'state'=>"NSW"
+		],
+		self::SERVICE_MEL_TOP=>[
+			'account_number'=>"30031520",
+			'sender_code'=>"PCTLM",
+			'label_prefix'=>"LMA",
+			'suburb'=>"SUNSHINE",
+			'postcode'=>"3020",
+			'address'=>"3B/8 Judge St",
+			'state'=>"VIC"
+		],
+		self::SERVICE_BNE_TOP=>[
+			'account_number'=>"30031800",
+			'sender_code'=>"PCTLB",
+			'label_prefix'=>"TBC",
+			'suburb'=>"Coopers Plains",
+			'postcode'=>"4108",
+			'address'=>"6/55 Musgrave Rd",
+			'state'=>"QLD"
+		],
+		self::SERVICE_PER_TOP=>[
+			'account_number'=>"30032250",
+			'sender_code'=>"PCTLP",
+			'label_prefix'=>"LPC",
+			'suburb'=>"PERTH AIRPORT",
+			'postcode'=>"6105",
+			'address'=>"1/13 HUGH EDWARDS DR",
+			'state'=>"WA"
+		]
+	];
+	
+	public $is_test=true;
+	
+	public $user_id;
+	
+	public $user_passwd;
+	
+	private $select_service_code='76';
+	
+	private $collection_suburb="Bankstown Aerodrome";
+	
+	private $collection_postcode="2200";
+	
+	private $collection_address="1/233 Milperra Rd";
+	
+	private $collection_state="NSW";
+	
+	private $select_service = self::SERVICE_SYD;
+	
+	private $select_sender_code = self::SENDER_CODE;
+	
+	private $select_account_number = self::ACCOUNT_NUMBER;
+	
+	const CONSIGNMENT_FINAL_YES='Y';
+	const CONSIGNMENT_FINAL_NO='N';
+	const str_syd_top = 'syd_top';
+	const str_mel_top = 'mel_top';
+	const str_bne_top = 'bne_top';
+	const str_per_top = 'per_top';
+
+
+	private function __construct($user_id, $user_passwd, $service=self::SERVICE_SYD, $is_test)
+	{
+		$this->user_id = $user_id;
+		$this->user_passwd = $user_passwd;
+		$this->is_test = $is_test;
+		if (isset(self::$api_accounts[$service])) {
+			$selectedAccount = self::$api_accounts[$service];
+			$this ->select_account_number = $selectedAccount['account_number'];
+			$this->select_sender_code =$selectedAccount['sender_code'];
+			$this->select_service = $service;
+			$this ->collection_address =$selectedAccount['address'];
+			$this ->collection_suburb = $selectedAccount['suburb'];
+			$this ->collection_postcode = $selectedAccount['postcode'];
+			$this ->collection_state = $selectedAccount['state'];
+		}
+	}
+
+	public static function getTntInterface($o = 'syd')
+	{
+		switch ($o) {
+			case 'mel':
+				$service = self::SERVICE_MEL;
+			break;
+			case 'bne':
+				$service = self::SERVICE_BNE;
+			break;
+			case 'test':
+				$service = self::SERVICE_TEST;
+			break;
+			case self::str_syd_top:
+				$service = self::SERVICE_SYD_TOP;
+			break;
+			case self::str_mel_top:
+				$service = self::SERVICE_MEL_TOP;
+			break;
+			case self::str_bne_top:
+				$service = self::SERVICE_BNE_TOP;
+			break;
+			case self::str_per_top:
+				$service = self::SERVICE_PER_TOP;
+			break;
+			default:
+				$service = self::SERVICE_SYD;
+			break;
+		}
+		return new TntAPI(self::API_USER_ID, self::API_USER_PASSWORD, $service, false);
+	}
+
+	const API_TEST_USER_ID="CIT00000000000100794";
+	const API_TEST_PASSWORD="uatTNT123";
+	const TEST_ACCOUNT_NUMBER="30024461";
+
+	public static function genTNTSydConsignmentNo()
+	{
+		return ConnoteRange::newNumber("Org", 976, self::$api_accounts[self::SERVICE_SYD]['label_prefix']);
+	}
+
+	public static function genTNTMelConsignmentNo()
+	{
+		return ConnoteRange::newNumber("Org", 979);
+	}
+
+	public static function genTNTBneConsignmentNo()
+	{
+		return ConnoteRange::newNumber("Org", 976, self::$api_accounts[self::SERVICE_BNE]['label_prefix']);
+	}
+
+	public static function genTNTSydConsignmentNoTOP()
+	{
+		return ConnoteRange::newNumber("Org", Org::ORGID_COURIER_TNT_TOP, self::$api_accounts[self::SERVICE_SYD_TOP]['label_prefix']);
+	}
+
+	public static function genTNTMelConsignmentNoTOP()
+	{
+		return ConnoteRange::newNumber("Org", Org::ORGID_COURIER_TNT_TOP, self::$api_accounts[self::SERVICE_MEL_TOP]['label_prefix']);
+	}
+	public static function genTNTBneConsignmentNoTOP()
+	{
+		return ConnoteRange::newNumber("Org", Org::ORGID_COURIER_TNT_TOP, self::$api_accounts[self::SERVICE_BNE_TOP]['label_prefix']);
+	}
+		public static function genTNTPerConsignmentNoTOP()
+	{
+		return ConnoteRange::newNumber("Org", Org::ORGID_COURIER_TNT_TOP, self::$api_accounts[self::SERVICE_PER_TOP]['label_prefix']);
+	}
+	
+	public function genTNTConsignmentNo()
+	{
+		if ($this->select_service==self::SERVICE_MEL) {
+			return TntAPI::genTNTMelConsignmentNo();
+		}
+		if ($this->select_service==self::SERVICE_BNE) {
+			return TntAPI::genTNTBneConsignmentNo();
+		}
+
+		if ($this->select_service==self::SERVICE_SYD_TOP) {
+			return TntAPI::genTNTSydConsignmentNoTOP();
+		}
+		if ($this->select_service==self::SERVICE_MEL_TOP) {
+			return TntAPI::genTNTMelConsignmentNoTOP();
+		}
+		if ($this->select_service==self::SERVICE_BNE_TOP) {
+			return TntAPI::genTNTBneConsignmentNoTOP();
+		}
+		if ($this->select_service==self::SERVICE_PER_TOP) {
+			return TntAPI::genTNTPerConsignmentNoTOP();
+		}
+		
+		return TntAPI::genTNTSydConsignmentNo();
+	}
+	
+	public static function genTransactionId()
+	{
+		return ConnoteRange::newNumber("Org", 977);
+	}
+
+	public static function genManifestId()
+	{
+		return ConnoteRange::newNumber("Org", 978);
+	}
+
+	/* this function is used to split the address into Array.
+	* each component up to 30 characters.
+	* @param ImParcel $shipment
+	* @return type
+	*/
+	public function prepAddrLines($addr)
+	{
+		$addr = trim($addr);
+		$ls = preg_split('/[\n\r;]+/', $addr);
+		if (sizeof($ls) == 1 && mb_strlen($addr) > 30) {
+			$ls = AppHelper::mbstr_split($addr, 30);
+		}
+		$ls = array_slice($ls, 0, 2);
+		$ls[0] = mb_substr($ls[0], 0, 30);
+		if (!empty($ls[1])) {
+			$ls[1] = mb_substr($ls[1], 0, 30);
+		}
+		return $ls;
+	}
+
+	public function trackingTnt($connote_no)
+	{
+		$data=[];
+		$url= self::TRACKING_URL.$connote_no;
+		$curl=new curl($url);
+		$curl->setopt(CURLOPT_TIMEOUT, 600);
+		$curl->exec();
+		$result=$curl->result;
+		$xml = simplexml_load_string($curl->result, "SimpleXMLElement", LIBXML_NOCDATA);
+		$json = json_decode(json_encode($xml), true);
+		if (isset($json['statusHistory']['status'])) {
+			$statuses=$json['statusHistory']['status'];
+			if (isset($statuses[0])) {
+				foreach ($statuses as $oneStatus) {
+					$statusCode=isset($oneStatus['statusCode'])?$oneStatus['statusCode']:"";
+					$data[]=[date_format(date_create_from_format("d/m/Y H:i:s", $oneStatus['date']." ".$oneStatus['time']), 'Y-m-d H:i:s'),
+						$oneStatus['statusDescription'],
+						$oneStatus['depotName'],
+						$statusCode
+					];
+				}
+			} elseif (isset($statuses['statusCode'])) {
+				$data[]=[ date_format(date_create_from_format("d/m/Y H:i:s", $statuses['date']." ".$statuses['time']), 'Y-m-d H:i:s'),
+					$statuses['statusDescription'],
+					$statuses['depotName'],
+					$statuses['statusCode']
+				];
+			}
+		}
+		return $data;
+	}
+	
+	/**
+	 * create shipment for self own system;
+	 * @param type $shipment
+	 */
+	public function createOneShipment($shipment)
+	{
+		$reply=['status'=>true,'msg'=>''];
+		$data=['CSurburb'=> $this->collection_suburb,
+			"CPostcode"=> $this->collection_postcode,
+			"DSuburb"=>$shipment->cnee->suburb,
+			"DPostcode"=>$shipment->cnee->postcode,
+			"ServiceCode"=> $this->select_service_code,
+		];
+		$result= $this->getTntRoutingInfoFromTlaHK($data);
+		if ($result['status']) {
+			$shipment->ref= $this->genTNTConsignmentNo();
+			$shipment->mdata['tnt']=$result['routing'];
+			$shipment->nolog = true;
+			$shipment->save();
+			$shipment->nolog = false;
+		} else {
+			$reply['status']=false;
+			$reply['msg']=$result['error'];
+		}
+		return $reply;
+	}
+	
+	public function checkIfDelivery($suburb, $postcode,$address = '',$orgRateId = false)
+	{
+		$data=['CSurburb'=> $this->collection_suburb,
+			"CPostcode"=> $this->collection_postcode,
+			"DSuburb"=>$suburb,
+			"DPostcode"=>$postcode,
+			"ServiceCode"=> $this->select_service_code,
+		];
+		$result= $this->getTntRoutingInfoFromTlaHK($data);
+		if ($result['status']) {
+			if(!empty($orgRateId))
+			{
+				$orgRate = OrgRate::model()->findByPk($orgRateId);
+				$code = $orgRate->code;
+				if(preg_match("/amazon/i", $code))
+				{
+					return $this->isMatchAmazonOrB2B($postcode,$suburb,$address);
+				}
+			}
+
+			return true;
+		} else {
+			return false;
+		}
+	}
+
+	public static function isMatchAmazonOrB2B($postcode,$suburb,$address)
+	{
+		return AddressService::isMatchAmazonOrB2B($postcode,$suburb,$address);
+	}
+
+	public static function isMatchAmazon($postcode,$suburb,$address)
+	{
+		return AddressService::isMatchAmazon($postcode,$suburb,$address);
+	}
+	
+	private function doRoutingRequest($data)
+	{
+		$data['DSuburb'] = str_replace("'", "&apos;", $data['DSuburb']);
+		$key = $data['CSurburb'].$data['CPostcode'].$data['DSuburb'].$data['DPostcode'].$data['ServiceCode'];
+
+		// if(!empty(SystemSetting::getTntResponse($key)))
+		// {
+		// 	$cache = SystemSetting::getTntResponse($key);
+		// 	$this->log2filerout(
+		// 	'Time: '.date('Y-m-d H:i:s')."\n".
+		// 		"\nRequest: ". json_encode($data).
+		// 		 "\nResponse: ". json_encode($cache)."\n\n"
+		// 		);
+		// 	return SystemSetting::getTntResponse($key);
+		// }
+
+		$reply=['status'=>true,'error'=>'','routing'=>
+			['BinNumber'=>'','GatewayDepot'=>'','OnForwardingDepot'=>'','OriginDepot'=>'','Postcode'=>'','Suburb'=>'']];
+		$url= self::ROUTING_URL;
+		$i = 0;
+		while ($i < 6) {
+			try {
+				$client = new SoapClient($url, [
+					'login'=>'routingservice',  //username
+					'password'=>'gfMHJS*f',     //password
+					'trace' => 1,
+					'soap_version' => SOAP_1_1,
+					'encoding' => 'UTF-8',
+					'stream_context' => stream_context_create([
+						'http' => [
+							'user_agent' => 'PHPSoapClient',
+							'timeout' => 10,
+						],
+						'ssl' => [
+							'verify_peer' => false,
+							'verify_peer_name' => false,
+						]
+					])
+				]);
+				$result=$client->__soapCall('GetRoutingInformation', ["GetRoutingInformation"=>$data]);
+			} catch (SoapFault $fault) {
+				if ($i < 5) {
+					$i++;
+					continue;
+				} else {
+					$this->log2filerout(
+						'Time: '.date('Y-m-d H:i:s')."\nURL: ".$url.
+							"\nRequest: ". json_encode($data).
+							 "\nResponse: ". json_encode($fault)."\n\n".(empty($client)? '' : $client->__getLastResponse())
+							);
+					return ['status' => false, 'error' => 'SOAP Fault: (faultcode: {$fault->faultcode}, faultstring: {$fault->faultstring})'];
+				}
+			}
+			break;
+		}
+		$this->log2filerout(
+			'Time: '.date('Y-m-d H:i:s')."\nURL: ".$url.
+				"\nRequest: ". json_encode($data).
+				 "\nResponse: ". json_encode($result)."\n\n"
+				);
+		$result=json_decode(json_encode($result), true);
+		if (isset($result['GetRoutingInformationResult']['IsServiceSupported'])&&$result['GetRoutingInformationResult']['IsServiceSupported']=='true') {
+			$reponseResult=$result['GetRoutingInformationResult'];
+			$reply['routing']=[
+				'BinNumber'=>$reponseResult['BinNumber'],
+				'GatewayDepot'=>$reponseResult['GatewayDepot'],
+				'OnForwardingDepot'=>$reponseResult['OnForwardingDepot'],
+				'OriginDepot'=>$reponseResult['OriginDepot'],
+				'Postcode'=>$reponseResult['Postcode'],
+				'Suburb'=>$reponseResult['Suburb'],
+			];
+			SystemSetting::setTNTResponse($reply,$key);
+		} else {
+			$reply['status']=false;
+			if (!empty($result['GetRoutingInformationResult']['Errors']['RoutingResponseError'])) {
+				$errorResult=$result['GetRoutingInformationResult']['Errors']['RoutingResponseError'];
+				if (!empty($errorResult['ErrorCode'])) {
+					$reply['error'].="(".$errorResult['ErrorCode'].")".$errorResult['ErrorMessage'];
+				} elseif (!empty($errorResult[0])) {
+					foreach ($errorResult as $oneError) {
+						$reply['error'].="(".@$oneError['ErrorCode'].")".@$oneError['ErrorMessage'];
+					}
+				}
+			}
+
+			SystemSetting::setTNTResponse($reply,$key);
+		}
+		return $reply;
+	}
+
+	public function doRoutingRequestPublic($data)
+	{
+		return $this->doRoutingRequest($data);
+	}
+
+	public function getTntRoutingInfoFromTlaHK($data)
+	{
+		$params = [];
+		$params['data'] = $data; 
+		$tlaApi = new TlaAPI();
+		$result = $tlaApi->doTNTRouting($params);
+		if($result['status']==1)
+		{
+			$data = $result['result'];
+			return $data;
+		}else
+		{
+			return ['status'=>false];
+		}
+	}
+
+	/**
+	 * Pre the File and Manifest to TNT
+	 * @param type $rs array of shipments
+	 * @return boolean
+	 * @throws Exception
+	 */
+	public function preEt12File($rs)
+	{
+		$lf=Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR  . 'tntapi' . DIRECTORY_SEPARATOR.'tntmanifest'.DIRECTORY_SEPARATOR;
+		if (!file_exists($lf)) {
+			mkdir($lf);
+		}
+		$transaction_id= TntAPI::genTransactionId();
+		$manifest_id=TntAPI::genManifestId();
+		if (empty($transaction_id) || empty($manifest_id)) {
+			return false;
+		}
+
+		//$fileName="PCAEXP".date("dmHi");
+		$fileName="TLA".date("md").substr($manifest_id, -4);
+		$file=$lf.$fileName.'.dat';
+		$this->log2file('Time: '.date('Y-m-d H:i:s').' transaction_id: '.$transaction_id.' manifest_id: '.$manifest_id.' file: '.$file.PHP_EOL);
+		$content='';
+		$this->preEt12Header($content, $transaction_id, $manifest_id);
+		foreach ($rs as $shipment) {
+			$this->log2file($shipment->hbn."\t".$shipment->ref.PHP_EOL);
+			$this->preEt12Consignment($content, $manifest_id, $shipment);
+		}
+		$this->preEt12Tailer($content, $transaction_id);
+		file_put_contents($file, $content);
+		if ($this->upLoadManifestFile($file,$content)) {
+			$this->log2file('FTP upload successful'.PHP_EOL);
+			$rate_id = ImportChargeCode::TNT_SYDNEY_ID;
+			if ($this->select_service == TntAPI::SERVICE_MEL) {
+				$rate_id = ImportChargeCode::TNT_MELBOURNE_ID;
+			}
+			if ($this->select_service == TntAPI::SERVICE_BNE) {
+				$rate_id = ImportChargeCode::TNT_BRISBANE_ID;
+			}
+			if ($this->select_service == TntAPI::SERVICE_SYD_TOP) {
+				$rate_id = ImportChargeCode::TNT_SYDNEY_ID_TOP;
+			}
+
+			if ($this->select_service == TntAPI::SERVICE_MEL_TOP) {
+				$rate_id = ImportChargeCode::TNT_MELBOURNE_ID_TOP;
+			}
+
+			if ($this->select_service == TntAPI::SERVICE_BNE_TOP) {
+				$rate_id = ImportChargeCode::TNT_BRISBANE_ID_TOP;
+			}
+
+			if ($this->select_service == TntAPI::SERVICE_PER_TOP) {
+				$rate_id = ImportChargeCode::TNT_PERTH_ID_TOP;
+			}
+
+			$mani = new Manifest;
+			$mani->type = 90;
+			$mani->fwd_id = Org::ORGID_COURIER_TNT;
+			$mani->ref = $fileName;
+			$mani->save();
+			$transaction=Yii::app()->db->beginTransaction();
+			try {
+				foreach ($rs as $r) {
+					if (empty($r->trans)) {
+						$ts=new Tranship();
+						$maniMap = new ManiMap();
+						$maniMap->mani_id = $mani->id;
+						$maniMap->model = 'ImParcel';
+						$maniMap->fid = $r->id;
+						$maniMap->status = 10;
+						$maniMap->mdata['mani_time'] = date('Y-m-d H:i:s');
+						$maniMap->save();
+					} else {
+						$ts=$r->trans[0];
+					}
+					$r->mdata['manifest_weight']=sprintf('%.03f', $r->weight*0.75);
+					$r->updateMeta();
+					$ts->org_id = Org::ORGID_COURIER_TNT;  // for Fastway post office
+					$ts->man_id = $r->man_id;
+					$ts->pid=$r->id;
+					$ts->type = 80;  // shipment transfer to a different delivery courier
+					$ts->status = 19; // in finally moving status
+					$ts->connote = $r->ref;
+					$ts->time = date('Y-m-d H:i:s');
+					$ts->cost = number_format($this->getTntCost($r, $rate_id), 2, '.', '');
+					$ts->mdata['oid']=$transaction_id;
+					$ts->save();
+				}
+				$transaction->commit();
+			} catch (Exception $ex) {
+				$transaction->rollback();
+				throw $ex;
+			}
+			$this->moveFile($file);
+			return true;
+		} else {
+			//unlink($file);
+			return false;
+		}
+	}
+	
+	public function getTntCost($shipment, $rate_id=ImportChargeCode::TNT_SYDNEY_ID_TOP)
+	{
+		$price = 0;
+		$postcode = $shipment->postcode;
+		$zoneMap = ZoneMap::model()->find('org_id = :oid AND zone_id = :zoneid AND pc_lo <= :code AND pc_hi >= :code', [':oid' =>Org::ORGID_COURIER_TNT ,':zoneid' => 1,':code' => $postcode]);
+		$chargeCode = 'N1';
+		if (!empty($zoneMap) && !empty($zoneMap['z1'])) {
+			$chargeCode = $zoneMap['z1'];
+		}
+		$weight=$shipment->getCubeWeight();
+		$suburb = $shipment->cnee->suburb;
+		$zrs = ZoneRate::model()->findAll("zone = :s AND (weight_lo < :w AND weight_hi >= :w) AND rate_id = :rateid AND base+item+perkg > 0 ", [':s' => $chargeCode, ':w' => $weight, ':rateid' => $rate_id]);
+		if (!empty($zrs)) {
+			// get maximum one
+			foreach ($zrs as $zr) {
+				$temp = $zr['base'] + $zr['item'];
+				if ($zr['nkg'] > 0) {
+					$wl = $weight- ($zr['base'] > 0 ? $zr['nkg'] : 0);
+					$temp += ceil($wl / $zr['nkg']) * $zr['perkg'];
+				} else {
+					$temp +=  $weight * $zr['perkg'];
+				}
+				if ($zr['minimum'] > 0 && $temp < $zr['minimum']) {
+					$temp = $zr['minimum'];
+				}
+				$price = max($price, $temp);
+			}
+		}
+
+		if($price>0)
+		{
+			$remoteCostRate = RemoteChargeRate::model()->find("rate_id = :rateId and (postcode =:postcode or CONCAT('0',postcode)=:postcode) and upper(suburb) = :suburb and (perkg+base)>0",[":rateId"=>$rate_id,":postcode"=>$postcode,":suburb"=>strtoupper($suburb)]);
+			if(!empty($remoteCostRate))
+			{
+				$remoteSurcharge = $weight*$remoteCostRate->perkg+$remoteCostRate->base;
+				$price+=$remoteSurcharge;
+			}
+
+			if(empty($shipment->mdata['is_b2b']))
+			{
+				if($weight<=35)
+				{
+					$price = $price + 50;
+				}else
+				{
+					$price = $price + 170;
+				}
+			}
+
+		}
+
+		return $price;
+	}
+	
+	
+	private function preEt12Header(&$content, $transaction_id, $manifest_id)
+	{
+		$content.= str_pad("A", 1);
+		$content.= str_pad($transaction_id, 20, '0', STR_PAD_LEFT);
+		$content.= str_pad(" ", 15); //sender interchange address
+		$content.= str_pad(" ", 15);  // receiver interchange address
+		$content.= str_pad(" ", 12); //trading Partner identifier
+		$content.=str_pad("TNT", 3);
+		$content.=str_pad(date('YmdHi'), 12);//file generation date and file generation Time
+		$content.=str_pad('12', 2);
+		$content.=str_pad(" ", 8);//routing effective date
+		$content.= str_pad(" ", 3);
+		$content.="\n";
+		$content.= str_pad("B", 1);
+		$content.= str_pad($manifest_id, 10, '0', STR_PAD_LEFT);
+		$content.=str_pad($this->select_sender_code, 15);
+		$content.= str_pad($this->select_account_number, 10);
+		$content.= str_pad("Top Logistics", 30);
+		$content.= str_pad($this->collection_address, 30);
+		$content.= str_pad(" ", 30);
+		$content.= str_pad($this->collection_suburb, 20);
+		$content.= str_pad($this->collection_state, 3);
+		$content.= str_pad($this->collection_postcode, 4);
+		$content.= str_pad(" ", 20);
+		$content.= str_pad(" ", 13);
+		$content.="\n";
+	}
+
+	private function preEt12Consignment(&$content, $manifest_id, ImParcel $shipment)
+	{
+		$consignment_no=trim($shipment->ref);
+		$content.= str_pad("C", 1);
+		$content.= str_pad($manifest_id, 10);
+		$content.= str_pad($consignment_no, 15);
+		$content.= str_pad($shipment->pkg, 3);
+		$content.= str_pad(" ", 15);
+		$content.= str_pad(" ", 10);//Receiver Account Number
+		$content.= str_pad(substr($shipment->cnee->name, 0, 30), 30);  //receiver name
+		$cneeAddr= $this->prepAddrLines($shipment->cnee->address);
+		$content.= str_pad($cneeAddr[0], 30); //address line1
+		$content.= str_pad(isset($cneeAddr[1])?$cneeAddr[1]:"", 30); //address line2
+		$content.= str_pad(substr($shipment->cnee->suburb, 0, 20), 20);
+		$content.= str_pad(strtoupper($shipment->cnee->state), 3);//state
+		$content.= str_pad($shipment->cnee->postcode, 4);
+		$content.= str_pad(substr($shipment->cnee->name, 0, 20), 20);
+		$content.= str_pad(substr($shipment->cnee->tel, 0, 13), 13);
+		$content.=str_pad(date('dmY'), 8);//con note date
+		$content.= str_pad("76", 4);  //service
+		if(!empty($shipment->mdata['is_dg']))
+		{
+			$content.= str_pad("1", 1); //dangerous goods flag
+		}else
+		{
+			$content.= str_pad("0", 1); //dangerous goods flag
+		}
+		$content.= str_pad("S", 1); // Payer flag, here we choose the sender to pay the money
+		$content.= str_pad("0", 1); // canlled flag
+		$content.= str_pad("0", 1);// foodstuffs flag
+		if(empty($shipment->insurance) || floatval($shipment->insurance) == 0 || empty($shipment->mdata['tnt_warranty_class'])){
+			$content.= str_pad(" ", 8); //extended Warranty value
+		}else{
+			$content.= str_pad($shipment->insurance, 8); //extended Warranty value
+			$content.= $shipment->mdata['tnt_warranty_class']; //extended Warranty Class
+		}
+		$content.= str_pad(" ", 3);  //Additional Service1
+		$content.= str_pad(" ", 3);  //additional service2
+		$content.= str_pad(" ", 3);  //additional service3
+		$content.= str_pad(" ", 3);  //additional service4
+		$content.= str_pad(" ", 3);  //additional service5
+		$content.= str_pad(" ", 9);  //handrate amount
+		$content.= str_pad(" ", 9);  //Other Charges
+		$content.= str_pad(" ", 30);  //customer Consignment Reference
+		$content.="\n";
+		// add lines;
+		$dimInfo=$shipment->getPackDimensions();
+		$singleWeight= sprintf('%.03f', ($shipment->weight/$shipment->pkg)*0.75);
+		$singlePackItemQuantity=1;            //($shipment->itemsTotQty()/$shipment->pkg) > 998 ? 998:ceil($shipment->itemsTotQty()/$shipment->pkg);
+		for ($index=1; $index<=$shipment->pkg;$index++) {
+			$length=sprintf('%.03f', isset($dimInfo[$index-1]['length'])?$dimInfo[$index-1]['length']:10);
+			$width=sprintf('%.03f', isset($dimInfo[$index-1]['width'])?$dimInfo[$index-1]['width']:10);
+			$height=sprintf('%.03f', isset($dimInfo[$index-1]['height'])?$dimInfo[$index-1]['height']:10);
+			$content.= str_pad("F", 1);
+			$content.= str_pad($manifest_id, 10);
+			$content.= str_pad($consignment_no, 15);
+			$content.= str_pad($index, 3);//line sequence
+		$content.= str_pad(" ", 15); //Customer Reference, Optional
+		$content.= str_pad(substr("carton", 0, 20), 20); //description of goods
+		$content.= str_pad(" ", 6); // commodity code
+		$content.= str_pad($singlePackItemQuantity, 5);
+			$content.= str_pad($singleWeight, 9);  //single line weight
+		$content.= str_pad("KG", 2); //Unit of Measure
+		$content.= str_pad($length, 7); //length;
+		$content.= str_pad($width, 7); //length;
+		$content.= str_pad($height, 7); //length;
+		$content.= str_pad("CM", 2);
+			$content.= str_pad(number_format(($length*$width*$height/1000000), 4, '.', ''), 10);// cubic volume
+			$content.= str_pad("CO", 2);
+			$content.= str_pad(" ", 5); //Article Qty
+		$content.= str_pad(" ", 5); //Garment Qty
+		$content.="\n";
+		}
+		$index=1;
+		for ($itemRecordNumber=1;$itemRecordNumber<=ceil($shipment->pkg/8);$itemRecordNumber++) {
+			$content.= str_pad("H", 1);
+			$content.= str_pad($manifest_id, 10);
+			$content.= str_pad($consignment_no, 15);
+			$content.= str_pad($itemRecordNumber, 3);
+			while ($index<=$shipment->pkg) {
+				$content.= str_pad(self::genItemUniqueNumber($consignment_no, $index), 20);
+				if ($index%8==0) {
+					$index++;
+					break;
+				}
+				$index++;
+			}
+			$content.="\n";
+		}
+	}
+
+	private function preEt12Tailer(&$content, $transaciton_id)
+	{
+		$content.= str_pad("Z", 1);
+		$content.= str_pad($transaciton_id, 20);
+		$line_number= substr_count($content, "\n")+1;
+		$content.= str_pad($line_number, 5);
+	}
+
+	public static function genItemUniqueNumber($connote_no, $index)
+	{
+		$no= self::ITEM_UNIQUE_NUMBER;// $assigned by TNT
+		$preFix= substr($connote_no, 0, 3);
+		for ($i=0;$i<strlen($preFix);$i++) {
+			$no.=(ord($preFix[$i]) - 55);
+		}
+		$no.=substr($connote_no, 3);
+		$no.= sprintf("%03d", $index);
+		return $no;
+	}
+	
+	public static function decodePrefix($number)
+	{
+		$prefix = "";
+		for ($i = 0; $i < strlen($number); $i=$i + 2) {
+			$prefix.=chr(intval(substr($number, $i, 2)) + 55);
+		}
+		return $prefix;
+	}
+
+	private function upLoadManifestFile($fileName,$content)
+	{
+		require_once Yii::app()->basePath . '/vendor/autoload.php';
+		if (!is_file($fileName)) {
+			return false;
+		}
+		try
+		{
+			$sftp = new phpseclib\Net\SFTP('ftp.tnt.com.au');
+			// Check SFTP Connection
+			if ($sftp->login('pcaex292', 'E&@5Ic20Q'))
+			{
+				// $lists = $sftp->rawlist('/Manifests');
+				$sftp->chdir('/outbox');
+				if($sftp->put(basename($fileName), $content))
+				{
+					return true;
+				}else
+				{
+					return false;
+				}
+
+
+
+				// $ftp = ftp_connect("ftp.tnt.com.au", 22);
+				// if (ftp_login($ftp, "pcaex292", "E&@5Ic20Q")) {
+				// 	ftp_set_option($ftp, FTP_USEPASVADDRESS, false);
+				// 	ftp_pasv($ftp, true);
+				// 	$file = fopen($fileName, 'r');
+				// 	ftp_chdir($ftp, "outbox");
+				// 	if (ftp_fput($ftp, basename($fileName), $file, FTP_BINARY)) {
+				// 		return true;
+				// 	}
+				// }
+			}
+		} catch (Exception $ex) {
+			return false;
+		} finally {
+			// ftp_close($ftp);
+			// fclose($file);
+		}
+		return false;
+	}
+	
+	private function moveFile($fileName)
+	{
+		$lf=Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR  . 'tntapi' . DIRECTORY_SEPARATOR.'manifest_hitory'.DIRECTORY_SEPARATOR;
+		if (!file_exists($lf)) {
+			mkdir($lf);
+		}
+		rename($fileName, $lf.basename($fileName));
+	}
+
+	/**
+		 * Log the Request and Response to the file
+		 *
+		 */
+	private function log2file($m)
+	{
+		$lf = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR  . 'tntapi' . DIRECTORY_SEPARATOR;
+		if (!file_exists($lf)) {
+			mkdir($lf);
+		}
+		$lf .= 'tnt_api.log';
+		return file_put_contents($lf, $m, FILE_APPEND);
+	}
+
+	private function log2filerrt($m)
+	{
+		$lf = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR  . 'tntapi' . DIRECTORY_SEPARATOR;
+		if (!file_exists($lf)) {
+			mkdir($lf);
+		}
+		$lf .= 'tnt_rrt_' . date('Y-m-d') . '.log';
+		return file_put_contents($lf, $m, FILE_APPEND);
+	}
+
+	private function log2filerout($m)
+	{
+		$lf = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR  . 'tntapi' . DIRECTORY_SEPARATOR;
+		if (!file_exists($lf)) {
+			mkdir($lf);
+		}
+		$lf .= 'tnt_routing_' . date('Ym') . '.log';
+		return file_put_contents($lf, $m, FILE_APPEND);
+	}
+	
+	//// TNT Web API:
+	/**
+	public function manifestWithShipment($rs){
+		$params= $this->preParams($rs,'Y','N');
+		$this->doRequest($params,'ProcessConsignmentRequest');
+	}
+		/**
+		 * create a init shipment, we need to finalize the shipment OR cancel the shipment
+		 * @param type $shipment
+		 */
+	/**
+		public function createShipment($shipment){
+			$rs=[$shipment];
+			$params=$this->preParams($rs, 'N','N');
+			$result=$this->doRequest($params,'ProcessConsignmentRequest');
+			 var_dump($result);
+			if(isset($result['aConsignmentProcessResultList']['aConsignmentProcessResult']['aConsignmentActionList']['banyType'])){ //only one shipment
+				$oneConsginemntResponse=$result['aConsignmentProcessResultList']['aConsignmentProcessResult']['aConsignmentActionList']['banyType'];
+				$errors="";
+				$shipment->bwf= $shipment->bwf&~2048;
+				foreach ($oneConsginemntResponse as $responseIndex=>$responseContent){
+					if(empty($responseContent['aerrors'])){
+						if($responseIndex==0){  //means succsfully submit; need to cancel if not use;
+							$shipment->bwf=$shipment->bwf|2048;
+							$shipment->updateMeta();
+							$shipment->ref=$result['aConsignmentProcessResultList']['aConsignmentProcessResult']['aConsignmentNumber'];
+						}
+					 if(!empty($responseContent['aBinNumber'])){
+							if($responseContent['aIsServiceSupported']=='true'){
+							 $shipment->mdata['tnt_info']['aBinNumber']=$responseContent['aBinNumber'];
+							 $shipment->mdata['tnt_info']['aGatewayDepot']=@$responseContent['aGatewayDepot'];
+							 $shipment->mdata['tnt_info']['aGatewayDepot']=@$responseContent['aGatewayDepot'];
+							 $shipment->mdata['tnt_info']['aOnForwardingDepot']=@$responseContent['aOnForwardingDepot'];
+							 $shipment->mdata['tnt_info']['aOriginDepot']=@$responseContent['aOriginDepot'];
+							 $shipment->mdata['tnt_info']['aPostcode']=@$responseContent['aPostcode'];
+							 $shipment->mdata['tnt_info']['aSuburb']=@$responseContent['aSuburb'];
+							}else{
+							$errors.="Service Not Supported";
+							}
+						}
+						if(!empty($responseContent['aLabelPDF'])){
+							$shipment->mdata['tnt_info']['label']=trim($responseContent['aLabelPDF']);
+						}
+					}else{
+						if(isset($responseContent['aerrors']['aErrorResponse'])){
+							$errArray=$responseContent['aerrors']['aErrorResponse'];
+							$errors.="(".$errArray['aCode'].")".$errArray['aMessage']."|";
+						}else{
+							$errArray=$responseContent['aerrors'][0]['aErrorResponse'];
+							 $errors.="(".$errArray['aCode'].")".$errArray['aMessage"']."|";
+						}
+					}
+				}
+				if(empty($errors)){
+					$shipment->save();
+					return $shipment->ref;
+				}else{
+					$shipment->save();
+					return $errors;
+				}
+			}
+
+
+			//save routing data, //save
+		}
+		public function cancelShipment($rs){
+			$this->preParams($rs, 'N','N');
+			$this->doRequest($params,'ProcessConsignmentRequest');
+		}
+
+		public function preParams($rs,$finalize='N',$cancel='N'){
+		$consignmentProcess=[];
+		foreach($rs as $r){
+			$oneProcess=[];
+			$oneProcess['consignment']= $this->preOneConsignment($r,$finalize,$cancel);
+			$oneProcess['consignmentActionList']=
+				array(
+					'ConsignmentActionType'=>['SUBMIT'],    //GETLABEL     //GETROUTINGDATA  //SUBMIT  'GETROUTINGDATA','GETLABEL', //don't change this order please
+				);
+			if($finalize=='N'&&$cancel=='N'){
+				$oneProcess['consignmentActionList'][ 'ConsignmentActionType'][]='GETROUTINGDATA';
+				$oneProcess['consignmentActionList'][ 'ConsignmentActionType'][]='GETLABEL';
+			}
+			$oneProcess['senderCode']= self::SENDER_CODE;
+			$oneProcess['labelType']='C';
+			$consignmentProcess[]=$oneProcess;
+		}
+		$params=array(
+			 'Request'=>array(
+				 'UserName'=> $this->user_id,
+				 'Password'=> $this->user_passwd,
+				 'ConsignmentProcessList'=>[
+					 'ConsignmentProcess'=>$consignmentProcess, //an array;
+				 ], //list of consignment
+			 )
+		);
+		return $params;
+	}
+
+	public function preOneConsignment($shipment,$finalize,$cancel){
+		$consignment=array();
+		if($finalize=='Y'||$cancel=='Y'){
+			 $consignment['consignmentNumber']=trim($shipment->ref);
+		}else{
+				 $consignment['consignmentNumber']= self::genConsignmentNo();
+		}
+		$consignment['payingAccount']=self::ACCOUNT_NUMBER;
+		$consignment['collection']=array(
+			'Name'=>substr($shipment->cnor->name,0,30),
+			'Address1'=>'6C The Crescent',
+			'Suburb'=>'Kingsgrove',
+			'State'=>'NSW',
+			'Postcode'=>'2208',
+		);
+		$cneeAddr= $this->prepAddrLines($shipment->cnee->address);
+		$consignment['delivery']=array(
+			'Name'=>substr($shipment->cnee->name,0,30),
+			'Address1'=>$cneeAddr[0],
+			'Address2'=>isset($cneeAddr[1])?$cneeAddr[1]:"",
+			'Suburb'=>$shipment->cnee->suburb,
+			'State'=>$shipment->cnee->state,
+			'Postcode'=>$shipment->cnee->postcode,
+		);
+		if(!empty($shipment->cnee->tel)) $consignment['delivery']['Phone']=$shipment->cnee->auTel();
+		$consignment['consignmentDate']=date('dmY');
+		$consignment['serviceCode']= $this->getServiceCode();
+		$consignment['dangerousGoodsIndicator']='N';
+		$consignment['payer']='S';
+		$consignment['foodIndicator']='N';
+		$consignment['cancelIndicator']=$cancel;/// set default to CancelIndicator at first.
+		$consignment['consignmentFinaliseIndicator']=$finalize;  //Our manifest are all finalized!;
+
+		//Prepare packline
+		$singleWeight= sprintf('%.03f', $shipment->weight/$shipment->pkg);
+		$singlePackItemQuantity=($shipment->itemsTotQty()/$shipment->pkg) > 998 ? 998:ceil($shipment->itemsTotQty()/$shipment->pkg);
+		$dimInfo=$shipment->getPackDimensions();
+		$packageLine=[];
+		 for($index=1;$index<=$shipment->pkg;$index++){
+			 $length=isset($dimInfo[$index-1]['length'])?$dimInfo[$index-1]['length']:10;
+			 $width=isset($dimInfo[$index-1]['width'])?$dimInfo[$index-1]['width']:10;
+			 $height=isset($dimInfo[$index-1]['height'])?$dimInfo[$index-1]['height']:10;
+			 $temp=[];
+			 $temp['lineSequence']=$index;
+			 $temp['itemQuantity']= $singlePackItemQuantity;
+			 $temp['DescriptionOfGoods']= substr($shipment->getGoods(),0,20);
+			 $temp['lineWeight']=$singleWeight;
+			 $temp['weightMeasureUnit']='KG';
+			 $temp['itemLength']=$length;
+			 $temp['itemWidth']=$width;
+			 $temp['itemHeight']=$height;
+			 $temp['dimensionMeasureUnit']='CM';
+			 $temp['lineVolume']= number_format(($length*$width*$height/1000000),4,'.','');
+			 $temp['volumeMeasureUnit']='CO';
+			 $packageLine[]=$temp;
+		}
+		 $consignment['packageLineList']=array(
+			'PackageLine'=>$packageLine,
+		 );
+		 return $consignment;
+	}
+	***
+/
+	/**
+	 * send the soap request based on specific function
+	 *
+	 * @param type $data the function parmas, $function, the name of the function that we will call
+	 * @return   An array of the response result;
+	 *
+	 * //need to do adding log about the request and response.
+	 *
+	 public function savePdfLabel($base64Content=''){
+		$lf = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR  . 'tntLabel' . DIRECTORY_SEPARATOR;
+		if(!file_exists($lf)) mkdir ($lf);
+		$lf.= uniqid().'tnt.pdf';
+		$pdf_decoded= base64_decode($base64Content);
+		$pdf= fopen($lf,'w');
+		fwrite($pdf, $pdf_decoded);
+		$fclose=($pdf);
+
+	}
+
+	 $url=$this->is_test?self::TEST_URL:self::PRODUCTION_URL;
+	 $client = new SoapClient($url, array(
+			'trace' => 1,
+			'soap_version' => SOAP_1_1,
+			'encoding' => 'UTF-8',
+			'stream_context' => stream_context_create([
+				'http' => array(
+					'user_agent' => 'PHPSoapClient',
+				),
+				'ssl' => [
+					'verify_peer' => false,
+					'verify_peer_name' => false,
+				]
+			])
+		));
+
+	 try {
+			$result = $client->{$function}($data);
+//            var_dump($result);
+		} catch (Exception $ex) {
+			echo $ex;
+		}
+		$sendRequest=$client->__getLastRequest();
+		$xmlResponse=$client->__getLastResponse();
+
+		$response = preg_replace("/(<\/?)(\w+):([^>]*>)/", "$1$2$3", $xmlResponse);
+		$xml = new SimpleXMLElement($response);
+		$body = $xml->xpath('//sBody')[0];
+		$responseArray = json_decode(json_encode((array)$body), TRUE);
+		$status=@$responseArray[$function."Response"][$function.'Result']['aStatus'];
+		$this->log2file('Time: '.date('Y-m-d H:i:s')."\nURL: ".$url."\nFunction: ".$function.
+				"\nRequest: ". json_encode($data).
+				"\nSend Request: ".$sendRequest.
+				"\nStatus: ".$status .
+				 "\nResponse: ".$xmlResponse."\n\n"
+				);
+		if($status=="SUCCESS"){
+			return  @$responseArray[$function."Response"][$function.'Result'];
+		}else {
+			return false;
+		}
+	}
+
+	 /**
+	* Reprint the label for the TNT
+	* @param type $shipment which already have TNT consignment number
+	*/
+	 /**
+	 public function rePrintLabel($shipment){
+		$data= $this->preReprintLabelParams($shipment);
+		$result=$this->doRequest($data,'ReprintLabelRequest');
+		$this->savePdfLabel($result['aReprintActionResult']['aLabelPDF']);
+	}
+
+	private function preReprintLabelParams($shipment){
+		echo $shipment->ref;
+		$params=array(
+			'Request'=>array(
+				'UserName'=> $this->user_id,
+				'Password'=> $this->user_passwd,
+				'ConsignmentNumber'=>trim($shipment->ref),
+				'labelType'=>'C',
+			)
+		);
+		return $params;
+	}
+	/**
+	private function preRrtXmlData(ImParcel $shipment){
+		$xml = new SimpleXMLElement('<?xml version="1.0"?><enquiry xmlns="http://www.tntexpress.com.au"></enquiry>');
+		$ratedTransitTimeEnquiry=$xml->addChild('ratedTransitTimeEnquiry');
+		$cutOffTimeEnquiry=$ratedTransitTimeEnquiry->addChild('cutOffTimeEnquiry');
+		$termsOfPayment=$ratedTransitTimeEnquiry->addChild('termsOfPayment');
+		$termsOfPayment->addChild('senderAccount', self::ACCOUNT_NUMBER);
+		$termsOfPayment->addChild('payer','S');
+		$collectionAddress=$cutOffTimeEnquiry->addChild("collectionAddress");
+		$deliveryAddress=$cutOffTimeEnquiry->addChild("deliveryAddress");
+		$cutOffTimeEnquiry->addChild('shippingDate',date('Y-m-d',strtotime('next tuesday')));
+		$cutOffTimeEnquiry->addChild('userCurrentLocalDateTime',date(DATE_ATOM));
+		$dangerousGoods=$cutOffTimeEnquiry->addChild('dangerousGoods');
+		$dangerousGoods->addChild('dangerous','false');
+		$packageLines=$cutOffTimeEnquiry->addChild('packageLines');
+		$packageLines->addAttribute('packageType','D');
+		$packageLine=$packageLines->addChild('packageLine');
+		$singleWeight= ceil($shipment->weight/$shipment->pkg);
+		$packageLine->addChild('numberOfPackages',$shipment->pkg);
+		$dimensions=$packageLine->addChild('dimensions');
+		$dimInfo=$shipment->getPackDimensions();
+		$dimensions->addAttribute('unit','cm');
+		$dimensions->addChild('length',$dimInfo[0]['length']);
+		$dimensions->addChild('width',$dimInfo[0]['width']);
+		$dimensions->addChild('height',$dimInfo[0]['height']);
+		$weight=$packageLine->addChild('weight');
+		$weight->addAttribute('unit','kg');
+		$weight->addChild('weight',$singleWeight);
+		$collectionAddress->addChild('suburb','Banksmeadow');
+		$collectionAddress->addChild('postCode','2019');
+		$collectionAddress->addChild('state','NSW');
+		$deliveryAddress->addChild('suburb',$shipment->cnee->suburb);
+		$deliveryAddress->addChild('postCode',$shipment->cnee->postcode);
+		$deliveryAddress->addChild('state',$shipment->cnee->state);
+		return $xml->asXML();
+	}
+	 *
+	 */
+	/*  this function is used to get TNT price
+	 *  but not used at the moment,so comment by Jerry at 2018-10-10;
+	public function getRrtPrice($shipment){
+		$xmlData= $this->preRrtXmlData($shipment);
+		$data=array(
+			'username'=> self::API_USER_ID,
+			'Password'=> self::API_USER_PASSWORD,
+			'Version'=>2,
+			'XMLRequest'=>$xmlData
+		);
+		$queryResult=$this->requestRrt($data);
+		if(empty($queryResult)){
+			return false;
+		}else{
+			 $serviceInfo=[];
+			foreach ($queryResult as $product){
+				if(isset($product['product']['code'])&&isset($product['quote']['price'])){
+					 $serviceInfo[$product['product']['code']]= floatval($product['quote']['price']);
+				 }
+				}
+				foreach ($serviceInfo as $key=>$value){
+					if(!in_array($key,array(self::OVERNIGHT_EXPRESS_CODE, self::ROAD_SERVICE_CODE))){
+						unset($serviceInfo[$key]);
+					}
+				}
+				ksort($serviceInfo);
+				if(!empty($serviceInfo)){
+					foreach ($serviceInfo as $key=>$value){
+						return [$key=>$value];
+					}
+				}
+			}
+			return false;
+		}
+	 private function requestRrt($data){
+		$curl=new curl(self::GET_SERVICE_URL);
+		$curl->setopt(CURLOPT_TIMEOUT, 600);
+		$curl->setopt(CURLOPT_CUSTOMREQUEST, "POST");
+		$curl->setopt(CURLOPT_RETURNTRANSFER, true);
+		$post_string=$curl->asPostString($data);
+		$curl->setopt(CURLOPT_POSTFIELDS, $post_string);
+		$curl->exec();
+
+
+		$result = json_decode($json,TRUE);
+		$this->log2filerrt('Time: '.date('Y-m-d H:i:s').
+				"\nRequest: ". json_encode($data).
+				 "\nResponse: ".$json."\n\n");
+		if(isset($result['ratedTransitTimeResponse']['ratedProducts']['ratedProduct'])&&
+				is_array($result['ratedTransitTimeResponse']['ratedProducts']['ratedProduct'])){
+			return $result['ratedTransitTimeResponse']['ratedProducts']['ratedProduct'];
+		}else {
+			return false;
+		}
+	}
+
+*/
+}

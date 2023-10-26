@@ -1,0 +1,907 @@
+<?php
+class AusPostAPI
+{
+	const CHARGE_CODE_POD = '3D35'; //'7D55';
+	const CHARGE_CODE_NO_POD ='3D35'; //'7D53';
+	const CHARGE_CODE_EXPRESS = '3J35';
+	const EPARCEL_CODE = "00093";
+	const EXPRESS_CODE = "00096";
+
+	private static $api_accounts = [
+		'syd' => ['id' => 'AMQ', 'no' => '0006081844', 'key' => 'ed40f505-2a88-4596-acf7-3c25ad220764', 'password' => 'TopBuy2016'],
+		'stone' => ['id' => '333UF', 'no' => '0007705328', 'key' => 'afa846c5-a30f-4e5d-9482-c89cfad6f08f', 'password' => 'TopBuy2016'],
+		'mel' => ['id' => '33EVH', 'no' => '0007876937', 'key' => '0980b73a-8438-4bab-b94e-cf4541a6f02a', 'password' => 'TopBuy2016'],
+		'bne' => ['id' => '33EVJ', 'no' => '0007876929', 'key' => '64b0739e-9c1a-409d-87f5-75c73fd1b61a', 'password' => 'TopBuy2016'],
+		'per' => ['id' => '34AWE', 'no' => '0006920042', 'key' => 'ed40f505-2a88-4596-acf7-3c25ad220764', 'password' => 'TopBuy2016'],
+		//'ecof' => ['id' => '33MBQ', 'no' => '0008406727', 'key' => 'f5c1c1a8-91cc-49ce-8b29-aa4e2ee502ba', 'password' => 'VQ@N%p3lQzUCxmra'], //ecof
+		//'int' => ['id' => '', 'no' => '0007848388', 'key' => '657f9b96-0dcc-4e15-b84e-cb9736642cc2', 'password' => 'x19ee9dea88b1d0563b4'],
+		'test' => ['id' => 'TEST', 'no' => '1014445357', 'key' => '657f9b96-0dcc-4e15-b84e-cb9736642cc2', 'password' => 'x19ee9dea88b1d0563b4'],
+		'test2' => ['id' => 'TEST2', 'no' => '2005741161', 'key' => '006ec0be-326b-4efa-845e-af8e2963cf94', 'password' => 'xc493904977e34c0315a'],
+	];
+
+	public static $api_accounts_info = [
+		'syd' => ['id' => 'AMQ'],
+		'stone' => ['id' => '333UF'],
+		'mel' => ['id' => '33EVH'],
+		'bne' => ['id' => '33EVJ'],
+		'per' => ['id' => '34AWE'],
+		'ecof' => ['id' => '33MBQ']
+	];
+	private static $test_url = 'https://digitalapi.auspost.com.au/test/shipping/v1/'; //Test URL
+	private static $url = 'https://digitalapi.auspost.com.au/shipping/v1/'; //Production URL
+
+	private $api_id;
+	private $api_key;
+	private $api_pwd;
+	private $is_test;
+	private $debug;
+
+	public $result;
+	public $rescode;
+	public $err;
+		
+	// public static $acountsMild=[
+	// 	self::PCAE_ACCOUNT_BOTANY=>'AMQ',
+	// 	self::PCAE_ACCOUNT_STONEBRIDGE=>'333UF',
+	// 	self::PCAE_ACCOUNT_MEL=>'33EVH',
+	// 	self::PCAE_ACCOUNT_BRS=>'33EVJ'
+	// ];
+
+	public function __construct($o = 'syd', $debug = true, $test = false){
+		if(isset(self::$api_accounts[$o])){
+			$this->api_id = self::$api_accounts[$o]['no'];
+			$this->api_key = self::$api_accounts[$o]['key'];
+			$this->api_pwd =self::$api_accounts[$o]['password'];
+		}
+		$this->is_test = true;
+		$this->debug = $debug;
+	}
+
+	public static function aidChkDgt($aid)
+	{
+		$st='';
+		$dt=0;
+		for ($i=0;$i<strlen($aid);$i++) {
+			$st.= preg_match('/[A-Z]/', $aid[$i])?substr(ord($aid[$i]), -1):$aid[$i];
+		}
+		$st = strrev($st);
+		for ($i = 0; $i < strlen($st); $i++) {
+			if ($i % 2 == 0) {
+				$dt += intval($st[$i]) * 3;
+			} else {
+				$dt += intval($st[$i]);
+			}
+		}
+		return substr(10 - ($dt % 10), -1);
+	}
+
+	/**
+	 * validate suburb
+	 * refer to : https://developers.auspost.com.au/apis/shipping-and-tracking/reference/validate-suburb
+	 * @param $suburb
+	 * @param $state
+	 * @param $postcode
+	 */
+	public static function validSuburb($suburb, $state, $postcode)
+	{
+		$apa = new AusPostAPI('syd', true, false);
+		return $apa->validateAddress($suburb, $state, $postcode);
+	}
+
+	public function getAccounts($id='')
+	{
+		return $this->request('accounts/'.(empty($id)? $this->api_id : $id));
+	}
+
+	public static function mlid2acc($id){
+		foreach(self::$api_accounts as $acc => $d){
+			if($d['id'] == $id){
+				return $acc;
+			}
+		}
+		return false;
+	}
+
+	public function getItemPrices($pc_from, $pc_to, $weight, $dim=[])
+	{
+		$d = new stdClass;
+		$d->from['postcode'] = $pc_from;
+		$d->to['postcode'] = $pc_to;
+		$itm = new stdClass;
+		$itm->weight = $weight;
+		if (!empty($dim[0])) {
+			$itm->length = floatval($dim[0]);
+		}
+		if (!empty($dim[1])) {
+			$itm->height = floatval($dim[1]);
+		}
+		if (!empty($dim[2])) {
+			$itm->width = floatval($dim[2]);
+		}
+		$d->items = [$itm];
+
+		return $this->request('prices/items', 'POST', $d);
+	}
+
+	public function getShipments($ids, $offset=null, $nos=null, $status=null)
+	{
+		$qs = [];
+		if (!empty($ids)) {
+			$qs[] = 'shipment_ids='.$ids;
+		}
+		if (!empty($offset)) {
+			$qs[] = 'offset='.$offset;
+		}
+		if (!empty($nos)) {
+			$qs[] = 'number_of_shipments='.$nos;
+		}
+		if (!empty($status)) {
+			$qs[] = 'status='.$status;
+		}
+		return $this->request('shipments'.(empty($qs)? '' : '?'.implode('&', $qs)));
+	}
+
+	protected function prepAddrLines($addr)
+	{	
+		$addr = str_ireplace(['&#xd', '&#xa', '&#39', ' ', '–'], ["\n", "\n", "'", ' ', '-'], $addr);
+		$ls = preg_split('/[\n\r;]+/', trim($addr));
+		if (sizeof($ls) == 1 && mb_strlen($addr) > 40) {
+			$ls = AppHelper::mbstr_split($addr, 40);
+		}
+		$ls = array_slice($ls, 0, 3);
+		$ls[0] = mb_substr($ls[0], 0, 40);
+		if (!empty($ls[1])) {
+			$ls[1] = mb_substr($ls[1], 0, 40);
+		}
+		if (!empty($ls[2])) {
+			$ls[2] = mb_substr($ls[2], 0, 40);
+		}
+
+		return $ls;
+	}
+
+	protected function log2file($m)
+	{
+		$lf = Yii::app()->basePath.DIRECTORY_SEPARATOR.'runtime'.DIRECTORY_SEPARATOR . 'auspost' . DIRECTORY_SEPARATOR;
+		$lf .= 'auspost_api_' . date('Y-m-d') . '.log';
+		return file_put_contents($lf, $m, FILE_APPEND);
+	}
+
+	/**
+	 * based on real weight to get our virtual weight and relate cube values
+	 * we will post to aupost with these virtual values
+	 * @param $p
+	 * @return array
+	 */
+	private function getVirtualWeightDim($p)
+	{
+		$units = $p->pkg > 0 ? $p->pkg : 1;
+		$weight = $p->weight / $units;
+
+		$weight = round($weight * 70) / 100; // shrink to 70% firstly
+		$normalCubic = $weight / 250;
+
+		/*
+		// currently remove weight shrink for CK1 and JCEX
+		if ( $p->agent_id != 838 ) {
+			$weight = round($weight * 75) / 100; // shrink to 75% firstly
+		}
+
+		$normalCubic = $weight / 250;
+		// for CK1 and JCEX , we don't calculate cubic based on weight
+		// unless there is no any cbm
+		if ( $p->agent_id == 838 ){
+			if ( $p->cbm >= 0.0 ) {
+				$weight = sprintf('%.02f', $weight);
+				if (  $p->mdata['dim']['w'] * $p->mdata['dim']['h'] * $p->mdata['dim']['d'] > 0.0 ) {
+					$width = sprintf('%.1f', $p->mdata['dim']['w']);;
+					$height = sprintf('%.1f', $p->mdata['dim']['h']);;
+					$length = sprintf('%.1f', $p->mdata['dim']['d']);;
+					return array(
+						'weight' => $weight,
+						'width' => $width,
+						'height' => $height,
+						'length' => $length
+					);
+				} else {
+					$normalCubic = $p->cbm; // will get dim based on cubic
+				}
+			}
+		}*/
+
+		// divide by 250 to get virtual cube
+		$averageCube = floor((Utility::croot3($normalCubic) * 100));
+		if ($averageCube <= 5) {  // aupost can accept cube with minimum 5cm
+			$width = 5;
+			$height = 5;
+			$length = 5;
+		} else {
+			$adjust = $averageCube - 5;
+			$adjustValue = rand(1, $adjust);
+			if (rand(1, 100) > 50) {
+				$width = $averageCube - $adjustValue;
+				$height = $averageCube;
+				$length = $averageCube + $adjustValue;
+			} else {
+				$height = $averageCube - $adjustValue;
+				$width = $averageCube;
+				$length = $averageCube + $adjustValue;
+			}
+		}
+
+		$weight = sprintf('%.02f', $weight);
+		$width =  sprintf('%.1f', $width);
+		;
+		$height = sprintf('%.1f', $height);
+		;
+		$length = sprintf('%.1f', $length);
+		;
+
+		return [
+			'weight' => $weight,
+			'width' => $width,
+			'height' => $height,
+			'length' => $length
+		];
+	}
+		
+	public function getBreakWeight($weight)
+	{
+		if ($weight <= 0.500) {
+			return $weight;
+		} elseif ($weight <= 1.0) {
+			return $this->doTheWeight($weight, 0.5, 1.0, 0.4, 0.5);
+		} elseif ($weight <= 2) {
+			return $this->doTheWeight($weight, 1, 2, 0.8, 1.0);
+		} elseif ($weight <= 3) {
+			return $this->doTheWeight($weight, 2, 3, 1.8, 2.0);
+		} elseif ($weight <= 4) {
+			return $this->doTheWeight($weight, 3, 4, 2.5, 3.0);
+		} elseif ($weight <= 5) {
+			return $this->doTheWeight($weight, 4, 5, 3.5, 4.0);
+		} elseif ($weight <= 7) {
+			return $this->doTheWeight($weight, 5, 7, 4.5, 5.0);
+		} elseif ($weight <= 10) {
+			return round($weight * rand(80, 100) / 100, 3);
+		} else {
+			return round($weight, 3);
+		}
+	}
+	public function doTheWeight($w, $x1, $x2, $y1, $y2)
+	{
+		return round(($y1-abs($y1-$y2)/abs($x1-$x2)*$x1)+abs($y1-$y2)/abs($x1-$x2)*$w, 3);
+	}
+
+	public function prepShipmentData($p, $prod)
+	{
+		if (get_class($p) == 'stdClass') {
+			return $p;
+		}
+		$s = new stdClass;
+		$s->shipment_reference = $p->hbn;
+		$s->customer_reference_1 = $p->cref;
+
+		/*
+		$s->from = new stdClass;
+		$s->from->name = $this->prepAddrLines($p->cnor->name);
+		$s->from->lines = str_split($p->cnor->address, 40);
+		$s->from->suburb = $p->cnor->suburb;
+		$s->from->state = $p->cnor->state;
+		$s->from->postcode = $p->cnor->postcode;
+		*/
+
+		$s->from = new stdClass;
+		if($this->api_id == '0008406727'){
+			$s->from->name = substr('Peter - '.$p->agent_id, 0, 40);
+			$s->from->lines = $this->prepAddrLines("PO Box 7199");
+			$s->from->suburb = 'Wetherill Park';
+			$s->from->state = 'NSW';
+			$s->from->postcode = '2164';
+		}else{
+			$s->from->name = substr(Org::COMPANY_NAME_SL, 0, 40);
+			$s->from->lines = $this->prepAddrLines(Org::COMPANY_NAME_SL."\n".Org::IM_COMPANY_ADDRESS_TLA);
+			$s->from->suburb = Org::IM_COMPANY_SUBURB;
+			$s->from->state =  Org::IM_COMPANY_STATE;
+			$s->from->postcode = Org::IM_COMPANY_POSTCODE;
+		}
+
+		// 2020-05-01 return label
+		if ($prod == 'PR') {
+			$s->movement_type = 'RETURN';
+
+			$s->from->name = substr(trim(str_ireplace(['&#xd', '&#xa', '&#39', ' ', '–'], ["\n", "\n", "'", ' ', '-'], $p->cnor->name)), 0, 35);
+			$s->from->business_name = substr(trim(str_ireplace(['&#xd', '&#xa', '&#39', ' ', '–'], ["\n", "\n", "'", ' ', '-'], $p->cnor->company)), 0, 40);
+			$s->from->lines = $this->prepAddrLines($p->cnor->address);
+			$s->from->suburb = substr($p->cnor->suburb, 0 ,40);
+			$s->from->state = $p->cnor->state;
+			$s->from->postcode = sprintf('%04d', $p->cnor->postcode);
+		}
+
+		$s->to = new stdClass;
+		$s->to->name = substr(trim(str_ireplace(['&#xd', '&#xa', '&#39', ' ', '–'], ["\n", "\n", "'", ' ', '-'], $p->cnee->name)), 0, 35);
+		$s->to->business_name = substr(trim(str_ireplace(['&#xd', '&#xa', '&#39', ' ', '–'], ["\n", "\n", "'", ' ', '-'], $p->cnee->company)), 0, 40);
+		$s->to->lines = $this->prepAddrLines($p->cnee->address);
+		$s->to->suburb = substr($p->cnee->suburb, 0 ,40);
+		$s->to->state = $p->cnee->state;
+		$s->to->postcode = sprintf('%04d', $p->cnee->postcode);
+		if (!empty($p->cnee->tel)) {
+			$s->to->phone = $p->cnee->auTel();
+		}
+
+		// if (!empty($p->cnee->email)) {
+		//     $s->to->email = $p->cnee->email;
+		//     $s->email_tracking_enabled = true;
+		// }
+
+		$insurance = round($p->insurance / ($p->pkg > 0 ? $p->pkg : 1), 2);
+
+		for ($i = 1; $i <= $p->pkg; $i++) {
+			$itm = new stdClass;
+			$itm->item_reference = $p->hbn . '-' . $i;
+
+			// always set with 7D53
+			$itm->product_id = $prod;
+			// $itm->product_id = AusPostAPI::CHARGE_CODE_NO_POD;
+
+			// shrink weight to 75%
+			$units = $p->pkg > 0 ? $p->pkg : 1;
+			$itm->weight = sprintf('%.02f', $this->getBreakWeight($p->weight/$units));
+			if ($i==1) {
+				$p->mdata['manifest_weight']=$itm->weight*$units;
+				$p->updateMeta();
+			}
+
+			// NOTE: weight is always all parcels' weight
+			// cube is always average cube
+			$virtualValues = $this->getVirtualWeightDim( $p );
+			// if(date('Y-m-d')<"2018-02-01"){
+				// $itm->weight = $virtualValues['weight'];
+			// }
+
+			// if(in_array($prod, ['B30', 'B31'])){
+			// 	$itm->width =  $virtualValues['width'];
+			// 	$itm->height = $virtualValues['height'];
+			// 	$itm->length = $virtualValues['length'];
+			// }
+
+			// always set as true
+			$serviceCode = self::EPARCEL_CODE;
+			if(in_array($prod, [AusPostAPI::CHARGE_CODE_NO_POD])){
+				$itm->authority_to_leave = true;
+			}
+			if(in_array($prod, [self::CHARGE_CODE_EXPRESS])){
+				$itm->authority_to_leave = false;
+				$serviceCode = self::EXPRESS_CODE;
+			}
+			$itm->partial_delivery_allowed = false;
+
+			// 2020-05-01 return label
+			if ($prod == 'PR') {
+				$itm->type = 'EPARCEL POST RETURNS';
+				$itm->group = 'Parcel Post';
+				$itm->product_id = 'PR';
+				$itm->authority_to_leave = false;
+				unset($itm->weight);
+			}
+
+			// Whether your customer can request that the item be left in a safe place at the delivery address if they are not home to sign for their delivery.
+			// Your customer can request this while the item is on its way. This field is optional for domestic shipments (and defaults to true),
+			// but must not be specified for international shipments. This field works with the authority_to_leave field.
+			// If the authority_to_leave field is set to true, the safe_drop_enabled field is ignored. Please review the fact sheet for full details.
+			//if (!$itm->authority_to_leave) $itm->safe_drop_enabled = false;
+
+			// $itm->safe_drop_enabled = false;
+
+			/*2014 format AID
+			$aid = $p->ref.sprintf('%02s', $i).'08'.'2';
+			$aid .= self::aidChkDgt($aid).'0'.sprintf('%04s', $p->cnee->postcode);
+			*/
+			/*2015 format AID*/
+
+			if(!empty($p->ref)){
+				$aid = $p->ref . sprintf('%02d', $i) . $serviceCode . '50' . '0'; //eparcel
+				$aid .= self::aidChkDgt($aid);
+				$itm->tracking_details = [
+					'consignment_id' => $p->ref.(empty($p->mdata['ap_consignment_id_suffix'])? '' : $p->mdata['ap_consignment_id_suffix']),
+					'article_id' => $aid,
+					//'barcode_id' => '99700160'.$aid, //2014
+					'barcode_id' => '019931265099999891' . $aid, //2015
+				];
+			}
+
+			// in case insurance
+			/*
+			 *  "features":{
+						"TRANSIT_COVER":{
+							"attributes":{
+								"cover_amount":1000
+							  }
+						 }
+			 */
+			if ($insurance > 0) {
+				$itm->features = new stdClass();
+				$itm->features->TRANSIT_COVER = new stdClass();
+				$itm->features->TRANSIT_COVER->attributes = new stdClass();
+				$itm->features->TRANSIT_COVER->attributes->cover_amount = $insurance;
+			}
+
+			if($insurance>500)
+			{
+				$itm->authority_to_leave = false;
+				$itm->safe_drop_enabled = false;
+			}
+
+			$s->items[] = $itm;
+		}
+
+		return $s;
+	}
+
+	/**
+	 * prepare shipments with 2014 standard label format
+	 * @param $p
+	 * @param $prod
+	 * @return stdClass
+	 */
+	protected function prepShipmentData2014($p, $prod)
+	{
+		if (get_class($p) == 'stdClass') {
+			return $p;
+		}
+		$s = new stdClass;
+		$s->shipment_reference = $p->hbn;
+		$s->customer_reference_1 = $p->cref;
+
+		$s->from = new stdClass;
+		$s->from->name = substr(Org::COMPANY_NAME_SL, 0, 40);
+		$s->from->lines = $this->prepAddrLines(Org::COMPANY_NAME_SL."\n".Org::IM_COMPANY_ADDRESS_TLA);
+		$s->from->suburb = Org::IM_COMPANY_SUBURB;
+		$s->from->state =  Org::IM_COMPANY_STATE;
+		$s->from->postcode = Org::IM_COMPANY_POSTCODE;
+
+		$s->to = new stdClass;
+		$s->to->name = substr($p->cnee->name, 0, 35);
+		$s->to->business_name = $p->cnee->company;
+		$s->to->lines = $this->prepAddrLines($p->cnee->address);
+		$s->to->suburb = $p->cnee->suburb;
+		$s->to->state = $p->cnee->state;
+		$s->to->postcode = sprintf('%04d', $p->cnee->postcode);
+		if (!empty($p->cnee->tel)) {
+			$s->to->phone = $p->cnee->auTel();
+		}
+
+
+		// sometimes don't know why aupost return email invalid even correct email address
+		// so just ignore email address
+		//if (!empty($p->cnee->email)) {
+		//    $s->to->email = $p->cnee->email;
+		//    $s->email_tracking_enabled = true;
+		// }
+
+		$insurance = round($p->insurance / ($p->pkg > 0 ? $p->pkg : 1), 2);
+
+		for ($i = 1; $i <= $p->pkg; $i++) {
+			$itm = new stdClass;
+			$itm->item_reference = $p->hbn . '-' . $i;
+
+			// always set with 7D53
+			//  $itm->product_id = $prod;
+			$itm->product_id = AusPostAPI::CHARGE_CODE_NO_POD;
+
+			// shrink weight to 75%
+			$units = $p->pkg > 0 ? $p->pkg : 1;
+			$itm->weight =sprintf('%.02f', $this->getBreakWeight($p->weight/$units));
+			if ($i==1) {
+				$p->mdata['manifest_weight']=$itm->weight*$units;
+				$p->updateMeta();
+			}
+
+			// NOTE: weight is always all parcels' weight
+			// cube is always average cube
+//			$virtualValues = $this->getVirtualWeightDim( $p );
+//		      if(date('Y-m-d')<"2018-02-01"){
+			//                          $itm->weight = $virtualValues['weight'];
+			//                        }else{
+			//                          $itm->weight =sprintf('%.02f', $this->getBreakWeight($p->weight/$units));
+			//                        }
+						
+			//                        if(date('Y-m-d')<"2018-02-01"){
+//			$itm->width =  $virtualValues['width'];
+//			$itm->height = $virtualValues['height'];
+//			$itm->length = $virtualValues['length'];
+			//                        }
+
+			$itm->authority_to_leave = true; //in_array($prod, [AusPostAPI::CHARGE_CODE_NO_POD]);
+			$itm->partial_delivery_allowed = false;
+
+			// Whether your customer can request that the item be left in a safe place at the delivery address if they are not home to sign for their delivery.
+			// Your customer can request this while the item is on its way. This field is optional for domestic shipments (and defaults to true),
+			// but must not be specified for international shipments. This field works with the authority_to_leave field.
+			// If the authority_to_leave field is set to true, the safe_drop_enabled field is ignored. Please review the fact sheet for full details.
+			//if (!$itm->authority_to_leave) $itm->safe_drop_enabled = false;
+
+			// $itm->safe_drop_enabled = false;
+
+			//2014 format AID
+			//$aid = $p->ref.sprintf('%02s', $i).'08'.'2';
+			$aid = $p->ref.sprintf('%02s', $i).'50'.'2';
+			$aid .= self::aidChkDgt($aid);
+
+			/*
+			// 2015 format AID
+			$aid = $p->ref . sprintf('%02d', $i) . '00093' . '02' . '0'; //eparcel
+			$aid .= self::aidChkDgt($aid);
+			*/
+
+			$itm->tracking_details = [
+				'consignment_id' => $p->ref,
+				'article_id' => $aid,
+				'barcode_id' => '99700160'.$aid.'0'.sprintf('%04s', $p->cnee->postcode), //2014
+				//  'barcode_id' => '019931265099999891' . $aid, //2015
+			];
+
+			// in case insurance
+			if ($insurance > 0) {
+				$itm->features = new stdClass();
+				$itm->features->TRANSIT_COVER = new stdClass();
+				$itm->features->TRANSIT_COVER->attributes = new stdClass();
+				$itm->features->TRANSIT_COVER->attributes->cover_amount = $insurance;
+			}
+
+			$s->items[] = $itm;
+		}
+
+		if ($this->debug == 1) {
+			//  $this->log2file('Time: '.date('Y-m-d H:i:s')."\n item data : " . $p->hbn . ' - ' .json_encode($s)."\n");
+		}
+
+		return $s;
+	}
+
+	public function createShipments($p, $prod = AusPostAPI::CHARGE_CODE_NO_POD)
+	{
+		$d = new stdClass;
+		if (is_array($p)) {
+			foreach ($p as $s) {
+				$d->shipments[] = $this->prepShipmentData($s, $prod);
+			}
+		} else {
+			$d->shipments[] = $this->prepShipmentData($p, $prod);
+		}
+		return $this->request('shipments', 'POST', $d);
+	}
+
+	protected function prepIntShipmentData($p, $prod)
+	{
+		if (get_class($p) == 'stdClass') {
+			return $p;
+		}
+		$s = new stdClass;
+		$s->shipment_reference = $p->hbn;
+		$s->customer_reference_1 = $p->cref;
+
+		$s->from = new stdClass;
+		$s->from->name = $p->cnor->name;
+		$s->from->lines = $this->prepAddrLines(Org::COMPANY_NAME_SL."\n".Org::IM_COMPANY_ADDRESS_TLA);
+		$s->from->suburb = Org::IM_COMPANY_SUBURB;
+		$s->from->state =  Org::IM_COMPANY_STATE;
+		$s->from->postcode = Org::IM_COMPANY_POSTCODE;
+		$toChina = preg_match('/(China|PRC|CN)/i', $p->cnee->country);
+
+		$s->to = new stdClass;
+		$s->to->name = 'Name: '.$p->cnee->name;
+		$s->to->business_name = $p->cnee->company;
+		$s->to->lines = $this->prepAddrLines('Addr: '.$p->cnee->name.'  '.$p->cnee->tel."\n".$p->cnee->address);
+		$s->to->suburb = $toChina? ' '.$p->cnee->city.$p->cnee->suburb : $p->cnee->suburb.' '.$p->cnee->city;
+		$s->to->state = ' '.$p->cnee->state;
+		$s->to->postcode = $p->cnee->postcode;
+		$s->to->country = $toChina? 'CN' : $p->cnee->country;
+		if (!empty($p->cnee->tel)) {
+			$s->to->phone = $p->cnee->tel;
+		}
+		
+		$itm = new stdClass;
+		$itm->item_reference = $p->hbn;
+		$itm->product_id = $prod;
+		$itm->weight = sprintf('%.2f', round($p->weight * 0.95, 1));
+
+		// in case insurance
+		if ($p->insurance > 0) {
+			$itm->features = ['TRANSIT_COVER' => ['attributes' => [
+				'cover_amount' => round($p->insurance),
+			]]];
+		}
+		
+		$itm->commercial_value = !empty($p->eitems['hs'][0]);
+		$itm->classification_type = !empty($p->eitems['m'][0]) && preg_match('/sample/i', $p->eitems['m'][0])? 'SAMPLE' : 'OTHER';
+		$itm->description_of_other = substr(implode(',', $p->eitems['g']), 0 ,40);
+		if (!empty($p->ref)) {
+			$itm->tracking_details=[
+				'consignment_id' => $p->ref,
+				'article_id' => $p->ref,
+			];
+		}
+
+		$ict = [];
+		foreach ($p->eitems['g'] as $gi => $g) {
+			$ict[] = [
+				'description' => substr($g, 0, 40),
+				'quantity' => empty($p->eitems['q'][$gi])? 1 : $p->eitems['q'][$gi],
+				'value' => empty($p->eitems['v'][$gi])? 10 : $p->eitems['v'][$gi],
+				'tariff_code' => empty($p->eitems['hs'][$gi]) ? '' : $p->eitems['hs'][$gi],
+				'country_of_origin' => 'AU',
+			];
+		}
+		$itm->item_contents = $ict;
+
+		$s->items[] = $itm;
+
+		return $s;
+	}
+
+	public function createIntShipments($p, $prod = 'PTI8')
+	{
+		$d = new stdClass;
+		if (is_array($p)) {
+			foreach ($p as $s) {
+				$d->shipments[] = $this->prepIntShipmentData($s, $prod);
+			}
+		} else {
+			$d->shipments[] = $this->prepIntShipmentData($p, $prod);
+		}
+		return $this->request('shipments', 'POST', $d);
+	}
+
+	public function updateShipment($id, $p, $prod = AusPostAPI::CHARGE_CODE_POD)
+	{
+		return $this->request('shipments/'.$id, 'PUT', $this->prepShipmentData($p, $prod));
+	}
+
+
+	public function updateIntShipment($id, $p, $prod = 'PTI8')
+	{
+		return $this->request('shipments/'.$id, 'PUT', $this->prepIntShipmentData($p, $prod));
+	}
+
+	public function updateItems($id, $p, $prod = AusPostAPI::CHARGE_CODE_POD)
+	{
+		$s = $this->getShipments($id);
+		if (empty($s->shipments)) {
+			return $s;
+		}
+		$ns = $this->prepShipmentData($p, $prod);
+		foreach ($ns->items as $k=>$itm) {
+			if (isset($s->shipments[0]->items[$k])) {
+				$itm->item_id = $s->shipments[0]->items[$k]->item_id;
+			}
+		}
+		return $this->request('shipments/'.$id.'/items', 'PUT', ['items' => $ns->items]);
+	}
+
+	public function deleteShipment($ids)
+	{
+		return $this->request('shipments?shipment_ids='.$ids, 'DELETE');
+	}
+
+	public function deleteItem($id, $item_id)
+	{
+		return $this->request('shipments/'.$id.'/items/'.$item_id, 'DELETE');
+	}
+
+	public function getOrder($id)
+	{
+		return $this->request('orders/'.$id);
+	}
+
+	public function createOrderFromShipments($ss, $ref=null)
+	{
+		$d = new stdClass;
+		if (!empty($ref)) {
+			$d->order_reference = $ref;
+		}
+
+		foreach($ss as $s){
+			if ( isset($s->mdata['ap_sid']) ) {
+				$d->shipments[] = ['shipment_id' => $s->mdata['ap_sid']];
+			}elseif(isset($s->trans[0]->mdata['sid'])){
+				$d->shipments[] = ['shipment_id' => $s->trans[0]->mdata['sid']];
+			}
+		}
+
+		return $this->request('orders', 'PUT', $d);
+	}
+
+	public function createOrderIncludingShipments($ss, $ref=null, $prod = AusPostAPI::CHARGE_CODE_POD)
+	{
+		$d = new stdClass;
+		if (!empty($ref)) {
+			$d->order_reference = $ref;
+		}
+
+		$errors = [];
+		foreach ($ss as $index => $p) {
+			if ($p->status == 100) {
+				continue;
+			}
+
+			// for CK1 and JCEX we try to check to see if weight compare to cubic is not reasonable
+			// cubic weight more than 5 times real weight
+//			if ( $p->agent_id == 838 ) {
+//				if ( $p->cbm * 250 > 5 * $p->weight / ( $p->pkg > 0 ? $p->pkg : 1)) {
+//					$errors[$index] = 'cubic weight is more than 5 times of real weight';
+//				}
+//			}
+
+			// // test with jiacheng some shipments only
+			if (isset($p->mdata['test_aupost_2014'])) {
+				$d->shipments[] = $this->prepShipmentData2014($p, $prod);
+				if ($this->debug == 1) {
+					//  $this->log2file('Time: ' . date('Y-m-d H:i:s') . "\n shipment index : " . $index . '-' . $p->hbn . " done \n");
+				}
+			} else {
+				$d->shipments[] = $this->prepShipmentData($p, $prod);
+			}
+		}
+		unset($ss);
+
+		if ($this->debug == 1) {
+			//  $this->log2file('Time: ' . date('Y-m-d H:i:s') . "\n shipments: " . json_encode($d) . "\n");
+		}
+
+		if (!empty($errors)) {
+			// in order to make caller popup error message
+			$r = new stdClass();
+			$r->order = [];
+			$apaErrors = [];
+			foreach ($errors as $k => $error) {
+				$e = new stdClass();
+				$e->message = $error;
+				$e->field = 'shipments[' . $k . ']';
+				$e->code = '400';
+				$apaErrors[] = $e;
+			}
+			$this->err = $apaErrors;
+			return $r;
+		}
+
+		return $this->request('orders', 'POST', $d);
+	}
+
+	/**
+	 * lodge shipments with 2014-standard label format
+	 * @param $ss
+	 * @param null $ref
+	 * @param string $prod
+	 * @return bool|mixed
+	 * @throws Exception
+	 */
+	public function createOrderIncludingShipments2014($ss, $ref=null, $prod = AusPostAPI::CHARGE_CODE_POD)
+	{
+		$d = new stdClass;
+		if (!empty($ref)) {
+			$d->order_reference = $ref;
+		}
+		foreach ($ss as $index => $p) {
+			if ($p->status == 100) {
+				continue;
+			}
+			$d->shipments[] = $this->prepShipmentData2014($p, $prod);
+		}
+		return $this->request('orders', 'POST', $d);
+	}
+
+
+	public function getOrderSummary($id)
+	{
+		return $this->request('accounts/'.$this->api_id.'/orders/'.$id.'/summary');
+	}
+
+	public function createLabels($ids, $layout="A6")
+	{
+		$d = new stdClass;
+		$d->preferences = ['type' => 'PRINT',
+			'groups' =>[
+				[
+					'group' => "Parcel Post",
+					'layout' => $layout == 'A4'? 'A4-4pp' : 'A6-1pp',
+					'branded' => $layout == 'A4'? false : true,
+					'left_offset' => 0,
+					'top_offset' => 0,
+				],[
+					'group' => "Express Post",
+					'layout' => $layout == 'A4'? 'A4-4pp' : 'A6-1pp',
+					'branded' => $layout == 'A4'? false : true,
+					'left_offset' => 0,
+					'top_offset' => 0,
+
+				]]
+		];
+
+		if (!is_array($ids)) {
+			$ids = [$ids];
+		}
+
+		foreach ($ids as $id) {
+			$d->shipments[] = ['shipment_id' => $id];
+		}
+		return $this->request('labels', 'POST', $d);
+	}
+
+	public function getLabel($id)
+	{
+		return $this->request('labels/'.$id);
+	}
+
+	public function validateAddress($suburb, $state, $postcode)
+	{
+		$suburb = trim($suburb);
+		$state = trim($state);
+		$postcode = trim($postcode);
+		$r = $this->request('address?suburb='.urlencode($suburb).'&state='.$state.'&postcode='.$postcode);
+
+		if ($r===false) {
+			return 2;
+		} else {
+			return $r->found;
+		}
+	}
+
+	public function trackItems($ids)
+	{
+		$re = $this->request('track?tracking_ids='.$ids);
+		return $re;
+	}
+
+	public function createPayment($order_id, $ref=null)
+	{
+		$d = new stdClass;
+		$d->order_id = $order_id;
+		$d->payments_method = 'CHARGE_TO_ACCOUNT';
+		if (!empty($ref)) {
+			$d->payment_reference = $ref;
+		}
+		return $this->request('payments', 'POST', $d);
+	}
+
+	protected function request($action, $method = 'GET', $data = null)
+	{
+		$this->result = false;
+		$url = ($this->is_test? self::$test_url : self::$url).$action;
+		$c = new curl($url);
+		$c->setopt(CURLOPT_USERPWD, $this->api_key . ":" . $this->api_pwd);
+		$c->setopt(CURLOPT_CUSTOMREQUEST, strtoupper($method));
+		$c->setopt(CURLOPT_RETURNTRANSFER, true);
+		$c->setopt(CURLOPT_SSL_VERIFYPEER, false);
+		$c->setopt(CURLOPT_TIMEOUT, 600);
+		$hdr = ['Content-Type: application/json','Account-Number: ' . $this->api_id];
+		if (!empty($data)) {
+			//$data = json_encode($data);
+			$data = AppHelper::safeJsonEncode($data);
+
+			$c->setopt(CURLOPT_POSTFIELDS, $data);
+			$hdr[] = 'Content-Length: ' . strlen($data);
+		}
+		$c->setopt(CURLOPT_HTTPHEADER, $hdr);
+		if (!$c->exec()) {
+			throw new Exception('cUrl Error: '.$c->err);
+		}
+		$this->rescode = $c->rcode;
+
+		if ($this->debug == 1 || !empty($this->result->errors)) {
+			$this->log2file('Time: '.date('Y-m-d H:i:s')."\nURL: ".$url."\nRequest: ".$data."\nResponse Code: ".$this->rescode."\nResponse: ".$c->result."\n\n");
+		}
+		if(preg_match('/^application\/json/i', $c->header['Content-Type'])){
+			$this->result = json_decode($c->result);
+			if (!empty($this->result->errors)) {
+				$this->err = $this->result->errors;
+				return false;
+			}
+		}else{
+			$this->result = $c->result;
+		}
+
+		return $this->result;
+	}
+
+	//end of class
+}

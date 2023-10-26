@@ -1,0 +1,91 @@
+<?php
+
+class DashController extends Controller{
+	protected $skipAcl = array('index', 'save', 'widget');
+
+	public $layout = 'none';
+
+	public static $widgets = array(
+		// 'impdelay' => array('title' => 'Import Delay', 'col' => 1, 'collapse' => 0,'dpmt'=>2),
+		// 'expdelay' => array('title' => 'Export Delay', 'col' => 2, 'collapse' => 0,'dpmt'=>4),
+		// 'copdelay' => array('title' => 'Courier Delay', 'col' => 3, 'collapse' => 0,'dpmt'=>6),
+		'imwhInOutSyd' => array('title' => 'Import Warehouse Stock-In and Out Syd', 'col' => 4, 'collapse' => 0,'dpmt'=>2),
+		'imwhInOutMel' => array('title' => 'Import Warehouse Stock-In and Out Mel', 'col' => 4, 'collapse' => 0,'dpmt'=>2),
+		'imwhInOutBne' => array('title' => 'Import Warehouse Stock-In and Out Bne', 'col' => 4, 'collapse' => 0,'dpmt'=>2),
+		'imgp' => array('title' => 'Import Month GP', 'col' => 5, 'collapse' => 0,'dpmt'=>2),
+		'imcp' => array('title' => 'Import Custom Process Summary', 'col' => 6, 'collapse' => 0,'dpmt'=>2),
+		'imcop' => array('title' => 'Import Consol Process Summary', 'col' => 7, 'collapse' => 0,'dpmt'=>2),
+		'imml' => array('title' => 'Import Mail List Summary', 'col' => 8, 'collapse' => 0,'dpmt'=>2),
+		'imcs' => array('title' => 'Import Customer Service Summary', 'col' => 9, 'collapse' => 0,'dpmt'=>2),
+		'imcap' => array('title' => 'Import Cargo Process Summary', 'col' => 10, 'collapse' => 0,'dpmt'=>2),
+		'imzo' => array('title' => 'Import Delivery Zone Summary', 'col' => 11, 'collapse' => 0,'dpmt'=>2),
+		'imwe' => array('title' => 'Import Delivery Weight Summary', 'col' => 12, 'collapse' => 0,'dpmt'=>2),
+		'kprp' => array('title' => 'CargoProcess Daily Report Syd', 'col' => 13, 'collapse' => 0,'dpmt'=>2),
+		'kpmp' => array('title' => 'CargoProcess Daily Report Mel', 'col' => 14, 'collapse' => 0,'dpmt'=>2),
+		'tpls' => array('title' => '3PL Task Daily Report Syd','col' => 15, 'collapse' => 0,'dpmt'=>2 ),
+		'tplm' => array('title' => '3PL Task Daily Report Mel','col' => 16, 'collapse' => 0,'dpmt'=>2 ),
+		'whrr' => array('title' => 'WareHouse Put in Pallet / Put away Reminder','col' => 17, 'collapse' => 0,'dpmt'=>2 ),
+		'imghwr' => array('title' => 'Gatepass History Without Resorting','col' => 17, 'collapse' => 0,'dpmt'=>2 ),
+		'kpbp' => array('title' => 'CargoProcess Daily Report BNE', 'col' => 18, 'collapse' => 0,'dpmt'=>2),
+		//'tplm' => array('title' => '3PL Task Daily Report Mel','col' => 16, 'collapse' => 0,'dpmt'=>2 ),
+		//'pasr' => array('title' => 'Putaway Daily Report Syd','col' => 15, 'collapse' => 0,'dpmt'=>2 ),
+		// 'imwhInOut' => array('title' => 'Import Warehouse Storck-In and Out', 'col' => 4, 'collapse' => 0,'dpmt'=>2),
+	);
+	
+	public function actionWidget($name){
+		$vf = 'wid_'.$name;
+		if(!Acl::hasAccess($this->CaName.'/'.$vf)) return false;
+		if($this->getViewFile($vf.Yii::app()->user->grp) !== false){
+			$this->render($vf.Yii::app()->user->grp);
+		}else{
+			$this->render($vf);
+		}
+	}
+	
+	public function actionSave(){
+		if(!empty($_POST['data'])){
+			$wids = array();
+			foreach($_POST['data'] as $d){
+				$id = $d['name'];
+				unset($d['name']);
+				$wids[$id] = $d;
+			}
+			$u = User::model()->findByPk(Yii::app()->user->id);
+			$u->dash = $wids;
+			$u->save();	
+			$this->ajaxResult($u);
+		}
+	}
+	
+	/**
+	 * Dashboard
+	 */
+	public function actionIndex(){
+		$cols = array();
+		$u = User::model()->findByPk(Yii::app()->user->id);
+		if(!empty($u->dash)){
+			$widgets = $u->dash;
+			foreach(self::$widgets as $n=>$w){
+				if(empty($widgets[$n])) $widgets[$n] = $w;
+				$widgets[$n] = array_merge($w, $widgets[$n]);
+			}
+		}else{
+			$widgets = self::$widgets;
+		}
+		//merge personal preference;
+		foreach($widgets as $n=>$w){
+			if(empty(self::$widgets[$n])||($u->dpmt&$w['dpmt'])==0) continue;
+			$vf = 'wid_'.$n;
+			if(!Acl::hasAccess($this->CaName.'/'.$vf)) continue;
+			$cols[$w['col']][$n] = $w;
+		}
+
+		$i = 1;
+		while($i < 4){
+			if(!isset($cols[$i])) $cols[$i] = [];
+			$i++;
+		}
+
+		$this->render('index', array('cols' => $cols));
+	}
+}

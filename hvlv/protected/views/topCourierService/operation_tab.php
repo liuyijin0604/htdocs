@@ -1,0 +1,1023 @@
+<style type="text/css">
+	.display_none {
+		display: none;
+	}
+</style>
+<h3>Operation-<?= $model->shipment_id ?></h3>
+<h3><?= $model->status == 15 ? "Consol" : "Direct Consol" ?>
+	<div class="form">
+		<div class="row">
+			<div class="col" style="margin-right: 25px">
+				<div class="row rowcol-left">
+					<?php
+					if ($model->status != 98 && @$model->mdata['problemcargo'] == 1) {
+						echo CHtml::label('Status - Problem Cargo Processing', 'status');
+					} else {
+						echo CHtml::label('Status', 'status');
+					}
+					?>
+					<?php if ($model->type == CargoProcess::PICKUP_CARGO) : ?>
+						<?php echo CHtml::dropDownList('cargo_process_status', @$model->status, CargoProcess::$processTypes_pickup, array('prompt' => 'Select', 'disabled' => 'disabled')); ?>
+					<?php else : ?>
+						<?php echo CHtml::dropDownList('cargo_process_status', @$model->status, CargoProcess::$processTypes_normal, array('prompt' => 'Select', 'disabled' => 'disabled')); ?>
+					<?php endif; ?>
+
+					<div style="background-position:-240px -416px" class="icon"></div>
+					<?php echo CHtml::button('Update', array('class' => 'updateStatus')); ?>
+					<?php if (!User::checkIsNotTruckUser() || User::getOrgIds()[0] == 1) : ?>
+						<?php echo CHtml::button('Add preparetion tracking', array('class' => 'add_preparetion_tracking')); ?>
+					<?php endif; ?>
+				</div>
+
+			</div>
+		</div>
+		<br>
+		<div class="form">
+			<?php
+			$id = $model->id;
+			$url = $this->createUrl('topCourierService/update');
+			if (isset($ids) && $ids != "") {
+				$id = $ids;
+			}
+			$form = $this->beginWidget(
+				'CActiveForm',
+				array(
+					'id' => 'cargo-process-acr_form',
+					'enableAjaxValidation' => false,
+					'action' => $url . "?id=" . $id
+				)
+			);
+			?>
+
+
+			<?php if ($model->status == CargoProcess::COLLECTINFO || $model->status == CargoProcess::AGENTCOLLECTINFO) : ?>
+				<div class="row buttons">
+					<?php if ($model->type != CargoProcess::PICKUP_CARGO) : ?>
+						<?php echo CHtml::button('Collect Info Done', array('class' => 'collectInfo_done')); ?>
+					<?php else : ?>
+						<?php echo CHtml::button('Outturn', array('class' => 'send_outturn')); ?>
+
+						<?php if ($model->shipment->consol->service == ImcoConsol::SEACONSOL) : ?>
+							<?php if (!empty($model->mdata['is_sendDo'])) : ?>
+								<?php echo CHtml::button('resend DO', array('class' => 'send_do')); ?>
+							<?php else : ?>
+								<?php echo CHtml::button('send DO', array('class' => 'send_do')); ?>
+							<?php endif; ?>
+						<?php endif; ?>
+
+
+						<?php echo CHtml::button('Don\'t Outturn', array('class' => 'not_send_outturn')); ?>
+					<?php endif; ?>
+				</div>
+			<?php endif; ?>
+
+			<?php if ($model->status == CargoProcess::WAITINGWINITBOOKING) : ?>
+				<div class="row buttons">
+
+					<?php echo CHtml::button('Winit Booking Done', array('class' => 'winitBooking_done')); ?>
+				</div>
+			<?php endif; ?>
+
+			<?php if ($model->status == CargoProcess::COLLECTINFO || $model->status == CargoProcess::WAITINGERRORCHECKING || $model->status == CargoProcess::WAITINGASSIGNDRIVER && $model->type == CargoProcess::NORMAL_CARGO) : ?>
+				<div class="row buttons">
+					<label>
+						<?php if (!empty($model->mdata['sendEmailNotie'])) : ?>
+							Sent Email&nbsp;&nbsp;&nbsp;
+						<?php endif; ?>
+						<?php if (!empty($model->mdata['sendSmsNotie'])) : ?>
+							Sent Sms
+						<?php endif; ?>
+					</label>
+
+					<?php echo CHtml::button('Send Sms and Email to notice consignee', array('class' => 'send_sms_email')); ?>
+				</div>
+				<?php if (!empty($model->mdata['customer_confirmed'])) : ?>
+					<div class="row buttons">
+						<label>Customer Response:</label>
+						<?php echo CHtml::textArea('customer_response', $model->getCustomerResponse(), array('rows' => 6, 'cols' => 60)); ?>
+					</div>
+				<?php endif; ?>
+			<?php endif; ?>
+
+			<?php if ($model->type == CargoProcess::FBA_CARGO && !empty($ids)) : ?>
+				<a href="<?= $this->createUrl('cargoProcess/exportAmazonInfo', ['ids' => $ids]); ?>" class="export_search" target="_blank" );">
+					<div style="background-position:-48px -688px" class="icon"></div> Export Amazon Info
+				</a>
+			<?php endif; ?>
+
+
+
+			<?php if ($model->status == CargoProcess::WAITINGASSIGNDRIVER || $model->status == CargoProcess::AGENTWAITINGASSIGNDRIVER) : ?>
+				<div class="row buttons">
+					<!-- <?php echo CHtml::label('Assign Driver', 'driver_id'); ?>
+					
+					<?php //echo CHtml::dropDownList('driver_id', @$model->driver_id, $drivers, array('prompt' => 'Select')); ?> -->
+
+				</div>
+			<?php endif; ?>
+
+
+
+			<?php if ($model->status == CargoProcess::PAPERWORK || !User::checkIsNotTruckUser() || $model->status == CargoProcess::AGENTCOLLECTINFO || $model->status == CargoProcess::AGENTWAITINGASSIGNDRIVER || $model->status == CargoProcess::WAITINGASSIGNDRIVER || ($model->status == CargoProcess::WAITINGDELIVERY && isset($model->mdata["assigned_user"])) || ($model->status == CargoProcess::WAITINGDELIVERY && $model->type == CargoProcess::PICKUP_CARGO)) : ?>
+				<div class="row buttons">
+					<?php if (Acl::hasAccess("C:gatepass/generateCargoProcessGatePass")) echo CHtml::button('Generate GatePass', array('class' => 'gate_pass')); ?>
+					<?php if (Acl::hasAccess("C:cargoProcess/noticeWarehouseToPrepare")) echo CHtml::button('Notice Warehouse To Prepare', array('class' => 'gate_pass_prepare')); ?>
+					<?php
+					if (!empty($model->gate_pass_id)) {
+						echo CHtml::link('Check GatePass', $this->createUrl("cargoProcess/printGatePass") . "?id=" . $model->gate_pass_id, ["target" => "_blank"]);
+					}
+					?>
+					<?php
+					if (!empty($model->gate_pass_id) || !empty($model->mdata['canBePrepared'])) {
+						if (Acl::hasAccess("C:cargoProcess/generateCargoReceipt")) echo CHtml::button('Generate Cargo Receipt', array('class' => 'generate_cargo_receipt'));
+					}
+					?>
+				</div>
+			<?php endif; ?>
+
+			<?php if ($model->status == CargoProcess::PAPERWORK) : ?>
+				<div class="row buttons">
+
+					<?php if (Acl::hasAccess("C:cargoProcess/paperworkDone")) echo CHtml::button('Paperwork Done', array('class' => 'paperwork_done')); ?>
+				</div>
+			<?php endif; ?>
+			<?php if (($model->status == CargoProcess::WAITINGDELIVERY || $model->status == CargoProcess::PROCESSDONE || $model->status == CargoProcess::WAITINGAGENTDELIVERY || ($model->status == CargoProcess::AGENTDELIVERYDONE && User::checkIsNotTruckUser())) && Acl::hasAccess("C:cargoProcess/uploadPOD")) : ?>
+
+				<?php //if(($model->status==CargoProcess::WAITINGDELIVERY||$model->status==CargoProcess::PROCESSDONE||$model->status==CargoProcess::WAITINGAGENTDELIVERY||($model->status==CargoProcess::AGENTDELIVERYDONE&&User::checkIsNotTruckUser()))&& Acl::hasAccess("C:cargoProcess/uploadPOD")&&$model->type!=CargoProcess::PICKUP_CARGO):
+				?>
+				<div class="row buttons">
+					<?php
+					$uploadType = 25;
+					if (isset($ids) && $ids != "") {
+						$uploadType = 130;
+					}
+
+					$fr = new FileRepo('search');
+					$fr->unsetAttributes();
+					$fr->theTypes[] = 131;
+
+					if (empty($_GET['FileRepo'])) {
+						if (isset($ids) && $ids != "") {
+							$fr->theTypes[] = 131;
+						}
+						$fr->theTypes[] = $uploadType;
+					} else {
+						$fr->attributes = $_GET['FileRepo'];
+						if (empty($fr->theTypes)) {
+							if (isset($ids) && $ids != "") {
+								$fr->theTypes[] = 131;
+							}
+							$fr->theTypes[] = $uploadType;
+						}
+					}
+					if (isset($ids) && $ids != "") {
+						$fr->fid = $model->id;
+					} else {
+						$fr->fid = $model->shipment_id;
+					}
+					$mf = Acl::hasAccess('B:org/manageFile');
+					$this->widget('zii.widgets.grid.CGridView', [
+						'id' => $_GET['tabid'] . '_excofile-grid',
+						'cssFile' => false,
+						'summaryText' => '',
+						'dataProvider' => $fr->search(),
+						'filter' => $fr,
+						'columns' => [
+							['name' => 'name', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->baseUrl."/filerepo/".$data->hash."/".$data->name."\" target=\"_blank\">".$data->name."</a>"'],
+							[
+								'name' => 'size',
+								'value' => '$data->formatSize()',
+								'filter' => false,
+							],
+							'date',
+							'type',
+							[
+								'name' => 'status', 'type' => 'raw', 'value' => '$data->getStatus()',
+								'filter' => CHtml::dropDownList('FileRepo[status]', $fr->status, FileRepo::$states, ['prompt' => $this->t('All')])
+							],
+							[
+								'class' => 'oButtonColumn',
+								'template' => '{update}',
+								'buttons' => [
+									'update' => [
+										'url' => 'Yii::app()->createUrl("imParcel/fileUpdate",array("id"=>$data->id))',
+										'imageUrl' => false,
+										'visible' => 'true',
+										'options' => ['class' => 'jqm_link grid_edit_btn', 'label' => $this->t('Update'), 'title' => '$data->name'],
+									],
+								],
+							],
+						],
+					]);
+					?>
+				</div>
+			<?php endif; ?>
+			<?php if (($model->status == CargoProcess::WAITINGDELIVERY || $model->status == CargoProcess::WAITINGAGENTDELIVERY || ($model->status == CargoProcess::AGENTDELIVERYDONE && User::checkIsNotTruckUser())) && Acl::hasAccess("C:cargoProcess/uploadPOD")) : ?>
+
+				<?php //if(($model->status==CargoProcess::WAITINGDELIVERY ||$model->status==CargoProcess::WAITINGAGENTDELIVERY||($model->status==CargoProcess::AGENTDELIVERYDONE&&User::checkIsNotTruckUser()))&& Acl::hasAccess("C:cargoProcess/uploadPOD")&&$model->type!=CargoProcess::PICKUP_CARGO):
+				?>
+				<div class="row buttons">
+
+					<?php
+					$pphash = "";
+					echo '<br /><h3>', CHtml::label($this->t('Upload POD Files'), '</h3>uploader');
+					if (isset($ids) && $ids != "") {
+						$idArray = explode(CargoProcess::IP_SEPERATOR, $ids);
+						$pphash = "";
+						foreach ($idArray as $key => $thisId) {
+							$thisModel = CargoProcess::Model()->findByPK($thisId);
+							if ($key == (sizeof($idArray) - 1)) {
+								$pphash .= FileRepo::uploadHash($thisModel, $uploadType);
+							} else {
+								$pphash .= FileRepo::uploadHash($thisModel, $uploadType) . CargoProcess::IP_SEPERATOR;
+							}
+						}
+					} else {
+						echo "can be download by client";
+						$pphash = FileRepo::uploadHash($model, $uploadType);
+					}
+
+					$this->widget('application.extensions.plupload.PluploadWidget', [
+						'config' => [
+							'url' => $this->createUrl('cargoProcess/uploadPOD/' . $pphash),
+							'max_file_size' => Yii::app()->params['maxFileSize'],
+							'unique_names' => true,
+							'file_list_height' => 60,
+							'visible_header' => false,
+							'filters' => [
+								['title' => Yii::t('app', 'JPG, PDF, Word, Excel files'), 'extensions' => 'pdf,doc,docx,xls,xlsx,jpg,png,txt'],
+							],
+							//'resize' => array('width' => 800, 'height' => 800, 'quality' => 80),
+							'language' => Yii::app()->language,
+							'max_file_number' => 2,
+							'autostart' => false,
+							'jquery_ui' => false,
+							'reset_after_upload' => true,
+						],
+						'callbacks' => [
+							'FileUploaded' => 'function(up,file,response){alert("Upload POD File Success");$("#' . $_GET["tabid"] . '").trigger("reload_excofile_grid");$("#' . $_GET["tabid"] . '").trigger("reload_excofile_grid_file");}',
+						],
+						'id' => $_GET['tabid'] . '_excofile_uploader_1',
+					]);
+
+					$pphash = "";
+					echo '<br /><h3>', CHtml::label($this->t('Upload Signature Files'), '</h3>uploader');
+					$uploadType = 131;
+					echo "Single POD can be download by client";
+					$idArray = explode(CargoProcess::IP_SEPERATOR, $id);
+					$pphash = "";
+					foreach ($idArray as $key => $thisId) {
+						$thisModel = CargoProcess::Model()->findByPK($thisId);
+						if ($key == (sizeof($idArray) - 1)) {
+							$pphash .= FileRepo::uploadHash($thisModel, $uploadType);
+						} else {
+							$pphash .= FileRepo::uploadHash($thisModel, $uploadType) . CargoProcess::IP_SEPERATOR;
+						}
+					}
+					$this->widget('application.extensions.plupload.PluploadWidget', [
+						'config' => [
+							'url' => $this->createUrl('cargoProcess/uploadSignatureFile/' . $pphash),
+							'max_file_size' => Yii::app()->params['maxFileSize'],
+							'unique_names' => true,
+							'file_list_height' => 60,
+							'visible_header' => false,
+							'filters' => [
+								['title' => Yii::t('app', 'JPG, PDF, Word, Excel files'), 'extensions' => '	pdf,doc,docx,xls,xlsx,jpg,png,txt'],
+							],
+							//'resize' => array('width' => 800, 'height' => 800, 'quality' => 80),
+							'language' => Yii::app()->language,
+							'max_file_number' => 2,
+							'autostart' => false,
+							'jquery_ui' => false,
+							'reset_after_upload' => true,
+						],
+						'callbacks' => [
+							'FileUploaded' => 'function(up,file,response){
+								alert("Upload POD File Success");
+								$("#' . $_GET["tabid"] . '	").trigger("reload_excofile_grid");
+								$("#' . $_GET["tabid"] . '	").trigger("reload_excofile_grid_file");
+							}',
+						],
+						'id' => $_GET['tabid'] . '_excofile_uploader_2',
+					]);
+					?>
+				</div>
+			<?php endif; ?>
+			<?php if (($model->status == CargoProcess::WAITINGDELIVERY || $model->status == CargoProcess::WAITINGAGENTDELIVERY || ($model->status == CargoProcess::AGENTDELIVERYDONE && User::checkIsNotTruckUser())) && Acl::hasAccess("C:cargoProcess/processDone")) : ?>
+				<div class="row buttons">
+					<?php echo CHtml::button('Upload POD Done', array('class' => 'upload_pod_done')); ?>
+
+					<?php
+					if (!isset($ids) && $model->status != CargoProcess::WAITINGAGENTDELIVERY) {
+						echo CHtml::checkbox('upload_consol', 0, array('class' => 'upload_consol')), '&nbsp;Upload Consol';
+					}
+					?>
+				</div>
+			<?php endif; ?>
+
+
+			<?php if ($model->status == CargoProcess::COLLECTINFO || ($model->status == CargoProcess::WAITINGDELIVERY && $model->type == CargoProcess::PICKUP_CARGO)) : ?>
+				<div class="row">
+					<div class='row rowcol rowleft'>
+						<?php echo CHtml::label('Pickup Booking Time', 'pickup_booking_time'); ?>
+						<?php echo CHtml::textField('ImParcel[pickup_booking_time]', @$model->shipment->mdata['pickup_booking_time'], array('size' => 20, 'class' => "datetime_input", 'id' => 'pickup_booking_time' . $_GET['tabid'])); ?>
+					</div>
+				</div>
+			<?php endif; ?>
+
+			<?php if ($model->status == CargoProcess::WAITINGDELIVERY && $model->type == CargoProcess::PICKUP_CARGO) : ?>
+				<div class="row buttons">
+					<?php echo CHtml::submitButton('Save', array('class' => 'update')); ?>
+				</div>
+			<?php endif; ?>
+
+			<?php if ($model->status == CargoProcess::COLLECTINFO || $model->type == CargoProcess::FBA_CARGO || $model->type == CargoProcess::B2B_CARGO) : ?>
+				<div class='row rowcol rowleft'>
+					<?php if ($model->type == CargoProcess::B2B_CARGO) : ?>
+						<div class='row' id='delivery_area'>
+							<div class='row rowcol rowleft'>
+								<?= CHtml::label('Delivery Booking Time', 'Delivery_booking_time'); ?>
+								<?php $deliveryBookingTime = empty($model->cargo_delivery_info) ? "" : $model->cargo_delivery_info->delivery_booking_time;
+								echo CHtml::textField('CargoDeliveryInfo[delivery_booking_time]', $deliveryBookingTime, array('size' => 20, 'class' => "datetime_input", 'id' => 'delivery_book_time' . $_GET['tabid']));
+								?>
+							</div>
+						</div>
+						<div class="row">
+							<div class="row rowcol rowleft">
+								<?= CHtml::label('Booking Cancellation Reason', 'booking_cancellation_reason'); ?>
+								<?php $bookingCancellationReason = !empty($model->mdata['overseas_booking_cancellation_reason']) ? $model->mdata['overseas_booking_cancellation_reason'] : "";
+								echo CHtml::textArea('CargoDeliveryInfo[overseas_booking_cancellation_reason]', $bookingCancellationReason, array('rows' => 3, 'cols' => 60)); ?>
+							</div>
+						</div>
+						<div class="row">
+							<div class="row rowcol rowleft">
+								<?php echo CHtml::button('Cancel Booking', array('class' => 'cancel_booking')); ?>
+							</div>
+						</div>
+					<?php else : ?>
+
+						<div class="row rowcol rowleft">
+							<?php echo CHtml::label('Amazon Booking Time', 'amazon_booking_time'); ?>
+							<?php
+							echo CHtml::textField('AmazonInfo[amazon_booking_time]', @$model->amazon_info->amazon_booking_time, array('size' => 20, 'class' => "datetime_input", 'id' => 'amazon_book_time' . $_GET['tabid']));
+							?>
+						</div>
+						<div class="row rowcol">
+							<?php echo CHtml::label("AmazonBooking Info", 'booking_ref'); ?>
+							<?php
+							echo CHtml::textField('AmazonInfo[booking_ref]', @$model->amazon_info->booking_ref);
+							?>
+						</div>
+					<?php endif; ?>
+
+					<!-- <?php if ($model->type != 6) { ?>
+					<?php //echo CHtml::label("Pallet", 'Pallet'); 
+					?>
+					<?php
+								//echo CHtml::numberField('pallet', @$model->mdata['pallet']);
+					?>
+					<?php } ?> -->
+				</div>
+			<?php endif; ?>
+
+			<?php if (!isset($ids) || $ids == "") : ?>
+				<?php if (($model->status == CargoProcess::WAITINGASSIGNDRIVER || $model->status == CargoProcess::AGENTWAITINGASSIGNDRIVER) && Acl::hasAccess("C:cargoProcess/assignDriverDone")) : ?>
+					<div class="row buttons">
+						<!-- <?php echo CHtml::button('Assign Driver Done', array('class' => 'assign_driver_done')); ?> -->
+					</div>
+				<?php endif; ?>
+				<!-- $model->status==CargoProcess::WAITINGAGENTDELIVERY -->
+				<?php if ($model->shipment->status == ImParcel::DELIVERED) : ?>
+					<div>
+						<br />
+						google review
+						<br />
+						<?= CHtml::button('Send Google Review', array('onClick' => 'funcSendGoogleReviewEmail()', 'id' => 'btnGoogleReview')); ?>
+						<br />
+						<br />
+					</div>
+				<?php endif; ?>
+
+				<?php if (!isset($ismulti) || $ismulti != 1) : ?>
+				<div class="row">
+					<?php echo CHtml::label('Job Pallet No', 'Job Pallet No'); ?>
+					<?php echo CHtml::numberField('job_pallet_no', @$model->mdata['job_pallet_no']); ?>
+				</div>
+				<?php endif; ?>
+
+				<div class="row">
+					<?php echo CHtml::label('Cargo Note', 'note'); ?>
+					<?php echo CHtml::textArea('note', @$model->note, array('rows' => 2, 'cols' => 60)); ?>
+				</div>
+
+				<?php if (!User::checkIsNotTruckUser() && $model->status != CargoProcess::AGENTDELIVERYDONE) : ?>
+					<!-- when the user is truck agent, their can change the delivery time whenever they want -->
+					<?php if (isset($model->shipment->mdata['cargo_delivery']) && $model->shipment->mdata['cargo_delivery'] == 1) : ?>
+						<div class='row' id='delivery_area'>
+							<div class='row rowcol rowleft'>
+								<?= CHtml::label('Delivery Booking Time', 'Delivery_booking_time'); ?>
+								<?php $deliveryBookingTime = $model->shipment->cargo_delivery_info == null ? "" : $model->shipment->cargo_delivery_info->delivery_booking_time;
+								echo CHtml::textField('CargoDeliveryInfo[delivery_booking_time]', $deliveryBookingTime, array('size' => 20, 'class' => "datetime_input", 'id' => 'delivery_book_time' . $_GET['tabid']));
+								?>
+							</div>
+						</div>
+					<?php endif; ?>
+				<?php endif; ?>
+
+
+				<?php if (User::checkIsNotTruckUser()) : ?>
+					<?= CHtml::label('Cargo Type', 'cargo_type'); ?>
+					<?= CHtml::dropDownList('cargo_type', @$model->type, CargoProcess::$cargoTypeList); ?>
+					<?= CHtml::label('Deport', 'deport'); ?>
+					<?= CHtml::dropDownList('dpt_id', @$model->dpt_id, Org::$warehouse_list); ?>
+				<?php endif; ?>
+				<div class="row buttons">
+					<?php echo CHtml::submitButton('Save', array('class' => 'update')); ?>
+				</div>
+				<?php if ($model->status == CargoProcess::RTSDELIVERY) : ?>
+					<div class="row">
+						<div class="row rowcol rowleft">
+							<a class="jqm_link" href="<?= $this->createUrl('topCourierService/createInvoice', ['id' => $model->id, 'type' => 1]); ?>">
+								<div style="background-position:-48px -688px" class="icon"></div>Invoice to Shipper
+							</a>
+						</div>
+
+						<div class="row rowcol">
+							<a class="jqm_link" href="<?= $this->createUrl('topCourierService/createInvoice', ['id' => $model->id, 'type' => 0]); ?>">
+								<div style="background-position:-48px -688px" class="icon"></div>Invoice to Customer
+							</a>
+						</div>
+					</div>
+					<br>
+				<?php endif; ?>
+
+			<?php endif; ?>
+
+			<?php if (isset($ids) && $ids != "") : ?>
+				<?php if ($model->status == CargoProcess::COLLECTINFO) : ?>
+					<?php if (!isset($ismulti) && $ismulti != 1) : ?>
+					<div class="row">
+						<?php echo CHtml::label('Job Pallet No', 'Job Pallet No'); ?>
+						<?php echo CHtml::textField('job_pallet_no', @$model->mdata['job_pallet_no']); ?>
+					</div>
+					<?php endif; ?>
+					<div class="row">
+						<?php echo CHtml::label('Cargo Note', 'note'); ?>
+						<?php echo CHtml::textArea('note', @$model->note, array('rows' => 2, 'cols' => 60)); ?>
+					</div>
+				<?php endif; ?>
+
+				<?php if (($model->status == CargoProcess::WAITINGASSIGNDRIVER || $model->status == CargoProcess::AGENTWAITINGASSIGNDRIVER) && Acl::hasAccess("C:cargoProcess/assignDriverDone")) : ?>
+					<div class="row buttons">
+						<?php echo CHtml::button('Assign Driver Done', array('class' => 'assign_driver_done')); ?>
+
+					</div>
+					<br>
+					<br>
+					<br>
+				<?php endif; ?>
+
+				<?php if (($model->status == CargoProcess::COLLECTINFO) || (($model->status == CargoProcess::WAITINGASSIGNDRIVER || $model->status == CargoProcess::AGENTWAITINGASSIGNDRIVER) && Acl::hasAccess("C:cargoProcess/assignDriverDone")) || ($model->status == CargoProcess::PAPERWORK && $model->type == CargoProcess::FBA_CARGO)) : ?>
+					<div class="row buttons">
+						<?php echo CHtml::submitButton('Save', array('class' => 'update')); ?>
+					</div>
+				<?php endif; ?>
+
+
+
+			<?php endif; ?>
+			<?php
+			if ($model->type != 6) {
+				$numPut = empty($model->getCostInOperation()) ? 0 : number_format($model->getCostInOperation(), 2, '.', '');
+				$numRevenue = empty($model->mdata['systemTotalRevenue']) ? 0 : number_format($model->mdata['systemTotalRevenue'], 2, '.', '');
+			?>
+				<br>
+				<p>Cost:<?php echo $numPut ?> Revenue:<?php echo $numRevenue ?></p>
+				<br>
+				<div>
+					<?php echo CHtml::label('Has Forklift', 'Has Forklift'); ?>
+					<?php echo CHtml::dropDownList('forklift',@$model->mdata['custconfirmforklift'],[0=>"No",1=>"Yes"])?>
+				</div>
+				<div>
+					<?php echo CHtml::label('Input Cost - For driver not has org rate', 'Input Cost'); ?>
+					<?php echo CHtml::textField('inputcost', @$model->mdata['inputcost']); ?>
+				</div>
+				<br>
+				<div class="row buttons">
+					<?php echo CHtml::submitButton('Calculate Cost/Revenue', array('class' => 'calculate_cost_revenue')); ?>
+				</div>
+			<?php } else { ?>
+				<div>
+					<?php echo CHtml::label('Input Cost - For Interstate', 'Input Cost Interstate'); ?>
+					<?php echo CHtml::textField('inputcostinterstate', is_numeric(@$model->mdata['inputcostinterstate']) ? number_format(floatval(@$model->mdata['inputcostinterstate']), 2, '.', '') : '', array('disabled' => true)); ?>
+				</div>
+				<div>
+					<?php echo CHtml::label('Need Invoice', 'Need Invoice'); ?>
+					<?php echo CHtml::dropDownList('need_invoice', @$model->mdata['need_invoice'], [1 => 'Yes', 0 => 'No'], ['onchange' => 'funcNeedInvoice(this.options[this.selectedIndex].value)']) ?>
+				</div>
+				<div id="ot_invoice">
+					<div class="row rowcol rowleft">
+						<?php echo CHtml::label('OT Invoice No. - Interstate', 'Input Cost Interstate OT NO.'); ?>
+						<?php echo CHtml::textField('interstateotno', @$model->mdata['interstateotno']); ?>
+					</div>
+					<div class="row rowcol">
+						<?php echo CHtml::label('&nbsp', 'nbsp'); ?>
+						<?php echo CHtml::label('Or', 'or'); ?>
+					</div>
+					<div class="row rowcol">
+						<?php echo CHtml::label('Interstate Chargecode. - Interstate', 'Interstate Chargecode'); ?>
+						<?php echo CHtml::textField('interstatechargecode', @$model->mdata['interstatechargecode']); ?>
+					</div>
+				</div>
+				<div class="row rowcol rowleft">
+					<?php echo CHtml::label('Courier label No. - For Interstate', 'Courier label NO.'); ?>
+					<?php echo CHtml::textField('third_part_label_no', @$model->mdata['third_part_label_no']); ?>
+				</div>
+				<!-- <div class="row buttons">
+					<?php echo CHtml::submitButton('Calculate Cost/Revenue', array('class' => 'calculate_cost_revenue')); ?>
+				</div> -->
+			<?php } ?>
+			<?php if (!empty($model->mdata['customer_confirmed'])) : ?>
+				<div class="row buttons">
+					<label>Customer Response:</label>
+					<?php echo CHtml::textArea('customer_response', $model->getCustomerResponse(), array('rows' => 6, 'cols' => 60)); ?>
+				</div>
+			<?php endif; ?>
+
+			<?php if ($model->status == CargoProcess::RTSDELIVERY && $model->mdata['redeliverypaid'] != 1) { ?>
+				<div class="row buttons">
+					<?php echo CHtml::submitButton('Redelivery Paid/Free Redelivery', array('class' => 'repaid')); ?>
+				</div>
+			<?php } else { ?>
+				<div class="row">
+					<?php echo CHtml::label('Paid/Free Delivery', 'Paid/Free Delivery'); ?>
+				</div>
+			<?php } ?>
+
+
+
+			
+			<div class="row">
+				<h3>Packages From Customer</h3>
+				<table id="packages" style="border: 1px solid #000;">
+					<thead>
+						<tr>
+							<th style="width:10em;">#</th>
+							<th style="width:10em;">Weight</th>
+							<th style="width:10em;">Length</th>
+							<th style="width:10em;">Height</th>
+							<th style="width:10em;">Width</th>
+						</tr>
+					</thead>
+					<tbody>
+						<?php 
+						if(!empty($model->shipment->packs)){
+							foreach ($model->shipment->packs as $key => $pack) {
+								$num = $key + 1;
+								echo "<tr><td align='center'>{$num}</td><td align='center'>" . @$pack['weight'] . "kg</td><td align='center'>" . @$pack['length'] . "CM</td><td align='center'>" . @$pack['height'] . "CM</td><td align='center'>" . @$pack['width'] . "CM</td></tr>";
+							}
+						}
+						?>
+
+					</tbody>
+				</table>
+			</div>
+
+			<div class="row">
+				<h3>Manifest Packages To Courier</h3>
+				<table id="packages" style="border: 1px solid #000;">
+					<thead>
+						<tr>
+							<th style="width:10em;">Qty</th>
+							<th style="width:10em;">Weight</th>
+							<th style="width:10em;">Length</th>
+							<th style="width:10em;">Height</th>
+							<th style="width:10em;">Width</th>
+						</tr>
+					</thead>
+					<tbody>
+						<?php
+						if (!empty($model->shipment->mdata['eiz'])) {
+							foreach ($model->shipment->mdata['eiz']['package'] as $key => $pack) {
+								$num = $key + 1;
+								echo "<tr><td align='center'>" . @$pack['qty'] . "</td><td align='center'>" . @$pack['weight'] . "kg</td><td align='center'>" . @$pack['length'] . "CM</td><td align='center'>" . @$pack['height'] . "CM</td><td align='center'>" . @$pack['width'] . "CM</td></tr>";
+							}
+						} ?>
+
+					</tbody>
+				</table>
+			</div>
+
+			<?php
+			if (!empty($objCargoProcessRelation)) {
+				echo "<br/>";
+				echo "First Delivery Approve";
+				$this->widget('application.extensions.booster.TbExtendedGridView', [
+					'id' => 'cargo_process_relation_list',
+					'cssFile' => false,
+					'dataProvider' => $objCargoProcessRelation->search(true, 10),
+					//'filter' => $objCargoProcessRelation,
+					'columns' => [
+						['header' => 'Delivery Date', 'value' => '@$data->job->created'],
+						['header' => 'Job Name', 'value' => '@$data->job->job_name'],
+						['header' => 'Driver', 'value' => '@$data->getDriverName()'],
+						['header' => 'Operation', 'type' => 'raw', 'value' => 'CHtml::dropDownList($data->id,$data->isredelivery,[0=>"Not Approve","1"=>"Approve"],["class"=>"approve_redelivery"])'],
+					],
+				]);
+			}
+			?>
+
+			<script type="text/javascript">
+				$(function() {
+					var win = $('#jqmw_<?= $_GET["tabid"]; ?>');
+					var tab = $('#<?= $_GET["tabid"]; ?>');
+					var panel = $('#<?= $_GET["tabid"]; ?>').data('panel');
+
+					<?php if ( isset($model->mdata['need_invoice'])&& $model->mdata['need_invoice'] == 0) { ?>
+						$("#ot_invoice").addClass("display_none");
+					<?php }else{ ?>
+						$("#ot_invoice").removeClass("display_none");
+					<?php } ?>
+					
+					tab.unbind('reload_cargo_process_grid').bind('reload_cargo_process_grid', function() {
+						$('#<?= $_GET["tabid"]; ?>_cargo_process_grid', tab.data('panel')).yiiGridView('update');
+						return false;
+					});
+
+					tab.unbind('reload_excofile_grid').bind('reload_excofile_grid', function() {
+						$('#<?= $_GET["tabid"]; ?>_excofile-grid', win).yiiGridView('update');
+						return false;
+					});
+					tab.data('panel').off('change', 'select.pfile_status').on('change', 'select.pfile_status', function() {
+						$.post('files/status', {
+							'id': $(this).data('id'),
+							'status': $(this).val()
+						});
+					});
+					win.unbind('reload_cargo_invoice_grid').bind('reload_cargo_invoice_grid', function() {
+						$('#cargo_invoice_grid_<?= $_GET['tabid'] ?>', win).yiiGridView('update');
+					});
+
+					$('.collectInfo_done', win).on('click', function() {
+						if (confirm('Are you sure to Collect Info Done')) {
+							$.get('<?= $this->createUrl("cargoProcess/collectInfoDone") . "?id=" . $id ?>', function(r) {
+								if (r == 'done') {
+									save();
+								} else {
+									myApp.alert(r, false);
+								}
+								tab.trigger('reload_cargo_process_grid');
+							});
+
+						}
+					});
+
+					$('.cancel_booking', win).on('click', function() {
+						if (confirm('Are you sure to cancel booking?')) {
+							let formData = new FormData();
+							formData.append('id', <?=$id?>);
+							formData.append('cancellation_reason', $('textarea#CargoDeliveryInfo_overseas_booking_cancellation_reason').val());
+							$.ajax({
+								url: '<?= $this->createUrl("cargoProcess/cancelBooking")?>',
+								type: "post",
+								data: formData,
+								processData: false,
+								contentType: false,
+								success: function(r) {
+									if (r == 'done') {
+										myApp.notice('Done', 5000);
+									} else {
+										myApp.alert(r, false);
+									}
+									tab.trigger('reload_cargo_process_grid');
+								},
+								error: function(e) {
+									console.log(e);
+								}
+							})
+						}
+					});
+
+					$('.send_outturn', win).on('click', function() {
+						if (confirm('Are you sure to send outturn Done')) {
+							$.get('<?= $this->createUrl("cargoProcess/collectInfoDone") . "?id=" . $id . "&outturn=1" ?>', function(r) {
+								if (r == 'done') {
+									save();
+								} else {
+									myApp.alert(r, false);
+								}
+								tab.trigger('reload_cargo_process_grid');
+							});
+
+						}
+					});
+
+					$('.calculate_cost_revenue', win).on('click', function() {
+						if (confirm('Are you want to calculate cost and revenue')) {
+							$.get('<?= $this->createUrl("cargoProcess/calculateCostRevenue") . "?id=" . $id ?>', function(r) {
+								if (r == 'done') {
+									save();
+								} else {
+									myApp.alert(r, false);
+								}
+								tab.trigger('reload_cargo_process_grid');
+							});
+						}
+					});
+
+					$('.repaid', win).on('click', function() {
+						if (confirm('Are you sure this redelivery paid?')) {
+							$.get('<?= $this->createUrl("cargoProcess/setRedeliveryPaid") . "?id=" . $id ?>', function(r) {
+								if (r == 'done') {
+									save();
+								} else {
+									myApp.alert(r, false);
+								}
+								tab.trigger('reload_cargo_process_grid');
+							});
+						}
+					});
+
+					$('.send_do', win).on('click', function() {
+						if (confirm('Are you sure to send outturn Done')) {
+							$.get('<?= $this->createUrl("cargoProcess/sendDo") . "?id=" . $id ?>', function(r) {
+								if (r == 'done') {
+									save();
+								} else {
+									myApp.alert(r, false);
+								}
+								tab.trigger('reload_cargo_process_grid');
+							});
+
+						}
+					});
+
+					$('.not_send_outturn', win).on('click', function() {
+						if (confirm('Are you sure to not send outturn Done')) {
+							$.get('<?= $this->createUrl("cargoProcess/collectInfoDone") . "?id=" . $id ?>', function(r) {
+								if (r == 'done') {
+									save();
+								} else {
+									myApp.alert(r, false);
+								}
+								tab.trigger('reload_cargo_process_grid');
+							});
+
+						}
+					});
+
+					$('.winitBooking_done', win).on('click', function() {
+						if (confirm('Are you sure to Winit Booking Done?')) {
+							$.get('<?= $this->createUrl("cargoProcess/winitBookingDone") . "?id=" . $id ?>', function(r) {
+								if (r == 'done') {
+									save();
+								} else {
+									myApp.alert(r, false);
+								}
+								tab.trigger('reload_cargo_process_grid');
+							});
+
+						}
+					});
+
+					$('.send_sms_email', win).on('click', function() {
+						if (confirm('Are you sure to send sms and email?')) {
+							$.get('<?= $this->createUrl("cargoProcess/sendNormalCargoSmsEmail") . "?id=" . $id ?>', function(r) {
+								if (r == 'done') {
+									save();
+								} else {
+									myApp.alert(r, false);
+								}
+								tab.trigger('reload_cargo_process_grid');
+							});
+
+						}
+					});
+
+
+					$('.add_preparetion_tracking', win).on('click', function() {
+						if (confirm('Are you sure to add preparetion tracking?')) {
+							$.get('<?= $this->createUrl("cargoProcess/addPreparetionTracking") . "?id=" . $id ?>', function(r) {
+								if (r == 'done') {
+									save();
+								} else {
+									myApp.alert(r, false);
+								}
+								tab.trigger('reload_cargo_process_grid');
+							});
+
+						}
+					});
+
+					$('#cargo_process_status', win).next().on('dblclick', function() {
+						if (window.confirm('Are you sure to override status?')) {
+							$(this).prev().attr('disabled', false);
+						}
+					});
+
+					$('.assign_driver_done', win).on('click', function() {
+						if (confirm('Are you sure to Assign Driver Done')) {
+							$.get('<?= $this->createUrl("cargoProcess/assignDriverDone") . "?id=" . $id ?>', function(r) {
+								if (r == 'done') {
+									save();
+								} else {
+									myApp.alert(r, false);
+								}
+								tab.trigger('reload_cargo_process_grid');
+							});
+
+						}
+					});
+
+					$('.gate_pass', win).on('click', function() {
+						if (confirm('Are you sure to Generate Gate Pass?')) {
+							$.get('<?= $this->createUrl("gatepass/generateCargoProcessGatePass") . "?id=" . $id ?>', function(r) {
+								r = JSON.parse(r);
+								if (r.done == true) {
+									window.open("<?= $this->createUrl("cargoProcess/printGatePass") ?>" + "?id=" + r.id, "_blank");
+								} else {
+									myApp.alert(r, false);
+								}
+							});
+
+						}
+						// if( confirm('Are you sure to notice the warehouse to prepare?')){
+						// 		$.get('<?= $this->createUrl("cargoProcess/noticeWarehouseToPrepare") . "?id=" . $id ?>',function(r){
+						// 				if(r=="done"){
+						// 						myApp.notice('Done', 5000);
+						// 				 }else{
+						// 						myApp.alert(r, false);   
+						// 			 }
+						// 	 });
+						// }
+					});
+
+					$('.gate_pass_prepare', win).on('click', function() {
+						if (confirm('Are you sure to notice the warehouse to prepare?')) {
+							$.get('<?= $this->createUrl("cargoProcess/noticeWarehouseToPrepare") . "?id=" . $id ?>', function(r) {
+								if (r == "done") {
+									myApp.notice('Done', 5000);
+								} else {
+									myApp.alert(r, false);
+								}
+							});
+						}
+					});
+
+					$('.paperwork_done', win).on('click', function() {
+						if (confirm('Are you sure to paperwork done?')) {
+							$.get('<?= $this->createUrl("cargoProcess/paperworkDone") . "?id=" . $id ?>', function(r) {
+								if (r == 'done') {
+									myApp.notice('Done', 5000);
+								} else {
+									myApp.alert(r, false);
+								}
+								tab.trigger('reload_cargo_process_grid');
+							});
+
+						}
+					});
+					$('.upload_pod_done', win).on('click', function() {
+						let msg = "<?= empty($model->getDigitalGatePass()) ? "--Without Digital Gatepass, makesure generate paperwork gatepass" : "" ?>";
+						if (confirm('Are you sure to pod done?' + msg)) {
+							let typeCheck = $("[name='upload_consol']:checked");
+							let typeStr = "";
+							if (typeCheck != null && typeCheck.length > 0) {
+								typeStr += "&&upload_consol=1";
+							}
+							$.get('<?= $this->createUrl("cargoProcess/processDone") . "?id=" . $id ?>' + typeStr, function(r) {
+								if (r == 'done') {
+									myApp.notice('Done', 5000);
+								} else {
+									myApp.alert(r, false);
+								}
+								tab.trigger('reload_cargo_process_grid');
+							});
+
+						}
+					});
+
+					$('.generate_cargo_receipt', win).on('click', function() {
+						if (confirm('Are you sure to generate cargo receipt')) {
+							window.open("<?= $this->createUrl("cargoProcess/generateCargoReceipt") . "?id=" . $id ?>", "_blank");
+						};
+					});
+
+
+					$('.update', win).on('click', function() {
+						if (confirm('Are you sure to save?')) {
+							save();
+						}
+						return false;
+					});
+
+					$('body').off('change', '.approve_redelivery').on('change', '.approve_redelivery', function() {
+						const tr = $(this).parents('tr');
+						var listData = new FormData();
+						listData.append('approve', $('.approve_redelivery', tr).val());
+						listData.append('id', $('.approve_redelivery', tr).attr('id'));
+						htmlobj = $.ajax({
+							url: '<?= $this->createUrl("topCourierService/approveRedelivery") ?>',
+							type: "post",
+							data: listData,
+							async: false,
+							contentType: false,
+							processData: false,
+						});
+						obj = JSON.parse(htmlobj.responseText);
+						//alert(obj.isSuccess);
+						if (obj.isSuccess) {
+							myApp.notice('Successful', 5000);
+						} else {
+							myApp.notice('Error', 5000);
+						}
+					});
+
+					function save() {
+						var form = new FormData(document.getElementById("cargo-process-acr_form"));
+						$.ajax({
+							url: '<?= $url . "?id=" . $id ?>',
+							type: "post",
+							data: form,
+							processData: false,
+							contentType: false,
+							success: function(r) {
+								if (r == 'done') {
+									myApp.notice('Done', 5000);
+								} else {
+									myApp.alert(r, false);
+								}
+								tab.trigger('reload_cargo_process_grid');
+							},
+							error: function(e) {
+								console.log(e);
+							}
+						});
+					}
+
+					$('.updateStatus', win).on('click', function() {
+						if (confirm('Are you sure to update status?')) {
+							var form = new FormData(document.getElementById("cargo-process-acr_form"));
+							$.ajax({
+								url: '<?= $this->createUrl("cargoProcess/updateStatus") . "?id=" . $id ?>' + '&&status=' + $('#cargo_process_status', win).val(),
+								type: "post",
+								data: form,
+								processData: false,
+								contentType: false,
+								success: function(r) {
+									if (r == 'done') {
+										myApp.notice('Done', 5000);
+									} else {
+										myApp.alert(r, false);
+									}
+									tab.trigger('reload_cargo_process_grid');
+								},
+								error: function(e) {
+									console.log(e);
+								}
+							});
+						}
+						return false;
+					});
+
+
+				});
+			</script>
+
+
+			<?php $this->endWidget(); ?>
+
+			<script>
+				function funcSendGoogleReviewEmail() {
+					if (confirm("Do you want to send?")) {
+						setTimeout(() => {
+							var listData = new FormData();
+							listData.append("id", <?= $model->shipment_id ?>);
+
+							htmlobj = $.ajax({
+								type: "POST",
+								url: "/topCourierService/sendGoogleReviewEmail",
+								data: listData,
+								contentType: false,
+								processData: false,
+								async: false
+							});
+							obj = JSON.parse(htmlobj.responseText);
+							if (obj.isSuccess) {
+								myApp.notice('success', 5000);
+							}
+						}, 0);
+					}
+
+				}
+				function funcNeedInvoice(curTarget) {
+						switch (curTarget) {
+							case "0":
+								$("#ot_invoice").addClass("display_none");
+								break;
+							case "1":
+								$("#ot_invoice").removeClass("display_none");
+								break;
+						}
+					}
+			</script>

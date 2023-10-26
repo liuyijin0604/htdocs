@@ -1,0 +1,125 @@
+<?php
+class icsMailer{
+	public $err = array();
+	public $Subject, $Header, $Body, $CreatorID;
+	public $icsSetting;
+
+	
+	public function __construct($senderSite = false){
+		$this->icsSetting = Yii::app()->params['ics'];
+		if(!empty($senderSite))
+		{
+			if(!empty(Yii::app()->params['otherICS'][$senderSite]))
+			{
+				$this->icsSetting = Yii::app()->params['otherICS'][$senderSite];
+			}
+
+		}
+
+		$this->CreatorID = $this->icsSetting['testing']? $this->icsSetting['test_site'] : $this->icsSetting['prod_site'];
+	}
+
+	public function addEDI($ediMsg){
+		if(is_array($ediMsg)){
+			$id = str_pad($ediMsg[0]->id, 10, '0', STR_PAD_LEFT);
+			$ackreq = empty($ediMsg[0]->mdata['ackreq'])? 0 : 1;
+			$msgCount = sizeof($ediMsg);
+			$msgs = [];
+			foreach($ediMsg as $em){
+				$msgs[] = $em->msg;
+			}
+			$msgs = implode("\n", $msgs);
+		}else{
+			$id = str_pad($ediMsg->id, 10, '0', STR_PAD_LEFT);
+			$ackreq = empty($ediMsg->mdata['ackreq'])? 0 : 1;
+			$msgCount = 1;
+			$msgs = $ediMsg->msg;
+		}
+		
+		$this->Subject = $this->CreatorID."_{$id}_".$this->icsSetting['customs_id'];
+		$edi = "UNB+UNOC:3+".$this->CreatorID."::".$this->CreatorID."+".$this->icsSetting['customs_id']."+".date('ymd').":".date('Hi')."+".$id."++++".$ackreq.($this->icsSetting['testing']? "++1'\n" : "'\n").$msgs."\nUNZ+".$msgCount."+".$id."'\n";
+		
+		$this->Body = "MIME-Version: 1.0\n";
+		$this->Body .= "Content-Type: application/octet-stream; name=\"".$this->Subject.".edi\"\n";
+		$this->Body .= "Content-Transfer-Encoding: base64\n";
+		$this->Body .= "Content-Disposition: attachment; filename=\"".$this->Subject.".edi\"\n\n";
+		$this->Body .= chunk_split(base64_encode($edi))."\n\n";
+		//file_put_contents('edi.log', $edi, FILE_APPEND);
+	}
+
+	public function signEncrypt(){
+		$crtKey = 'sig_pem';
+		if(!empty($this->icsSetting['new_sig_pem']))
+		{
+			$crtKey = 'new_sig_pem';
+		}
+
+		$pemKey = "pem_pwd";
+		if(!empty($this->icsSetting['new_pem_pwd']))
+		{
+			$pemKey = 'new_pem_pwd';
+		}
+		$crts = [$crtKey => 'Signature', 'customs_pk' => 'Customs'];
+		foreach($crts as $k=>$v){
+			$crt_info = openssl_x509_parse($this->icsSetting[$k]);
+			if($crt_info['validTo_time_t'] < time()) $this->addError($v.' Certificate Expired');
+		}
+
+		if(empty($this->err)){
+			$tmp_dir = sys_get_temp_dir();
+			$headers = array("From" => $this->icsSetting['email'], "Importance" => "HIGH");
+			$msgraw = tempnam($tmp_dir, "msgraw");
+			file_put_contents($msgraw, $this->Body);
+			$msgsign = tempnam($tmp_dir, "msgsign");
+			if(openssl_pkcs7_sign($msgraw, $msgsign, $this->icsSetting[$crtKey], array($this->icsSetting[$crtKey], $this->icsSetting[$pemKey]), array(), 0)){
+				$msgenc = tempnam($tmp_dir, "msgenc");
+				if(openssl_pkcs7_encrypt($msgsign, $msgenc, $this->icsSetting['customs_pk'], $headers, 0, 1)){
+					list($this->Header, $this->Body) = explode("\n\n", file_get_contents($msgenc), 2);
+				}else{
+					$this->addError("Encrypt Error!");
+				}
+			}else{
+				$this->addError("Sign Error!");
+			}
+
+			while ($err = openssl_error_string()) $this->addError($err);
+
+			unlink($msgraw);
+			unlink($msgsign);
+			unlink($msgenc);
+		}
+
+		return empty($this->err);
+	}
+
+	public function Send(){
+		if($this->signEncrypt()){
+			require_once('PHPMailer/class.phpmailer.php');
+			require_once('PHPMailer/class.smtp.php');
+			$mail = new PHPMailer();
+			$mail->IsSMTP();
+			$mail->Host = "mail.ccf.border.gov.au;"; // smtp servers
+			//$mail->SMTPDebug  = 2;
+			$mail->addCustomHeader($this->Header);
+			$mail->From = $this->icsSetting['email'];
+			$mail->FromName = 'HVLV';
+			$mail->Subject =  $this->Subject;
+			$mail->Body =  $this->Body;
+			$mail->AddAddress($this->icsSetting['customs_email']);
+			//$mail->AddAddress('test@orite.com');
+			return $mail->Send();
+			//return @mail(Yii::app()->params['ics']['customs_email'], $this->Subject, $this->Body, $this->Header, '-f'.Yii::app()->params['ics']['email']);
+		}else{
+			return $this->err;
+		}
+	}
+
+	private function addError($e){
+		if(is_array($e)){
+			$this->err = array_merge($this->err, $e);
+		}else{
+			array_push($this->err, $e);
+		}
+	}
+//end of class
+}

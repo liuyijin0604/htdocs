@@ -1,0 +1,552 @@
+<?php 
+class SalesfunnelRequirementsService extends Service
+{
+	
+    public function createSalesfunnelRequirements($questionNum,$question,$questionType,$Answers)
+    {
+        $questionModel = new SalesfunnelRequirementsQuestions();
+        $answerModel = new SalesfunnelRequirementsAnswer();
+        $errors = [];
+        $newCBM = 0;
+        $qa = SalesfunnelRequirementsQuestions::model()->findAll(["condition"=>'question_num =  "'.$questionNum. 'and question ="'.$question.'"']);
+        if(!empty($qa))
+        	print('alert("This requirement is exited.")');
+        else{
+        	$qu = new SalesfunnelRequirementsQuestions;
+        	$qu->question_num = $questionNum;
+        	$qu->question = $question;
+        	$qu->question_type = $questionType;
+        	$qu->save();
+        }
+        $an = new SalesfunnelRequirementsAnswer;
+        foreach ($Answers as $key => $d) {
+            $an->answer = $d[0];
+            $an->question_id = $qu->id;
+            $an->next_question_id = $d[1];
+            $an->save();
+        }
+
+        return $qu->id;
+	}
+
+   public function modifySalesfunnelRequirements($questionId,$questionNum,$question,$questionType,$Answers)
+   {
+        $this->modifySalesfunnelRequirementsQuestions($questionId,$questionNum,$question,$questionType);
+        $this->modifySalesfunnelRequirementsAnswer($questionId,$Answers);
+
+    }
+
+    public function modifySalesfunnelRequirementsQuestions($questionId,$questionNum,$question,$questionType){
+    	$questionModel = SalesfunnelRequirementsQuestions::model()->findByPk($questionId);
+        $errors = [];        
+        if(!empty($questionModel)){
+        	if(!empty($questionNum)){
+        		$questionModel->question_num = $questionNum;
+        	}
+            if(!empty($question)){
+        		$questionModel->question = $question;
+        	}
+            if(!empty($questionType)){
+        		$questionModel->question_type = $questionType;
+        	}            
+            $questionModel->save();
+            $questionModel->refresh();
+        }
+        else
+        	print('console.log("empty.")');
+
+    }
+
+    public function modifySalesfunnelRequirementsAnswer($questionId,$Answers){
+    	$answerModels = SalesfunnelRequirementsAnswer::model()->findAll(['condition'=>'question_id =  "'.$questionId]);
+        foreach ($Answers as $key => $d){
+        	if(!empty($d[0])){
+            	$answerModels->answer = $d[0];
+       		}
+       		if(!empty($questionId)){
+            	$answerModels->question_id = $questionId;
+       		}
+       		if(!empty($d[1])){
+            	$answerModels->next_question_id = $d[1];
+        	}   
+    	}            
+        $answerModels->save();
+        $answerModels->refresh();
+    }
+
+    public function removeRequirementQuestion($id)
+    {
+        $requirementQu = SalesfunnelRequirementsQuestions::model()->findByPk($id);
+        $requirementQu->delete();
+        $requirementAn = SalesfunnelRequirementsAnswer::model()->findAll(["condition"=>'question_id =  '.$id]);
+        $requirementQu->delete();
+       
+        return $model;
+    }
+
+    public function relations()
+	{
+		// NOTE: you may need to adjust the relation name and the related
+		// class name for the relations automatically generated below.
+		return [
+			'SalesfunnelRequirementsQuestions' => [self::BELONGS_TO, 'SalesfunnelRequirementsAnswer', 'question_id'
+			]
+		];
+	}
+
+	public function showAnswers($questionId=1){
+		$requirementAns = SalesfunnelRequirementsAnswer::model()->findAll("question_id = :question_id", [":question_id" =>$questionId]);
+        if (!empty($requirementAns))
+        	return $requirementAns;
+        else 
+        	print('alert("No Answer for this question.")');
+	}
+
+	public function sendRequirementEmail($submissionModel,$requirementRecordModels,$toEmail,$subject,$cc=""){
+		$emailService = new EmailService();
+		$htmlStr='';
+		// $subjectStr = 'New Sales Funnel Requirement from'.$submissionModel->company_name;
+		$htmlStr.='<a class = "tab_link" href="https://os.toplogistics.com.au/?salesfunnelRequirementsSubmission_id=';
+		if (!empty($submissionModel->id)){
+			$htmlStr.=$submissionModel->id;
+		}
+		$htmlStr.='&&menu=showCustomersDetail">Link to our system</a> </br></br>';
+
+		$htmlStr.= '<div class="row">
+                        <div class="col-md-6">
+                            <label for="email" class="form-label pe-label text-input-row">Email</label>
+                            <input disabled type="text" class="form-control" id="email" name="email"';
+
+        if (!empty($submissionModel->email)){
+            $htmlStr.= 'value="'.$submissionModel->email.'"';
+        }
+
+        $htmlStr.='>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="company_name" class="form-label pe-label text-input-row">Company name</label>
+                            <input disabled type="text" class="form-control" id="company_name" name="company_name"';
+
+        if (!empty($submissionModel->company_name)){
+             $htmlStr.='value="'.$submissionModel->company_name.'"';
+        }
+        $htmlStr.='>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label for="Name" class="form-label pe-label text-input-row">Name</label>
+                            <input disabled type="text" class="form-control" id="Name" name="Name"';
+        
+        if (!empty($submissionModel->first_name) || !empty($submissionModel->last_name)){
+            $htmlStr.='value="'.$submissionModel->first_name."  ".$submissionModel->last_name.'"';
+        }
+         $htmlStr.='>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="contact_number" class="form-label pe-label text-input-row">Contact number</label>
+                            <input disabled type="text" class="form-control" id="contact_number" name="contact_number"';
+
+        if (!empty($submissionModel->contact_number)){
+            $htmlStr.='value="'.$submissionModel->contact_number.'"';
+        }
+        $htmlStr.='>
+                        </div>
+                    </div>';
+
+		foreach ($requirementRecordModels as $key => $recordModel)
+		{
+			if (!empty($recordModel->question) && !empty($submissionModel))
+		    {
+                $htmlStr .= '<div class="item" id="item">';
+		    	$htmlStr .=$this->printFinalQuestion($recordModel->question, $submissionModel->id,false);
+                $htmlStr .= '</div> </br>';
+		    }
+		}
+		$emailService->sendNormalEmail($toEmail,$subject,$htmlStr,$cc);
+	}
+
+	public function checkNextQuestionExited($question_id){
+		$q = SalesfunnelRequirementsQuestions::model()->findByPk($question_id);
+        $answerModel = SalesfunnelRequirementsAnswer::model()->find('question_id = :question_id', [':question_id' => $question_id]);
+        if(!empty($answerModel)){
+            if (!empty($answerModel->next_question_id)){
+                return $answerModel->next_question_id;
+            }
+            else{
+                return NULL;
+            }
+        }
+        else{
+             $nextQuestionModel = SalesfunnelRequirementsQuestions::model()->find(["condition"=>'question_num >  '.($q->question_num),"order"=>"question_num ASC"]);
+            if (!empty($nextQuestionModel)){
+                return $nextQuestionModel->id;
+            }
+            else{
+                return NULL;
+            }
+        }
+    }
+
+    public function checkServiceType($serviceTypes){
+    	$questionCategories = array();
+
+    	foreach ($serviceTypes as $key => $serviceType) {
+    		$service = SalesfunnelRequirementsAnswer::model()->findByPk($serviceType);
+    		switch ($service->answer) {
+    		case 'Import Service':
+    			array_push($questionCategories, SalesfunnelRequirementsQuestions::IMPORTSERVICE);
+    			break;
+
+    		case 'Same Day Delivery':
+    			array_push($questionCategories, SalesfunnelRequirementsQuestions::SAMECITYDELIVERY);
+    			break;
+
+    		case 'Service Type For 3PL':
+    			array_push($questionCategories, SalesfunnelRequirementsQuestions::_3PLFULFILMENT);
+    			break;
+    		
+    		default:
+    			// code...
+    			break;
+    		}
+    	}
+    	return $questionCategories;
+
+    }
+
+    public function randomPassword() {
+	    $alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890';
+	    $pass = array(); //remember to declare $pass as an array
+	    $alphaLength = strlen($alphabet) - 1; //put the length -1 in cache
+	    for ($i = 0; $i < 8; $i++) {
+	        $n = rand(0, $alphaLength);
+	        $pass[] = $alphabet[$n];
+	    }
+	    return implode($pass); //turn the array into a string
+	}
+
+	public function printQuestion($data, $submitID = null){
+		
+		if (!isset($data['question_type']))
+			return print("echo'error");
+		else{
+			$questionAnswerModel = SalesfunnelRequirementsRecords::model()->find('submit_id = :submit_id AND question_id = :question_id',[':submit_id' => $submitID, ':question_id' => $data->id]);
+			// echo $questionAnswerModel->question_id;
+			// Yii::app()->end();
+
+			switch ($data['question_type']) {
+				case SalesfunnelRequirementsQuestions::QUESTIONTYPENUMBER:
+					$this->printType0($data, $questionAnswerModel);
+					break;
+				case SalesfunnelRequirementsQuestions::QUESTIONTYPETEXTFIELD:
+					$this->printType1($data, $questionAnswerModel);
+					break;
+				case SalesfunnelRequirementsQuestions::QUESTIONTYPERADIOBUTTON:
+					$this->printType2($data,$questionAnswerModel);
+					break;
+				case SalesfunnelRequirementsQuestions::QUESTIONTYPECHECKBOX:
+					$this->printType3($data, $questionAnswerModel);
+					break;
+				case SalesfunnelRequirementsQuestions::LASTQUESTIONQUESTIONTYPE:
+					$this->printType99($data);
+					break;
+
+				default:
+					// code...
+					break;
+			}
+
+		}
+
+	}
+
+	public function printType0($data, $questionAnswerModel=null){//print out number question
+		print('
+			<div class="item" id="item">                    
+	            <h1 id="qid" qid="'.$data->id.'">Question '.$data->question_num.'</h1>
+	            <h2>'.$data->question.'</h2>
+				<div class="col-12">
+		            <!-- <label for="category_'.$data->question_num.'_0" class="form-label pe-label text-input-row">'.$data->question.'</label> -->
+		            <input type="number" class="form-control" id="category_'.$data->question_num.'_0" name="_answer"');
+		if(!empty($questionAnswerModel->answer_str)){
+			print('value="'.$questionAnswerModel->answer_str.'"');
+		}
+		 print(' required >
+		        </div>
+		    </div>
+		');
+	}
+
+	public function printType1($data, $questionAnswerModel=null){//print out testfield question
+		print('
+			<div class="item" id="item">                    
+	            <h1 id="qid" qid="'.$data->id.'">Question '.$data->question_num.'</h1>
+	            <h2>'.$data->question.'</h2>
+				<div class="col-12">
+		            <!-- <label for="category_'.$data->question_num.'_0" class="form-label pe-label text-input-row">'.$data->question.'</label> -->
+		            <input type="text" class="form-control" id="category_'.$data->question_num.'_0" name="_answer"');
+		if(!empty($questionAnswerModel->answer_str)){
+			print('value="'.$questionAnswerModel->answer_str.'"');
+		}
+		print(' required >
+		        </div>
+		    </div>
+		');
+	}
+
+	public function printType2($data, $questionAnswerModel=null){//print out radio button question
+		print('
+			<div class="item" id="item">                    
+	            <h1 id="qid" qid="'.$data->id.'">Question '.$data->question_num.'</h1>
+	            <h2>'.$data->question.'</h2>
+		');
+		$answers = $this->showAnswers($data->id);
+
+		$count = 1;
+		foreach ($answers as $key => $an) {
+			$count++;
+			print('
+				<div class="form-check form-check-inline" style="fornt-size:2em">
+	                <input class="form-check-input" type="radio" name="_answer" id="category_'.$data->question_num.'_'.$count.'" value="'.$an->id.'"');
+			if (!empty($questionAnswerModel) && $an->id == $questionAnswerModel->answer_id){
+				print(' checked ');
+			}
+			Print('>
+	                <label class="form-check-label pe-label" for="category_'.$data->question_num.'_'.$count.'">'.$an->answer.'</label>
+	            </div>
+				');
+		}
+
+		Print('</div>');
+	}
+
+	public function printType3($data, $questionAnswerModel=null){//print out check box button question
+		print('
+			<div class="item" id="item">                    
+	            <h1 id="qid" qid="'.$data->id.'">Question '.$data->question_num.'</h1>
+	            <h2>'.$data->question.'</h2>
+		');
+		$answers = $this->showAnswers($data->id);
+
+		$count = 1;		
+		foreach ($answers as $key => $an) {
+			$count++;
+			print('
+				<div class="form-check form-check-inline" style="fornt-size:2em">
+	                <input class="form-check-input" type="checkbox" name="_answer" id="category_'.$data->question_num.'_'.$count.'" value="'.$an->id.'"');
+			if (!empty($questionAnswerModel)){
+				$answerArray = explode(',', $questionAnswerModel->answer_str);
+				if ( in_array($an->id, $answerArray)){
+					print(' checked ');
+				}
+			}			
+			print('>
+	                <label class="form-check-label pe-label" for="category_'.$data->question_num.'_'.$count.'">'.$an->answer.'</label>
+	            </div>
+				');
+		}
+
+		Print('</div>');
+	}
+
+	public function printType99($data){//print out last question
+		print('
+			<div class="item" id="item">                    
+	            <h1 id="qid" qid="'.$data->id.'">Question '.$data->question_num.'</h1>
+	            <h2 id="lid">'.$data->question.'</h2>
+		    </div>
+		');
+	}
+
+	public function printFinalQuestion($data, $submitID = null,$isPrint=true){
+		
+		if (!isset($data['question_type']))
+			return print("echo'error");
+		else{
+			$questionAnswerModel = SalesfunnelRequirementsRecords::model()->find('submit_id = :submit_id AND question_id = :question_id',[':submit_id' => $submitID, ':question_id' => $data->id]);
+			// echo $questionAnswerModel->question_id;
+			// Yii::app()->end();
+
+			switch ($data['question_type']) {
+				case SalesfunnelRequirementsQuestions::QUESTIONTYPENUMBER:
+					return $this->printFaType0($data, $questionAnswerModel,$isPrint);
+					break;
+				case SalesfunnelRequirementsQuestions::QUESTIONTYPETEXTFIELD:
+					return $this->printFaType1($data, $questionAnswerModel,$isPrint);
+					break;
+				case SalesfunnelRequirementsQuestions::QUESTIONTYPERADIOBUTTON:
+					return $this->printFaType2($data,$questionAnswerModel,$isPrint);
+					break;
+				case SalesfunnelRequirementsQuestions::QUESTIONTYPECHECKBOX:
+					return $this->printFaType3($data, $questionAnswerModel,$isPrint);
+					break;
+				case SalesfunnelRequirementsQuestions::LASTQUESTIONQUESTIONTYPE:
+					return $this->printFaType99($data,$isPrint);
+					break;
+
+				default:
+					// code...
+					break;
+			}
+
+		}
+
+	}
+
+	public function printFaType0($data, $questionAnswerModel=null,$isPrint = true){//print out number question
+		$str = '
+				<div class="col-12">
+		            <label for="category_'.$data->question_num.'_0" class="form-label pe-label text-input-row">'.$data->question.'</label>
+		            <input disabled type="text" class="form-control" id="category_'.$data->question_num.'_0" name="'.$data->id.'_answer"';
+		if(!empty($questionAnswerModel->answer_str)){
+			$str.='value="'.$questionAnswerModel->answer_str.'"';
+		}
+		 $str.='>
+		        </div>		    
+		';
+
+
+		if($isPrint)
+		{
+			print($str);
+		}else
+		{
+			return $str;
+		}
+	}
+
+	public function printFaType1($data, $questionAnswerModel=null, $isPrint = true){//print out testfield question
+		$str = '
+				<div class="col-12">
+		            <label for="category_'.$data->question_num.'_0" class="form-label pe-label text-input-row">'.$data->question.'</label>
+		            <input disabled type="text" class="form-control" id="category_'.$data->question_num.'_0" name="'.$data->id.'_answer"';
+		if(!empty($questionAnswerModel->answer_str)){
+			$str.='value="'.$questionAnswerModel->answer_str.'"';
+		}
+		$str.='>
+		        </div>';
+
+		if($isPrint)
+		{
+			print($str);
+		}else
+		{
+			return $str;
+		}
+	}
+
+	public function printFaType2($data, $questionAnswerModel=null, $isPrint = true){//print out radio button question
+		$str = '
+	            <h6>'.$data->question.'</h6>';
+		$answers = $this->showAnswers($data->id);
+
+		$count = 1;
+		foreach ($answers as $key => $an) {
+			$count++;
+			$str.='
+				<div class="form-check form-check-inline" style="fornt-size:2em">
+	                <input disabled class="form-check-input" type="radio" name="'.$data->id.'_answer" id="category_'.$data->question_num.'_'.$count.'" value="'.$an->id.'"';
+			if (!empty($questionAnswerModel) && $an->id == $questionAnswerModel->answer_id){
+				$str.=' checked ';
+			}
+			$str.='>
+	                <label class="form-check-label pe-label" for="category_'.$data->question_num.'_'.$count.'">'.$an->answer.'</label>
+	            </div>';
+		}
+
+		if($isPrint)
+		{
+			print($str);
+		}else
+		{
+			return $str;
+		}
+	}
+
+	public function printFaType3($data, $questionAnswerModel=null, $isPrint = true){//print out check box button question
+		$str = '<h6>'.$data->question.'</h6>';
+		$answers = $this->showAnswers($data->id);
+
+		$count = 1;
+		foreach ($answers as $key => $an) {
+			$count++;
+			$str.='
+				<div class="form-check form-check-inline" style="fornt-size:2em">
+	                <input disabled class="form-check-input" type="checkbox" name="'.$data->id.'_answer" id="category_'.$data->question_num.'_'.$count.'" value="'.$an->id.'"';
+			if (!empty($questionAnswerModel)){
+				$answerArray = explode(',', $questionAnswerModel->answer_str);
+				if ( in_array($an->id, $answerArray)){
+					$str.=' checked ';
+				}
+			}
+			$str.='>
+	                <label class="form-check-label pe-label" for="category_'.$data->question_num.'_'.$count.'">'.$an->answer.'</label>
+	            </div>';
+		}
+
+		if($isPrint)
+		{
+			print($str);
+		}else
+		{
+			return $str;
+		}
+	}
+
+	public function printFaType99($data, $isPrint = true){//print out last question
+		$str = '<h6 id="lid">'.$data->question.'</h6>';
+
+		if($isPrint)
+		{
+			print($str);
+		}else
+		{
+			return $str;
+		}
+	}
+
+	public function editProcessEmail($postData,$getData,$ids)
+	{
+		$submission = SalesfunnelRequirementsSubmission::model()->findByPk($ids[0]);
+		$ccEmail = "imports@toplogistics.com.au";
+		$customerInfo = @$submission->company_name." ".$submission->first_name." ".$submission->last_name;
+		$emailContent = $customerInfo."</br></br> Info:</br><table border=2 cellspacing=0 ><tr><th>TYPE</th><th>CTN number</th><th>Vessel</th><th>Vessel ID</th><th>Voyage</th><th>ETA</th><th>Free Detention Days</th></tr>";
+		$submissions = [];
+		foreach ($ids as $key => $id) {
+			$thisSubmission = SalesfunnelRequirementsSubmission::model()->findByPk($id);
+			$emailContent.= "<tr><td>".@SalesfunnelRequirementsSubmission::$customerType[$thisSubmission->customer_type]."</td>"."<td>Forwarder or Shipping Agent".@SalesfunnelRequirementsSubmission::$forwarderAgent[$thisSubmission->forwarder_shippingagent]."</td>"."</tr>";
+			$submissions[] = $thisSubmission;
+		}
+		$emailContent .= "</table>";
+		$salesRequirementService = new SalesfunnelRequirementsService();
+
+		$emailService = new EmailService();
+		// print_r(json_encode($getData));
+		// Yii::app()->end();
+		[$model,$data] = $emailService->createEmailContent($postData,$getData,null,null,null,null);	
+
+		return [$model,$data];
+	}
+
+	public function updateRequirementProcessStatus($submission,$processType,$isIgnore=false,$postData = null)
+ 	{
+		if(!empty($isIgnore))
+		{
+
+	 		$submission->sub_status = intval($submission->sub_status)|$processType;
+			$submission->sub_status_ignore = intval($submission->sub_status_ignore)|$processType;
+
+	 		$submission->save();
+	 		return  $this->getSuccessResultWithWarns();
+		}else
+		{
+			$submission->sub_status = intval($submission->sub_status)|$processType;
+			$submission->sub_status_ignore = (intval($submission->sub_status_ignore)|$processType) - $processType;
+			$submission->save();
+			return  $this->getSuccessResultWithWarns();
+		}
+
+ 	}
+}
+?>

@@ -1,0 +1,288 @@
+<?php
+
+class WordReplaceController extends Controller
+{
+	/**
+	 * @var string the default layout for the views. Defaults to '//layouts/column2', meaning
+	 * using two-column layout. See 'protected/views/layouts/column2.php'.
+	 */
+	public $layout='//layouts/column2';
+
+	/**
+	 * @return array action filters
+	 */
+	public function filters()
+	{
+		return array(
+			'accessControl', // perform access control for CRUD operations
+			'postOnly + delete', // we only allow deletion via POST request
+		);
+	}
+
+	/**
+	 * Specifies the access control rules.
+	 * This method is used by the 'accessControl' filter.
+	 * @return array access control rules
+	 */
+	public function accessRules()
+	{
+		return array(
+			array('allow',  // allow all users to perform 'index' and 'view' actions
+				'actions'=>array('index','view'),
+				'users'=>array('*'),
+			),
+			array('allow', // allow authenticated user to perform 'create' and 'update' actions
+				'actions'=>array('create','update'),
+				'users'=>array('@'),
+			),
+			array('allow', // allow admin user to perform 'admin' and 'delete' actions
+				'actions'=>array('admin','delete'),
+				'users'=>array('admin'),
+			),
+			array('deny',  // deny all users
+				'users'=>array('*'),
+			),
+		);
+	}
+
+	/**
+	 * Creates a new model.
+	 * If creation is successful, the browser will be redirected to the 'view' page.
+	 */
+	public function actionCreate()
+	{
+		$model=new WordReplace;
+                if(!empty($_GET['word'])){
+                  $model->pre_word=$_GET['word'];
+                }
+
+		// Uncomment the following line if AJAX validation is needed
+		// $this->performAjaxValidation($model);
+
+		if(isset($_POST['WordReplace']))
+		{
+			$model->attributes=$_POST['WordReplace'];
+                        foreach($_POST['mdata'] as $k=>$v){
+                            $model->mdata[$k]=$v;
+                        }
+			 $model->save();
+		        $this->ajaxResult($model);
+		}
+
+		$this->render('create',array(
+			'model'=>$model
+		));
+	}
+
+	/**
+	 * Updates a particular model.
+	 * If update is successful, the browser will be redirected to the 'view' page.
+	 * @param integer $id the ID of the model to be updated
+	 */
+	public function actionUpdate($id)
+	{
+		$model=$this->loadModel($id);
+
+		// Uncomment the following line if AJAX validation is needed
+		// $this->performAjaxValidation($model);
+
+		if(isset($_POST['WordReplace']))
+		{
+			$model->attributes=$_POST['WordReplace'];
+                        foreach($_POST['mdata'] as $k=>$v){
+                            $model->mdata[$k]=$v;
+                        }
+			$model->save();
+                        $this->ajaxResult($model);
+		}
+
+		$this->render('update',array(
+			'model'=>$model,
+		));
+	}
+
+	/**
+	 * Deletes a particular model.
+	 * If deletion is successful, the browser will be redirected to the 'admin' page.
+	 * @param integer $id the ID of the model to be deleted
+	 */
+	public function actionDelete($id)
+	{
+		$this->loadModel($id)->delete();
+
+		// if AJAX request (triggered by deletion via admin grid view), we should not redirect the browser
+		if(!isset($_GET['ajax']))
+			$this->redirect(isset($_POST['returnUrl']) ? $_POST['returnUrl'] : array('admin'));
+	}
+
+
+
+	/**
+	 * Manages all models.
+	 */
+	public function actionList()
+	{
+		$model=new WordReplace('search');
+		$model->unsetAttributes();  // clear any default values
+		if(isset($_GET['WordReplace']))
+			$model->attributes=$_GET['WordReplace'];
+
+		$this->render('list',array(
+			'model'=>$model,
+		));
+	}
+        
+        /**
+	 * show invoice related logs
+	 * @param $id
+	 * @throws CHttpException
+	 */
+	public function actionLog(){
+		$model = $this->loadModel($_GET['id']);
+		$this->render('log',array(
+			'model'=>$model,
+		));
+	}
+        public function actionNotes($id){
+		$model = $this->loadModel($id);
+		Log::add($model,Log::LOG_TYPE_NOTES,['notes' => $_POST['notes']]);
+		$this->ajaxResult($model);
+	}
+
+	/**
+	 * Returns the data model based on the primary key given in the GET variable.
+	 * If the data model is not found, an HTTP exception will be raised.
+	 * @param integer $id the ID of the model to be loaded
+	 * @return WordReplace the loaded model
+	 * @throws CHttpException
+	 */
+	public function loadModel($id)
+	{
+		$model=WordReplace::model()->findByPk($id);
+		if($model===null)
+			throw new CHttpException(404,'The requested page does not exist.');
+		return $model;
+	}
+
+	/**
+	 * Performs the AJAX validation.
+	 * @param WordReplace $model the model to be validated
+	 */
+	protected function performAjaxValidation($model)
+	{
+		if(isset($_POST['ajax']) && $_POST['ajax']==='word-replace-form')
+		{
+			echo CActiveForm::validate($model);
+			Yii::app()->end();
+		}
+	}
+
+	public function actionImport()
+	{
+		if (!empty($_FILES)) {
+			$file = $_FILES['import_file'];
+			$service = new Service();
+			$fileData = $service->getFileData($file);
+			
+			$res = new stdClass;
+			if (empty($fileData)) {
+				$res->success = false;
+				$res->msg = 'Invalid File';
+			} else {
+				for ($i = 2; $i <= count($fileData[0]); $i++) {
+					$itemWord = $fileData[0][$i];
+					$origin = strtolower($itemWord['1']);
+					$replace = $itemWord['2'];
+					$type = strtolower($itemWord['3']);
+					$status = strtolower($itemWord['4']);
+					$note = $itemWord['5'];
+					
+					$wordModel = WordReplace::model()->findByAttributes(array('pre_word' => $origin));
+					/**
+					 * If original word doesn't exist, create a new one, otherwise, update existing word
+					 */
+					if (empty($wordModel)) {
+						$word = new WordReplace();
+						$word->pre_word = $origin;
+						$word->replace_word = $replace;
+						$word->status = ($status == 'active') ? 1 : 0;
+						$word->type = ($type == 'danger') ? 1 : 2;
+						$word->mdata['note'] = $note;
+						$word->save();
+					} else {
+						if ($wordModel->replace_word == $replace && strtolower(WordReplace::$states[$wordModel->status]) == $status && strtolower(WordReplace::$types[$wordModel->type]) == $type && $wordModel->mdata['note'] == $note) {
+							continue;	// Nothing changed
+						}
+						$wordModel->replace_word = $replace;
+						$wordModel->status = ($status == 'active') ? 1 : 0;
+						$wordModel->type = ($type == 'danger') ? 1 : 2;
+						$wordModel->mdata['note'] = $note;
+						$wordModel->save();
+					}
+					
+				}
+				$res->success = true;
+				//$res->msg = 'Done';
+			}
+			echo json_encode($res);
+			
+		} else {
+			$this->render('import');
+		}
+	}
+
+	public function actionExport()
+	{
+		$sql = 'SELECT * FROM word_replace';
+		$allRecords = WordReplace::model()->findAllBySql($sql);
+
+		$xls = new oExcel();
+		$i = 1;
+		$xls->addRow($i++, array('Origin', 'Replace', 'Type', 'Status', 'Note'));
+		foreach ($allRecords as $record) {
+			$xls->addRow($i++, array($record->pre_word, $record->replace_word, WordReplace::$types[$record->type], WordReplace::$states[$record->status], @$record->mdata['note']));
+		}
+
+		$xls->output('Word_Replace.xlsx');
+	
+	}
+
+	public function getFileData($file)
+	{
+		if (!preg_match('/xml|csv|xls|xlsx/i', $file['name'])) 
+		{
+			return [];
+		}
+		if (preg_match('/csv/i', $file['name'])) 
+		{
+			$xls = new oExcel('CSV');
+			$xls->load($file['tmp_name']);
+		} elseif(preg_match('/xml/i', $file['name']))
+		{
+			$xml = simplexml_load_file($file['tmp_name']);
+			$invoiceCount = count($xml->Details);
+			if($invoiceCount<=0)
+			{
+				$data = [];
+			}else
+			{
+				$data = [$xml->Details];
+				return $data;
+			}
+		}else {
+			$xls = new oExcel;
+			$format = $xls->supported($file['name']);
+			$xls = new oExcel($format);
+			$xls->load($file['tmp_name']);
+		}
+		$data = [];
+		$i = 0;
+		$sheetsArray = $xls->xls->getAllSheets();
+		foreach ($sheetsArray as $n => $sheet) {
+			$xls->goSheet($n);
+			$data[$i] = $xls->getAll();
+			$i++;
+		}
+		return $data;
+	}
+}

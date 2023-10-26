@@ -1,0 +1,177 @@
+<?php
+class GoogleMapAPI
+{
+	private const key = "AIzaSyAs29lz_08T9c1IFm84gzHOB9gbGw7FPno";
+	private const avoid = "toll";
+	private const syndey ="-33.93081528218377, 151.0056033399989";
+	private const melbourne = "-37.80115472967032, 144.8410692764063";
+	private const brisbane = "-27.5628709,153.0247358";
+	private const perth = "-31.9516594,115.8622073";
+	private const adelaide = "-34.9199013,138.601643";
+	private const url="https://maps.googleapis.com/maps/api/distancematrix/json";
+	private const urlGeocode="https://maps.googleapis.com/maps/api/geocode/json";
+
+	private static function requestAPI($origin,$destination)
+	{
+		$url=self::url;
+	    $params=array('origins'=>$origin,'destinations'=>$destination,'avoid'=>self::avoid,'key'=>self::key);
+	    $result=self::do_get($url,$params);
+	    return json_decode($result,true);
+	}
+
+	private static function requestGeocodeAPI($address)
+	{
+		$url=self::urlGeocode;
+	    $params=array('address'=>$address,'key'=>self::key);
+	    $result=self::do_get($url,$params);
+	    return json_decode($result,true);
+	}
+
+	public static function getDistanceBetweenPostcode($warehouse,$destination)
+	{	
+		try 
+		{
+			$orgin = null;
+			switch ($warehouse) {
+				case Org::PCAE_DEPARTMENT_SYDNEY:
+					$orgin =self::syndey;
+					break;
+				case Org::PCAE_DEPARTMENT_MELBOURNE:
+					$orgin =self::melbourne;
+					break;
+				case Org::PCAE_DEPARTMENT_BRISBANE:
+					$orgin =self::brisbane;
+					break;
+				case Org::PCAE_DEPARTMENT_PERTH:
+					$orgin =self::perth;
+					break;
+				case Org::PCAE_DEPARTMENT_ADELAIDE:
+					$orgin =self::adelaide;
+					break;
+				case 2214:
+					$orgin ='-33.9410532,150.9660555';
+					break;	
+				default:
+					$orgin ="";
+					break;
+			}
+			$result = self::requestAPI($orgin,$destination);
+			if(@$result["rows"][0]["elements"][0]["distance"]["value"]!=null)
+			{
+				return ceil($result["rows"][0]["elements"][0]["distance"]["value"]/1000);
+			}else
+			{
+				return null;
+			}
+		} catch (Exception $e) {
+			return null;
+		}
+	}
+
+	public static function getDistance($shipment,$ddpt_id=false)
+	{
+		if(empty($ddpt_id))
+		{
+			$ddpt_id = $shipment->consol->dpt_id;
+		}
+		$distanceObj = PostcodeDistance::model()->find(["condition"=>"origin = :origin and destination=:destination and suburb=:suburb and state = :state","params"=>[":origin"=>$ddpt_id,":destination"=>$shipment->cnee->postcode,":suburb"=>strtoupper($shipment->cnee->suburb),":state"=>$shipment->cnee->state],"order"=>"id desc"]);
+		$distance =0;
+		if($distanceObj==null)
+		{
+			$destination = $shipment->cnee->suburb." ".$shipment->cnee->state." ".$shipment->cnee->country." ".$shipment->cnee->postcode;
+			$distance = GoogleMapAPI::getDistanceBetweenPostcode($ddpt_id,$destination);
+			$postcodeDistance = new PostcodeDistance();
+			$postcodeDistance->savePostcodeDistance($shipment,$distance,$ddpt_id);
+		}else
+		{
+			$distance =$distanceObj['distance'];
+		}
+		return $distance;
+
+	}
+
+	public static function getAddress($cnee,$country='Australia',$missPostcode = false,$isBreak = false)
+	{
+		$cnee->address = preg_replace('/^(\d+)([A-z]{3,})/', '$1 $2', $cnee->address);
+		$address = $cnee->address.",".$cnee->suburb.",". $cnee->state." ".$cnee->postcode.','. $country;
+		if($missPostcode)
+		{
+			$address = $cnee->address.",".$cnee->suburb." ". $cnee->state.",". $country;
+		}
+		$result = self::requestGeocodeAPI($address);
+		$address = new stdClass;
+		$address->address= "";
+		$address->suburb= "";
+		$address->state= "";
+		$address->postcode= "";
+		$address->country= $country;
+		if(!empty($result['results']))
+		{
+			$r = $result['results'];
+			$com = $r[0];
+			if(!empty($com['address_components']))
+			{
+				$coms = $com['address_components'];
+			}else
+			{
+				$coms = [$com];
+			}
+			
+			if($com['geometry']['location_type'] == 'APPROXIMATE' && !Addr::checkIsPoBox($cnee->address))
+			{
+				return null;
+			}
+
+			foreach ($coms as $key => $value) 
+			{
+				if(!empty($value['types'][0]=='subpremise'))
+				{
+					$address->address.=$value['long_name']."/";
+				}
+				if(!empty($value['types'][0]=='street_number'))
+				{
+					$address->address.=$value['long_name']." ";
+				}
+				if(!empty($value['types'][0]=='route'))
+				{
+					$address->address.=$value['long_name'];
+				}
+				if((!empty($value['types'][0]=='locality')&&!empty($value['types'][1]=='political'))||(!empty($value['types'][0]=='colloquial_area')&&!empty($value['types'][1]=='locality')&&!empty($value['types'][2]=='political')))
+				{
+					$address->suburb=$value['short_name'];
+				}
+				if(!empty($value['types'][0]=='administrative_area_level_1')&&!empty($value['types'][1]=='political'))
+				{
+					$address->state=$value['short_name'];
+				}
+				if(!empty($value['types'][0]=='postal_code'))
+				{
+					$address->postcode=$value['short_name'];
+				}
+				if(!empty($value['types'][0]=='country')&&!empty($value['types'][1]=='political'))
+				{
+					$address->country=$value['short_name'];
+					if($address->country!="AU")
+					{
+						return null;
+					}
+				}
+			}
+		}
+
+		return $address;
+		
+	}
+
+	private static function do_get($url, $params) {
+        $url = "{$url}?" . http_build_query ( $params );
+       	$ch = curl_init();  
+	    curl_setopt($ch, CURLOPT_URL, $url);  
+	    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true); 
+	    curl_setopt($ch, CURLOPT_BINARYTRANSFER, true); 
+	    $data = curl_exec($ch);  
+	    curl_close($ch);  
+	    return $data;  
+    }
+}
+?>

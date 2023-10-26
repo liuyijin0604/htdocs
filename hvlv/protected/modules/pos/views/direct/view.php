@@ -1,0 +1,129 @@
+<?php
+$this->widget('zii.widgets.CBreadcrumbs', array(
+	'links' => array(
+		'Orders' => array('direct/manage'),
+		'View - '.$model->hbn,
+	),
+));
+?>
+
+<h1>Shipment - <?=$model->hbn;?></h1>
+
+<div class="row">
+	<div class="col col-md-4 col-sm-4 col-xs-6">
+		<label><?=$this->t('Reference No.');?></label><br />
+		<?php echo $model->ref; ?>
+	</div>
+	</div>
+
+	<div class="row">
+	<div class="col col-md-6 col-sm-12">
+	<h3><?=$this->t('Shipper');?></h3>
+	<div class="row">
+	<div class="col col-sm-6 col-xs-12">
+		<label><?=$this->t('Name');?></label><br />
+		<?php echo ($model->cnor->name) ? $model->cnor->name : ''; ?>
+	</div>
+	<div class="col col-sm-6 col-xs-12">
+		<label><?=$this->t('Tel');?></label><br />
+		<?php echo ($model->cnor->tel) ? $model->cnor->tel : ''; ?>
+	</div>
+	</div>
+	<div class="form-group">
+		<label><?=$this->t('Address');?></label><br />
+		<?php echo ($model->cnor->address) ? $model->cnor->address : ''; ?>
+	</div>
+
+	<div class="row">
+	<div class="col col-sm-6 col-xs-12">
+		<label><?=$this->t('Suburb');?></label><br />
+		<?php echo ($model->cnor->suburb) ? $model->cnor->suburb : ''; ?>
+	</div>
+	<div class="col col-sm-6 col-xs-12">
+		<label><?=$this->t('State');?></label><br />
+		<?php echo ($model->cnor->state) ? $model->cnor->state : ''; ?>
+	</div>
+	</div>
+
+	<div class="row">
+	<div class="col col-sm-6 col-xs-12">
+		<label><?=$this->t('Postcode');?></label><br />
+		<?php echo ($model->cnor->postcode) ? $model->cnor->postcode : ''; ?>
+	</div>
+	<div class="col col-sm-6 col-xs-12">
+		<label><?=$this->t('Country');?></label><br />
+		<?php echo ($model->cnor->country) ? $model->cnor->country : ''; ?>
+	</div>
+	</div>
+	<div class="form-group">
+		<label><?=$this->t('Email');?></label><br />
+		<?php echo ($model->cnor->email) ? $model->cnor->email : ''; ?>
+	</div>
+	</div>
+	<div class="col col-md-6 col-sm-12">
+	<h3><?=$this->t('Consignee');?></h3>
+
+	<div class="row">
+	<div class="col col-sm-6 col-xs-12">
+		<label><?=$this->t('Name');?></label><br />
+		<?php echo ($model->cnee->name) ? $model->cnee->name : ''; ?>
+	</div>
+	<div class="col col-sm-6 col-xs-12">
+		<label><?=$this->t('Tel');?></label><br />
+		<?php echo ($model->cnee->tel) ? $model->cnee->tel : ''; ?>
+	</div>
+	</div>
+	<div class="form-group">
+		<label><?=$this->t('Address');?></label><br />
+		<?php echo ($model->cnee->address) ? $model->cnee->address : ''; ?>
+	</div>
+
+	<div class="row">
+	<div class="col col-sm-6 col-xs-12">
+		<label><?=$this->t('Suburb');?></label><br />
+		<?php echo ($model->cnee->suburb) ? $model->cnee->suburb : ''; ?>
+	</div>
+	<div class="col col-sm-6 col-xs-12">
+		<label><?=$this->t('State');?></label><br />
+		<?php echo ($model->cnee->state) ? $model->cnee->state : ''; ?>
+	</div>
+	</div>
+
+	<div class="row">
+	<div class="col col-sm-6 col-xs-12">
+		<label><?=$this->t('Postcode');?></label><br />
+		<?php echo ($model->cnee->postcode) ? $model->cnee->postcode : ''; ?>
+	</div>
+	<div class="col col-sm-6 col-xs-12">
+		<label><?=$this->t('Country');?></label><br />
+		<?php echo ($model->cnee->country) ? $model->cnee->country : ''; ?>
+	</div>
+	</div>
+	<div class="form-group">
+		<label><?=$this->t('Email');?></label><br />
+		<?php echo ($model->cnee->email) ? $model->cnee->email : ''; ?>
+	</div>
+	</div>
+	</div>
+
+	<div class="form-group">
+	<table id="items" class="table table-striped table-bordered">
+	<thead>
+	<tr><th>#</th><th><?=$this->t('Item Name');?></th><th><?=$this->t('Qty');?></th><th><?=$this->t('Value');?></th></tr>
+	</thead>
+	<tbody>
+	<?php
+		$tv = 0;
+		$tq = 0;
+		foreach($model->eitems['g'] as $i => $g){
+			echo '<tr><td>'.($i+1).'</td><td>', $g, '</td><td>', $model->eitems['q'][$i], '</td><td>$', $model->eitems['v'][$i], '</td></tr>';
+			$tq += $model->eitems['q'][$i];
+			$tv += $model->eitems['v'][$i];
+		}
+	?>
+	</tbody>
+	<tfoot>
+	<tr><td colspan="2"><b class="pull-right">Total:</b></td><th id="tot_qty"><?=$tq;?></th><th id="tot_value">$<?=$tv;?></th></tr>
+	</tfoot>
+	</table>
+	</div>

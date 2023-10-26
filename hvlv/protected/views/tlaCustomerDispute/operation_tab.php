@@ -1,0 +1,369 @@
+<h3>Operation</h3>
+<br>
+<div class="form">
+<?php 
+	$id = $model->id;
+	$url = $this->createUrl('tlaCustomerDispute/update');
+	if(isset($ids) && $ids != "")
+	{
+		$id = $ids;
+	}
+	$form=$this->beginWidget('CActiveForm', array(
+	'id'=>'tla_dispute_acr_form',
+	'enableAjaxValidation'=>false,
+	'action'=> $url."?id=".$id)
+	);
+?>
+<div style="font-size:1.5em;">
+	<?php 
+			echo '<div class="row">Invoice Number :'.$model->inv_no.'</br>';
+			echo '<div class="row">Shipment :'.@$model->shipment->ref.'</br>';
+			echo '<div class="row">Invoice Amount :'.$model->invoice_amount.'</br>';
+			echo '<div class="row">Customer Amount :'.$model->customer_amount.'</br>';
+			echo '<div class="row">Diff :'.$model->diff.'</br>';
+	?>
+</div>
+	<div class="row">
+		<?php echo CHtml::label('Tla OP Comment','Tla OP Comment'); ?>
+		<?php echo CHtml::textArea('tla_op_comment',@$model->tla_op_comment,array('rows'=>10, 'cols' => 60)); ?>
+	</div>
+
+	<?php if($model->status==TlaCustomerDisputeLine::NEW_STATUS):?>
+	<div class="row rowcol-left">
+			<?php echo CHtml::button('Approved', array('class' => 'approveStatus'));?>
+			<?php echo CHtml::button('Rejected', array('class' => 'rejectStatus'));?>
+
+	</div>
+	<?php endif;?>
+</br>
+</br>
+<?php if($model->status!=TlaCustomerDisputeLine::NEW_STATUS):?>
+	<div class="row">
+		<?php echo CHtml::label('Credit Note No','Credit Note No'); ?>
+		<?php echo CHtml::textField('credit_note_no',@$model->credit_note_no); ?>
+	</div>
+	<div class="row">
+		<?php echo CHtml::label('Credit Note Amount','Credit Note Amount'); ?>
+		<?php echo CHtml::numberField('credit_note_amount',@$model->credit_note_amount); ?>
+		<?php echo CHtml::hiddenField('pass',""); ?>
+	</div>
+
+	<div class="row">
+		<div class="rowcol">
+				<?php echo CHtml::button('Generate Credit Note', array('class' => 'generateCreditNote'));?>
+		</div>
+	</div>
+
+	<div class="row">
+		<div class="rowcol">
+				<?php echo CHtml::button('Save and Close', array('class' => 'saveAndClose'));?>
+		</div>
+	</div>
+<?php endif;?>
+	<div class="row buttons">
+		<?php
+			$fr = new FileRepo('search');
+			$fr->unsetAttributes();
+			$fr->theTypes[] = FileRepo::TLACUSTOMERDISPUTEFILETYPE;
+			$fr->fid = $model->parent_id;
+			$mf = Acl::hasAccess('B:org/manageFile');
+			$this->widget('zii.widgets.grid.CGridView', [
+				'id'=>$_GET['tabid'].'_excofile-grid',
+				'cssFile' => false,
+				'summaryText'=>'',
+				'dataProvider'=> $fr->search(),
+				'filter'=>$fr,
+				'columns'=>[
+					['name' => 'name', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->baseUrl."/filerepo/".$data->hash."/".$data->name."\" target=\"_blank\">".$data->name."</a>"'],
+					[
+						'name'=>'size',
+						'value'=>'$data->formatSize()',
+						'filter' => false,
+					],
+					'date',
+					'type',
+					['name' => 'status', 'type'=>'raw', 'value' => '$data->getStatus()',
+						'filter'=>CHtml::dropDownList('FileRepo[status]', $fr->status, FileRepo::$states, ['prompt'=>$this->t('All')]) ],
+					[
+						'class'=>'oButtonColumn',
+						'template'=>'{update}',
+						'buttons'=>[
+							'update' => [
+								'url'=>'Yii::app()->createUrl("imParcel/fileUpdate",array("id"=>$data->id))',
+								'imageUrl'=>false,
+								'visible'=>'true',
+								'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Update'), 'title' => '$data->name'],
+							],
+						],
+					],
+				],
+			]);
+			?>
+	</div>
+
+
+<script type="text/javascript">
+	$(function(){
+			var win = $('#jqmw_<?=$_GET["tabid"];?>');
+			var tab = $('#<?=$_GET["tabid"];?>');
+			var panel = $('#<?=$_GET["tabid"];?>').data('panel');
+
+			tab.unbind('reload_tla_task_grid').bind('reload_tla_task_grid', function(){
+				$('#<?=$_GET["tabid"];?><?=$tab?>_sub_tla_task_grid', tab.data('panel')).yiiGridView('update');
+				return false;
+			});
+
+			tab.unbind('reload_excofile_grid').bind('reload_excofile_grid', function(){
+				$('#<?=$_GET["tabid"];?>_excofile-grid', win).yiiGridView('update');
+				return false;
+			});
+			tab.data('panel').off('change', 'select.pfile_status').on('change', 'select.pfile_status', function(){
+				$.post('files/status', {'id': $(this).data('id'), 'status': $(this).val() });
+			});
+						win.unbind('reload_cargo_invoice_grid').bind('reload_cargo_invoice_grid',function(){
+								$('#cargo_invoice_grid_<?=$_GET['tabid']?>',win).yiiGridView('update');
+						});
+
+			 $('.task_close',win).on('click',function(){
+				if( confirm('Are you sure to Collect Info Done')){
+						$.get('<?=$this->createUrl("cargoProcess/collectInfoDone")."?id=".$id?>',function(r){
+								if(r=='done'){
+										save();	
+								 }else{
+										myApp.alert(r, false);   
+							 }
+								tab.trigger('reload_tla_task_grid');
+					 });
+				
+				}
+			});
+
+		
+			 
+			function save()
+			{
+					var form = new FormData(document.getElementById("tla_dispute_acr_form"));
+					 $.ajax({
+					            url: '<?=$url."?id=".$id?>',
+					            type: "post",
+					            data: form,
+					            processData: false,
+					            contentType: false,
+					            success: function(r) {
+					       
+						         },
+					            error: function(e) {
+					                console.log(e);
+					            }
+					        });	
+			}
+
+			$('.approveStatus',win).on('click',function(){
+				if( confirm('Are you sure to approve?')){
+					var form = new FormData(document.getElementById("tla_dispute_acr_form"));
+					 $.ajax({
+					            url: '<?=$url."?id=".$id?>',
+					            type: "post",
+					            data: form,
+					            processData: false,
+					            contentType: false,
+					            success: function(r) {
+					       			$.ajax({
+								            url: '<?=$this->createUrl("tlaCustomerDispute/approveStatus")."?id=".$id?>',
+								            type: "post",
+								            data: [],
+								            processData: false,
+								            contentType: false,
+								            success: function(r) {
+								                if(r=='done')
+								                 {
+													myApp.notice('Done', 5000);
+												 }else
+												 {
+													myApp.alert(r, false);   
+									             }
+									             tab.trigger('reload_tla_task_grid');
+									         },
+								            error: function(e) {
+								                console.log(e);
+								            }
+						        		});	
+
+						         },
+					            error: function(e) {
+					                console.log(e);
+					            }
+					        });
+		
+				}
+				return false;
+			});
+
+			$('.rejectStatus',win).on('click',function(){
+				if( confirm('Are you sure to reject status?')){
+					var form = new FormData(document.getElementById("tla_dispute_acr_form"));
+					 $.ajax({
+					            url: '<?=$url."?id=".$id?>',
+					            type: "post",
+					            data: form,
+					            processData: false,
+					            contentType: false,
+					            success: function(r) {
+					       			$.ajax({
+								            url: '<?=$this->createUrl("tlaCustomerDispute/rejectStatus")."?id=".$id?>',
+								            type: "post",
+								            data: [],
+								            processData: false,
+								            contentType: false,
+								            success: function(r) {
+								                if(r=='done')
+								                 {
+													myApp.notice('Done', 5000);
+												 }else
+												 {
+													myApp.alert(r, false);   
+									             }
+									             tab.trigger('reload_tla_task_grid');
+									         },
+								            error: function(e) {
+								                console.log(e);
+								            }
+						        		});	
+
+						         },
+					            error: function(e) {
+					                console.log(e);
+					            }
+					        });
+				}
+				return false;
+			});
+
+			$('.saveAndClose',win).on('click',function(){
+				if( confirm('Are you sure to save and close this dispute case?')){
+					var form = new FormData(document.getElementById("tla_dispute_acr_form"));
+					 $.ajax({
+					            url: '<?=$url."?id=".$id?>',
+					            type: "post",
+					            data: form,
+					            processData: false,
+					            contentType: false,
+					            success: function(r) {
+					       			$.ajax({
+							            url: '<?=$this->createUrl("tlaCustomerDispute/close")."?id=".$id?>',
+							            type: "post",
+							            data: [],
+							            processData: false,
+							            contentType: false,
+							            success: function(r) {
+							                if(r=='done')
+							                 {
+												myApp.notice('Done', 5000);
+											 }else
+											 {
+												myApp.alert(r, false);   
+								             }
+								              tab.trigger('reload_tla_task_grid');
+								         },
+							            error: function(e) {
+							                console.log(e);
+							            }
+							        });	
+
+						         },
+					            error: function(e) {
+					                console.log(e);
+					            }
+					        });		
+				}
+				return false;
+			});
+
+			$('.generateCreditNote',win).on('click',function(){
+				if( confirm('Are you sure to generate credit note by the inputed amount?')){
+					var form = new FormData(document.getElementById("tla_dispute_acr_form"));
+					 $.ajax({
+					            url: '<?=$url."?id=".$id?>',
+					            type: "post",
+					            data: form,
+					            processData: false,
+					            contentType: false,
+					            success: function(r) {
+					       			$.ajax({
+							            url: '<?=$this->createUrl("tlaCustomerDispute/generateCreditNote")."?id=".$id?>',
+							            type: "post",
+							            data: form,
+							            processData: false,
+							            contentType: false,
+							            success: function(r) {
+							            	var data = JSON.parse(r);
+							                if(data.done==true)
+							                 {
+							                 	$("#credit_note_no",win).val(data.no);
+												myApp.notice('Done', 5000);
+											 }else
+											 {
+											 	if(data.msg!=undefined &&data.msg=="confirmGen")
+												{
+													if(confirm("The from invoice "+data.invoice+" already generate credit note "+data.credit_note+", are you sure to generate this credit note?"))
+													{
+														$("#pass").val("1");
+														var form = new FormData(document.getElementById("tla_dispute_acr_form"));
+														$.ajax({
+														    url: '<?=$this->createUrl("tlaCustomerDispute/generateCreditNote")."?id=".$id?>',
+														    type: "post",
+														    data: form,
+														    processData: false,
+														    contentType: false,
+														    success: function(r) {
+														    	data = JSON.parse(r);
+														        if(data.done==true)
+														         {
+														         	$("#credit_note_no",win).val(data.no);
+																	myApp.notice('Done', 5000);
+																 }else
+																 {
+																	myApp.alert(data.msg, false);
+														         }
+														         tab.trigger('reload_tla_task_grid');
+														     },
+														    error: function(e) {
+														        console.log(e);
+														    }
+														});
+
+
+													}else
+													{
+														$('#pass',win).val("");
+													}
+												}else
+												{
+													$('#pass',win).val("");
+													myApp.alert(data.msg, false);
+												}
+								             }
+								              tab.trigger('reload_tla_task_grid');
+								         },
+							            error: function(e) {
+							                console.log(e);
+							            }
+							        });	
+
+						         },
+					            error: function(e) {
+					                console.log(e);
+					            }
+					        });		
+				}
+				return false;
+			});
+
+
+
+	});
+</script>
+
+
+<?php $this->endWidget();?>
+		

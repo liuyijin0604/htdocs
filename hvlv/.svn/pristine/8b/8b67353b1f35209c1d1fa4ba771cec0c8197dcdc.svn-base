@@ -1,0 +1,257 @@
+<?php
+$consolId = 0;
+if (empty(Yii::app()->session['scan_warehouse'])) {
+	echo '<a class="dash-item ajax-link" href="'.$this->createUrl('site/index', ['scan_warehouse' => 'sydney']).'"><span class="glyphicon glyphicon-wrench"></span><br/>Home Page(To Choose Warehouse)</a>';
+	return;
+}
+?>
+
+<h3>Unpacking Container</h3></br>
+
+<input type="hidden" name="consol-id" value="" id="consol_id">
+
+<div class="printHelper_info" style="text-align: center;"></div>
+<iframe id="pdf_label" style="display: none;" name="pdf_label" src="" ></iframe>
+
+<?php if(!empty($model)):?>
+<?php 
+$this->widget('application.extensions.booster.TbExtendedGridView', [
+	'fixedHeader' => true,
+	'id'=>'unpack-consol-grid',
+	'type' => 'striped bordered',
+	'headerOffset' => 40,
+	'responsiveTable' => true,
+	'cssFile' => false,
+	'dataProvider'=>$model,
+	// 'dataProvider'=>$model,
+	'columns'=>[		
+		'eta',
+		['name' => 'no', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->createAbsoluteUrl("whscan/unpackContainer/checkContainerDetail", array("id" => $data->id))."\" class=\"tab_link\" title=\"".$data->no."\">".$data->no."</a>"',],
+		['name' => 'container_no', 'type' => 'raw', 'value' => '$data->container_no'],
+		['header'=>'Customer','name' => 'owner_name','value' => '$data->getOwnerName()'],
+		['name' => 'status', 'value' => '$data->process->getUnpackContainStatus()'],
+		// ['name' => 'service', 'value' => '$data->getService()', 'filter'=>CHtml::dropDownList('ImcoConsol[service]', $model->service, $this->t(ImcoConsol::$services), ['prompt'=>'All'])],
+		// ['name' => 'dpt_id', 'value' => '@$data->depot->name',
+		// 	'filter'=>CHtml::dropDownList('ImcoConsol[dpt_id]', $model->dpt_id, $this->t(Org::dptList()), ['prompt'=>$this->t('All')]),],
+		// 'flight',
+		// 'pol',
+		// 'pod',
+		['header' => 'Shipments', 'value' => '$data->totShipments()'],
+		// ['header' => 'Weight', 'value' => '$data->totWeight()'],
+		// ['header'=>'extra Info','type'=>'raw','value'=>'$data->getConsolDGWarnings()','filter'=>CHtml::dropDownList('ImcoConsol[exInfo]', $model->exInfo, $this->t(Consol::$exInfos), ['prompt'=>'All'])],
+		// ['header'=>'Unload Date','value'=>'@$data->mdata["ContainerUnloadDate"]'],
+		/*'created',
+		'meta',
+		*/
+		// [
+		// 	'class'=>'oButtonColumn',
+		// 	'template'=>'{update}',//{view}
+		// 	'buttons'=>[
+		// 		'view' => [
+		// 			'imageUrl'=>false,
+		// 			'options' => ['class' => 'jqm_link grid_view_btn'],
+		// 		],
+		// 		'update' => [
+		// 			'imageUrl'=>false,
+		// 			'visible'=>'true',
+		// 			'options' => ['class' => 'tab_link grid_edit_btn', 'label'=>$this->t('Update'), 'title' => '$data->no'],
+		// 		],
+		// 	],
+		// ],
+	],
+]); 
+
+?>
+<?php else: ?>
+<h4>No Unpacking Container Yet</h4>
+<?php endif; ?>
+<script type="text/javascript" src="<?php echo Yii::app()->request->baseUrl; ?>/js/BrowserPrint-3.0.216.min.js"></script>
+<script type="text/javascript">
+
+			function checkInTakePhotoContainer()
+			{
+				$('#container_file').click();
+				return false;
+			};
+
+			function checkInChangeFileContainer()
+			{
+				$('#check_in_path_container').val($("#container_file").val());
+			}
+
+
+			function checkInTakePhoto()
+			{
+				$('#damage_file').click();
+				return false;
+			};
+
+			function checkInChangeFile()
+			{
+				$('#check_in_path').val($("#damage_file").val());
+			}
+</script>
+<?php ob_start(); ?>
+<script type="text/javascript">
+$(function(){
+	let uploadContainerPhoto = 1;
+
+	$('input#scan').focus();
+	$('#result tbody tr').hide();
+	let ws = null;
+	let printHelper = false;
+	let printLog = [];
+
+	function websocket_connect() {
+		ws = new WebSocket("ws://127.0.0.1:10081");
+
+		ws.onopen = function() {
+			$('.printHelper_info').html('<b style="color:green">打印工具已开启</b>');
+			printHelper = true;
+		}
+
+		ws.onclose = function (){
+			printHelper = false;
+			websocket_connect();
+		}
+
+		ws.onerror = function(e) {
+			$('.printHelper_info').html('<b style="color:red">打印工具未开启</b> <a href="https://os.pcaex.com/PrintHelper.zip" target="_blank">(点击下载)</a>');
+			printHelper = false;
+		}
+
+		ws.onmessage = function(msg) {
+			// console.log(msg);
+		}
+	}
+
+	$('#auto_print_label').on('change', function(){
+		websocket_connect();
+	});
+
+	$(window).unload(function() {
+		ws.close();
+	});
+
+	$('form#scan-form').on('keydown',function(e){
+		if(e.which!=13)
+		{			
+			return true;
+
+		}
+		barcode = $('input#scan').val();		
+
+		// $('#related_shipment_grid_view').yiiGridView('update', {data: $('.filters input, .filters select').serialize() + '&' + $(this).serialize()});
+		// return false;
+
+	    <?php $url = $this->createUrl('warehouseProcess/checkContainerDetailByBarcode');?>
+	    $.ajax({
+	             url: '<?=$url?>'+"?barcode="+barcode,
+	             type: "post",
+	             processData: false,
+	             contentType: false,             
+	             success: function(r) {
+	             	r = JSON.parse(r);
+					if (r.print == 1) {
+						$('.print_btn_pdf').show();
+						$('#a_unpack_list').show();
+						$('#consol_id').val(r.consol_id);
+						$('#a_unpack_list').attr("href","<?=$this->createUrl('warehouseProcess/exportUnpackList');?>"+"?id="+r.consol_id);
+						
+						if($('input#auto_print').prop('checked')) $('input.print_btn_pdf').trigger('click');
+					} else {
+						$('.print_btn_pdf').hide();
+						$('#a_unpack_list').hide();
+					}
+					if ($('input[name="ImParcel[ref]"]').val() == "searching"){
+						$('input[name="ImParcel[ref]"]').val("");
+					}
+					$('#related_shipment_grid_view').yiiGridView('update', {data: $('.filters input, .filters select').serialize() + '&' + $(this).serialize()+"&ImParcel[consol_id]="+r.consol_id});
+					return true;
+	              //$('#content').remove();
+
+	           },
+	             error: function(e) {
+	                 console.log(e);
+	             }
+	         });
+
+	});
+
+	$('input#scan').on('focus', function(){
+		$(this).select();
+	});
+	$('.gohome').click(function(e){
+		window.location.href = '/whscan';
+	});
+
+	$('.print_btn_pdf').click(function(e){
+		var sid = $('#scaned_shipment_id').val();
+		var sn = $('#my_sn').val();
+
+		if($.inArray(sid+"_"+sn, printLog) > -1){
+			if(!window.confirm('Are you sure to reprint? 确认重复打印吗？')) return false;
+		}else{
+			if(printLog.length > 100) printLog.pop();
+			printLog.unshift(sid+"_"+sn);
+		}
+		
+		if(printHelper){
+			$.get("<?php echo Yii::app()->createAbsoluteUrl("whscan/warehouseProcess/printAllPalletLabels"); ?>"+"?id="+$('#consol_id').val(), function(r){
+				ws.send(r.file);
+			}, 'json');
+			return;
+		}
+
+		<?php $url = Yii::app()->createAbsoluteUrl("whscan/warehouseProcess/printAllPalletLabels"); ?>
+		window.open('<?=$url?>'+"?id="+$('#consol_id').val());
+	    // $.ajax({
+	    //          url: '<?=$url?>'+"?id="+$('#consol_id').val(),
+	    //          type: "POST",
+	    //          processData: false,
+	    //          contentType: false,             
+	    //          success: function(r) {
+	    //          	r = JSON.parse(r);
+					// if (r.result) {
+					// 	let file = r.file;
+					// 	// console.log(file);
+					// 	writeToSelectedPrinter(file);					
+					// } else {
+					// 	alert("Can not print!");
+					// }
+
+	    //        },
+	    //          error: function(e) {
+	    //              console.log(e);
+	    //          }
+	    //      });
+	    return false;
+	});    
+
+	if(navigator.userAgent.match(/Android|iPhone|iPad|iPod|SymbianOS|Windows Phone/) !== null || (window.screen.width < 500 && window.screen.height < 800)){ //Mobile
+		$("#auto_print_label").hide();
+	}
+	var oriRef = "";
+	$('#outre').on('mousedown', function(){
+		if(oriRef=="")
+		{
+			oriRef = $(this).attr('href');
+		}
+		var cNo = $('#containerNo').val();
+		$(this).attr('href', oriRef + '?containerNo=' + cNo);
+	});
+
+	var lolist = "";
+	$('#lolist').on('mousedown', function(){
+		if(lolist=="")
+		{
+			lolist = $(this).attr('href');
+		}
+		var cNo = $('#containerNo').val();
+		$(this).attr('href', lolist + '?containerNo=' + cNo);
+	});
+
+});
+</script>
+<?php $this->registerJS(ob_get_clean()); ?>
+

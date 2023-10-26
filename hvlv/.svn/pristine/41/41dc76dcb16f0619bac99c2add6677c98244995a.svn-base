@@ -1,0 +1,25 @@
+<?php 
+class HvlvJavaService extends Service
+{
+	public function getAlliedHomeDelFee($shipment,$courier)
+	{
+		//getCache
+		$alliedRateIds = [Org::TLA_DEPARTMENT_SYDNEY=>10900,Org::TLA_DEPARTMENT_MELBOURNE=>10903,Org::TLA_DEPARTMENT_BRISBANE=>10906];
+		$orgRate = OrgRate::model()->findByPk($alliedRateIds[$courier->mdata['ddpt_id']]);
+		$javaAPI = new HvlvJavaAPI(HvlvJavaAPI::RATE_TYPE[$orgRate->mdata['ddpt_id']],$orgRate->id);
+		$result = $javaAPI->checkAlliedHomeFee($shipment);
+		if($result['code']!="60000")
+		{
+			return 100;
+		}else
+		{
+			if(!empty($result['data']['freight_oversized_home_del']))
+			{
+				return $result['data']['freight_oversized_home_del'];
+			}
+		}
+
+	}
+	
+}
+?>

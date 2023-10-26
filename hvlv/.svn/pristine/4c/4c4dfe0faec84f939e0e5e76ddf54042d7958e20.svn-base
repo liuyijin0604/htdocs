@@ -1,0 +1,57 @@
+<div style="position: absolute; right: 20px;">
+<a href="#" data-dropdown="#<?=$_GET["tabid"];?>-dropdown-top"><div style="background-position:-48px -688px" class="icon"></div> Export TLA</a>
+<a href="#" data-dropdown="#<?=$_GET["tabid"];?>-dropdown-1"><div style="background-position:-48px -688px" class="icon"></div> Export</a>
+<div id="<?=$_GET["tabid"];?>-dropdown-top" class="dropdown dropdown-tip dropdown-relative dropdown-anchor-right">
+    <ul class="dropdown-menu">
+                <li><a class="export" href="<?=$this->createUrl('top/imParcel/seaManifest', array('id'=>$model->id));?>" target="_blank"><?=$this->t('Sea Manifest');?></a></li>
+                <li><a href="<?=$this->createUrl('top/imParcel/seaOrder', array('id'=>$model->id,'type'=>1))?>" target="_blank">Sea Delivery Order(manifest)</a></li>
+                 <li><a href="<?=$this->createUrl('top/imParcel/seaOrder', array('id'=>$model->id,'type'=>2))?>" target="_blank">Sea Delivery Order(scan)</a></li>
+                <li><a href="<?=$this->createUrl('top/imParcel/seaOutturn', array('id'=>$model->id))?>" target="_blank">Sea Outturn Report</a></li>
+                <li><a href="<?=$this->createUrl('top/imParcel/seaOutturn', array('id'=>$model->id,'type'=>'cover'))?>" target="_blank">Sea Outturn Report(CP)</a></li>
+                <li><a href="<?=$this->createUrl('top/imParcel/cargoReceipt', array('id'=>$model->id))?>" target="_blank">Cargo Receipt</a></li>
+                <li><a href="<?=$this->createUrl('top/imParcel/requestManifest', array('id'=>$model->id))?>" target="_blank">Request Manifest</a></li>
+                <li><a href="<?=$this->createUrl('top/imParcel/preAlert', array('id'=>$model->id))?>" target="_blank">Pre Alert</a></li>
+                 <li><a href="<?=$this->createUrl('top/imParcel/arrivalNotice', array('id'=>$model->id))?>" target="_blank">Arrival Notice</a></li>
+    </ul>
+</div>
+<div id="<?=$_GET["tabid"];?>-dropdown-1" class="dropdown dropdown-tip dropdown-relative dropdown-anchor-right">
+	<ul class="dropdown-menu">
+                <li><a href="<?=$this->createUrl('customProcess/houseWaybill', array('id'=>$model->id))?>" target="_blank">House Waybill</a></li>
+		<li><a href="<?=$this->createUrl('imParcel/pcaLabel', array('id'=>$model->id))?>" target="_blank">TLA Label</a></li>
+		<li><a href="<?=$this->createUrl('imParcel/epLabel', array('id'=>$model->id, 'type' => 'pdf'))?>" target="_blank">Courier Label</a></li>
+        <li><a href="<?=$this->createUrl('imParcel/dgDocument', array('id'=>$model->id, 'type' => 'pdf'))?>" target="_blank">DG Document</a></li>
+                <li><a class="export" href="<?=$this->createUrl('imParcel/seaManifest', array('id'=>$model->id));?>" target="_blank"><?=$this->t('Sea Manifest');?></a></li>
+                <li><a href="<?=$this->createUrl('imParcel/seaOrder', array('id'=>$model->id,'type'=>1))?>" target="_blank">Sea Delivery Order(manifest)</a></li>
+                <li><a href="<?=$this->createUrl('imParcel/seaOrder', array('id'=>$model->id,'type'=>2))?>" target="_blank">Sea Delivery Order(scan)</a></li>
+                <li><a href="<?=$this->createUrl('imParcel/seaOutturn', array('id'=>$model->id))?>" target="_blank">Sea Outturn Report</a></li>
+                <li><a href="<?=$this->createUrl('imParcel/seaOutturn', array('id'=>$model->id,'type'=>'cover'))?>" target="_blank">Sea Outturn Report(CP)</a></li>
+                <li><a href="<?=$this->createUrl('imParcel/cargoReceipt', array('id'=>$model->id))?>" target="_blank">Cargo Receipt</a></li>
+                <li><a href="<?=$this->createUrl('imParcel/requestManifest', array('id'=>$model->id))?>" target="_blank">Request Manifest</a></li>
+                <li><a href="<?=$this->createUrl('imParcel/preAlert', array('id'=>$model->id))?>" target="_blank">Pre Alert</a></li>
+                 <li><a href="<?=$this->createUrl('imParcel/arrivalNotice', array('id'=>$model->id))?>" target="_blank">Arrival Notice</a></li>
+                <li><a href="<?=$this->createUrl('imParcel/storageLabel', array('id' => $model->id))?>" target="_blank">Storage Label</a></li>
+                <li><a href="<?=$this->createUrl('imParcel/manualCoverSheet', array('id'=>$model->id))?>" target="_blank">Manual Cover Sheet</a></li>
+                <li><a class="jqm_link" href="<?=$this->createUrl('imParcel/genYlwLabel', array('id' => $model->id));?>">Print Yellow Pallet Label</a></li>
+                <?php if (Acl::hasAccess('B:imParcel/manualGatepass')) { ?>
+                <li><a href="<?=$this->createUrl('imParcel/manualGatepass', array('id' => $model->id))?>" class="ajax_link">M GP</a></li>
+                <?php } ?>
+   	</ul>
+</div>
+</div>
+
+<?php echo $this->renderPartial('_form', array('model'=>$model)); ?>
+<script type="text/javascript">
+$(function(){
+	var tab = $('#<?=$_GET["tabid"];?>');
+	var pane = tab.data('panel');
+	$($('.item_qty', pane).get(0)).trigger('change');
+
+    $('.ajax_link', pane).on('success', function(e, r) {
+        if (r.done) {
+            myApp.notice(r.msg, 5000);
+        } else {
+            myApp.alert(r.msg, false);
+        }
+    });
+});
+</script>

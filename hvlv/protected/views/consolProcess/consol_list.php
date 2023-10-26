@@ -1,0 +1,165 @@
+<?php $podName=($_GET['pod_id']<0)?"All":Org::dptList()[$_GET['pod_id']];
+$type=$_GET['consol_type']==20?"Sea":"Air";?>
+<h2><?=$podName."-".$type?> Consol Processing</h2>
+<div style="position: absolute; right:80px;">
+    <div class="form">
+        <div class='row'>
+        <div class="rowcol rowleft">
+            <a class="tab_link <?=($permissionArr[3]==2)?"dark_link":""?>"  href="<?=$this->createUrl("consolProcess/newConsol", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type']])?>" title="<?=$podName."-".$type?> New" ><span style="background-position:-48px -688px" class="icon"></span>New</a>
+            </div>
+
+        <div class="rowcol ">
+            <a class="tab_link <?=($permissionArr[3]==2)?"dark_link":""?>"  href="<?=$this->createUrl("consolProcess/waitAcr", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type']])?>" title="<?=$podName."-".$type?> Waiting ACR" ><span style="background-position:-48px -688px" class="icon"></span>Waiting ACR</a>
+        </div>
+
+        <div class="rowcol ">
+            <a class="tab_link <?=($permissionArr[3]==2)?"dark_link":""?>"  href="<?=$this->createUrl("consolProcess/waitUbm", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type']])?>" title="<?=$podName."-".$type?> Waiting UBM" ><span style="background-position:-48px -688px" class="icon"></span>Waiting UBM</a>
+        </div>
+
+        <div class="rowcol ">
+            <a class="tab_link <?=($permissionArr[3]==2)?"dark_link":""?>"  href="<?=$this->createUrl("consolProcess/waitAirportCheckIn", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type']])?>" title="<?=$podName."-".$type?> Waiting Airport Check In" ><span style="background-position:-48px -688px" class="icon"></span>Waiting Airport Check n</a>
+        </div>
+
+        <div class="rowcol ">
+            <a class="tab_link <?=($permissionArr[3]==2)?"dark_link":""?>"  href="<?=$this->createUrl("consolProcess/waitingDriverPickUp", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type']])?>" title="<?=$podName."-".$type?> Waiting Driver PickUp" ><span style="background-position:-48px -688px" class="icon"></span>Waiting Driver PickUp</a>
+        </div>
+
+        <div class="rowcol ">
+            <a class="tab_link <?=($permissionArr[3]==1)?"dark_link":""?>"  href="<?=$this->createUrl("consolProcess/waitingWhScan", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type']])?>" title="<?=$podName."-".$type?> Waiting WH Scan" ><span style="background-position:-48px -688px" class="icon"></span>Waiting WH Scan</a>
+            <p>
+            <a class="tab_link <?=($permissionArr[3]==1)?"dark_link":""?>"  href="<?=$this->createUrl("consolProcess/surplusShipmentTab", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type'],'podName'=>$podName])?>" title="<?=$podName."-".$type?> Surplus Shipments" ><span style="background-position:-48px -688px" class="icon"></span>Handling Surplus Shipments(<font class="red" id="<?=$_GET['pod_id'].$_GET['consol_type']?>Surplus">0</font>)</a>
+            </p>
+        </div>
+
+        <div class="rowcol ">
+            <a class="tab_link <?=($permissionArr[3]==1)?"dark_link":""?>"  href="<?=$this->createUrl("consolProcess/waitingAirout", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type']])?>" title="<?=$podName."-".$type?> Waiting AirOut/Manifest" ><span style="background-position:-48px -688px" class="icon"></span>Waiting AirOut/Manifest</a>
+        </div>
+
+        <div class="rowcol ">
+            <p><a class="tab_link <?=($permissionArr[3]==1)?"dark_link":""?>"  href="<?=$this->createUrl("consolProcess/waitingInvoice", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type']])?>" title="<?=$podName."-".$type?> Waiting create Invoice" ><span style="background-position:-48px -688px" class="icon"></span>Waiting create Invoice</a></p>
+            <p><a class="tab_link <?=($permissionArr[3]==1)?"dark_link":""?>"  href="<?=$this->createUrl("consolProcess/exceptionShipmentList", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type'],'podName'=>$podName,'process_status'=>ConsolProcess::STATE_WAITING_CREATE_INVOICE])?>" title="<?=$podName."-".$type?> Handling Exception Shipments" ><span style="background-position:-48px -688px" class="icon"></span>Handling Exception Shipments(<font class="red" id="<?=$_GET['pod_id'].$_GET['consol_type']?>Exception">0</font>)</a></p>
+        </div>
+
+        <div class="rowcol ">
+            <a class="tab_link  <?=($permissionArr[3]==1)?"dark_link":""?>"  href="<?=$this->createUrl("consolProcess/processDone", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type']])?>" title="<?=$podName."-".$type?> Process Done" ><span style="background-position:-48px -688px" class="icon"></span>Process Done</a>
+        </div>
+        </div>
+    </div>
+</div>
+<br>
+<br>
+<style>
+    .cloumn_red_1{
+        color:red;
+        font-weight: bold;
+    }   
+</style>
+<div style="width:50%" id="consols-client-view<?=$_GET['tabid']?>">
+   <?php $this->widget('zii.widgets.grid.CGridView', [
+    'id'=>'consols-client-list-grid'.$_GET['tabid'],
+    'htmlOptions'=>['style'=>'width: 70%'],
+    'cssFile' => false,
+    'dataProvider'=>$dataProvider[0],
+    'filter'=>$dataProvider[1],
+    'columns'=>[
+        ['name'=>'status','headerHtmlOptions' => ['style' => 'display:none'],'filterHtmlOptions' => ['style' => 'display:none'],
+            'htmlOptions' => ['style' => 'display:none'],'type'=>'raw'],
+        ['name'=>'status','value'=>'ConsolProcess::$states[$data["status"]]'],
+        'number',
+        ['name'=>'day1','header'=>'<=1 days'],
+        ['name'=>'day2','header'=>'2 days'],
+        ['name'=>'day3','header'=>'>=3 days','cssClassExpression' => '$data>0? "cloumn_red_1" : ""'],
+    ],
+   ]); ?>
+</div>
+<br/>
+<div class="form">
+    <div class="row">
+   <?php  echo CHtml::button('Show All', ['class' => 'show_all']);?>
+    </div>
+</div>
+<div style="right: 20px;position: absolute;">
+<a class="jqm_link grid_edit_btn" href="<?=$this->createUrl('consolProcess/splitConsol');?>"> Split Consol</a> 
+<a href="#" class="export_search" target="_blank" data-baseurl="<?=$this->createUrl('consolProcess/export', ['typ' => '','pod_id'=>$_GET['pod_id']]);?>"><div style="background-position:-48px -688px" class="icon"></div> Export Current Search</a> 
+<a href="#" class="export_search" target="_blank" data-baseurl="<?=$this->createUrl('consolProcess/exportPreAlert', ['typ' => '','pod_id'=>$_GET['pod_id']]);?>"><div style="background-position:-48px -688px" class="icon"></div> Export Pre Alert</a> 
+<a href="#" class="export_search" target="_blank" data-baseurl="<?=$this->createUrl('consolProcess/exportPreAlert', ['typ' => '','pod_id'=>$_GET['pod_id'],'hideCusotmer'=>true]);?>"><div style="background-position:-48px -688px" class="icon"></div> Export Pre alert without customer</a>
+<a class="tab_link grid_edit_btn" href="<?=$this->createUrl('consolReport/consol');?>">Consol Report</a> 
+</div>
+ <div class="row">
+  <span> <h2> Available Consols </h2></span>
+ <div id="consol-list-view<?=$_GET['pod_id']?>">
+      <?php
+         $this->renderPartial('_sub_consols', [
+            'consol' => $consol,
+            'name' =>'All'
+         ]);
+    ?>
+  </div>
+</div>
+<script>
+$(function(){
+    var tab = $('#<?=$_GET["tabid"];?>');
+    var panel=tab.data('panel');
+     $('#consols-client-view<?=$_GET['tabid']?>',panel).on("click", "table tbody td", function(event){
+        // get console id
+        var status = parseInt($(this).parent().children(':nth-child(1)').html());
+        var data = {};
+        data['status'] = status;
+        data['pod_id']=<?=$_GET['pod_id']?>;
+        data['consol_type']=<?=$_GET['consol_type']?>;
+        $.ajax({
+            type : 'GET',
+            url : '<?php echo Yii::app()->createAbsoluteUrl("ConsolProcess/consolList", ['tabid'=>$_GET['tabid']]) ;?>',
+            data: data,
+            dataType: 'html',
+            success:function(resp){
+                $('#consol-list-view<?=$_GET['pod_id']?>',panel).html(resp);
+            },
+        });
+    }); 
+    
+    $('.show_all',panel).on('click',function(event){
+        var data = {};
+        data['status'] = 0;
+        data['pod_id']=<?=$_GET['pod_id']?>;
+        data['consol_type']=<?=$_GET['consol_type']?>;
+        $.ajax({
+            type : 'GET',
+            url : '<?php echo Yii::app()->createAbsoluteUrl("ConsolProcess/consolList", ['tabid'=>$_GET['tabid']]) ;?>',
+            data: data,
+            dataType: 'html',
+            success:function(resp){
+                $('#consol-list-view<?=$_GET['pod_id']?>').html(resp);
+            },
+        });
+        
+    });
+     $('a.export_search', panel).on('mousedown', function(){
+        var q = $('.filters input, .filters select', panel).serialize();
+        $(this).attr('href', $(this).data('baseurl') + '&' + q);
+    });
+    $(function(){
+        function refreshExN()
+        {
+            $.ajax({
+                      url: "<?=$this->createUrl("consolProcess/getExceptionShipmentNumber", ['pod_id'=>$_GET['pod_id'],'consol_type'=>$_GET['consol_type']])?>",
+                      type: "get",
+                      processData: false,
+                      contentType: false,
+                      success: function(r) {
+                          $("#<?=$_GET['pod_id'].$_GET['consol_type']?>Exception").html(r.split(',')[0]);
+                          $("#<?=$_GET['pod_id'].$_GET['consol_type']?>Surplus").html(r.split(',')[1]);
+                       },
+                      error: function(e) {
+                          console.log(e);
+                      }
+              });
+
+        }
+        $("#<?=$_GET['pod_id'].$_GET['consol_type']?>Exception").everyTime(6e4, function(){
+            refreshExN();
+        });
+        refreshExN();
+    });
+})
+</script>

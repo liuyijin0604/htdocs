@@ -1,0 +1,990 @@
+<h1>HBN:<?=$model->hbn?></h1>
+<?php
+$inv_tot = 0;
+if (!empty($model->mdata['custom_inv']['qty']) && is_array($model->mdata['custom_inv']['qty'])) {
+	foreach ($model->mdata['custom_inv']['qty'] as $i => $q) {
+		if (empty($q)) {
+			continue;
+		}
+		$inv_tot += $q * floatval($model->mdata['custom_inv']['amount'][$i]);
+	}
+}
+?>
+<div class="form" style="background-color:<?=empty($model->process->mdata['stay_here'])?'none':'rgb(101,189,177)'?>">
+
+<?php if (Yii::app()->user->grp != 72) { ?>
+	<div class="row">
+	<div style="display: inline-block; font-weight: bold"><span>Invoice Amount:</span><?=$inv_tot?></div>&nbsp;&nbsp; 
+<a class="jqm_link"  href="<?=$this->createUrl("imParcel/customInv", ['id'=>$model->id])?>"  ><span class="icon"></span>Add Invoice Amount</a>
+<a class="jqm_link"  href="<?=$this->createUrl("imParcel/custMsg", ['id'=>$model->id])?>"  ><span class="icon"></span>Add Message</a>
+</div>
+<?php } ?>
+
+	<div class="row">
+	<?php echo CHtml::label('Link Type', 'link_type'); ?>
+	<?php
+	$link_types=[];
+	if (($model->process->type&4)>0) {
+		$link_types=[
+			2=>'HV Require Document From Sender Link',
+			1=>'LOA link',
+			3=>'Entry Confirm Link',
+			4=>'Require Invoice Receipt Link'
+		];
+	} elseif (($model->process->type&1)>0) {
+		$link_types=[
+			5=>'EMPP Require Document Link',
+		];
+	} elseif (($model->process->type&2)>0) {
+		$link_types=[
+			6=>'AQIS Require Document Link',
+			7=>'AQIS Status Confirm Link',
+		];
+	}
+
+	echo CHtml::dropDownList('link_type', '', $link_types); ?>
+	<a id="copy_address" href="#"  ><span class="icon"></span>Copy Url</a>
+		<input type="hidden" id="address_tocopy" value='' />
+	</div>
+<div class="row rowcol rowleft">
+	<?php echo CHtml::label('Status', 'status'); ?>
+	<?php echo CHtml::dropDownList('custom_status', @$model->process->status, $this->t(Yii::app()->user->grp != 72? ShipmentProcess::$statesdisplay : ShipmentProcess::brokerStats(false)), array_merge(['prompt'=>'Select'], Yii::app()->user->grp != 72 || $model->process->status <= 14 ? [] : ['disabled' => 'disabled'])); ?>
+ </div>
+ <?php if (Yii::app()->user->grp != 72):?>
+   <div class="row rowcol">
+	<?php echo CHtml::label('Customs Borker', 'broker_id'); ?>
+	<?php echo CHtml::dropDownList('broker_id', @$model->process->broker_id, ShipmentProcess::brokerList(false), ['prompt'=>'Select']); ?>
+</div>
+   <div class="row rowcol">
+	<?php echo CHtml::label('Storage Start', 'ssdate'); ?>
+	<?php echo CHtml::textField('ssdate', @$model->process->getStorageStartDate(), ['class'=>'date_input', 'size' => 10]); ?>
+</div>
+<?php if(!empty($model->consol)):?>
+<div class="row rowcol">
+	<?php echo CHtml::label('Day No', 'fd'); ?>
+	<?php echo CHtml::textField('fd', @$model->process->mdata['fd'], ['size' => 8]); ?>
+</div>
+<?php else:?>
+<div class="row rowcol">
+	<?php echo CHtml::label('Week No', 'fw'); ?>
+	<?php echo CHtml::textField('fw', @$model->process->mdata['fw'], ['size' => 8]); ?>
+</div>
+<?php endif;?>
+<?php if ($model->process->status >= ShipmentProcess::ENTRY_CONFIRM && $model->process->status <= ShipmentProcess::CONFIRM_PAYMENT) { ?>
+	<div class="row rowcol">
+		<?php echo CHtml::button('Generate ST invoice', ['class' => 'generate_st']);?>
+	</div>
+<?php } ?>
+<?php if(($model->bwf&128)>0): //DDU ?>
+   <div class="row rowcol rowleft">
+	<?php echo CHtml::label('Billing Name', 'billname'); ?>
+	<?php echo CHtml::textField('cabill_name', @$model->process->mdata['cabill_name'], ['size' => 15]); ?>
+</div>
+   <div class="row rowcol">
+	<?php echo CHtml::label('Billing Address', 'billaddr'); ?>
+	<?php echo CHtml::textField('cabill_addr', @$model->process->mdata['cabill_addr'], ['size' => 30]); ?>
+</div>
+<?php endif; ?>
+<?php endif; ?>
+<div class="row rowcol rowleft">
+	<?php echo CHtml::label('Inco Term', 'inv term'); ?>
+	<?php echo CHtml::checkBoxList(
+		'inv_terms',
+		@$model->process->mdata['inv_terms'],
+		ShipmentProcess::$inv_terms,
+			[
+				'template'=>'{input}{label}',
+				'separator'=>'',
+				'labelOptions'=>[
+					'style'=> 'padding-right:12px;min-width: 60px;float: left;'],
+				'style'=>'float:left;',]
+			); ?>
+</div>
+<?php if(in_array($model->process->status, array_keys(ShipmentProcess::$aqisStates))):?>
+<div class="row">
+	<?php echo CHtml::label('Direction Due Date', 'direction_due_date'); ?>
+	<?php echo CHtml::textField('direction_due_date', @$model->process->mdata['direction_due_date'], ['class'=>'date_input', 'size' => 10]); ?>
+</div>
+<?php endif;?>
+
+ <div class="row buttons">
+	<?php echo CHtml::button('Update', ['class' => 'updateStatus']);?>
+ </div>
+<br>
+<?php
+if (isset($model->process)&&($model->process->type&4)>0) {
+	if (in_array($model->process->status, [ShipmentProcess::DOC_RECEIVED])) {
+		echo $this->renderPartial('suggest_parcels', ['model'=>$model->process]);
+	}
+}
+?>
+
+<?php
+if (isset($model->process)&&($model->process->type&4)>0) {
+	if (in_array($model->process->status, [ShipmentProcess::MSG_SENDER, ShipmentProcess::MSG_NEW, ShipmentProcess::MSG_CONSIGNEE])) {
+		echo CHtml::button('Resend Require Document', ['class' => 'resend_document']);
+		echo '<a class="jqm_link grid_email_btn theclick"  style="margin-left:5px;" href="'.$this->createUrl("customProcess/createEmailM", ["id"=>$model->id,'type'=> Emailog::CUST_DOCUMENT_SENDER]).'"  title="Edit Email">RRD</a>';
+		echo CHtml::button('Require LOA', ['class' => 'require_loa','style'=>'margin-left:20px;']);
+		echo '<a class="jqm_link grid_email_btn theclick"  style="margin-left:5px;" href="'.$this->createUrl("customProcess/createEmailM", ["id"=>$model->id,'type'=> Emailog::CUST_DOCUMENT_CUSTOMER2]).'"  title="Edit Email">Require LOA</a>';
+		echo CHtml::button('Send SMS', ['class' => 'require_email','style'=>'margin-left:20px;']);
+	} elseif (in_array($model->process->status, [ShipmentProcess::DOC_RECEIVED])) {
+		echo CHtml::button('Resend Require Document', ['class' => 'resend_document']);
+		echo '<a class="jqm_link grid_email_btn theclick"  style="margin-left:5px;" href="'.$this->createUrl("customProcess/createEmailM", ["id"=>$model->id,'type'=> Emailog::CUST_DOCUMENT_SENDER]).'"  title="Edit Email">RRD</a>';
+		echo CHtml::button('Require LOA', ['class' => 'require_loa','style'=>'margin-left:20px;']);
+		echo '<a class="jqm_link grid_email_btn theclick"  style="margin-left:5px;" href="'.$this->createUrl("customProcess/createEmailM", ["id"=>$model->id,'type'=> Emailog::CUST_DOCUMENT_CUSTOMER2]).'"  title="Edit Email">Require LOA</a>';
+		echo CHtml::button('Send SMS', ['class' => 'require_email','style'=>'margin-left:20px;']);
+		echo CHtml::button('Send to Broker(After Document confirm)', ['class' => 'send_to_broker','style'=> 'margin-left:20px;margin-top:5px; ']);
+		echo '<a class="jqm_link grid_email_btn theclick"  style="margin-left:5px;" href="'.$this->createUrl("customProcess/createEmailM", ["id"=>$model->id,'type'=> Emailog::CUST_DOCUMENT_BROKER]).'"  title="Edit Email">STBroker</a>';
+	} elseif (in_array($model->process->status, [ShipmentProcess::MSG_BROKER, ShipmentProcess::ENTRY_SEND])) {
+		if ($model->process->status==ShipmentProcess::MSG_BROKER) {
+			$text='Send Entry To Confirm';
+		} else {
+			$text='Resend Entry To Confirm';
+		}
+		echo CHtml::button($text, ['class' => 'entry_received']);
+	} elseif (in_array($model->process->status, [ShipmentProcess::ENTRY_CONFIRM, ShipmentProcess::WAIT_BROKER_FINAL_ENTRY, ShipmentProcess::STATE_EMPP_CUSTOM, ShipmentProcess::STATE_AQIS_CUSTOM])) {
+		if (in_array($model->process->broker_id, [ShipmentProcess::BROKER_FYN_ID])) {
+			if ($model->process->status== ShipmentProcess::ENTRY_CONFIRM) {
+				echo CHtml::button('Broker Entry Lodge', ['class'=>'broker_final_entry','style'=> 'margin-right:10px;margin-bottom:5px;']);
+			}
+		}
+		if (yii::app()->user->grp != 72) {
+			echo CHtml::button('Generate Invoice', ['class' => 'invoice_gen','style'=> 'margin-left:20px;']);
+			echo CHtml::button('Send Invoice to Client', ['class' => 'send_invoice','style'=> 'margin-left:20px;']);
+			echo '<a class="jqm_link grid_email_btn theclick"  style="margin-left:20px;" href="'.$this->createUrl("customProcess/createEmail", ["id"=>$model->id]).'"  title="Edit Email"></a>';
+		}
+	}elseif(in_array($model->process->status, [ShipmentProcess::INFROM_CUSTOMER_PAY, ShipmentProcess::PAYMENT_RECEIVED])){
+		echo CHtml::button('Resend Invoice to Client', ['class' => 'send_invoice', 'style' => 'margin-left:20px;']);
+		echo '<a class="jqm_link grid_email_btn theclick"  style="margin-left:20px;" href="'.$this->createUrl("customProcess/createEmail", ["id"=>$model->id]).'"  title="Edit Email"></a>';
+	}elseif (in_array($model->process->status, [ShipmentProcess::CONFIRM_PAYMENT])) {
+		if (Yii::app()->user->grp != 72) {
+			// op send broker to pay
+			echo CHtml::button('Broker To Pay', ['class' => 'broker_pay','style' => 'margin-left:20px;']);
+			echo '&nbsp;&nbsp;&nbsp;&nbsp;',CHtml::checkbox('stay_here',@$model->process->mdata['stay_here']),' Stay Here &nbsp;&nbsp;';
+		} else {
+			// broker confirm paid
+			echo CHtml::button('Broker Paid', ['class' => 'broker_paid', 'style' => 'margin-left:20px;']);
+			echo '&nbsp;&nbsp;&nbsp;&nbsp;',CHtml::checkbox('stay_here',@$model->process->mdata['stay_here']),' Stay Here &nbsp;&nbsp;';
+		}
+	} else if (in_array($model->process->status, [ShipmentProcess::INFORM_BROKER_PAY])) {
+		// op confirm broker paid
+		echo CHtml::button('Broker Paid', ['class' => 'broker_paid', 'style' => 'margin-left:20px;']);
+		// echo CHtml::button('Notice Release', ['class' => 'notice_release', 'style' => 'margin-left:20px;']);
+		echo CHtml::button('Customs Done & Release', ['class' => 'custom_done', 'style' => 'margin-left:20px;']);
+		echo '<a class="jqm_link grid_email_btn theclick"  style="margin-left:20px;" href="'.$this->createUrl("customProcess/editNoticeContent", ["id"=>$model->id]).'"  title="Edit Notice Content">Edit Notice Content</a>';
+	} else if (in_array($model->process->status, [ShipmentProcess::BROKER_PAID])) {
+		// echo CHtml::button('Notice Release', ['class' => 'notice_release', 'style' => 'margin-left:20px;']);
+		echo CHtml::button('Customs Done & Release', ['class' => 'custom_done', 'style' => 'margin-left:20px;']);
+		echo '<a class="jqm_link grid_email_btn theclick"  style="margin-left:20px;" href="'.$this->createUrl("customProcess/editNoticeContent", ["id"=>$model->id]).'"  title="Edit Notice Content">Edit Notice Content</a>';
+	}
+}
+if (isset($model->process)&&($model->process->type&1)>0) {
+	if (in_array($model->process->status, [ShipmentProcess::MSG_SENDER, ShipmentProcess::MSG_NEW])) {
+		echo CHtml::button('Resend Require Empp Document', ['class' => 'resend_empp_document','style'=>'margin-right:5px;']);
+		echo '<a class="jqm_link grid_email_btn theclick"  style="margin-left:20px;" href="'.$this->createUrl("customProcess/createEmailM", ["id"=>$model->id,'type'=> Emailog::EMPP_DOCUMENT]).'"  title="Edit Email">Resend Empp</a>';
+	}elseif (in_array($model->process->status, [ShipmentProcess::STATE_EMPP_CUSTOM])) {
+		echo CHtml::button('Resend Require Empp Document', ['class' => 'resend_empp_document','style'=>'margin-right:5px;']);
+		echo '<a class="jqm_link grid_email_btn theclick"  style="margin-left:20px;" href="'.$this->createUrl("customProcess/createEmailM", ["id"=>$model->id,'type'=> Emailog::EMPP_DOCUMENT]).'"  title="Edit Email">Resend Empp</a>';
+		echo '<a class="jqm_link grid_email_btn check_empp2customs"  style="margin-left:20px;" href="'.$this->createUrl("customProcess/createEmailM", ["id"=>$model->id, 'type'=>Emailog::EMPP2CUSTOMS]).'"  title="Send Dox"> EMPP to Customs</a>';
+	} elseif (in_array($model->process->status, [ShipmentProcess::DOC_RECEIVED,ShipmentProcess::DOC_CONFIRMED])) {
+		echo '<a class="jqm_link grid_email_btn check_empp2customs"  style="margin-left:20px;" href="'.$this->createUrl("customProcess/createEmailM", ["id"=>$model->id, 'type'=>Emailog::EMPP2CUSTOMS]).'"  title="Send Dox"> EMPP to Customs</a>';
+	}elseif (in_array($model->process->status, [ShipmentProcess::WAIT_BROKER_FINAL_ENTRY])) {
+		echo CHtml::button('Generate Invoice', ['class' => 'invoice_gen','style'=> 'margin-left:20px;']);
+		echo CHtml::button('Send Invoice to Client', ['class' => 'send_invoice','style'=> 'margin-left:20px;']);
+	}
+
+	if (in_array($model->process->status, [ShipmentProcess::STATE_EMPP_CUSTOM])) {
+		// echo CHtml::button('Notice Release', ['class' => 'notice_release', 'style' => 'margin-left:20px;']);
+		echo CHtml::button('Customs Done & Release', ['class' => 'custom_done', 'style' => 'margin-left:20px;']);
+		echo '<a class="jqm_link grid_email_btn theclick"  style="margin-left:20px;" href="'.$this->createUrl("customProcess/editNoticeContent", ["id"=>$model->id]).'"  title="Edit Notice Content">Edit Notice Content</a>';
+	}
+}
+
+if (isset($model->process)&&($model->process->type&2)>0) {
+	if (in_array($model->process->status, [ShipmentProcess::MSG_SENDER, ShipmentProcess::MSG_NEW,ShipmentProcess::DOC_RECEIVED])) {
+		echo CHtml::button('Resend Require AQIS Document', ['class' => 'resend_aqis_document','style'=>'margin-left:20px;']);
+		echo '<a class="jqm_link grid_email_btn theclick"  style="margin-left:20px;" href="'.$this->createUrl("customProcess/createEmailM", ["id"=>$model->id,'type'=> Emailog::AQIS_DOCUMENT]).'"  title="Edit Email">Resend AQIS</a>';
+	}
+	if (in_array($model->process->status, [ShipmentProcess::DOC_RECEIVED,ShipmentProcess::DOC_CONFIRMED])) {
+		echo CHtml::button('Send AQIS Inv To Customs', ['class' => 'send_aqis_inv_custom']);
+	}
+
+	if (in_array($model->process->status, [ShipmentProcess::STATE_AQIS_CUSTOM])) {
+		// echo CHtml::button('Notice Release', ['class' => 'notice_release', 'style' => 'margin-left:20px;']);
+		echo CHtml::button('Customs Done & Release', ['class' => 'custom_done', 'style' => 'margin-left:20px;']);
+		echo '<a class="jqm_link grid_email_btn theclick"  style="margin-left:20px;" href="'.$this->createUrl("customProcess/editNoticeContent", ["id"=>$model->id]).'"  title="Edit Notice Content">Edit Notice Content</a>';
+		echo CHtml::button('Send AQIS Inv To Customs', ['class' => 'send_aqis_inv_custom']);
+	}
+}
+
+switch ($model->process->status) {
+	case ShipmentProcess::STATE_AQIS_CUSTOM:
+		echo '<a class="jqm_link grid_edit_btn theclick"  style="margin-left:20px;" href="'.$this->createUrl("customProcess/createAqisEmail", ["id"=>$model->id,"action"=>"AQIS Do Not Move","type"=>"aqis_do_not_move"]).'"  title="AQIS Do not Move">AQIS Do not Move</a>';
+		echo CHtml::button('Do not move', ['class' => 'do_not_move', 'style' => 'margin-left:20px;']);
+		break;
+
+	case ShipmentProcess::STATE_AQIS_DONOT_MOVE:
+		echo '<a class="jqm_link grid_edit_btn theclick"  style="margin-left:20px;" href="'.$this->createUrl("customProcess/createAqisEmail", ["id"=>$model->id,"action"=>"AQIS Do Not Move","type"=>"aqis_do_not_move"]).'"  title="AQIS Do not Move">Resend AQIS Do not Move</a>';
+		break;
+
+	case ShipmentProcess::STATE_CONFIRM_INS:
+	case ShipmentProcess::STATE_CONFIRM_DIS:
+		echo '<a class="jqm_link grid_edit_btn theclick"  style="margin-left:20px;" href="'.$this->createUrl("customProcess/generateDisposalRequestForm", ["id"=>$model->id]).'"  title="Edit Notice Content">Generate Disposal Request Form</a>';
+		echo '<a class="jqm_link grid_edit_btn theclick"  style="margin-left:20px;" href="'.$this->createUrl("customProcess/createAqisEmail", ["id"=>$model->id,"action"=>"Send Disposal Booking","type"=>"send_disposal_booking"]).'"  title="Send Disposal Booking">Send Disposal Booking</a>';
+		echo '<a class="jqm_link grid_edit_btn theclick"  style="margin-left:20px;" href="'.$this->createUrl("customProcess/createAqisEmail", ["id"=>$model->id,"action"=>"Request For Invoice","type"=>"request_for_invoice"]).'"  title="Request For Invoice">Request For Invoice</a>';
+
+		echo CHtml::button('Invoice Received', ['class' => 'invoice_received', 'style' => 'margin-left:20px;']);
+		break;
+
+	case ShipmentProcess::STATE_INS_INVOICE_RECEIVED:
+	case ShipmentProcess::STATE_DIS_INVOICE_RECEIVED:
+		echo "Invoice Paid Amount:".CHtml::textField('aqis_invoice_paid_amount',@$model->process->mdata['aqis_invoice_paid_amount'],['style' => 'margin-left:20px;']);
+		echo CHtml::button('Invoice Paid', ['class' => 'invoice_paid', 'style' => 'margin-left:20px;']);
+		break;
+
+	case ShipmentProcess::STATE_INS_INVOICE_PAID:
+		echo '<a class="jqm_link grid_edit_btn theclick"  style="margin-left:20px;" href="'.$this->createUrl("customProcess/createAqisEmail", ["id"=>$model->id,"action"=>"Send To Customs","type"=>"send_to_customs"]).'"  title="Send To Customs">Send To Customs</a>';
+
+		echo CHtml::button('Issued Direction', ['class' => 'issued_direction', 'style' => 'margin-left:20px;']);
+		echo "<p>"."Invoice Paid Amount:".CHtml::textField('aqis_invoice_paid_amount',@$model->process->mdata['aqis_invoice_paid_amount'],['style' => 'margin-left:20px;'])."</p>";
+		break;
+	
+	case ShipmentProcess::STATE_DIS_INVOICE_PAID:
+		echo '<a class="jqm_link grid_edit_btn theclick"  style="margin-left:20px;" href="'.$this->createUrl("customProcess/createAqisEmail", ["id"=>$model->id,"action"=>"Send To Customs","type"=>"send_to_customs"]).'"  title="Send To Customs">Send To Customs</a>';
+
+		echo CHtml::button('Issued Direction', ['class' => 'issued_direction', 'style' => 'margin-left:20px;']);
+		echo "<p>"."Invoice Paid Amount:".CHtml::textField('aqis_invoice_paid_amount',@$model->process->mdata['aqis_invoice_paid_amount'],['style' => 'margin-left:20px;'])."</p>";
+		break;
+
+	case ShipmentProcess::STATE_WAITING_FOR_INSPECTION:
+		echo '<a class="jqm_link grid_edit_btn theclick"  style="margin-left:20px;" href="'.$this->createUrl("customProcess/generateInspectionRequestForm", ["id"=>$model->id]).'"  title="Edit Notice Content">Generate Inspection Request Form</a>';
+
+		echo '<a class="jqm_link grid_edit_btn theclick"  style="margin-left:20px;" href="'.$this->createUrl("customProcess/createAqisEmail", ["id"=>$model->id,"action"=>"Send Inspection Booking","type"=>"send_inspection_booking"]).'"  title="Send Inspection Booking">Send Inspection Booking</a>';
+
+
+		echo CHtml::button('Booking Confirmed', ['class' => 'booking_confirmed', 'style' => 'margin-left:20px;']),'on';
+		echo " Date:",CHtml::textField('confirm_date'.$_GET['tabid'], @$model->process->mdata['confirm_date'], ['class'=>'date_input', 'size' => 10]);
+		echo "<p>"."Invoice Paid Amount:".CHtml::textField('aqis_invoice_paid_amount',@$model->process->mdata['aqis_invoice_paid_amount'],['style' => 'margin-left:20px;'])."</p>";
+		break;
+
+
+	case ShipmentProcess::STATE_WAITING_FOR_DISPOSAL:
+		// echo '<a class="jqm_link grid_edit_btn theclick"  style="margin-left:20px;" href="'.$this->createUrl("customProcess/generateDisposalRequestForm", ["id"=>$model->id]).'"  title="Edit Notice Content">Generate Disposal Request Form</a>';
+		echo '<a class="jqm_link grid_edit_btn theclick"  style="margin-left:20px;" href="'.$this->createUrl("customProcess/createAqisEmail", ["id"=>$model->id,"action"=>"Send Disposal Booking","type"=>"send_disposal_booking"]).'"  title="Send Disposal Booking">Send Disposal Booking</a>';
+
+		echo CHtml::button('Disposal Arranged', ['class' => 'booking_confirmed', 'style' => 'margin-left:20px;']),'on';
+		echo " Date:",CHtml::textField('confirm_date'.$_GET['tabid'], @$model->process->mdata['confirm_date'], ['class'=>'date_input', 'size' => 10]);
+		echo "<p>"."Invoice Paid Amount:".CHtml::textField('aqis_invoice_paid_amount',@$model->process->mdata['aqis_invoice_paid_amount'],['style' => 'margin-left:20px;'])."</p>";
+		break;
+
+	case ShipmentProcess::STATE_DISPOSAL_ARRANGED:
+		echo CHtml::button('DIS Complete', ['class' => 'dis_done', 'style' => 'margin-left:20px;']);
+		echo "<p>"."Invoice Paid Amount:".CHtml::textField('aqis_invoice_paid_amount',@$model->process->mdata['aqis_invoice_paid_amount'],['style' => 'margin-left:20px;'])."</p>";
+		echo '<p> Disposal arranged on:';
+		echo " Date:",CHtml::textField('confirm_date'.$_GET['tabid'], @$model->process->mdata['confirm_date'], ['class'=>'date_input', 'size' => 10])."</p>";
+		break;
+
+	case ShipmentProcess::STATE_INSPECTION_BOOKING_CONFIRMED:
+		echo CHtml::button('Customs Done & Release', ['class' => 'custom_done', 'style' => 'margin-left:20px;']);
+		echo CHtml::button('Generate Invoice', ['class' => 'invoice_gen','style'=> 'margin-left:20px;']);
+		echo CHtml::button('Send Invoice to Client', ['class' => 'send_invoice','style'=> 'margin-left:20px;']);
+		echo "<p>"."Invoice Paid Amount:".CHtml::textField('aqis_invoice_paid_amount',@$model->process->mdata['aqis_invoice_paid_amount'],['style' => 'margin-left:20px;'])."</p>";
+
+
+		echo '<p> Booking Confirmed on:';
+		echo " Date:",CHtml::textField('confirm_date'.$_GET['tabid'], @$model->process->mdata['confirm_date'], ['class'=>'date_input', 'size' => 10])."</p>";
+		break;
+
+	case ShipmentProcess::STATE_INS_NOT_OK:
+		echo '<a class="jqm_link grid_edit_btn theclick"  style="margin-left:20px;" href="'.$this->createUrl("customProcess/createAqisEmail", ["id"=>$model->id,"action"=>"INS Not OK","type"=>"ins_not_ok"]).'"  title="INS Not OK">Send INS Not OK Email</a>';
+		break;
+
+	case ShipmentProcess::STATE_DISPOSAL_COMPLETE:
+		echo '<a class="jqm_link grid_edit_btn theclick"  style="margin-left:20px;" href="'.$this->createUrl("customProcess/createAqisEmail", ["id"=>$model->id,"action"=>"Send Record To Customs","type"=>"send_record_to_customs"]).'"  title="Send Record To Customs">Send Record To Customs</a>';
+		echo "<p>"."Invoice Paid Amount:".CHtml::textField('aqis_invoice_paid_amount',@$model->process->mdata['aqis_invoice_paid_amount'],['style' => 'margin-left:20px;'])."</p>";
+		echo '<p> Disposal arranged on:';
+		echo " Date:",CHtml::textField('confirm_date'.$_GET['tabid'], @$model->process->mdata['confirm_date'], ['class'=>'date_input', 'size' => 10])."</p>";
+		echo CHtml::button('Disposal Done', ['class' => 'disposal_done', 'style' => 'margin-left:20px;']);
+		break;
+	case ShipmentProcess::STATE_DISPOSAL_DONE:
+		echo "<p>"."Invoice Paid Amount:".CHtml::textField('aqis_invoice_paid_amount',@$model->process->mdata['aqis_invoice_paid_amount'],['style' => 'margin-left:20px;'])."</p>";
+		echo '<p> Disposal arranged on:';
+		echo " Date:",CHtml::textField('confirm_date'.$_GET['tabid'], @$model->process->mdata['confirm_date'], ['class'=>'date_input', 'size' => 10])."</p>";
+		break;
+
+	default:
+		// code...
+		break;
+}
+
+
+?>
+<br>
+<?php
+
+echo CHtml::link("Confirm All Files",$this->createURL("imParcel/fileConfirmAll")."?id=".$model->id,['class' => 'confirm_all grid_edit_btn','style'=>"float:right"]);
+
+$fr = new FileRepo('search');
+$fr->unsetAttributes();
+if (empty($_GET['FileRepo'])) {
+	$fr->theTypes = [18,19,20,21,FileRepo::AQIS_INSPECTION_FORM,FileRepo::AQIS_DISPOSAL_FORM];
+} else {
+	$fr->attributes=$_GET['FileRepo'];
+	if (empty($fr->theTypes)) {
+		$fr->theTypes = [18,19,20,21,FileRepo::AQIS_INSPECTION_FORM,FileRepo::AQIS_DISPOSAL_FORM];
+	}
+}
+$fr->fid = $model->id;
+$mf = Acl::hasAccess('B:org/manageFile');
+
+$this->widget('zii.widgets.grid.CGridView', [
+	'id'=>$_GET['tabid'].'_excofile-grid',
+	'cssFile' => false,
+	'summaryText'=>'',
+	'dataProvider'=> $fr->search(),
+	'afterAjaxUpdate'=>'function(){initFileList'.$model->id.'();}',
+	'filter'=>$fr,
+	'columns'=>[
+		['name' => 'name', 'type' => 'raw', 'value' => '"<a href=\"".Yii::app()->baseUrl."/filerepo/".$data->hash."/".$data->name."\" target=\"_blank\">".$data->name."</a>"'],
+		[
+			'name'=>'size',
+			'value'=>'$data->formatSize()',
+			'filter' => false,
+		],
+		'date',
+		['name'=>'type','value'=>'@FileRepo::$custom_type[$data->type]','filter'=>CHtml::dropDownList('FileRepo[type]', $fr->type, FileRepo::$custom_type, ['prompt'=>'All']),],
+		['name' => 'status', 'type'=>'raw', 'value' => '$data->getStatus()',
+			'filter'=>CHtml::dropDownList('FileRepo[status]', $fr->status, FileRepo::$states, ['prompt'=>$this->t('All')]) ],
+		[
+			'class'=>'CButtonColumn',
+			'template'=>'{confirm}{update}{delete}',
+			'buttons'=>[
+				'confirm' => [
+					'url'=>'Yii::app()->createURL("imParcel/fileUpdate")."?id=".$data->id."&&FileRepo[status]=30"',
+					'imageUrl'=>false,
+					'visible'=>'true',
+					'options' => ['class' => 'confirm_file grid_edit_btn', 'label'=>$this->t('Confirm'), 'title' => '$data->id' , 'data-id' => '$data->id'],
+				],
+				'update' => [
+					'url'=>'Yii::app()->createUrl("imParcel/fileUpdate",array("id"=>$data->id))',
+					'imageUrl'=>false,
+					'visible'=>'true',
+					'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Update'), 'title' => '$data->name'],
+				],
+				'delete' => [
+					'imageUrl'=>false,
+					'url'=>'Yii::app()->createUrl("filerepo/delete", array("id"=>$data->id))',
+					'options' => ['class' => 'grid_delete_btn'],
+				],
+			],
+		],
+	],
+]);
+
+echo '<br />', CHtml::label($this->t('Upload Files'), 'uploader');
+$pphash = FileRepo::uploadHash($model, 19);
+$this->widget('application.extensions.plupload.PluploadWidget', [
+	'config' => [
+		'url' => $this->createUrl('customProcess/upload/')."?hash=".$pphash,
+		'max_file_size' => Yii::app()->params['maxFileSize'],
+		'unique_names' => true,
+		'file_list_height' => 60,
+		'visible_header' => false,
+		'filters' => [
+			['title' => Yii::t('app', 'JPG, PDF, Word, Html, Excel files'), 'extensions' => 'pdf,doc,docx,xls,xlsx,jpg,png,htm,html'],
+		],
+		//'resize' => array('width' => 800, 'height' => 800, 'quality' => 80),
+		'language' => Yii::app()->language,
+		'max_file_number' => 2,
+		'autostart' => false,
+		'jquery_ui' => false,
+		'reset_after_upload' => true,
+	],
+	'callbacks' => [
+		'FileUploaded' => 'function(up,file,response){$("#'.$_GET['tabid'].'").data("panel").trigger("reload_excofile_grid");}',
+	],
+	'id' => $_GET['tabid'].'_excofile_uploader',
+]);
+?>
+<div class="row">
+	<?php echo CHtml::label('Custom Note', 'custom_note'); ?>
+	<?php echo CHtml::textArea('custom_note', @$model->mdata['custom_note'], ['rows'=>2, 'cols' => 60]);
+	echo '<br/>', CHtml::button('Update', ['class' => 'update_note']);?>
+ </div>
+
+ <div class="row">
+	<?php echo CHtml::label('Shipment Memo', 'Shipment Memo'); ?>
+	<?php echo CHtml::textArea('memo', @$model->can, ['rows'=>2, 'cols' => 60]);?>
+ </div>
+<br>
+
+<?php if (Yii::app()->user->grp != 72) { ?>
+<?php
+$invoices = Invoice::model()->findAll('pid= :pid AND status NOT IN (10,8)', [':pid' => $model->id]);
+
+if(empty($invoices)){
+	$app_name = Yii::app()->name;
+	Yii::app()->name = 'TLA';
+	$invoices = Invoice::model()->findAll('pid = :pid AND type in(41,45) AND status NOT IN (10,8)', [':pid' => $model->id]);
+	Yii::app()->name = $app_name;
+}
+$dp = new CArrayDataProvider($invoices, [
+	'id' => 'custom_casual_invoices-'.$_GET["tabid"]
+]);
+$dp->pagination=['pageSize' => 30,];
+$this->widget('zii.widgets.grid.CGridView', [
+	'id'=>'custom_casual_invoice_grid',
+	'cssFile' => false,
+	'dataProvider' => $dp,// $dp->search(),
+	'filter' => null,
+	'enableSorting' => false,
+	'columns'=>[
+		['name' => 'no', 'value' => '$data->no', ],
+		['name' => 'bill_to', 'value' => '$data->cust->name', ],
+		['name' => 'status', 'value' => '$data->getStatus()'],
+		['header' => 'Invoice Total', 'value' => '$data->getCurrency().$data->total', ],
+		[
+			'class'=>'oButtonColumn',
+			'template'=>'{view} ',
+			'buttons'=>[
+				'view' => [
+					'url' => 'Yii::app()->createURL("invoice/print", array("id" => $data->id))',
+					'imageUrl'=>false,
+					'options' => ['class' => 'grid_view_btn', 'target' => '_blank'],
+				],
+			
+			],
+		],
+	]]);
+?>
+<?php } ?>
+
+</div>
+<script type="text/javascript">
+function initFileList<?=$model->id?>()
+{
+	var win = $('#<?=$_GET["tabid"];?>').data('panel');
+	var tab = $('#<?=$_GET["parentTab"];?>');
+	var panel = $('#<?=$_GET["parentTab"];?>').data('panel');
+	$('.confirm_file',win).on('click',function(event){
+		event.preventDefault();
+		$.get($(this).attr('href'),function(r){
+				r = JSON.parse(r);
+				if(r.done){
+					myApp.notice("Confirmed!");
+					$('#<?=$_GET['tabid']?>_excofile-grid', win).yiiGridView('update');
+				}
+		});
+	});
+}
+$(function(){
+	var win = $('#<?=$_GET["tabid"];?>').data('panel');
+	var tab = $('#<?=$_GET["parentTab"];?>');
+	var panel = $('#<?=$_GET["parentTab"];?>').data('panel');
+	
+	tab.unbind('reload_custom_grid').bind('reload_custom_grid', function(){
+		$('#<?=$_GET["parentTab"];?>_custom_grid', panel).yiiGridView('update');
+		return false;
+	});
+	
+	win.unbind('reload_excofile_grid').bind('reload_excofile_grid', function(){
+		$('#<?=$_GET["tabid"];?>_excofile-grid').yiiGridView('update');
+		return false;
+	});
+	win.off('change', 'select.pfile_status').on('change', 'select.pfile_status', function(){
+		$.post('files/status', {'id': $(this).data('id'), 'status': $(this).val() });
+	});
+		$(document).off('click','#<?=$_GET["parentTab"];?>_excofile-grid a.grid_delete_btn');
+
+	
+		$('.resend_document', win).click(function(){
+		if(confirm('Are you sure to Resend Document Requirement?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("customProcess/SendMessage", ["id" => $model->id]);?>', function(r){
+				if(r == 'done'){
+					myApp.notice('Done', 5000);
+				}else{
+					myApp.alert(r, false);
+				}
+				tab.trigger('reload_custom_grid');
+			});
+		}
+	return false;   
+	});
+	
+	$('.resend_empp_document', win).click(function(){
+		if(confirm('Are you sure to Resend Empp Document Requirement?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("customProcess/requireEmppDocument", ["id" => $model->id]);?>', function(r){
+				if(r == 'done'){
+					myApp.notice('Done', 5000);
+				}else{
+					myApp.alert(r, false);
+				}
+				tab.trigger('reload_custom_grid');
+			});
+		}
+	return false;
+	});
+	$('.resend_aqis_document', win).click(function(){
+		if(confirm('Are you sure to Resend Empp Document Requirement?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("customProcess/requireAqisDocument", ["id" => $model->id]);?>', function(r){
+				if(r == 'done'){
+					myApp.notice('Done', 5000);
+				}else{
+					myApp.alert(r, false);
+				}
+					tab.trigger('reload_custom_grid');
+			});
+		}
+	return false;
+	});
+	
+	$('.require_loa', win).click(function(){
+		if(confirm('Are you sure to require LOA from customer?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("customProcess/requireLoa", ["id" => $model->id]);?>', function(r){
+				if(r == 'done'){
+					myApp.notice('Done', 5000);
+				}else{
+					myApp.alert(r, false);
+				}
+				tab.trigger('reload_custom_grid');
+			});
+		}
+		
+		return false;
+	});
+
+	$('.require_email', win).click(function(){
+		if(confirm('Are you sure to send SMS to customer?')){
+			//$(this).hide();
+			$.get('<?=$this->createUrl("customProcess/requireEmail", ["id" => $model->id]);?>', function(r){
+				if(r == 'done') {
+					myApp.notice('Done', 5000);
+				} else {
+					myApp.alert(r, false);
+				}
+				tab.trigger('reload_custom_grid');
+			});
+		}
+		return false;
+	});
+	
+		$('.send_aqis_inv_custom', win).click(function(){
+		if(confirm('Are you sure to send email to custom for AQIS?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("customProcess/sendAqsiToCustom", ["id" => $model->id]);?>', function(r){
+				if(r == 'done'){
+					myApp.notice('Done', 5000);
+				}else{
+					myApp.alert(r, false);
+				}
+				tab.trigger('reload_custom_grid');
+			});
+		}
+		
+		return false;
+	});
+	
+		$('.send_to_broker',win).click(function(){
+		var broker_id=<?=empty($model->process->broker_id)?"0":$model->process->broker_id?>;
+		if(broker_id<=0){
+			alert('Please Choose the Broker for Hv declaration!');
+			return false;
+		}
+		if(confirm('Are you sure to Confirm Document All right, and sent the right document to flag status?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("customProcess/sendtoBrokerFirst", ["id" => $model->id]);?>', function(r){
+				if(r == 'done'){
+					myApp.notice('Done', 5000);
+				}else{
+					myApp.alert(r, false);
+				}
+				tab.trigger('reload_custom_grid');
+			});
+		}
+		return false;
+	});
+	
+	$('.entry_received', win).click(function(){
+		if(confirm('Are you sure to Confirm Document All right, and please sent the right document to flag status?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("customProcess/entrytoCheck", ["id" => $model->id]);?>', function(r){
+				if(r == 'done'){
+					myApp.notice('Done', 5000);
+				}else{
+					myApp.alert(r, false);
+				}
+				tab.trigger('reload_custom_grid');
+			});
+		}
+		return false;
+	});
+	
+	
+	
+	$('.broker_pay', win).click(function(){
+		var broker_id=<?=empty($model->process->broker_id)?"0":$model->process->broker_id?>;
+		var str = '';
+		$("input[name='stay_here']:checkbox:checked").each(function(){ 
+			str = '?stay_here=1'
+		}) 
+		if(broker_id<=0){
+			alert('Please Choose the Broker for Hv declaration!');
+			return false;
+		}
+		if(confirm('Are you sure to Confirm broker to pay?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("customProcess/brokertopay", ["id" => $model->id]);?>'+str, function(r){
+				if(r == 'done'){
+					myApp.notice('Done', 5000);
+				}else{
+					myApp.alert(r, false);
+				}
+				tab.trigger('reload_custom_grid');
+			});
+		}
+	return false;
+	});
+
+	$('.broker_paid', win).click(function() {
+		var broker_id = <?=empty($model->process->broker_id)?"0":$model->process->broker_id?>;
+		var str = '';
+		$("input[name='stay_here']:checkbox:checked").each(function(){ 
+			str = '?stay_here=1'
+		}) 
+		if (broker_id <= 0) {
+			alert('Please Choose the Brokker for Hv declaration!');
+			return false;
+		}
+		if (confirm('Are you sure to Confirm broker paid?')) {
+			$(this).hide();
+			$.get('<?=$this->createUrl("customProcess/brokerpaid", ["id" => $model->id]);?>'+str, function(r) {
+				if (r == 'done') {
+					myApp.notice('Done', 5000);
+				} else {
+					myApp.alert(r, false);
+				}
+				tab.trigger('reload_custom_grid');
+			});
+		}
+		return false;
+	});
+	
+	$('.invoice_gen', win).click(function(){
+		if(confirm('Are you sure to generate Invoice ?')){
+			$(this).hide();
+			$.ajax({
+				'url': '<?=$this->createUrl("customProcess/createCasualInvoice", ["id" => $model->id]);?>',
+				'type': 'POST',
+				'data': { 'ssdate': $('#ssdate', win).val() },
+				success: function(r) {
+					if(r == 'done'){
+						myApp.notice('Done', 5000);
+					}else{
+						myApp.alert(r, false);
+					}
+					$("custom_casual_invoice_grid").yiiGridView.update("custom_casual_invoice_grid");
+					tab.trigger('reload_custom_grid');
+				}
+			});
+		}
+		return false;
+	});
+	
+	$('.send_invoice', win).click(function(){
+		if(confirm('Are you sure to send invoice to client?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("customProcess/sendInvoiceToCasual", ["id" => $model->id]);?>', function(r){
+				if(r == 'done'){
+					myApp.notice('Done', 5000);
+				}else{
+					myApp.alert(r, false);
+				}
+				tab.trigger('reload_custom_grid');
+			});
+		}
+	return false;
+	});
+	
+	$('.confirm_payment', win).click(function(){
+		if(confirm('Are you sure to Confirm Payment?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("customProcess/paymentConfirm", ["id" => $model->id]);?>', function(r){
+				if(r == 'done'){
+					myApp.notice('Done', 5000);
+				}else{
+					myApp.alert(r, false);
+				}
+				tab.trigger('reload_custom_grid');
+			});
+		}
+	return false;
+	});
+	
+		
+	$('.broker_final_entry', win).click(function(){
+		if(confirm('Are you sure to Request Final Entry From Broker?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("customProcess/requestFinalEntry", ["id" => $model->id]);?>', function(r){
+				if(r == 'done'){
+					myApp.notice('Done', 5000);
+				}else{
+					myApp.alert(r, false);
+				}
+				tab.trigger('reload_custom_grid');
+			});
+		}
+	return false;
+	});
+	
+	$('.empp_custom', win).click(function(){
+		if(confirm('Are you sure to you already send the Empp documents to the Customs?')){
+			$(this).hide();
+			$.get('<?=$this->createUrl("customProcess/emppCustom", ["id" => $model->id]);?>', function(r){
+				if(r == 'done'){
+					myApp.notice('Done', 5000);
+				}else{
+					myApp.alert(r, false);
+				}
+				tab.trigger('reload_custom_grid');
+			});
+		}
+		return false;
+	});
+
+
+	$('a.check_empp2customs', win).on('click', function(){
+		var ok = false;
+		jQuery.ajax({
+			url: '<?=$this->createUrl("customProcess/emppCustom", ["id" => $model->id]);?>',
+			success: function (r) {
+				ok = r;
+			},
+			async: false,
+			dataType: 'json'
+		});
+		if(!ok){
+			myApp.alert('Please confirm files first');
+		}
+		return ok;
+	});
+
+	var params = { width:1680, height:[1,2] };
+	var str = jQuery.param( params );
+	//console.log(str);
+	
+	$('.updateStatus',win).click(function(){
+		var term_checked=[];
+		$("input[name='inv_terms[]']:checked",win).each(function(){
+			term_checked.push(parseInt($(this).val()))
+		});
+		var qs={inv_terms:term_checked};
+		if(confirm('Are you sure to update?')){
+			ifs = ['custom_status', 'broker_id', 'ssdate', 'cabill_name', 'cabill_addr', 'fw','direction_due_date'];
+			for(i in ifs){
+				if($("#"+ifs[i], win).length > 0) qs[ifs[i]] = $("#"+ifs[i], win).val();
+			}
+			$.post('<?=$this->createUrl("customProcess/process", ["id"=>$model->id]);?>', $.param(qs), function(r){
+				if(r == 'done'){
+					myApp.notice('Done', 5000);
+				}else{
+					myApp.alert(r, false);
+				}
+				tab.trigger('reload_custom_grid');
+			});
+		}
+	});
+
+	$('.do_not_move',win).click(function(){
+		$(this).prop("disabled", true);
+		var qs={};
+		$.post('<?=$this->createUrl("customProcess/sendAqisEmail", ["id"=>$model->id]);?>', $.param(qs), function(r){
+				r = JSON.parse(r);
+				console.log(r);
+				if(r.done){
+					$('.do_not_move',win).removeAttr("disabled");
+					myApp.notice('Done', 5000);
+				}else{
+					myApp.alert(r, false);
+					$('.do_not_move',win).removeAttr("disabled");
+				}
+				tab.trigger('reload_custom_grid');
+		});
+	});
+
+	$('.invoice_received',win).click(function(){
+		var qs={status:<?=$model->process->status?>,action:"invoice received"};
+		if(confirm('Are you sure the invoice was received?')){
+			goNextAqisStatus(qs)
+		}
+	});
+
+	$('.invoice_paid',win).click(function(){
+		var qs={status:<?=$model->process->status?>,action:"invoice paid",mdata:{aqis_invoice_paid_amount:$('#aqis_invoice_paid_amount',win).val()}};
+		if(confirm('Are you sure the invoice was paid?')){
+			goNextAqisStatus(qs)
+		}
+	});
+
+	$('.issued_direction',win).click(function(){
+		var qs={status:<?=$model->process->status?>,action:"Issued Direction"};
+		if(confirm('Are you sure the direction was issued?')){
+			goNextAqisStatus(qs)
+		}
+	});
+
+	$('.disposal_done',win).click(function(){
+		var qs={status:<?=$model->process->status?>,action:"Disposal Done"};
+		if(confirm('Are you sure the direction was done?')){
+			goNextAqisStatus(qs)
+		}
+	});
+
+	$('.booking_confirmed',win).click(function(){
+		var qs={status:<?=$model->process->status?>,action:"booking confirmed",mdata:{confirm_date:$('#confirm_date<?=$_GET["tabid"]?>',win).val()}};
+		if(confirm('Are you sure the confirm booking?')){
+			goNextAqisStatus(qs)
+		}
+	});
+
+	$('.dis_done',win).click(function(){
+		var qs={status:<?=$model->process->status?>,action:"disposal complete",};
+		if(confirm('Are you sure to complete disposal?')){
+			goNextAqisStatus(qs)
+		}
+	});
+
+
+	function goNextAqisStatus(qs)
+	{
+		$.post('<?=$this->createUrl("customProcess/goNextAqisStatus", ["id"=>$model->id]);?>', $.param(qs), function(r){
+				r= JSON.parse(r);
+				if(r.done){
+					myApp.notice('Done', 5000);
+				}else{
+					myApp.alert(r.msg, false);
+				}
+				tab.trigger('reload_custom_grid');
+				win.trigger('click');
+			});
+	}
+
+	
+	$('.custom_done',win).click(function(){
+	if(confirm('Are you sure to Confirm custom process done?')){
+		$.post('<?=$this->createUrl("customProcess/process", ["id"=>$model->id]);?>', {"custom_status": <?=in_array($model->process->status, [ShipmentProcess::STATE_INSPECTION_BOOKING_CONFIRMED,ShipmentProcess::STATE_DISPOSAL_COMPLETE])?ShipmentProcess::STATE_AQIS_CUSTOMS_DONE:ShipmentProcess::CUSTOM_DONE?>}, function(r){
+			if(r == 'done'){
+					myApp.notice('Done', 5000);
+				}else{
+					myApp.alert(r, false);
+				}
+			tab.trigger('reload_custom_grid');
+		});
+	} 
+   });
+	
+	
+	// $('.notice_release',win).click(function(){
+	// if(confirm('Are you sure to notice release?')){
+	// 	$.get('<?=$this->createUrl("customProcess/noticeDelivery", ["id"=>$model->id]);?>',function(r){
+	// 		if(r == 'done'){
+	// 				myApp.notice('Done', 5000);
+	// 			}else{
+	// 				myApp.alert(r, false);
+	// 			}
+	// 			tab.trigger('reload_custom_grid');
+	// 	});
+	// } 
+	// });
+	
+	$('.update_note',win).click(function(){
+		var note=$('#custom_note',win).val();
+		var data={"custom_note":note,"id":<?=$model->id?>};
+		$.ajax({
+				url:'<?=Yii::app()->createUrl('customProcess/update')?>',
+				data:data,
+				method:'POST',
+				success:function(r){
+					if(r == 'done'){
+							myApp.notice('Done', 5000);
+						}else{
+							myApp.alert(r, false);
+					}},
+			});
+	});
+	$('.theclick',win).click(function(){
+		win.jqmHide();
+	});
+   
+   $("#copy_address",win).on('click',function(e){
+	var type=$('#link_type',win).val();
+		e.preventDefault();
+		$.ajax({
+			url: '<?=$this->createUrl("customProcess/copyLink", ["id"=>$model->id]);?>'+"?type="+type,
+			async:false,
+			success:function(msg){
+				if(msg){
+				copyToClipboard(msg);   
+				myApp.notice('Copy Successfully',500);
+				}
+			}
+		});
+		});
+		function copyToClipboard(msg) {
+		var temp = $("<input>",win);
+			$("body").append(temp);
+			temp.val(msg);
+			temp.select();
+			document.execCommand("copy");
+			temp.remove();
+	}
+
+	$('.generate_st', win).on('click', function(e) {
+		e.preventDefault();
+		$.ajax({
+			'url': '<?=$this->createUrl("customProcess/generateST", ["id" => $model->id]);?>',
+			'type': 'POST',
+			'data': { 'ssdate': $('#ssdate',win).val() },
+			success: function(r) {
+				r = JSON.parse(r);
+				if (r['done'] == true) {
+					myApp.notice('Done', 5000);
+				} else {
+					myApp.alert(r['msg'], false);
+				}
+				tab.trigger('reload_custom_grid');
+			}
+		});
+	});
+
+	$('.confirm_file',win).on('click',function(event){
+		event.preventDefault();
+		$.get($(this).attr('href'),function(r){
+				r = JSON.parse(r);
+				if(r.done){
+					myApp.notice("Confirmed!");
+					$('#<?=$_GET['tabid']?>_excofile-grid', win).yiiGridView('update');
+				}
+		});
+	});
+
+	$('.confirm_all',win).on('click',function(event){
+		event.preventDefault();
+		if(confirm('Are you sure to confirm all files?')){
+
+			$.get($(this).attr('href'),function(r){
+					r = JSON.parse(r);
+					if(r.done){
+						myApp.notice("Confirmed!");
+						$('#<?=$_GET['tabid']?>_excofile-grid', win).yiiGridView('update');
+					}
+			});
+		}
+	});
+	
+});
+</script>
+

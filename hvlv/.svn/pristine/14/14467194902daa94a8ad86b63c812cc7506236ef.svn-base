@@ -1,0 +1,11339 @@
+<?php
+class ReconcileService extends Service
+{
+	public $appName = "";
+	private $errors = [];
+	/**
+	**@param type the type of invoice courier, broker or terminal
+	**@param file the invoice file
+	**@param currency the currenct of the invoice
+	**@param rate_option this is the code of org_rate
+	**@param invoice_amount the amount of invoice for double check
+	**@param invoice_date the date of the invoice
+	**@param invoice_template the template type of the invoice
+	**@param invoice_no the number of the invoice
+	*/
+	public function addInvoice($type,$file,$currency,$invoiceAmount,$invoiceDate,$invoiceTemplate,$invoiceNo,$orgId = false)
+	{
+		$this->appName = Yii::app()->name;
+		if($invoiceTemplate=='OTHER'&&empty($orgId))
+		{
+			return ["done"=>false,"msg"=>'Need Supplier Id when use OTHER template'];
+		}
+		$invoice = $this->prepareSupplierInvoiceData($file,$type,$invoiceTemplate,$invoiceDate,$invoiceNo,$currency,$orgId);
+		$errors = $invoice[2];
+		if(empty($invoice[1]) or (is_array($invoice[0])&&empty($invoice[0])))
+		{
+			return ["done"=>false,"msg"=>'Error:'.json_encode($errors)];
+		}
+		if(!is_array($invoice[0]))
+		{
+			if(!$invoice[0])
+			{
+				return ["done"=>false,"msg"=>$invoice[1]];
+			}
+
+			if(abs(floatval($invoiceAmount)-floatval($invoice[0]->total_ex_gst))>0.009)
+			{
+				return ["done"=>false,"msg"=>json_encode($errors).'The input invoice mount are '.$invoiceAmount.', but the calculated amount exclude gst are '.$invoice[0]->total_ex_gst];
+			}
+		}else
+		{
+			$total_ex_gst = 0;
+			foreach ($invoice[0] as $key => $inv) {
+				$total_ex_gst+=$inv->total_ex_gst;
+			}
+			if(abs(floatval($invoiceAmount)-floatval($total_ex_gst))>0.009)
+			{
+				return ["done"=>false,"msg"=>json_encode($errors).'The input invoice mount are '.$invoiceAmount.', but the calculated amount exclude gst are '.$total_ex_gst];
+			}
+		}
+		if($this->appName=='TLA')
+		{
+			$transaction = Yii::app()->db_tla->beginTransaction();
+		}else
+		{
+			$transaction = Yii::app()->db->beginTransaction();
+		}
+		try {
+			if(is_array($invoice[0]))
+			{
+				$supplierInvoiceArr = $invoice[0];
+				$supplierInvoiceArrLines = $invoice[1];
+				foreach ($supplierInvoiceArr as $key => &$supplierInvoice)
+				{
+					$supplierInvoice->mdata['template'] = $invoiceTemplate;
+					$supplierInvoice->save();
+					$supplierInvoiceLines = &$supplierInvoiceArrLines[$supplierInvoice->inv_no];
+					foreach ($supplierInvoiceLines as $key => &$line) {
+						$line->inv_id = $supplierInvoice->id;
+						if(!$line->save())
+						{
+							print_r($supplierInvoice);
+							print_r($line);
+							$transaction->rollback();
+							return ["done"=>false,"msg"=>'Save Supplier Invoice to Si Reconcile Failure'];
+						}
+					}
+				}
+			}else
+			{
+				$supplierInvoice = $invoice[0];
+				$supplierInvoice->mdata['template'] = $invoiceTemplate;
+				$supplierInvoice->save();
+				$supplierInvoiceLines = $invoice[1];
+				foreach ($supplierInvoiceLines as $key => $line) {
+					$line->inv_id = $supplierInvoice->id;
+					if(!$line->save())
+					{
+						print_r($supplierInvoice);
+						print_r($line);
+						$transaction->rollback();
+						return ["done"=>false,"msg"=>'Save Supplier Invoice to Si Reconcile Failure'];
+					}
+				}
+			}
+			switch ($supplierInvoice->mdata['template']) {
+				case 'AUSPOST':
+				case 'AUSPOST-item':
+					if(count($supplierInvoiceLines)>100&&function_exists('fastcgi_finish_request'))
+					{
+						echo json_encode(["done"=>false,"msg"=>'Number of Lines is large. Saving Supplier Invoice in background for automatic importing details']);
+						ignore_user_abort(true);
+						set_time_limit(0);
+						fastcgi_finish_request();
+					}
+					$transaction->commit();
+
+					if($this->appName=='TLA')
+					{
+						$transaction = Yii::app()->db_tla->beginTransaction();
+					}else
+					{
+						$transaction = Yii::app()->db->beginTransaction();
+					}
+					$result = $this->saveAuspostSupplierInvoiceToSiReconcile($supplierInvoice,$supplierInvoiceLines,false);
+					if(!empty($result))
+					{
+						$transaction->commit();
+					}
+					break;
+				case 'Aupost-Weight-Check':
+					$result = $this->saveAuspostWeightCheckSiReconcile($supplierInvoice,$supplierInvoiceLines);
+					if($result===true)
+					{
+						$transaction->commit();
+					}
+					break;
+				case 'consol_manual_multi':
+				case 'consol_manual_weight':
+				case 'consol_manual_brownways':
+					$result = $this->saveMultiManualSupplierInvoiceToSiReconcile($supplierInvoiceArr,$supplierInvoiceArrLines);
+					if($result===true)
+					{
+						$transaction->commit();
+					}
+					break;
+				// case 'consol_manual_brownways':
+				// 	$result = $this->saveBrownwaysManualSupplierInvoiceToSiReconcile($supplierInvoice,$supplierInvoiceArrLines);
+				// 	if($result===true)
+				// 	{
+				// 		$transaction->commit();
+				// 	}
+				// 	break;
+				case 'consol_manual':
+					$result = $this->saveManualSupplierInvoiceToSiReconcile($supplierInvoice,$supplierInvoiceLines);
+					if($result===true)
+					{
+						$transaction->commit();
+					}
+					break;
+				case 'Master':
+				case 'Autumn':
+					$result = $this->saveBrokerSupplierInvoiceToSiReconcile($supplierInvoiceArr,$supplierInvoiceArrLines);
+					if($result===true)
+					{
+						$transaction->commit();
+					}
+					break;
+				case 'Dnata':
+				case 'Qantas':
+				case 'Menzies':
+					$result = $this->saveTerminalSupplierInvoiceToSiReconcile($supplierInvoice,$supplierInvoiceLines);
+					if($result===true)
+					{
+						$transaction->commit();
+					}
+					break;
+				case 'AMI':
+					$result = $this->saveTerminalMultiSupplierInvoiceToSiReconcile($supplierInvoiceArr,$supplierInvoiceArrLines);
+					if($result===true)
+					{
+						$transaction->commit();
+					}
+					break;
+				case 'TLD-supplier':
+					$result = $this->saveTLDSupplierInvoiceToSiReconcile($supplierInvoice,$supplierInvoiceLines,false);
+					if($result===true||$result==2)
+					{
+						$transaction->commit();
+					}
+					break;
+				case 'UBI-toll-surcharge':
+					$result = $this->saveUBITollSupplierInvoiceToSiReconcile($supplierInvoice,$supplierInvoiceLines,false);
+					if($result===true||$result==2)
+					{
+						$transaction->commit();
+					}
+					break;
+
+				default:
+					if((count($supplierInvoiceLines)>100||in_array($supplierInvoice->mdata['template'],["UBI-toll"]))&&function_exists('fastcgi_finish_request'))
+					{
+						echo json_encode(["done"=>false,"msg"=>'Number of Lines is large. Saving Supplier Invoice in background for automatic importing details']);
+						ignore_user_abort(true);
+						set_time_limit(0);
+						fastcgi_finish_request();
+					}
+					$transaction->commit();
+					$result = $this->saveSupplierInvoiceToSiReconcile($supplierInvoice,$supplierInvoiceLines);
+					break;
+			}
+
+			if($result===true)
+			{
+				if(!empty($supplierInvoiceArr))
+				{
+					$oldFr = null;
+					for ($i=0; $i <count($supplierInvoiceArr) ; $i++) { 
+						if(!empty($oldFr))
+						{
+							$fr = new FileRepo();
+							$fr->setAttributes($oldFr->getAttributes());
+							$fr->fid = $supplierInvoiceArr[$i]->rec->id;
+							$fr->save();
+						}else
+						{
+							$uploadType = FileRepo::SI_CONFIRM_FILE;
+						 	$pphash = "";
+							$pphash = FileRepo::uploadHash($supplierInvoiceArr[$i]->rec, $uploadType);
+							$fr = new FileRepo();
+							$fr->store($file,$pphash);
+							$oldFr = $fr;
+						}
+					}
+				}else
+				{
+						$uploadType = FileRepo::SI_CONFIRM_FILE;
+					 	$pphash = "";
+						$pphash = FileRepo::uploadHash($supplierInvoice->rec, $uploadType);
+						$fr = new FileRepo();
+						$fr->store($file,$pphash);
+				}
+			}elseif($result==2)
+			{
+				if(!empty($supplierInvoiceArr))
+				{
+					$oldFr = null;
+					for ($i=0; $i <count($supplierInvoiceArr) ; $i++) { 
+						if(!empty($oldFr))
+						{
+							$fr = new FileRepo();
+							$fr->setAttributes($oldFr->getAttributes());
+							$fr->fid = $supplierInvoiceArr[$i]->rec->id;
+							$fr->save();
+						}else
+						{
+							$uploadType = FileRepo::SI_CONFIRM_FILE;
+						 	$pphash = "";
+							$pphash = FileRepo::uploadHash($supplierInvoiceArr[$i]->rec, $uploadType);
+							$fr = new FileRepo();
+							$fr->store($file,$pphash);
+							$oldFr = $fr;
+						}
+					}
+				}else
+				{
+						$uploadType = FileRepo::SI_CONFIRM_FILE;
+					 	$pphash = "";
+						$pphash = FileRepo::uploadHash($supplierInvoice->rec, $uploadType);
+						$fr = new FileRepo();
+						$fr->store($file,$pphash);
+				}
+
+				return ["done"=>false,"msg"=>'Number of Lines are too many. Saving Supplier Invoice in background for automatic importing details'];
+			}else
+			{
+				return ["done"=>false,"msg"=>'Save Supplier Invoice to Si Reconcile Failure'];
+			}
+		}catch(Exception $ex)
+		{	
+			switch($supplierInvoice->mdata['template'])
+			{
+				case 'AUSPOST':
+				case 'AUSPOST-item':
+				case 'consol_manual_multi':
+				case 'consol_manual':
+				case 'Master':
+				case 'Autumn':
+				case 'Qantas':
+				case 'Menzies':
+					$transaction->rollback();
+					break;
+				default:
+					break;
+			}
+			throw $ex;
+		}
+		return ["done"=>false,'msg'=>'Success'.json_encode($errors)];
+	}
+
+	public function cancelReconciliation($type,$file,$rate)
+	{
+
+	}
+
+	public function updateReconciliationStatus($model,$status)
+	{
+	
+	}
+
+
+	public function importReconciliationConfirmList($model,$file,$dpmt = false)
+	{
+		$this->appName = Yii::app()->name;
+		$data = $this->getFileData($file);
+		$invoiceLine =[];
+		if(empty($data))
+		{
+			return $this->getResult(false,'Invalid Template');
+		}
+		$data = $data[0];
+		$header = $data[1];
+		$confirmCostKey = 0;
+		foreach ($header as $key => $head) {
+			if($head=="confirm_cost")
+			{
+				$confirmCostKey = $key;
+			}
+		}
+		unset($data[1]);
+		$confirmCostArr = [];
+		$eparcelConfirm = [];
+		if($confirmCostKey>0)
+		{
+			foreach ($data as $key => $d) {
+				if(!empty($d[1]))
+				{
+					$confirmCostArr[$d[1]] = $d[$confirmCostKey];
+
+					if(!empty($d[$confirmCostKey+1]))
+					{
+						$eparcelConfirm[$d[1]] = $d[$confirmCostKey+1];
+					}
+				}
+			}
+		}
+
+
+		$totalGstConfirmed = json_decode($model->total_gst_confirmed,true);
+		$totalExGstConfirmed = json_decode($model->total_ex_gst_confirmed,true);
+		$totalConfirmed = json_decode($model->total_confirmed,true);
+		$integratedArr = [];
+		$integratedOldStatusArr = [];
+		$srd = null;
+		//for dpmts
+		if(!empty($dpmt))
+		{
+			$srd = SiReconcileDpmt::model()->find('si_reconcile_id = :sid and dpmt =:dpmt',[':sid'=>$model->id,':dpmt'=>$dpmt]);
+			$totalGstConfirmed = json_decode($srd->total_gst_confirmed,true);
+			$totalExGstConfirmed = json_decode($srd->total_ex_gst_confirmed,true);
+			$totalConfirmed = json_decode($srd->total_confirmed,true);
+		}
+		$myStatus = $model->status;
+		if($srd!=null)
+		{
+			$myStatus = $srd->status;
+		}
+		$totalGstConfirmed[$myStatus] = 0;
+		$totalExGstConfirmed[$myStatus] = 0;
+		$totalConfirmed[$myStatus] = 0;
+
+
+		$batchLines=[];
+		$thisLines = $model->getLines($dpmt);
+        foreach ( $thisLines as $key => $r) {
+            if($key%1000==0)
+            {
+                $batchLines[]=[];
+            }
+            $batchLines[count($batchLines)-1][]=$r;
+        }
+
+        foreach ($batchLines as $key => $myLines)
+        {
+        	if($this->appName=='TLA')
+			{
+				$transaction = Yii::app()->db_tla->beginTransaction();
+			}else
+			{
+				$transaction = Yii::app()->db->beginTransaction();
+			}
+        	try
+			{
+				$idArr = array_column($data, 1);
+				foreach ($myLines as $key => $line)
+				{
+					$oldStatus = $line->confirm_status;
+
+					if($myStatus==SiReconcile::ERROR_CHECKING_STATUS)
+					{
+						if(($line->confirm_status&SiReconcile::ERROR_CONFIRMED)==0&&!in_array($line->id, $idArr)) continue;
+						$line->confirm_status = ($line->confirm_status|SiReconcile::ERROR_CONFIRMED)^SiReconcile::ERROR_CONFIRMED;
+					}else if($myStatus==SiReconcile::WEIGHT_CHECKING_STATUS)
+					{
+						if(($line->confirm_status&SiReconcile::WEIGHT_CONFIRMED)==0&&!in_array($line->id, $idArr)) continue;
+						$line->confirm_status = ($line->confirm_status|SiReconcile::WEIGHT_CONFIRMED)^SiReconcile::WEIGHT_CONFIRMED;
+					}else if($myStatus==SiReconcile::RATE_CHECKING_STATUS)
+					{
+						if(($line->confirm_status&SiReconcile::RATE_CONFIRMED)==0&&!in_array($line->id, $idArr)) continue;
+						$line->confirm_status = ($line->confirm_status|SiReconcile::RATE_CONFIRMED)^SiReconcile::RATE_CONFIRMED;
+					}else if($myStatus ==SiReconcile::SURCHARGE_CHECKING_STATUS)
+					{
+						if(($line->confirm_status&SiReconcile::SURCHARGE_CONFIRMED)==0&&!in_array($line->id, $idArr)) continue;
+						$line->confirm_status = ($line->confirm_status|SiReconcile::SURCHARGE_CONFIRMED)^SiReconcile::SURCHARGE_CONFIRMED;
+					}
+
+
+					if(in_array($line->id, $idArr))
+					{
+						switch ($myStatus)
+						{
+						case SiReconcile::ERROR_CHECKING_STATUS:
+							$line->confirm_status = $line->confirm_status|SiReconcile::ERROR_CONFIRMED;
+							break;
+
+						case SiReconcile::WEIGHT_CHECKING_STATUS:
+							$line->confirm_status = $line->confirm_status|SiReconcile::WEIGHT_CONFIRMED;
+							break;
+
+						case SiReconcile::RATE_CHECKING_STATUS:
+							$line->confirm_status = $line->confirm_status|SiReconcile::RATE_CONFIRMED;
+							break;
+
+						case SiReconcile::SURCHARGE_CHECKING_STATUS:
+							$line->confirm_status = $line->confirm_status|SiReconcile::SURCHARGE_CONFIRMED;
+							break;
+						}
+						
+						if(!in_array($line->item_code,["eparcel","eparcel-fuel"]))
+						{
+							if($confirmCostKey!=0)
+							{
+								if($confirmCostArr[$line->id]!=$line->value)
+								{
+									$line->confirm_status = $oldStatus;
+									$integratedOldStatusArr[$line->inline_pid] = [1,$oldStatus];
+								}else
+								{
+									$integratedOldStatusArr[$line->inline_pid] = [0,$oldStatus];
+								}
+								/***********************************************************************************/
+								$line->mdata['confirm_cost_ex_gst'] = $confirmCostArr[$line->id];
+								if(!($line->parent->org_id==Org::ORGID_COURIER_AUPOST&&in_array($line->item_code,["item","fuel"])))
+								{
+									$totalExGstConfirmed[$myStatus]+=$confirmCostArr[$line->id];
+									$totalGstConfirmed[$myStatus]+=$confirmCostArr[$line->id]*0.1;
+									$totalConfirmed[$myStatus]+=$confirmCostArr[$line->id]*1.1;
+								}
+							}else
+							{
+								$line->mdata['confirm_cost_ex_gst'] = $line->value;
+								if(!($line->parent->org_id==Org::ORGID_COURIER_AUPOST&&in_array($line->item_code,["item","fuel"])))
+								{
+									$totalExGstConfirmed[$myStatus]+=$line->value;
+									$totalGstConfirmed[$myStatus]+=$line->value*0.1;
+									$totalConfirmed[$myStatus]+=$line->value*1.1;
+								}
+							}
+							if(!empty($line->inline_pid))
+							{
+								if(empty($integratedArr[$line->inline_pid]))
+								{
+									$integratedArr[$line->inline_pid] =$line->mdata['confirm_cost_ex_gst'];
+								}else
+								{
+									$integratedArr[$line->inline_pid] +=$line->mdata['confirm_cost_ex_gst'];
+								}
+							}
+						}
+
+					}
+
+					$line->save();
+				}
+
+				foreach ($myLines as $key => $line)
+				{
+					if(in_array($line->id, $idArr))
+					{
+						if(in_array($line->item_code,["eparcel","eparcel-fuel"]))
+						{
+							if((!empty($integratedOldStatusArr[$line->id])&&$integratedOldStatusArr[$line->id][0]==1)||!empty($eparcelConfirm[$line->id]))
+							{
+								switch ($myStatus) 
+								{
+								case SiReconcile::ERROR_CHECKING_STATUS:
+									$line->confirm_status = $integratedOldStatusArr[$line->id][1]^SiReconcile::ERROR_CONFIRMED;
+									break;
+
+								case SiReconcile::WEIGHT_CHECKING_STATUS:
+									$line->confirm_status = $integratedOldStatusArr[$line->id][1]^SiReconcile::WEIGHT_CONFIRMED;
+									break;
+
+								case SiReconcile::RATE_CHECKING_STATUS:
+									$line->confirm_status = $integratedOldStatusArr[$line->id][1]^SiReconcile::RATE_CONFIRMED;
+									break;
+
+								case SiReconcile::SURCHARGE_CHECKING_STATUS:
+									$line->confirm_status = $integratedOldStatusArr[$line->id][1]^SiReconcile::SURCHARGE_CONFIRMED;
+									break;
+								}
+								$totalExGstConfirmed[$myStatus]+=$integratedArr[$line->id];
+								$totalGstConfirmed[$myStatus]+=$integratedArr[$line->id]*0.1;
+								$totalConfirmed[$myStatus]+=$integratedArr[$line->id]*1.1;
+								$line->mdata['confirm_cost_ex_gst'] = $integratedArr[$line->id];
+							}else
+							{
+								$totalExGstConfirmed[$myStatus]+=$line->value;
+								$totalGstConfirmed[$myStatus]+=$line->value*0.1;
+								$totalConfirmed[$myStatus]+=$line->value*1.1;
+								$line->mdata['confirm_cost_ex_gst'] = $line->value;
+							}
+						}
+
+					}
+
+					$line->save();
+				}
+				$transaction->commit();
+			}catch(Exception $ex)
+			{	
+				$transaction->rollback();
+				throw $ex;
+			}
+		}
+
+		switch ($myStatus) {
+			case SiReconcile::ERROR_CHECKING_STATUS:
+				$model->confirm_status = $model->confirm_status|SiReconcile::ERROR_CONFIRMED;
+				break;
+
+			case SiReconcile::WEIGHT_CHECKING_STATUS:
+				$model->confirm_status = $model->confirm_status|SiReconcile::WEIGHT_CONFIRMED;
+				break;
+
+			case SiReconcile::RATE_CHECKING_STATUS:
+				$model->confirm_status = $model->confirm_status|SiReconcile::RATE_CONFIRMED;
+				break;
+
+			case SiReconcile::SURCHARGE_CHECKING_STATUS:
+				$model->confirm_status = $model->confirm_status|SiReconcile::SURCHARGE_CONFIRMED;
+				break;
+		}
+
+		//for dpmts
+		if(!empty($srd))
+		{
+			switch ($srd->status)
+			{
+				case SiReconcile::ERROR_CHECKING_STATUS:
+					$srd->confirm_status = $srd->confirm_status|SiReconcile::ERROR_CONFIRMED;
+					break;
+
+				case SiReconcile::WEIGHT_CHECKING_STATUS:
+					$srd->confirm_status = $srd->confirm_status|SiReconcile::WEIGHT_CONFIRMED;
+					break;
+
+				case SiReconcile::RATE_CHECKING_STATUS:
+					$srd->confirm_status = $srd->confirm_status|SiReconcile::RATE_CONFIRMED;
+					break;
+
+				case SiReconcile::SURCHARGE_CHECKING_STATUS:
+					$srd->confirm_status = $srd->confirm_status|SiReconcile::SURCHARGE_CONFIRMED;
+					break;
+			}
+
+			$srd->total_gst_confirmed = json_encode($totalGstConfirmed);
+			$srd->total_ex_gst_confirmed = json_encode($totalExGstConfirmed);
+			$srd->total_confirmed = json_encode($totalConfirmed);
+			$srd->save();
+			$this->updateSiReconciliationConfirm($model);
+		}
+		else
+		{
+			$model->total_gst_confirmed = json_encode($totalGstConfirmed);
+			$model->total_ex_gst_confirmed = json_encode($totalExGstConfirmed);
+			$model->total_confirmed = json_encode($totalConfirmed);
+			$model->save();
+		}
+
+		return $this->getResult(true,'Done');
+	}
+
+	private function updateSiReconciliationConfirm($model)
+	{
+		$totalGstConfirmed =[SiReconcile::ERROR_CHECKING_STATUS=>0,SiReconcile::WEIGHT_CHECKING_STATUS=>0,SiReconcile::RATE_CHECKING_STATUS=>0,SiReconcile::SURCHARGE_CHECKING_STATUS=>0];
+		$totalExGstConfirmed = [SiReconcile::ERROR_CHECKING_STATUS=>0,SiReconcile::WEIGHT_CHECKING_STATUS=>0,SiReconcile::RATE_CHECKING_STATUS=>0,SiReconcile::SURCHARGE_CHECKING_STATUS=>0];
+		$totalConfirmed = [SiReconcile::ERROR_CHECKING_STATUS=>0,SiReconcile::WEIGHT_CHECKING_STATUS=>0,SiReconcile::RATE_CHECKING_STATUS=>0,SiReconcile::SURCHARGE_CHECKING_STATUS=>0];
+		$dpmts = $model->dpmts;
+		foreach ($dpmts as $key => $dpmt) {
+
+			if(!empty($dpmt->total_gst_confirmed))
+			{
+				$dpmt->total_gst_confirmed = json_decode($dpmt->total_gst_confirmed,true);
+				foreach ($totalGstConfirmed as $key => &$value) {
+					if(!empty($dpmt->total_gst_confirmed[$key]))
+					{
+						$value+=$dpmt->total_gst_confirmed[$key];
+					}
+				}
+			}
+			if(!empty($dpmt->total_ex_gst_confirmed))
+			{
+				$dpmt->total_ex_gst_confirmed = json_decode($dpmt->total_ex_gst_confirmed,true);
+				foreach ($totalExGstConfirmed as $key => &$value) {
+					if(!empty($dpmt->total_ex_gst_confirmed[$key]))
+					{
+						$value+=$dpmt->total_ex_gst_confirmed[$key];
+					}
+				}
+			}
+
+			if(!empty($dpmt->total_confirmed))
+			{
+				$dpmt->total_confirmed = json_decode($dpmt->total_confirmed,true);
+				foreach ($totalConfirmed as $key => &$value) {
+					if(!empty($dpmt->total_confirmed[$key]))
+					{
+						$value+=$dpmt->total_confirmed[$key];
+					}
+				}
+			}
+		}
+		$model->total_gst_confirmed = json_encode($totalGstConfirmed);
+		$model->total_ex_gst_confirmed = json_encode($totalExGstConfirmed);
+		$model->total_confirmed = json_encode($totalConfirmed);
+		$model->save();
+	}
+
+	
+	
+	/**
+	* This function is for extrating data for templates with different format to be  supplier invoice and lines
+	* @param $file
+	* @param $type
+	* @param $orgRateCode
+	*/
+	public function prepareSupplierInvoiceData($file,$type,$invoiceTemplate,$invoiceDate,$invoiceNo,$currency,$orgId = false)
+	{
+		if(self::checkInvoiceExisting($invoiceNo))
+		{
+			return [false,false,['Invoice Existing '.$invoiceNo]];
+		}
+		$invoice = new SupplierInvoice();
+		$invoice->created = date('Y-m-d');
+		$invoice->inv_date = $invoiceDate;
+		$invoice->inv_no =$invoiceNo;
+		$invoice->type = $type;
+		$invoice->currency = $currency;
+		$invoice->status = 1;
+
+		$data = $this->getFileData($file);
+		$invoiceLine =[];
+		$errors = [];
+		if(empty($data))
+		{
+			return [false,'Invalid Template'];
+		}
+		if($type==SiReconcile::TYPE_COURIER)
+		{
+			$invoice->org_id = OrgRate::$TemplateTypesOrg[$invoiceTemplate];
+			switch($invoiceTemplate)
+			{
+				case 'FWSYD2020':
+					$data = $data[0];
+					$this->prepareFWSYD2020($data,$invoiceLine,$invoice);
+					break;
+
+				case 'FWSYD2022':
+					$data = $data[0];
+					$this->prepareFWSYD2022($data,$invoiceLine,$invoice);
+					break;
+
+				case 'FWSYDOLD':
+					$data = $data[0];
+					$this->prepareFWSYD($data,$invoiceLine,$invoice);
+					break;
+
+				case 'TNT2020':
+					$this->prepareTNT($data,$invoiceLine,$invoice);
+					break;
+
+				case 'STARTRACK':
+					$data = $data[0];
+					$this->prepareSTARTRACK($data,$invoiceLine,$invoice);
+					break;
+
+				case 'AUSPOST':
+					$data = $data[0];
+					$this->prepareAUSPOST($data,$invoiceLine,$invoice);
+					break;
+
+				case 'AUSPOST-item':
+					$data = $data[0];
+					$this->prepareAUSPOSTItem($data,$invoiceLine,$invoice);
+					break;
+
+				case 'Eiz-toll':
+					$data = $data[0];
+					$this->prepareEizToll($data,$invoiceLine,$invoice);
+					break;
+
+				case 'UBI-toll':
+					$data = $data[0];
+					$this->prepareUbiToll($data,$invoiceLine,$invoice);
+					break;
+
+				case 'UBI-AUPOST':
+					$data = $data[0];
+					$this->prepareUbiAupost($data,$invoiceLine,$invoice);
+					break;
+
+				case 'UBI-toll-surcharge':
+					$data = $data[0];
+					$this->prepareUbiTollSurcharge($data,$invoiceLine,$invoice);
+					break;
+
+				case 'TLD-supplier':
+					$data = $data[0];
+					$this->prepareTLDSupplier($data,$invoiceLine,$invoice);
+					break;
+
+				case 'my-toll':
+					$data = $data[0];
+					$this->prepareMyToll($data,$invoiceLine,$invoice);
+					break;
+
+				case 'my-toll-CSV':
+					$data = $data[0];
+					$this->prepareMyTollCSV($data,$invoiceLine,$invoice);
+					break;
+
+				case 'FL-hunter':
+					$data = $data[0];
+					$this->prepareFLHunter($data,$invoiceLine,$invoice);
+					break;
+
+				case 'my-border-CSV':
+					$data = $data[0];
+					$this->prepareMyBorderCSV($data,$invoiceLine,$invoice);
+					break;
+
+				case 'GV-Aupost':
+					$data = $data[0];
+					$this->prepareGV($data,$invoiceLine,$invoice);
+					break;
+
+				case 'Allied':
+					$data = $data[0];
+					$this->prepareAllied($data,$invoiceLine,$invoice);
+					break;
+
+				case 'OTHER':
+					$invoice->org_id = $orgId;
+					$this->prepareOther($data,$invoiceLine,$invoice);
+					break;
+
+				case 'Aupost-Weight-Check':
+					$data = $data[0];
+					$this->prepareAupostWeightCheck($data,$invoiceLine,$invoice);
+					break;
+			}
+		}else if($type == SiReconcile::TYPE_BROKER)
+		{
+			switch ($invoiceTemplate) {
+				case 'FYN':
+					$this->prepareFYN($data,$invoiceLine,$invoice);
+					break;
+				
+				case 'Master':
+					$invoice = [];
+					$this->errors = $this->prepareMaster($data,$invoiceLine,$invoice);
+					break;
+
+				case 'Autumn':
+					$invoice = [];
+					$this->errors = $this->prepareAutumn($data,$invoiceLine,$invoice);
+					break;
+			}
+		}else if($type == SiReconcile::TYPE_TERMINAL)
+		{
+			$invoice->org_id = OrgRate::$TemplateTypesOrg[$invoiceTemplate];
+			switch ($invoiceTemplate) {
+				case 'Menzies':
+					$this->prepareMenziesTerminal($data[0],$invoiceLine,$invoice);
+					break;
+				case 'Qantas':
+					$this->prepareQantasTerminal($data[0],$invoiceLine,$invoice);
+					break;
+				case 'AMI':
+					$invoice = [];
+					$this->prepareAMITerminal($data[0],$invoiceLine,$invoice);
+					break;
+				case 'Dnata':
+					$this->prepareDnataTerminal($data[0],$invoiceLine,$invoice);
+					break;
+			}
+		}else if($type == SiReconcile::TYPE_MANUAL||$type == SiReconcile::TYPE_EXPENSE)
+		{
+			switch ($invoiceTemplate) {
+				case 'consol_manual':
+					$this->prepareConsolManual($data,$invoiceLine,$invoice);
+					break;
+				case 'consol_manual_multi':
+					$invoice = [];
+					$this->prepareConsolManualMulti($data,$invoiceLine,$invoice,$type);
+					break;
+				case 'consol_manual_weight':
+					$invoice = [];
+					$this->prepareConsolManualQtyOrWeight($data,$invoiceLine,$invoice,$type);
+					break;
+				case 'consol_manual_brownways':
+					$invoice = [];
+					$this->prepareConsolManualBrownways($data,$invoiceLine,$invoice,$type,$invoiceDate,$invoiceNo);
+					break;
+			}
+		}else
+		{
+
+		}
+		return [$invoice,$invoiceLine,$this->errors];
+	}
+
+	public function prepareFYN($data,$invoiceLine,$invoice)
+	{
+
+	}
+
+	public function prepareMenziesTerminal($data,&$invoiceLine,&$invoice)
+	{
+		foreach ($data as $k => $detail) 
+		{
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->amount_ex_gst = number_format(floatval($detail->Tran_Amount), 4, '.', '');
+			if($supplierInvoiceLine->amount_ex_gst==0)
+			{
+				continue;
+			}
+
+			$supplierInvoiceLine->ref = $detail->Object_Number;
+			$supplierInvoiceLine->item_code = $detail->Tran_Description;
+			$supplierInvoiceLine->postcode = "";
+			$supplierInvoiceLine->det = $detail->Tran_Description;
+			$supplierInvoiceLine->courier_cubic = 0;
+			$supplierInvoiceLine->weight = number_format(floatval($detail->Object_CHARWeight),4,'.','');
+			$supplierInvoiceLine->cdeadwt =number_format(floatval($detail->Object_CHARWeight),4,'.','');
+			$supplierInvoiceLine->qty = intval($detail->Tran_Quantity);
+			$supplierInvoiceLine->gst = number_format(floatval($detail->Tran_VAT),4,'.','');
+			$supplierInvoiceLine->mdata['price'] = number_format(floatval($detail->Tran_Price),4,'.','');
+			$supplierInvoiceLine->amount = number_format(floatval($detail->Tran_Total), 4, '.', '');
+			if(preg_match('/storage/i',$supplierInvoiceLine->item_code))
+			{
+				$consol=Consol::model()->find("awb = :awb and status !=100 and type !=90 and status !=100",[":awb"=>$supplierInvoiceLine->ref]);
+				if(!empty($consol)&&$consol->service==Consol::AIRCONSOL)
+				{
+					$supplierInvoiceLine->mdata['charge_code'] = Consol::AIR_STORAGE_COST_GL_CODE;
+				}else
+				{
+					$supplierInvoiceLine->mdata['charge_code'] = Consol::STORAGE_COST_GL_CODE;
+				}
+			}else
+			{
+				$supplierInvoiceLine->mdata['charge_code'] = '91030';
+			}
+
+			if($supplierInvoiceLine->gst>0)
+			{
+				$supplierInvoiceLine->mdata['gst_type'] =  Invoice::$InvoiceCostTaxRateSimple['on'];
+			}else
+			{
+				$supplierInvoiceLine->mdata['gst_type'] =  Invoice::$InvoiceCostTaxRateSimple['free'];
+			}
+			$invoiceLine[] = $supplierInvoiceLine;
+			$invoice->total+= $supplierInvoiceLine->amount;
+			$invoice->gst+= $supplierInvoiceLine->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+		}
+		$invoice->total = number_format($invoice->total, 4, '.', '');
+		$invoice->gst = number_format($invoice->gst, 4, '.', '');
+		$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+	}
+
+	public function prepareQantasTerminal($data,&$invoiceLine,&$invoice)
+	{	
+		unset($data[1]);
+		foreach ($data as $k => $d) 
+		{
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->amount_ex_gst = number_format(floatval(str_replace(',', '', str_replace('$', '', $d[14]))),4,'.','');
+			if($supplierInvoiceLine->amount_ex_gst==0)
+			{
+				continue;
+			}
+			$supplierInvoiceLine->ref = $d[11];
+			$supplierInvoiceLine->item_code = $d[13];
+			$supplierInvoiceLine->postcode = "";
+			$supplierInvoiceLine->det =$d[13];
+			$supplierInvoiceLine->courier_cubic = 0;
+			$supplierInvoiceLine->weight = 0;
+			$supplierInvoiceLine->cdeadwt = 0;
+			$supplierInvoiceLine->qty = 1;
+			$supplierInvoiceLine->gst = number_format(floatval(str_replace(',', '', str_replace('$', '', $d[15]))),4,'.','');
+			$supplierInvoiceLine->mdata['price'] = number_format($supplierInvoiceLine->amount_ex_gst,4,'.','');
+			$supplierInvoiceLine->amount = $supplierInvoiceLine->amount_ex_gst+$supplierInvoiceLine->gst;
+			if(preg_match('/storage/i',$supplierInvoiceLine->item_code))
+			{
+				$consol=Consol::model()->find("awb = :awb and type !=90 and status !=100",[":awb"=>$supplierInvoiceLine->ref]);
+				if(!empty($consol)&&$consol->service==Consol::AIRCONSOL)
+				{
+					$supplierInvoiceLine->mdata['charge_code'] = Consol::AIR_STORAGE_COST_GL_CODE;
+				}else
+				{
+					$supplierInvoiceLine->mdata['charge_code'] = Consol::STORAGE_COST_GL_CODE;
+				}
+			}else
+			{
+				$supplierInvoiceLine->mdata['charge_code'] = '91030';
+			}
+
+			if($supplierInvoiceLine->gst>0)
+			{
+				$supplierInvoiceLine->mdata['gst_type'] =  Invoice::$InvoiceCostTaxRateSimple['on'];
+			}else
+			{
+				$supplierInvoiceLine->mdata['gst_type'] =  Invoice::$InvoiceCostTaxRateSimple['free'];
+			}
+			$invoiceLine[] = $supplierInvoiceLine;
+			$invoice->total+= $supplierInvoiceLine->amount;
+			$invoice->gst+= $supplierInvoiceLine->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+		}
+		$invoice->total = number_format($invoice->total, 4, '.', '');
+		$invoice->gst = number_format($invoice->gst, 4, '.', '');
+		$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+	}
+
+	public function prepareDnataTerminal($data,&$invoiceLine,&$invoice)
+	{
+		foreach ($data as $k => $detail) 
+		{
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->amount_ex_gst = number_format(floatval($detail->Tran_Amount), 4, '.', '');
+			if($supplierInvoiceLine->amount_ex_gst==0)
+			{
+				continue;
+			}
+
+			$supplierInvoiceLine->ref = $detail->Object_Number;
+			$supplierInvoiceLine->item_code = $detail->Tran_Description;
+			$supplierInvoiceLine->postcode = "";
+			$supplierInvoiceLine->det = $detail->Tran_Description;
+			$supplierInvoiceLine->courier_cubic = 0;
+			$supplierInvoiceLine->weight = number_format(floatval($detail->Object_CHARWeight),4,'.','');
+			$supplierInvoiceLine->cdeadwt =number_format(floatval($detail->Object_CHARWeight),4,'.','');
+			$supplierInvoiceLine->qty = intval($detail->Tran_Quantity);
+			$supplierInvoiceLine->gst = number_format(floatval($detail->Tran_VAT),4,'.','');
+			$supplierInvoiceLine->mdata['price'] = number_format(floatval($detail->Tran_Price),4,'.','');
+			$supplierInvoiceLine->amount = number_format(floatval($detail->Tran_Total), 4, '.', '');
+
+			if(preg_match('/storage/i',$supplierInvoiceLine->item_code))
+			{
+				$consol=Consol::model()->find("awb = :awb and type !=90 and status !=100",[":awb"=>$supplierInvoiceLine->ref]);
+				if(!empty($consol)&&$consol->service==Consol::AIRCONSOL)
+				{
+					$supplierInvoiceLine->mdata['charge_code'] = Consol::AIR_STORAGE_COST_GL_CODE;
+				}else
+				{
+					$supplierInvoiceLine->mdata['charge_code'] = Consol::STORAGE_COST_GL_CODE;
+				}
+			}else
+			{
+				$supplierInvoiceLine->mdata['charge_code'] = '91030';
+			}
+
+			if($supplierInvoiceLine->gst>0)
+			{
+				$supplierInvoiceLine->mdata['gst_type'] =  Invoice::$InvoiceCostTaxRateSimple['on'];
+			}else
+			{
+				$supplierInvoiceLine->mdata['gst_type'] =  Invoice::$InvoiceCostTaxRateSimple['free'];
+			}
+			$invoiceLine[] = $supplierInvoiceLine;
+			$invoice->total+= $supplierInvoiceLine->amount;
+			$invoice->gst+= $supplierInvoiceLine->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+		}
+		$invoice->total = number_format($invoice->total, 4, '.', '');
+		$invoice->gst = number_format($invoice->gst, 4, '.', '');
+		$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+	}
+
+	public function prepareAMITerminal($data,&$invoiceLine,&$invoice)
+	{	
+		foreach ($data as $key => $value) {
+			if($value[1]!='Date')
+			{
+				unset($data[$key]);
+			}
+			if($value[1]=='Date')
+			{
+				unset($data[$key]);
+				break;
+			}
+
+		}
+
+		foreach ($data as $k => $d) 
+		{
+			if(empty($d[1])) continue;
+			if(preg_match('/\d{1,2}\/\d{1,2}\/\d{2}/i', $d[1]))
+			{
+				$invoiceDate = $d[1];
+				$invoiceDate = explode('/', $invoiceDate);
+				$invoiceDate = "20".$invoiceDate[2]."-".$invoiceDate[1]."-".$invoiceDate[0];
+			}elseif(preg_match('/\d{4}\/\d{1,2}\/\d{1,2}/i', $d[1]))
+			{
+				$invoiceDate = $d[1];
+				$invoiceDate = explode('/', $invoiceDate);
+				$invoiceDate = $invoiceDate[0]."-".$invoiceDate[1]."-".$invoiceDate[2];
+			}elseif(is_numeric($d[1]))
+			{
+				$invoiceDate = oExcel::toDate($d[1]);
+			}
+
+			$invoiceNo = $d[3];
+			if(self::checkInvoiceExisting($invoiceNo))
+			{
+				$this->errors[] = "Invoice Existing ".$invoiceNo;
+				continue;
+			}
+
+
+			$amount = $d[5];
+			$awb = $d[4];
+			$GST = round($d[5]/11,2);
+			$amountExGst = round($amount-$GST,2);
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->amount_ex_gst = $amountExGst;
+			if($supplierInvoiceLine->amount_ex_gst==0)
+			{
+				continue;
+			}
+
+			$consol = ImcoConsol::model()->find('awb = :awb and status != 100',[":awb"=>$awb]);
+			if(empty($consol))
+			{
+				$consol = DmawbConsol::model()->find('awb = :awb and status != 100',[":awb"=>$awb]);
+			}
+			$consolId =0;
+			// if(empty($consol))
+			// {
+			// 	$this->errors[] = "Empty Consol ".$awb;
+			// 	continue;
+			// }
+
+			$supplierInvoice = new SupplierInvoice();
+			$supplierInvoice->created = date('Y-m-d');
+			$supplierInvoice->inv_date = $invoiceDate;
+			$supplierInvoice->inv_no =$invoiceNo;
+			$supplierInvoice->type = SiReconcile::TYPE_TERMINAL;
+			$supplierInvoice->currency = 1;
+			$supplierInvoice->status = 1;
+			$supplierInvoice->org_id = Org::ORGID_SUPPLIER_AMI;
+
+
+			$supplierInvoiceLine->ref = $awb;
+			$supplierInvoiceLine->item_code ='terminal handling';
+			$supplierInvoiceLine->postcode = "";
+			$supplierInvoiceLine->det ="";
+			$supplierInvoiceLine->courier_cubic = 0;
+			$supplierInvoiceLine->weight = empty($consol->mdata['cgb_wt'])?0:$consol->mdata['cgb_wt'];
+			$supplierInvoiceLine->cdeadwt = empty($consol->mdata['cgb_wt'])?0:$consol->mdata['cgb_wt'];
+			$supplierInvoiceLine->qty = 1;
+			$supplierInvoiceLine->gst = $GST;
+			$supplierInvoiceLine->mdata['price'] = number_format($supplierInvoiceLine->amount_ex_gst,4,'.','');
+			$supplierInvoiceLine->amount =$amount;
+
+
+			$supplierInvoiceLine->mdata['charge_code'] = '91030';
+
+			if($supplierInvoiceLine->gst>0)
+			{
+				$supplierInvoiceLine->mdata['gst_type'] =  Invoice::$InvoiceCostTaxRateSimple['on'];
+			}else
+			{
+				$supplierInvoiceLine->mdata['gst_type'] =  Invoice::$InvoiceCostTaxRateSimple['free'];
+			}
+			$invoiceLine[$invoiceNo][] = $supplierInvoiceLine;
+			$supplierInvoice->total+= $supplierInvoiceLine->amount;
+			$supplierInvoice->gst+= $supplierInvoiceLine->gst;
+			$supplierInvoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+			$supplierInvoice->total = number_format($supplierInvoice->total, 4, '.', '');
+			$supplierInvoice->gst = number_format($supplierInvoice->gst, 4, '.', '');
+			$supplierInvoice->total_ex_gst = number_format($supplierInvoice->total_ex_gst, 4, '.', '');
+			$invoice[] = $supplierInvoice;
+		}
+	}
+
+
+
+	public function prepareMaster($data,&$invoiceLine,&$supplierInvoice)
+	{
+		$org_id = Org::ORGID_BROKER_MASTER;
+		unset($data[0]);
+		// normally one sheet for one invoice
+		$invoiceCount = count($data);
+		$sheetCount = $invoiceCount;
+		$sheetInvoicesFailed = array();
+
+		$billings = array();
+		$allItemsDesc = array(); // save all invoice related item description;
+		$errors = array();
+		$dates = [];
+
+		$invoiceProcessedCount = 0;
+		$sheetIndex = 1;
+
+		$invoiceCount = 0;
+		foreach ($data as $k => $invoice) {
+			$sheetIndex++;
+			// convert to real invoice number
+			// format : TAX INVOICE 00159458
+			if(empty($invoice[3][3]))
+			{
+				continue;
+			}
+			$invoiceNumber = trim($invoice[3][3]);
+			$consignor = trim($invoice[53][3]);
+			$consignee = trim($invoice[53][27]);
+			$consignor = substr($consignor, 0, 100);
+			$consignee = substr($consignee, 0, 100);
+			$cref = trim($invoice[56][3], ' /');
+			if(oExcel::toDate($invoice[7][41])===false||oExcel::toDate($invoice[36][41])===false)
+			{
+				$sheetInvoicesFailed[] = array('index' => $sheetIndex - 1, 'error' => $invoice[7][41]." ".$invoice[36][41].'invoice date is not valid1');
+					continue;
+			}
+
+			$invoiceDate = date('Y-m-d', strtotime(oExcel::toDate($invoice[7][41])));
+			$invoiceDue = date('Y-m-d', strtotime(oExcel::toDate($invoice[36][41])));
+			
+
+			preg_match_all('![S|B]\d+(\/\w)*!', $invoiceNumber, $realInvoiceNumber);
+			if (empty($realInvoiceNumber)||empty($realInvoiceNumber[0])) {
+				preg_match_all('/000\d{5}/', $invoiceNumber, $realInvoiceNumber);
+				if (empty($realInvoiceNumber))
+				{
+					$sheetInvoicesFailed[] = array('index' => $sheetIndex - 1, 'error' => 'no invoice number');
+					continue;
+				}
+			}
+			$invoiceType = 0;
+			if(preg_match('/credit/i', $invoiceNumber))
+			{
+				$invoiceType = 1;
+			}
+			$invoiceNumber = array_values(array_slice($realInvoiceNumber[0], -1))[0];
+
+			// try to find weight ,volume and etc . value
+			$orgin = '';
+			$dest = '';
+			$weight = 0;
+			$volume = 0;
+			$chargeWeight = 0;
+			$eta = '';
+			$etd = '';
+			$awb = '';
+			$shipno = '';
+			$isBreak = false;
+			for ($i = 10; $i < 80; $i++) {
+				$tag = trim($invoice[$i][3]);
+				$tag2 = trim($invoice[$i][27]);
+				if ($tag == 'BROKER' || substr($tag, 0, 5) == 'OWNER' || $tag == 'ORDER NUMBERS / REFERENCE') {
+					$weight = preg_replace('/\s*KG$/', '', trim($invoice[$i + 1][27]));
+					$volume = preg_replace('/\s*M3$/', '', trim($invoice[$i + 1][38]));
+					if (empty($volume)) {
+						$volume = preg_replace('/\s*M3$/', '', trim($invoice[$i + 1][35]));
+					}
+					$chargeWeight = preg_replace('/\s*KG$/', '', trim($invoice[$i + 1][27]));
+				} else if ($tag == 'ORIGIN') {
+					$orgin = trim($invoice[$i + 1][3]); // origin location
+					$dest = trim($invoice[$i + 1][27]); // destination
+
+					if ($invoice[$i][19] != 'ETD') {
+
+						if(oExcel::toDate($invoice[$i + 1][45])===false||oExcel::toDate($invoice[$i + 1][21])===false)
+						{
+							$isBreak = true;
+							break;
+						}
+
+						$eta = oExcel::toDate($invoice[$i + 1][45]);
+						$etd = oExcel::toDate($invoice[$i + 1][21]);
+					} else {
+
+						if(oExcel::toDate($invoice[$i][46])===false||oExcel::toDate($invoice[$i][22])===false)
+						{
+							$isBreak = true;
+							break;
+						}
+
+						$eta = oExcel::toDate($invoice[$i][46]);
+						$etd = oExcel::toDate($invoice[$i][22]);
+					}
+				}else if ($tag == 'Destination EMPP Only Without Job Creation/Handling:') {
+					$reg = 'TCN\s*\d{10}|TSN\s*\d{10}|TPN\s*\d{10}|TMN\s*\d{10}|TBN\s*\d{10}|ECN\s*\d{10}|ECN\s*\d{9}|AHAU\d{7}|AGDSY\d{8}\w{2}|AGDSY\d{8}|HNAU\d{6}';
+					if (empty($shipno) && preg_match('/(' . $reg . ')/i', trim($invoice[$i + 1][3]), $matches) || preg_match('/' . $reg . '/i', trim($invoice[$i + 1][39]), $matches)) {
+						$shipno = $matches[0];
+					}
+
+				} else if ($tag2 == 'OCEAN BILL OF LADING' || $tag2 == 'MAWB') {
+					$awb = trim($invoice[$i + 1][27]); // get awb number
+
+					$reg = 'TCN\s*\d{10}|TSN\s*\d{10}|TPN\s*\d{10}|TMN\s*\d{10}|TBN\s*\d{10}|ECN\s*\d{10}|ECN\s*\d{9}|AHAU\d{7}|AGDSY\d{8}\w{2}|AGDSY\d{8}|HNAU\d{6}';
+					if (empty($shipno) && preg_match('/(' . $reg . ')/i', trim($invoice[$i + 1][3]), $matches) || preg_match('/' . $reg . '/i', trim($invoice[$i + 1][39]), $matches)) {
+						$shipno = $matches[0];
+					}
+
+					if (empty($shipno) && preg_match('/,(\d{9})/i', trim($invoice[$i + 1][39]), $matches)) {
+						$shipment = Shipment::model()->find('ref = :shipno AND status != 100', [':shipno' => 'TNT' . $matches[0]]);
+						if (!empty($shipment)) {
+							$shipno = $shipment->ref;
+						} else {
+							$shipno = '';
+						}
+					}
+
+					if (empty($shipno) && preg_match('/PCA (\w*) \//i', trim($invoice[$i - 1][3]), $matches)) {
+						$shipno = $matches[1];
+					}
+
+					if (empty($shipno)) {
+						$shipno = str_replace(',', '', trim($invoice[$i + 1][39]));
+					}
+
+					break;
+				}
+			}
+			if($isBreak)
+			{
+				$sheetInvoicesFailed[] = array('index' => $sheetIndex - 1, 'error' => 'invoice date is not valid2');
+				continue;
+			}
+
+			// get all items
+			$items = array();
+			// try to find description begin line
+			$itemLineIndex = 34; // if not found set as default
+			for ($index = 12;; $index++) {
+				if ($invoice[$index][3] == 'DESCRIPTION') {
+					$itemLineIndex = $index + 2; // item lines begin from next 2 lines
+					break;
+				}
+				// avoid dead loop
+				if ($index > 120) {
+					break;
+				}
+
+			}
+			$allLineTotal = 0;
+			$lineConstCount = 1;
+			for ($index = $itemLineIndex;; $index++) 
+			{
+				if ($index > 200) {
+					break;
+				}
+				// avoid dead loop
+				$lineConstCount++;
+				if (empty($invoice[$index][3])) 
+				{
+					if ($lineConstCount++ < 20) 
+					{
+						continue;
+					} else {
+						break;
+					}
+
+				}
+				if ($invoice[$index][34] == 'SUBTOTAL' || $invoice[$index][33] == 'SUBTOTAL') 
+				{
+					break;
+				}
+				// got subtotal line stop
+
+				$desc = trim($invoice[$index][3]);
+				$gstAmount = 0;
+				if (in_array(trim($invoice[$itemLineIndex-2][34]), ['GST IN AUD', '=IF("Y"<>"N","GST IN AUD","")']) || in_array(trim($invoice[$itemLineIndex-2][35]), ['GST IN AUD', '=IF("Y"<>"N","GST IN AUD","")'])) {
+					if ($gst = preg_match('/^[\d\.\%]+\=(-[\d\.]+|[\d\.]+)$/', trim($invoice[$index][34]), $m)) {
+						$gstAmount = $m[1];
+					}
+				} else {
+					if (empty(trim($invoice[$index][31]))) {
+						continue;
+					} else {
+						if ($gst = preg_match('/^[\d\.\%]+\=(-[\d\.]+|[\d\.]+)$/', trim($invoice[$index][31]), $m)) {
+							$gstAmount = $m[1];
+						}
+					}
+				}
+
+				$value = floatval(str_replace(',', '', $invoice[$index][42]));
+
+				//append desc
+				if (empty($invoice[$index][34]) && empty($value) && !empty($items[sizeof($items) - 1]['desc'])) {
+					$items[sizeof($items) - 1]['desc'] .= "\n" . $desc;
+					continue;
+				}
+				$lineSubTotal = $value;
+				$lineTotal = $lineSubTotal + $gstAmount;
+				$allLineTotal += $lineTotal;
+
+				$glcode = '91032';
+				$chargeCode = '91032';
+
+				$items[] = array('desc' => $desc, 'gst' => $gst, 'chargecode' => $chargeCode, 'glcode' => $glcode, 'value' => $value, 'subtotal' => $lineSubTotal, 'gstamount' => $gstAmount, 'total' => $lineTotal);
+				$allItemsDesc[$desc] = 1;
+			}
+			// Yii::log(json_encode($items), 'error');
+
+			// try to get subtotal , gst and total
+			$subtotal = 0;
+			$gst = 0;
+			$total = 0;
+			for ($index = $index;; $index++) {
+				if ($invoice[$index][34] == 'SUBTOTAL') {
+					$subtotal = floatval(str_replace(',', '', $invoice[$index][41]));
+				} else if ($invoice[$index][33] == 'SUBTOTAL') {
+					$subtotal = floatval(str_replace(',', '', $invoice[$index][39]));
+				}
+				if ($invoice[$index][34] == 'ADD GST') {
+					$gst = floatval(str_replace(',', '', $invoice[$index][41]));
+				} else if ($invoice[$index][33] == 'ADD GST') {
+					$gst = floatval(str_replace(',', '', $invoice[$index][39]));
+				}
+				if ($invoice[$index][34] == 'TOTAL AUD') {
+					$total = floatval(str_replace(',', '', $invoice[$index][41]));
+					break;
+				} else if ($invoice[$index][33] == 'TOTAL AUD') {
+					$total = floatval(str_replace(',', '', $invoice[$index][39]));
+					break;
+				}
+
+				if ($index > 400) {
+					break;
+				}
+				// avoid dead loop
+			}
+
+			// making up billing array
+			$billing = array(
+				'number' => $invoiceNumber,
+				'type' => $invoiceType,
+				'awb' => $awb,
+				'date' => $invoiceDate,
+				'due' => $invoiceDue,
+				'cnee' => $consignee,
+				'cnor' => $consignor,
+				'cref' => $cref,
+				'orgin' => $orgin,
+				'eta' => $eta,
+				'etd' => $etd,
+				'weight' => $weight,
+				'chargeWeight' => $chargeWeight
+			);
+
+			$oldInvoice = SupplierInvoice::model()->findAll('inv_no = :inv_no and status!=100 and org_id=:org_id',[":inv_no"=>$invoiceNumber,"org_id"=>$org_id]);
+			if(!empty($oldInvoice))
+			{
+				$sheetInvoicesFailed[] = array('index' => $sheetIndex - 1, 'error' => 'invoice imported');
+				continue;
+			}
+
+			$inv = new SupplierInvoice();
+			$inv->created = date('Y-m-d');
+			$inv->inv_date = $invoiceDate;
+			$inv->inv_no =$invoiceNumber;
+			$inv->type = SiReconcile::TYPE_BROKER;
+			$inv->currency = 1;
+			$inv->status = 1;
+			$inv->mdata['billing'] =  $billing;
+			$inv->org_id = $org_id;
+			$invoiceLine[$invoiceNumber] = [];
+			$chargeWeight = floatval($chargeWeight);
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->ref = $shipno;
+			$supplierInvoiceLine->item_code = 'master_broker';
+			$supplierInvoiceLine->postcode = "";
+			$supplierInvoiceLine->det =  'master_broker';
+			$supplierInvoiceLine->courier_cubic = number_format(floatval($volume), 4, '.', '');
+			if(!is_float($chargeWeight))
+			{
+				$sheetInvoicesFailed[] = array('index' => $sheetIndex - 1, 'error' => 'chargeweight of '.$invoiceNumber.' is not float'.$chargeWeight);
+				continue;
+			}
+			$supplierInvoiceLine->weight =number_format($chargeWeight, 4, '.', '');
+			$supplierInvoiceLine->qty = 1;
+			$supplierInvoiceLine->cdeadwt = number_format($chargeWeight, 4, '.', '');
+			$supplierInvoiceLine->mdata['awb'] = $awb;
+			$supplierInvoiceLine->mdata['charge_code'] =  '91032';
+
+			foreach ($items as $key => $line) {
+				$supplierInvoiceLine->amount_ex_gst += $line['subtotal'];
+				$supplierInvoiceLine->gst += $line['gstamount'];
+				$supplierInvoiceLine->amount += $line['total'];
+			}
+			$number = 1;
+			if($invoiceType==1)
+			{
+				$number = -1;
+			}
+			$supplierInvoiceLine->amount_ex_gst = number_format($number*$supplierInvoiceLine->amount_ex_gst, 4, '.', '');
+			$supplierInvoiceLine->gst =number_format($number*$supplierInvoiceLine->gst, 4, '.', '');
+			$supplierInvoiceLine->amount = number_format($number*$supplierInvoiceLine->amount, 4, '.', '');
+
+			$inv->total= $number*$supplierInvoiceLine->amount;
+			$inv->gst= $supplierInvoiceLine->gst;
+			$inv->total_ex_gst= $number*$supplierInvoiceLine->amount_ex_gst;
+
+			$invoiceLine[$invoiceNumber][] = $supplierInvoiceLine;
+			if($supplierInvoiceLine->gst>0)
+			{
+				$supplierInvoiceLine->mdata['gst_type'] =  Invoice::$InvoiceCostTaxRateSimple['on'];
+			}else
+			{
+				$supplierInvoiceLine->mdata['gst_type'] =  Invoice::$InvoiceCostTaxRateSimple['free'];
+			}
+			
+			$inv->total = number_format($number*$inv->total, 4, '.', '');
+			$inv->gst = number_format($inv->gst, 4, '.', '');
+			$inv->total_ex_gst = number_format($number*$inv->total_ex_gst, 4, '.', '');
+			$supplierInvoice[] = $inv;
+		}
+		return $sheetInvoicesFailed;
+	}
+
+	public function prepareAutumn($data,&$invoiceLine,&$supplierInvoice)
+	{
+		$org_id = Org::ORGID_BROKER_AUTUMN;
+		unset($data[0]);
+		// normally one sheet for one invoice
+		$invoiceCount = count($data);
+		$sheetCount = $invoiceCount;
+		$sheetInvoicesFailed = array();
+
+		$billings = array();
+		$allItemsDesc = array(); // save all invoice related item description;
+		$errors = array();
+		$dates = [];
+
+		$invoiceProcessedCount = 0;
+		$sheetIndex = 1;
+
+		$invoiceCount = 0;
+		foreach ($data as $k => $invoice) {
+			$sheetIndex++;
+			// convert to real invoice number
+			// format : TAX INVOICE 00159458
+			if(empty($invoice[3][3]))
+			{
+				continue;
+			}
+			$invoiceNumber = trim($invoice[3][3]);
+			$consignor = trim($invoice[51][3]);
+			$consignee = trim($invoice[51][27]);
+			$consignor = substr($consignor, 0, 100);
+			$consignee = substr($consignee, 0, 100);
+			$cref = trim($invoice[55][3], ' /');
+			$invoiceDate = date('Y-m-d', strtotime(oExcel::toDate($invoice[6][41])));
+			$invoiceDue = date('Y-m-d', strtotime(oExcel::toDate($invoice[35][41])));
+			
+
+			preg_match_all('![S|B]\d+(\/\w)*!', $invoiceNumber, $realInvoiceNumber);
+			if (empty($realInvoiceNumber)) {
+				$sheetInvoicesFailed[] = array('index' => $sheetIndex - 1, 'error' => 'no invoice number');
+				continue;
+			}
+			$invoiceType = 0;
+			if(preg_match('/credit/i', $invoiceNumber))
+			{
+				$invoiceType = 1;
+			}
+			$invoiceNumber = array_values(array_slice($realInvoiceNumber[0], -1))[0];
+
+			// try to find weight ,volume and etc . value
+			$orgin = '';
+			$dest = '';
+			$weight = 0;
+			$volume = 0;
+			$chargeWeight = 0;
+			$eta = '';
+			$etd = '';
+			$awb = '';
+			$shipno = '';
+			for ($i = 10; $i < 80; $i++) {
+				$tag = trim($invoice[$i][3]);
+				$tag2 = trim($invoice[$i][27]);
+				if ($tag == 'BROKER' || substr($tag, 0, 5) == 'OWNER' || $tag == 'ORDER NUMBERS / REFERENCE') {
+					$weight = preg_replace('/\s*KG$/', '', trim($invoice[$i + 1][27]));
+					$volume = preg_replace('/\s*M3$/', '', trim($invoice[$i + 1][38]));
+					if (empty($volume)) {
+						$volume = preg_replace('/\s*M3$/', '', trim($invoice[$i + 1][35]));
+					}
+					$chargeWeight = preg_replace('/\s*KG$/', '', trim($invoice[$i + 1][27]));
+				} else if ($tag == 'ORIGIN') {
+					$orgin = trim($invoice[$i + 1][3]); // origin location
+					$dest = trim($invoice[$i + 1][27]); // destination
+					if ($invoice[$i][19] != 'ETD') {
+						$eta = oExcel::toDate($invoice[$i + 1][45]);
+						$etd = oExcel::toDate($invoice[$i + 1][21]);
+					} else {
+						$eta = oExcel::toDate($invoice[$i][46]);
+						$etd = oExcel::toDate($invoice[$i][22]);
+					}
+				} else if ($tag2 == 'OCEAN BILL OF LADING' || $tag2 == 'MAWB') {
+					$awb = trim($invoice[$i + 1][27]); // get awb number
+
+					$reg = 'ECN\s*\d{11}|ECN\s*\d{10}|ECN\s*\d{9}|AHAU\d{7}|AGDSY\d{8}\w{2}|AGDSY\d{8}|HNAU\d{6}';
+					if (empty($shipno) && preg_match('/(' . $reg . ')/i', trim($invoice[$i + 1][3]), $matches) || preg_match('/' . $reg . '/i', trim($invoice[$i + 1][39]), $matches)) {
+						$shipno = $matches[0];
+					}
+
+					if (empty($shipno) && preg_match('/,(\d{9})/i', trim($invoice[$i + 1][39]), $matches)) {
+						$shipment = Shipment::model()->find('ref = :shipno AND status != 100', [':shipno' => 'TNT' . $matches[0]]);
+						if (!empty($shipment)) {
+							$shipno = $shipment->ref;
+						} else {
+							$shipno = '';
+						}
+					}
+
+					if (empty($shipno) && preg_match('/PCA (\w*) \//i', trim($invoice[$i - 1][3]), $matches)) {
+						$shipno = $matches[1];
+					}
+
+					if (empty($shipno)) {
+						$shipno = str_replace(',', '', trim($invoice[$i + 1][39]));
+					}
+
+					break;
+				}
+			}
+			$chargeWeight = empty($chargeWeight)?0:$chargeWeight;
+			// get all items
+			$items = array();
+			// try to find description begin line
+			$itemLineIndex = 34; // if not found set as default
+			for ($index = 12;; $index++) {
+				if ($invoice[$index][3] == 'DESCRIPTION') {
+					$itemLineIndex = $index + 2; // item lines begin from next 2 lines
+					break;
+				}
+				// avoid dead loop
+				if ($index > 120) {
+					break;
+				}
+
+			}
+			$allLineTotal = 0;
+			$lineConstCount = 1;
+			for ($index = $itemLineIndex;; $index++) 
+			{
+				if ($index > 200) {
+					break;
+				}
+				// avoid dead loop
+				$lineConstCount++;
+				if (empty($invoice[$index][3])) 
+				{
+					if ($lineConstCount++ < 20) 
+					{
+						continue;
+					} else {
+						break;
+					}
+
+				}
+				if ($invoice[$index][34] == 'SUBTOTAL' || $invoice[$index][33] == 'SUBTOTAL') 
+				{
+					break;
+				}
+				// got subtotal line stop
+
+				$desc = trim($invoice[$index][3]);
+				$gstAmount = 0;
+				if (in_array(trim($invoice[$itemLineIndex-2][34]), ['GST IN AUD', '=IF("Y"<>"N","GST IN AUD","")']) || in_array(trim($invoice[$itemLineIndex-2][35]), ['GST IN AUD', '=IF("Y"<>"N","GST IN AUD","")'])) {
+					if ($gst = preg_match('/^[\d\.\%]+\=(-[\d\.]+|[\d\.]+)$/', trim($invoice[$index][34]), $m)) {
+						$gstAmount = $m[1];
+					}
+				} else {
+					if (empty(trim($invoice[$index][31]))) {
+						continue;
+					} else {
+						if ($gst = preg_match('/^[\d\.\%]+\=(-[\d\.]+|[\d\.]+)$/', trim($invoice[$index][31]), $m)) {
+							$gstAmount = $m[1];
+						}
+					}
+				}
+
+				$value = floatval(str_replace(',', '', $invoice[$index][42]));
+
+				//append desc
+				if (empty($invoice[$index][34]) && empty($value) && !empty($items[sizeof($items) - 1]['desc'])) {
+					$items[sizeof($items) - 1]['desc'] .= "\n" . $desc;
+					continue;
+				}
+				$lineSubTotal = $value;
+				$lineTotal = $lineSubTotal + $gstAmount;
+				$allLineTotal += $lineTotal;
+
+				$glcode = '91032';
+				$chargeCode = '91032';
+
+				$items[] = array('desc' => $desc, 'gst' => $gst, 'chargecode' => $chargeCode, 'glcode' => $glcode, 'value' => $value, 'subtotal' => $lineSubTotal, 'gstamount' => $gstAmount, 'total' => $lineTotal);
+				$allItemsDesc[$desc] = 1;
+			}
+			// Yii::log(json_encode($items), 'error');
+
+			// try to get subtotal , gst and total
+			$subtotal = 0;
+			$gst = 0;
+			$total = 0;
+			for ($index = $index;; $index++) {
+				if ($invoice[$index][34] == 'SUBTOTAL') {
+					$subtotal = floatval(str_replace(',', '', $invoice[$index][41]));
+				} else if ($invoice[$index][33] == 'SUBTOTAL') {
+					$subtotal = floatval(str_replace(',', '', $invoice[$index][39]));
+				}
+				if ($invoice[$index][34] == 'ADD GST') {
+					$gst = floatval(str_replace(',', '', $invoice[$index][41]));
+				} else if ($invoice[$index][33] == 'ADD GST') {
+					$gst = floatval(str_replace(',', '', $invoice[$index][39]));
+				}
+				if ($invoice[$index][34] == 'TOTAL AUD') {
+					$total = floatval(str_replace(',', '', $invoice[$index][41]));
+					break;
+				} else if ($invoice[$index][33] == 'TOTAL AUD') {
+					$total = floatval(str_replace(',', '', $invoice[$index][39]));
+					break;
+				}
+
+				if ($index > 400) {
+					break;
+				}
+				// avoid dead loop
+			}
+
+			// making up billing array
+			$billing = array(
+				'number' => $invoiceNumber,
+				'type' => $invoiceType,
+				'awb' => $awb,
+				'date' => $invoiceDate,
+				'due' => $invoiceDue,
+				'cnee' => $consignee,
+				'cnor' => $consignor,
+				'cref' => $cref,
+				'orgin' => $orgin,
+				'eta' => $eta,
+				'etd' => $etd,
+				'weight' => $weight,
+				'chargeWeight' => $chargeWeight
+			);
+
+			$oldInvoice = SupplierInvoice::model()->findAll('inv_no = :inv_no and status!=100 and org_id= :org_id',[":inv_no"=>$invoiceNumber,":org_id"=>$org_id]);
+			if(!empty($oldInvoice))
+			{
+				$sheetInvoicesFailed[] = array('index' => $sheetIndex - 1, 'error' => 'invoice imported');
+				continue;
+			}
+
+			$inv = new SupplierInvoice();
+			$inv->created = date('Y-m-d');
+			$inv->inv_date = $invoiceDate;
+			$inv->inv_no =$invoiceNumber;
+			$inv->type = SiReconcile::TYPE_BROKER;
+			$inv->currency = 1;
+			$inv->status = 1;
+			$inv->mdata['billing'] =  $billing;
+			$inv->org_id = $org_id;
+			$invoiceLine[$invoiceNumber] = [];
+
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->ref = $shipno;
+			$supplierInvoiceLine->item_code = 'master_broker';
+			$supplierInvoiceLine->postcode = "";
+			$supplierInvoiceLine->det =  'master_broker';
+			$supplierInvoiceLine->courier_cubic = number_format(floatval($volume), 4, '.', '');
+			$supplierInvoiceLine->weight =number_format($chargeWeight, 4, '.', '');
+			$supplierInvoiceLine->qty = 1;
+			$supplierInvoiceLine->cdeadwt = number_format($chargeWeight, 4, '.', '');
+			$supplierInvoiceLine->mdata['awb'] = $awb;
+			$supplierInvoiceLine->mdata['charge_code'] =  '91032';
+
+			foreach ($items as $key => $line) {
+				$supplierInvoiceLine->amount_ex_gst += $line['subtotal'];
+				$supplierInvoiceLine->gst += $line['gstamount'];
+				$supplierInvoiceLine->amount += $line['total'];
+			}
+			$number = 1;
+			if($invoiceType==1)
+			{
+				$number = -1;
+			}
+			$supplierInvoiceLine->amount_ex_gst = number_format($number*$supplierInvoiceLine->amount_ex_gst, 4, '.', '');
+			$supplierInvoiceLine->gst =number_format($number*$supplierInvoiceLine->gst, 4, '.', '');
+			$supplierInvoiceLine->amount = number_format($number*$supplierInvoiceLine->amount, 4, '.', '');
+
+			$inv->total= $number*$supplierInvoiceLine->amount;
+			$inv->gst= $supplierInvoiceLine->gst;
+			$inv->total_ex_gst= $number*$supplierInvoiceLine->amount_ex_gst;
+
+			$invoiceLine[$invoiceNumber][] = $supplierInvoiceLine;
+			if($supplierInvoiceLine->gst>0)
+			{
+				$supplierInvoiceLine->mdata['gst_type'] =  Invoice::$InvoiceCostTaxRateSimple['on'];
+			}else
+			{
+				$supplierInvoiceLine->mdata['gst_type'] =  Invoice::$InvoiceCostTaxRateSimple['free'];
+			}
+			
+			$inv->total = number_format($number*$inv->total, 4, '.', '');
+			$inv->gst = number_format($inv->gst, 4, '.', '');
+			$inv->total_ex_gst = number_format($number*$inv->total_ex_gst, 4, '.', '');
+			$supplierInvoice[] = $inv;
+		}
+		return $sheetInvoicesFailed;
+	}
+
+	public function prepareConsolManual($data,&$invoiceLine,&$invoice)
+	{
+		$data = $data[0];
+		$orgId = $data[1][2];
+		unset($data[1]);
+		unset($data[2]);
+		foreach ($data as $key => $d) 
+		{
+			if(empty($d[1]))continue;
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->ref = $d[2];
+			if($supplierInvoiceLine->ref!='general')
+			{
+				$consol = Consol::model()->find('no = :no  and type !=90 and status !=100',[":no"=>$supplierInvoiceLine->ref]);
+				if(empty($consol))
+				{
+					$this->errors[] = "Line ".$key.": ".SiReconcileLine::$type[SiReconcileLine::EMPTY_CONSOL]." ".$supplierInvoiceLine->ref;
+					continue;
+				}
+			}
+
+			$supplierInvoiceLine->item_code = $d[1];
+			$supplierInvoiceLine->postcode = "";
+			$supplierInvoiceLine->det = $d[3];
+			$supplierInvoiceLine->courier_cubic = 0;
+			$supplierInvoiceLine->weight = 0;
+			$supplierInvoiceLine->cdeadwt = 0;
+			$supplierInvoiceLine->qty = number_format($d[4], 4, '.', '');
+			$d[7] = strtolower($d[7]);
+			if($d[7]=="free")
+			{
+				$supplierInvoiceLine->gst = 0;
+			}else
+			{
+				$supplierInvoiceLine->gst = number_format($d[8]*0.1,4,'.','');
+			}
+			$supplierInvoiceLine->amount_ex_gst = number_format($d[8], 4, '.', '');
+			$supplierInvoiceLine->mdata['price'] = number_format($d[8]/$supplierInvoiceLine->qty,4,'.','');
+			$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst+$supplierInvoiceLine->gst, 4, '.', '');
+			$supplierInvoiceLine->mdata['charge_code'] = $d[6];
+			$supplierInvoiceLine->mdata['gst_type'] = Invoice::$InvoiceCostTaxRateSimple[$d[7]];
+			$invoiceLine[] = $supplierInvoiceLine;
+			$invoice->total+= number_format($supplierInvoiceLine->amount, 4, '.', '');
+			$invoice->gst+= number_format($supplierInvoiceLine->gst, 4, '.', '');
+			$invoice->total_ex_gst+= number_format($supplierInvoiceLine->amount_ex_gst, 4, '.', '');
+			Yii::app()->name = $this->appName;
+		}
+		$invoice->org_id = $orgId;
+		$invoice->total = number_format($invoice->total, 4, '.', '');
+		$invoice->gst = number_format($invoice->gst, 4, '.', '');
+		$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+	}
+
+	public function prepareConsolManualMulti($data,&$invoiceLine,&$invoice,$type)
+	{
+		$data = $data[0];
+		$orgId = $data[1][2];
+		unset($data[1]);
+		unset($data[2]);
+		$invoiceData = [];
+		foreach ($data as $key => $d) 
+		{
+			if(empty($d[1]))continue;
+			$date = date('Y-m-d', strtotime(oExcel::toDate($d[10])));
+			$lastDay = date('Y-m-d',strtotime('-60 day',strtotime(date('Y-m-d'))));
+			if(strtotime($date)<strtotime($lastDay))
+			{
+				$this->errors[] = "Line".$key." expired invoice date";
+				continue;
+			}
+			$index = $d[9].'||'.$date;
+			if(empty($invoiceData[$index]))
+			{
+				$invoiceData[$index] = [];
+				$invoiceData[$index][] = $d;
+			}else
+			{
+				$invoiceData[$index][] = $d;
+			}
+		}
+		foreach ($invoiceData as $key => $invData) 
+		{
+			$invoiceNumber = explode('||', $key)[0];
+			if(self::checkInvoiceExisting($invoiceNumber))
+			{
+				$this->errors[] = "Invoice Existing ".$invoiceNumber;
+				continue;
+			}
+			$invoiceDate = explode('||', $key)[1];
+			$inv = new SupplierInvoice();
+			$inv->created = date('Y-m-d');
+			$inv->inv_date = $invoiceDate;
+			$inv->inv_no =$invoiceNumber;
+			$inv->type = $type;
+			$inv->currency = 1;
+			$inv->status = 1;
+			$inv->org_id = $orgId;
+			$invoiceLine[$invoiceNumber] = [];
+			foreach ($invData as $key => $d)
+			{
+				$supplierInvoiceLine = new SupplierInvoiceLine();
+				$supplierInvoiceLine->ref = $d[2];
+				if($supplierInvoiceLine->ref!='general')
+				{
+					$consol = Consol::model()->find('(no = :no or awb=:no or json_value(meta,"$.container_no") = :no)  and type !=90 and status !=100 ',[":no"=>$supplierInvoiceLine->ref]);
+					if(empty($consol))// find consol by amazon no
+					{
+						$criteria=new CDbCriteria;
+						$criteria->compare('booking_ref', $supplierInvoiceLine->ref, true);
+						$rs= AmazonInfo::model()->findAll($criteria);
+						$totalConsol = [];
+						foreach ($rs as $r) {
+							$p = $r->model::model()->findByPk($r->fid);
+							if(empty($p)) continue;
+							if(!empty($p->shipment))
+							{
+								$p = $p->shipment;
+							}
+							$totalConsol[$p->consol_id] = floatval($p->consol_id);
+						}
+						$consols = count($totalConsol);
+						if($consols>1)
+						{
+							$this->errors[] = "Line ".$key.": amazon no has multi-consol ".$supplierInvoiceLine->ref;
+							continue;
+						}else if($consols==1)
+						{
+							$consol = Consol::model()->findByPk(end($totalConsol)->id);
+						}else
+						{
+
+							$p = ImParcel::model()->find('(hbn=:ref or ref=:ref) and status !=100',[":ref"=>$supplierInvoiceLine->ref]);
+							if(!empty($p->consol_id))
+							{
+								$consol = $p->consol;
+							}else
+							{
+								$this->errors[] = "Line ".$key.": ".SiReconcileLine::$type[SiReconcileLine::EMPTY_CONSOL]." ".$supplierInvoiceLine->ref;
+								continue;
+							}
+						}
+					}
+
+					$supplierInvoiceLine->ref = $consol->no;
+				}
+				$supplierInvoiceLine->item_code = $d[1];
+				$supplierInvoiceLine->postcode = "";
+				$supplierInvoiceLine->det = $d[3];
+				$supplierInvoiceLine->courier_cubic = 0;
+				$supplierInvoiceLine->weight = 0;
+				$supplierInvoiceLine->cdeadwt = 0;
+				$supplierInvoiceLine->qty = number_format($d[4], 4, '.', '');
+				$d[7] = strtolower($d[7]);
+				if($d[7]=="free")
+				{
+					$supplierInvoiceLine->gst = 0;
+				}else
+				{
+					$supplierInvoiceLine->gst = number_format($d[8]*0.1,4,'.','');
+				}
+				$supplierInvoiceLine->amount_ex_gst = number_format($d[8], 4, '.', '');
+				$supplierInvoiceLine->mdata['price'] = number_format($d[8]/$supplierInvoiceLine->qty,4,'.','');
+				$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst+$supplierInvoiceLine->gst, 4, '.', '');
+				$supplierInvoiceLine->mdata['charge_code'] = $d[6];
+				$supplierInvoiceLine->mdata['gst_type'] = Invoice::$InvoiceCostTaxRateSimple[$d[7]];
+				if(!empty($d[11]))
+				{
+					$supplierInvoiceLine->mdata['region'] = $d[11];
+				}
+
+				$invoiceLine[$invoiceNumber][] = $supplierInvoiceLine;
+				$inv->total+= number_format($supplierInvoiceLine->amount, 4, '.', '');
+				$inv->gst+= number_format($supplierInvoiceLine->gst, 4, '.', '');
+				$inv->total_ex_gst+= number_format($supplierInvoiceLine->amount_ex_gst, 4, '.', '');
+			}
+			$inv->total = number_format($inv->total, 4, '.', '');
+			$inv->gst = number_format($inv->gst, 4, '.', '');
+			$inv->total_ex_gst = number_format($inv->total_ex_gst, 4, '.', '');
+			$invoice[] = $inv;
+			Yii::app()->name = $this->appName;
+		}
+	}
+
+	public function prepareConsolManualWeight($data,&$invoiceLine,&$invoice,$type)
+	{
+		$data = $data[0];
+		$orgId = $data[1][2];
+		unset($data[1]);
+		unset($data[2]);
+		$invoiceData = [];
+		foreach ($data as $key => $d) 
+		{
+			if(empty($d[1]))continue;
+			$date = date('Y-m-d', strtotime(oExcel::toDate($d[10])));
+			$lastDay = date('Y-m-d',strtotime('-60 day',strtotime(date('Y-m-d'))));
+			if(strtotime($date)<strtotime($lastDay))
+			{
+				$this->errors[] = "Line".$key." expired invoice date";
+				continue;
+			}
+			$index = $d[9].'||'.$date;
+			if(empty($invoiceData[$index]))
+			{
+				$invoiceData[$index] = [];
+				$invoiceData[$index][] = $d;
+			}else
+			{
+				$invoiceData[$index][] = $d;
+			}
+		}
+		foreach ($invoiceData as $key => $invData) 
+		{
+			$invoiceNumber = explode('||', $key)[0];
+			if(self::checkInvoiceExisting($invoiceNumber))
+			{
+				$this->errors[] = "Invoice Existing ".$invoiceNumber;
+				continue;
+			}
+			$invoiceDate = explode('||', $key)[1];
+			$inv = new SupplierInvoice();
+			$inv->created = date('Y-m-d');
+			$inv->inv_date = $invoiceDate;
+			$inv->inv_no =$invoiceNumber;
+			$inv->type = $type;
+			$inv->currency = 1;
+			$inv->status = 1;
+			$inv->org_id = $orgId;
+			$invoiceLine[$invoiceNumber] = [];
+			foreach ($invData as $key => $d)
+			{
+				$supplierInvoiceLine = new SupplierInvoiceLine();
+				$supplierInvoiceLine->ref = $d[2];
+				if($supplierInvoiceLine->ref!='general')
+				{
+					$consol = Consol::model()->find('(no = :no or awb=:no or json_value(meta,"$.container_no") = :no)  and type !=90 and status !=100',[":no"=>$supplierInvoiceLine->ref]);
+					if(empty($consol))// find consol by amazon no
+					{
+						$criteria=new CDbCriteria;
+						$criteria->compare('booking_ref', $supplierInvoiceLine->ref, true);
+						$rs= AmazonInfo::model()->findAll($criteria);
+						$totalConsol = [];
+						foreach ($rs as $r) {
+							$p = $r->model::model()->findByPk($r->fid);
+							if(empty($p)) continue;
+							if(!empty($p->shipment))
+							{
+								$p = $p->shipment;
+							}
+							$totalConsol[$p->consol_id] = floatval($p->consol_id);
+						}
+						$consols = count($totalConsol);
+						if($consols>1)
+						{
+							$this->errors[] = "Line ".$key.": amazon no has multi-consol ".$supplierInvoiceLine->ref;
+							continue;
+						}else if($consols==1)
+						{
+							$consol = Consol::model()->findByPk(end($totalConsol)->id);
+						}else
+						{
+
+							$p = ImParcel::model()->find('(hbn=:ref or ref=:ref) and status !=100',[":ref"=>$supplierInvoiceLine->ref]);
+							if(!empty($p->consol_id))
+							{
+								$consol = $p->consol;
+							}else
+							{
+								$this->errors[] = "Line ".$key.": ".SiReconcileLine::$type[SiReconcileLine::EMPTY_CONSOL]." ".$supplierInvoiceLine->ref;
+								continue;
+							}
+						}
+					}
+
+					$supplierInvoiceLine->ref = $consol->no;
+				}
+				$supplierInvoiceLine->item_code = $d[1];
+				$supplierInvoiceLine->postcode = "";
+				$supplierInvoiceLine->det = $d[3];
+				$supplierInvoiceLine->courier_cubic = 0;
+				$supplierInvoiceLine->weight = number_format($d[4], 4, '.', '');
+				$supplierInvoiceLine->cdeadwt = 0;
+				$supplierInvoiceLine->qty = number_format($d[4], 4, '.', '');
+				$d[7] = strtolower($d[7]);
+				if($d[7]=="free")
+				{
+					$supplierInvoiceLine->gst = 0;
+				}else
+				{
+					$supplierInvoiceLine->gst = number_format($d[8]*0.1,4,'.','');
+				}
+				$supplierInvoiceLine->amount_ex_gst = number_format($d[8], 4, '.', '');
+				$supplierInvoiceLine->mdata['price'] = number_format($d[8]/$supplierInvoiceLine->qty,4,'.','');
+				$supplierInvoiceLine->mdata['check_price'] = number_format($d[5], 4, '.', '');
+				$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst+$supplierInvoiceLine->gst, 4, '.', '');
+				$supplierInvoiceLine->mdata['charge_code'] = $d[6];
+				$supplierInvoiceLine->mdata['gst_type'] = Invoice::$InvoiceCostTaxRateSimple[$d[7]];
+				if(!empty($d[11]))
+				{
+					$supplierInvoiceLine->mdata['region'] = $d[11];
+				}
+
+				$invoiceLine[$invoiceNumber][] = $supplierInvoiceLine;
+				$inv->total+= number_format($supplierInvoiceLine->amount, 4, '.', '');
+				$inv->gst+= number_format($supplierInvoiceLine->gst, 4, '.', '');
+				$inv->total_ex_gst+= number_format($supplierInvoiceLine->amount_ex_gst, 4, '.', '');
+			}
+			$inv->total = number_format($inv->total, 4, '.', '');
+			$inv->gst = number_format($inv->gst, 4, '.', '');
+			$inv->total_ex_gst = number_format($inv->total_ex_gst, 4, '.', '');
+			$invoice[] = $inv;
+			Yii::app()->name = $this->appName;
+		}
+	}
+
+	public function prepareConsolManualQtyOrWeight($data,&$invoiceLine,&$invoice,$type)
+	{
+		$data = $data[0];
+		$orgId = $data[1][2];
+		unset($data[1]);
+		unset($data[2]);
+		$invoiceData = [];
+		foreach ($data as $key => $d) 
+		{
+			if(empty($d[1]))continue;
+			$date = date('Y-m-d', strtotime(oExcel::toDate($d[10])));
+			$lastDay = date('Y-m-d',strtotime('-60 day',strtotime(date('Y-m-d'))));
+			if(strtotime($date)<strtotime($lastDay))
+			{
+				$this->errors[] = "Line".$key." expired invoice date";
+				continue;
+			}
+			$index = $d[9].'||'.$date;
+			if(empty($invoiceData[$index]))
+			{
+				$invoiceData[$index] = [];
+				$invoiceData[$index][] = $d;
+			}else
+			{
+				$invoiceData[$index][] = $d;
+			}
+		}
+		foreach ($invoiceData as $key => $invData) 
+		{
+			$invoiceNumber = explode('||', $key)[0];
+			if(self::checkInvoiceExisting($invoiceNumber))
+			{
+				$this->errors[] = "Invoice Existing ".$invoiceNumber;
+				continue;
+			}
+			$invoiceDate = explode('||', $key)[1];
+			$inv = new SupplierInvoice();
+			$inv->created = date('Y-m-d');
+			$inv->inv_date = $invoiceDate;
+			$inv->inv_no =$invoiceNumber;
+			$inv->type = $type;
+			$inv->currency = 1;
+			$inv->status = 1;
+			$inv->org_id = $orgId;
+			$invoiceLine[$invoiceNumber] = [];
+			foreach ($invData as $key => $d)
+			{
+				$supplierInvoiceLine = new SupplierInvoiceLine();
+				$supplierInvoiceLine->ref = $d[2];
+				if($supplierInvoiceLine->ref!='general')
+				{
+					$consol = Consol::model()->find('(no = :no or awb=:no or json_value(meta,"$.container_no") = :no)  and type !=90 and status !=100',[":no"=>$supplierInvoiceLine->ref]);
+					if(empty($consol))// find consol by amazon no
+					{
+						$criteria=new CDbCriteria;
+						$criteria->compare('booking_ref', $supplierInvoiceLine->ref, true);
+						$rs= AmazonInfo::model()->findAll($criteria);
+						$totalConsol = [];
+						foreach ($rs as $r) {
+							$p = $r->model::model()->findByPk($r->fid);
+							if(empty($p)) continue;
+							if(!empty($p->shipment))
+							{
+								$p = $p->shipment;
+							}
+							$totalConsol[$p->consol_id] = floatval($p->consol_id);
+						}
+						$consols = count($totalConsol);
+						if($consols>1)
+						{
+							$this->errors[] = "Line ".$key.": amazon no has multi-consol ".$supplierInvoiceLine->ref;
+							continue;
+						}else if($consols==1)
+						{
+							$consol = Consol::model()->findByPk(end($totalConsol)->id);
+						}else
+						{
+
+							$p = ImParcel::model()->find('(hbn=:ref or ref=:ref) and status !=100',[":ref"=>$supplierInvoiceLine->ref]);
+							if(!empty($p->consol_id))
+							{
+								$consol = $p->consol;
+							}else
+							{
+								$this->errors[] = "Line ".$key.": ".SiReconcileLine::$type[SiReconcileLine::EMPTY_CONSOL]." ".$supplierInvoiceLine->ref;
+								continue;
+							}
+						}
+					}
+
+					$supplierInvoiceLine->ref = $consol->no;
+				}
+				$supplierInvoiceLine->item_code = $d[1];
+				$supplierInvoiceLine->postcode = "";
+				$supplierInvoiceLine->det = $d[3];
+				$supplierInvoiceLine->courier_cubic = 0;
+				$supplierInvoiceLine->weight = 0;
+				$supplierInvoiceLine->cdeadwt = 0;
+				$supplierInvoiceLine->qty = number_format($d[4], 4, '.', '');
+				$d[7] = strtolower($d[7]);
+				if($d[7]=="free")
+				{
+					$supplierInvoiceLine->gst = 0;
+				}else
+				{
+					$supplierInvoiceLine->gst = number_format($d[8]*0.1,4,'.','');
+				}
+				$supplierInvoiceLine->amount_ex_gst = number_format($d[8], 4, '.', '');
+				$supplierInvoiceLine->mdata['price'] = number_format($d[8]/$supplierInvoiceLine->qty,4,'.','');
+				if(empty($d[12])||$d[12]=='weight')
+				{
+					$supplierInvoiceLine->weight = number_format($d[4], 4, '.', '');
+					$supplierInvoiceLine->mdata['check_price'] = number_format($d[5], 4, '.', '');
+				}
+
+				$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst+$supplierInvoiceLine->gst, 4, '.', '');
+				$supplierInvoiceLine->mdata['charge_code'] = $d[6];
+				$supplierInvoiceLine->mdata['gst_type'] = Invoice::$InvoiceCostTaxRateSimple[$d[7]];
+				if(!empty($d[11]))
+				{
+					$supplierInvoiceLine->mdata['region'] = $d[11];
+				}
+
+				$invoiceLine[$invoiceNumber][] = $supplierInvoiceLine;
+				$inv->total+= number_format($supplierInvoiceLine->amount, 4, '.', '');
+				$inv->gst+= number_format($supplierInvoiceLine->gst, 4, '.', '');
+				$inv->total_ex_gst+= number_format($supplierInvoiceLine->amount_ex_gst, 4, '.', '');
+			}
+			$inv->total = number_format($inv->total, 4, '.', '');
+			$inv->gst = number_format($inv->gst, 4, '.', '');
+			$inv->total_ex_gst = number_format($inv->total_ex_gst, 4, '.', '');
+			$invoice[] = $inv;
+			Yii::app()->name = $this->appName;
+		}
+	}
+
+	public function prepareConsolManualBrownways($data,&$invoiceLine,&$invoice,$type,$invoiceDate,$invoiceNo)
+	{
+		$data = $data[0];
+		// $orgId = $data[1][2];
+		$orgId = 4174;
+		unset($data[1]);
+		$invoiceData = [];
+		// foreach ($data as $key => $d) 
+		// {
+		// 	if(empty($d[1]))continue;
+		// 	$date = date('Y-m-d', strtotime(oExcel::toDate($d[1])));
+		// 	$lastDay = date('Y-m-d',strtotime('-60 day',strtotime(date('Y-m-d'))));
+		// 	if(strtotime($date)<strtotime($lastDay))
+		// 	{
+		// 		$this->errors[] = "Line".$key." expired invoice date";
+		// 		continue;
+		// 	}
+		// 	$index = $d[9].'||'.$date;
+		// 	if(empty($invoiceData[$index]))
+		// 	{
+		// 		$invoiceData[$index] = [];
+		// 		$invoiceData[$index][] = $d;
+		// 	}else
+		// 	{
+		// 		$invoiceData[$index][] = $d;
+		// 	}
+		// }
+		if(self::checkInvoiceExisting($invoiceNo))
+		{
+			$this->errors[] = "Invoice Existing ".$invoiceNo;
+		}
+		$invoiceDate = $invoiceDate;
+		$inv = new SupplierInvoice();
+		$inv->created = date('Y-m-d');
+		$inv->inv_date = $invoiceDate;
+		// $inv->inv_no =$invoiceNumber;
+		$inv->inv_no =$invoiceNo;
+		$inv->type = $type;
+		$inv->currency = 1;
+		$inv->status = 1;
+		$inv->org_id = $orgId;
+		$invoiceLine[$invoiceNo] = [];
+
+		foreach ($data as $key => $d) 
+		{
+			if ($d[9]==0){
+				continue;
+			}
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			if(preg_match('/(\d{3})[\s\-]*(\d{4})[\s\-]*(\d{4})/',$d[3],$m)){
+                $mawb = $m[1]."-".$m[2].$m[3];
+            }
+            else{
+            	$mawb = $d[3];
+            }
+			$supplierInvoiceLine->ref = $mawb;
+			if($supplierInvoiceLine->ref!='')
+			{
+				$consol = ImcoConsol::model()->find(['condition'=>'no = :no or awb=:no or json_value(meta,"$.container_no") = :no','params'=>[":no"=>$supplierInvoiceLine->ref],'order'=>'status desc']);
+				if(empty($consol))
+				{
+					$consol = DmawbConsol::model()->find('no = :no or awb=:no or json_value(meta,"$.container_no") = :no',[":no"=>$supplierInvoiceLine->ref]);
+				}
+
+				if(!isset($consol))// find consol by amazon no
+				{
+					$this->errors[] = "Consol: ".$mawb." No Existing ";	
+				}
+				else{
+					if(empty($consol->mdata['air_type']))
+					{
+						$this->errors[] = "Consol: ".$mawb." hasn't air type ";
+						continue;	
+					}
+					$supplierInvoiceLine->ref = $consol->awb;
+					$supplierInvoiceLine->item_code = ImcoConsol::$air_types[@$consol->mdata['air_type']];
+					$supplierInvoiceLine->postcode = "";
+					$supplierInvoiceLine->det = $d[10];
+					$supplierInvoiceLine->courier_cubic = 0;
+					$supplierInvoiceLine->weight = number_format($d[8], 4, '.', '');
+					$supplierInvoiceLine->cdeadwt = 0;
+					$supplierInvoiceLine->qty = number_format($d[8], 4, '.', '');
+					$d[7] = strtolower($d[7]);
+					
+					$supplierInvoiceLine->gst = number_format($d[12]*0.1,4,'.','');
+					$supplierInvoiceLine->qty = 1;
+					$supplierInvoiceLine->amount_ex_gst = number_format($d[12], 4, '.', '');
+					$supplierInvoiceLine->mdata['price'] = number_format($d[12],4,'.','');
+					$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst+$supplierInvoiceLine->gst, 4, '.', '');
+					$supplierInvoiceLine->mdata['charge_code'] = 91031;
+					$supplierInvoiceLine->mdata['gst_type'] = Invoice::$InvoiceCostTaxRateSimple['on'];
+
+					$supplierInvoiceLine->mdata['region'] = ORG::$warehouse_list[$consol->dpt_id];
+					$BrownwaysRates=SystemSetting::getBrownwaysInvoiceRates();
+					
+					if(in_array(4669 ,array_column($consol->totOrg(),'org_id'))){
+						$supplierInvoiceLine->mdata['check_price_min'] = $BrownwaysRates['DAI_POST'][2];
+						$supplierInvoiceLine->mdata['check_price'] = $BrownwaysRates['DAI_POST'][0];
+					}
+					elseif(!empty($consol->mdata['air_type'])&&$consol->mdata['air_type']==ImcoConsol::AIR_TYPE_AKE)
+					{
+						$supplierInvoiceLine->mdata['check_price_min'] = $BrownwaysRates['AKE'][2];
+						$supplierInvoiceLine->mdata['check_price'] = $BrownwaysRates['AKE'][0];
+					}
+					elseif(!empty($consol->mdata['air_type'])&&$consol->mdata['air_type']==ImcoConsol::AIR_TYPE_LOOSE)
+					{						
+						if($consol->dpt_id==Org::TLA_DEPARTMENT_SYDNEY||$consol->dpt_id==Org::TLA_DEPARTMENT_MELBOURNE){
+							$supplierInvoiceLine->mdata['check_price_min'] = $BrownwaysRates['LOOSE']['SYD_MEL'][2];
+							$supplierInvoiceLine->mdata['check_price'] = $BrownwaysRates['LOOSE']['SYD_MEL'][0];
+						}
+						elseif ($consol->dpt_id==Org::TLA_DEPARTMENT_BRISBANE) {
+							$supplierInvoiceLine->mdata['check_price_min'] = $BrownwaysRates['LOOSE']['BNE'][2];
+							$supplierInvoiceLine->mdata['check_price'] = $BrownwaysRates['LOOSE']['BNE'][0];
+						}						
+					}
+					elseif(!empty($consol->mdata['air_type'])&&$consol->mdata['air_type']==ImcoConsol::AIR_TYPE_PMC)
+					{
+						$supplierInvoiceLine->mdata['check_price'] = 0;
+						$supplierInvoiceLine->mdata['check_price_min'] = $BrownwaysRates['PMC'][0];						
+					}
+					else
+					{
+						$supplierInvoiceLine->mdata['check_price'] = $BrownwaysRates['DQF'][0];
+						$supplierInvoiceLine->mdata['check_price_min'] = $BrownwaysRates['DQF'][2];						
+					}
+					
+					$invoiceLine[$invoiceNo][] = $supplierInvoiceLine;
+					$inv->total+= number_format($supplierInvoiceLine->amount, 4, '.', '');
+					$inv->gst+= number_format($supplierInvoiceLine->gst, 4, '.', '');
+					$inv->total_ex_gst+= number_format($supplierInvoiceLine->amount_ex_gst, 4, '.', '');
+										
+				}
+				
+			}			
+		}
+		$inv->total = number_format($inv->total, 4, '.', '');
+		$inv->gst = number_format($inv->gst, 4, '.', '');
+		$inv->total_ex_gst = number_format($inv->total_ex_gst, 4, '.', '');
+		$invoice[] = $inv;
+		Yii::app()->name = $this->appName;
+	}
+
+	public function prepareParcelManual($data,&$invoiceLine,&$invoice)
+	{
+		$data = $data[0];
+		$orgId = $data[1][2];
+		unset($data[1]);
+		unset($data[2]);
+		foreach ($data as $key => $d) 
+		{
+			if(empty($d[1]))continue;
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->ref = $d[1];
+			$supplierInvoiceLine->item_code = $d[6];
+			$supplierInvoiceLine->postcode = "";
+			$supplierInvoiceLine->det = $d[6];
+			$supplierInvoiceLine->courier_cubic = $d[2];
+			$supplierInvoiceLine->weight = $d[3];
+			$supplierInvoiceLine->cdeadwt = $d[3];
+			$supplierInvoiceLine->qty = 1;
+			$d[5] = strtolower($d[5]);
+			if($d[5]=="free")
+			{
+				$supplierInvoiceLine->gst = 0;
+			}else
+			{
+				$supplierInvoiceLine->gst = number_format($d[4]*0.1,4,'.','');
+			}
+			$supplierInvoiceLine->amount_ex_gst = number_format($d[4], 4, '.', '');
+			$supplierInvoiceLine->mdata['price'] = number_format($d[4]/$supplierInvoiceLine->qty,4,'.','');
+			$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst+$supplierInvoiceLine->gst, 4, '.', '');
+			$supplierInvoiceLine->mdata['charge_code'] = $d[7];
+			$supplierInvoiceLine->mdata['gst_type'] = Invoice::$InvoiceCostTaxRateSimple[$d[5]];
+			$invoiceLine[] = $supplierInvoiceLine;
+			$invoice->total+= number_format($supplierInvoiceLine->amount, 4, '.', '');
+			$invoice->gst+= number_format($supplierInvoiceLine->gst, 4, '.', '');
+			$invoice->total_ex_gst+= number_format($supplierInvoiceLine->amount_ex_gst, 4, '.', '');
+		}
+		$invoice->org_id = $orgId;
+		$invoice->total = number_format($invoice->total, 4, '.', '');
+		$invoice->gst = number_format($invoice->gst, 4, '.', '');
+		$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+	}
+
+	public function saveSupplierInvoiceToSiReconcile($supplierInvoice,$allSupplierInvoiceLines,$debug = false,$background = false)
+	{
+		$checkShipments = [];
+		$continueId = 0;
+		$month = date("Y-m",strtotime($supplierInvoice->inv_date));
+		if($background)
+		{
+			$siReconcile = SiReconcile::model()->find("supplier_invoice_id = :id",[':id'=>$supplierInvoice->id]);
+			$siReconcile->mdata['command_run'] = 0;
+			$siReconcile->save();
+			Yii::app()->name = $this->appName;
+			$continueId = empty($siReconcile->mdata['continue'])?0:$siReconcile->mdata['continue'];
+		}else
+		{
+			$siReconcile = new SiReconcile();
+			$siReconcile->supplier_invoice_id = $supplierInvoice->id;
+			$siReconcile->org_id = $supplierInvoice->org_id;
+			$siReconcile->type = $supplierInvoice->type;
+			$siReconcile->create = date('Y-m-d H:i:s');
+			$siReconcile->status = SiReconcile::ERROR_CHECKING_STATUS;
+			$siReconcile->flag = 0;
+			$siReconcile->total = number_format($supplierInvoice->total, 4, '.', '');
+			$siReconcile->total_confirmed = 0;
+			$siReconcile->total_gst = number_format($supplierInvoice->gst, 4, '.', '');
+			$siReconcile->total_gst_confirmed = 0;
+			$siReconcile->total_ex_gst = number_format($supplierInvoice->total_ex_gst, 4, '.', '');
+			$siReconcile->total_ex_gst_confirmed = 0;
+			Yii::app()->name = $this->appName;
+
+			if((count($allSupplierInvoiceLines)>100||in_array($supplierInvoice->mdata['template'],["UBI-toll"])) && $background==false)
+			{
+				$siReconcile->mdata['command_run'] = 1;
+				if(!$siReconcile->save())
+				{
+					print_r($siReconcile);
+					return 2;
+				}
+				return 2;
+			}else
+			{
+				if(!$siReconcile->save())
+				{
+					print_r($siReconcile);
+					return false;
+				}
+			}
+		}
+			
+		$batchLines=[];
+		foreach ($allSupplierInvoiceLines as $key => $line) {
+			if($key%1000==0)
+			{
+				$batchLines[]=[];
+			}
+			if($line->id>$continueId)
+			{
+				$batchLines[count($batchLines)-1][]=$line;
+			}
+		}
+
+		foreach ($batchLines as $key => $supplierInvoiceLines) 
+		{
+			if($debug==true)
+			{
+				echo $key;
+			}
+			if($this->appName=='TLA')
+			{
+				$transaction = Yii::app()->db_tla->beginTransaction();
+			}else
+			{
+				$transaction = Yii::app()->db->beginTransaction();
+			}
+			try 
+			{	
+				foreach ($supplierInvoiceLines as $key => $s) 
+				{
+					$siLine = new SiReconcileLine();
+					$siLine->rec_id = $siReconcile->id;
+					$siLine->ref = $s->ref;
+					$siLine->type = 0;
+			
+					$imparcel = ImParcel::model()->find('(hbn = :ref or ref = :ref) and status!=100',[":ref"=>$s->ref]);
+					if(empty($imparcel))
+					{
+						$pLabel = ChangeShipmentLabel::model()->findAll('phbn = :ref or pref = :ref',[':ref'=>$s->ref]);
+						$pLabel = end($pLabel);
+						$imparcel = !empty($pLabel)?ImParcel::model()->find('hbn = :ref or ref = :ref',[":ref"=>$pLabel->newref]):null;
+
+						if(!empty($imparcel))
+						{
+							$siLine->type = $siLine->type | SiReconcileLine::CHANGED_LABEL_TYPE;
+							$siLine->mdata['pref'] = $s->ref;
+						}
+					}
+			
+					$siLine->model = 'ImParcel';
+					$siLine->weight = $s->weight;
+					$siLine->item_code = $s->item_code;
+					$siLine->value = $s->amount_ex_gst;
+					$siLine->courier_cubic = $s->courier_cubic;
+					$siLine->postcode = $s->postcode;
+					Yii::app()->name = $this->appName;
+					/** when the parcel is found**/
+					if(!empty($imparcel))
+					{
+						$siLine->ref = $imparcel->ref;
+					}
+
+					if(!empty($imparcel)&&$siLine->item_code=='item')
+					{
+						$siLine->fid = $imparcel->id;
+						$siLine->charge_code = $imparcel->mdata['chargecode'];
+						$siLine->cs_charge_weight = $siLine->getCSChargeWeight();
+						Yii::app()->name = $this->appName;
+
+						if($siLine->isPureCBMSiReconcileLine())
+						{
+							$orgRateId = $this->getOrgRateId($imparcel,$siLine->parent->parent->mdata['template'],$siLine->parent->org_id);
+							$cust_check_weight = $imparcel->myChargeCBM();
+							$our_charge_weight = $imparcel->myChargeCBM();
+							Yii::app()->name = $this->appName;
+							$siLine->manifest_weight = 0;
+						}else
+						{
+							$orgRateId = $this->getOrgRateId($imparcel,$supplierInvoice->mdata['template']);
+							$cust_check_weight = $imparcel->weight;
+							$our_charge_weight = floatval(isset($imparcel->mdata['charge_client_weight']) ? $imparcel->mdata['charge_client_weight'] : $imparcel->chargeWeight());
+							Yii::app()->name = $this->appName;
+
+							$siLine->manifest_weight = empty($imparcel->mdata["manifest_weight"])?0:$imparcel->mdata["manifest_weight"];
+							$siLine->manifest_weight = number_format($siLine->manifest_weight, 4, '.', '');
+
+						}
+						$chargevalue = $imparcel->getCouiercost();
+						Yii::app()->name = $this->appName;
+			
+						$siLine->cust_check_weight = number_format($cust_check_weight, 4, '.', '');
+						$siLine->our_charge_weight = number_format($our_charge_weight, 4, '.', '');
+						$siLine->postcode = empty($siLine->postcode)?$imparcel->cnee->postcode:$siLine->postcode;
+						$siLine->my_charge = number_format($chargevalue, 4, '.', '');
+						$siLine->agent_id = $imparcel->agent_id;
+						$siLine->getCSChargeWeight();
+						Yii::app()->name = $this->appName;
+						$siLine->getChargeWeightDiff();
+						Yii::app()->name = $this->appName;
+						$siLine->getWeight();
+						Yii::app()->name = $this->appName;
+						$isNoFuel = false;
+						if(!empty($s->mdata['no_fuel']))
+						{
+							$siLine->mdata['no_fuel'] = 1;
+							$isNoFuel = true;
+						}
+						
+						if(!empty($s->mdata['surcharge_criteria']))
+						{
+							$siLine->mdata['surcharge_criteria'] = $s->mdata['surcharge_criteria'];
+						}
+
+						$mDate = $imparcel->getManifestDate();
+						if(!empty($mDate))
+						{
+							$month = date("Y-m",strtotime($mDate));
+						}
+			
+						if(!empty($orgRateId))
+						{
+							if($siLine->isPureCBMSiReconcileLine(false))
+							{
+								$courierCubic = $siLine->org_charge_weight;
+								$ourRate =Shipment::getCourierCostByShipment($siLine->ref, $orgRateId,$courierCubic,false,true,$isNoFuel,$month);
+								Yii::app()->name = $this->appName;
+								$siLine->my_value = number_format($ourRate['price'], 4, '.', '');
+								$siLine->my_value_m = 0;
+							}else
+							{
+								$ourRate =Shipment::getCourierCostByShipment($siLine->ref, $orgRateId, $siLine->weight,false,true,$isNoFuel,$month);
+								Yii::app()->name = $this->appName;
+								$ourRateManifest =Shipment::getCourierCostByShipment($siLine->ref, $orgRateId, $siLine->manifest_weight,false,true,$isNoFuel,$month);
+								Yii::app()->name = $this->appName;
+								$siLine->my_value = number_format($ourRate['price'], 4, '.', '');
+								$siLine->my_value_m = number_format($ourRateManifest['price'], 4, '.', '');
+							}
+						}else
+						{
+							$siLine->my_value = 0;
+							$siLine->my_value_m = 0;
+							$siLine->type =$siLine->type | SiReconcileLine::EMPTY_ORG_RATE_TYPE;
+						}
+			
+					}elseif(!empty($imparcel)&&$siLine->item_code!='item')
+					{
+						$siLine->fid = $imparcel->id;
+						$siLine->charge_code = $imparcel->mdata['chargecode'];
+						$siLine->cust_check_weight = 0;
+						$siLine->our_charge_weight = 0;
+						$siLine->manifest_weight = 0;
+						$siLine->my_value = 0;
+						$siLine->my_value_m = 0;
+						$siLine->my_charge = 0;
+						$siLine->agent_id = 0;
+						$siLine->cs_charge_weight = 0;
+						$siLine->weight_diff = 0;
+						$siLine->org_charge_weight=0;
+					}/** when the parcel is not found**/
+					else
+					{
+						$siLine->fid = 0;
+						$siLine->type = $siLine->type | SiReconcileLine::EMPTY_PARCEL_TYPE;
+						$siLine->charge_code = "";
+						$siLine->cust_check_weight = 0;
+						$siLine->our_charge_weight = 0;
+						$siLine->manifest_weight = 0;
+						$siLine->my_value = 0;
+						$siLine->my_value_m = 0;
+						$siLine->my_charge = 0;
+						$siLine->agent_id = 0;
+						$siLine->cs_charge_weight = 0;
+						$siLine->weight_diff = 0;
+						$siLine->org_charge_weight=0;
+					}
+			
+					$siLine->confirm_status = 0;
+					$siLine->checkErrorsAndSetType($checkShipments);
+					$checkShipments[$siLine->ref.$siLine->item_code] = 1;
+					Yii::app()->name = $this->appName;
+					if(!$siLine->save())
+					{
+						print_r($siLine);
+						return false;
+					}
+				}
+				$transaction->commit();
+			}catch(Exception $ex)
+			{
+				$transaction->rollback();
+				throw $ex;	
+			}
+		}
+		$this->splitSiReconcileToDpmt($siReconcile);
+		return true;
+	}
+
+	public function saveTLDSupplierInvoiceToSiReconcile($supplierInvoice,$supplierInvoiceLines,$background)
+	{
+		Yii::app()->name = $this->appName;
+		if($background)
+		{
+			$siReconcile = SiReconcile::model()->find("supplier_invoice_id = :id",[':id'=>$supplierInvoice->id]);
+			$siReconcile->mdata['command_run'] = 0;
+			$siReconcile->save();
+			Yii::app()->name = $this->appName;
+			$continueId = empty($siReconcile->mdata['continue'])?0:$siReconcile->mdata['continue'];
+		}else
+		{
+			$siReconcile = new SiReconcile();
+			$siReconcile->supplier_invoice_id = $supplierInvoice->id;
+			$siReconcile->org_id = $supplierInvoice->org_id;
+			$siReconcile->type = $supplierInvoice->type;
+			$siReconcile->create = date('Y-m-d H:i:s');
+			$siReconcile->status = SiReconcile::ERROR_CHECKING_STATUS;
+			$siReconcile->flag = 0;
+			$siReconcile->total = number_format($supplierInvoice->total, 4, '.', '');
+			$siReconcile->total_confirmed = 0;
+			$siReconcile->total_gst = number_format($supplierInvoice->gst, 4, '.', '');
+			$siReconcile->total_gst_confirmed = 0;
+			$siReconcile->total_ex_gst = number_format($supplierInvoice->total_ex_gst, 4, '.', '');
+			$siReconcile->total_ex_gst_confirmed = 0;
+			Yii::app()->name = $this->appName;
+			if(!$siReconcile->save())
+			{
+				print_r($siReconcile);
+				return false;
+			}
+			$siReconcile->mdata['command_run'] = 1;
+			if(!$siReconcile->save())
+			{
+				print_r($siReconcile);
+				return 2;
+			}
+			return 2;
+		}
+			
+		foreach ($supplierInvoiceLines as $key => $s) 
+		{
+				$siLine = new SiReconcileLine();
+				$siLine->rec_id = $siReconcile->id;
+				$siLine->ref = $s->ref;
+				$siLine->type = 0;
+		
+				$imparcel = ImParcel::model()->find('(hbn = :ref or ref = :ref) and status!=100',[":ref"=>$s->ref]);
+				if(empty($imparcel))
+				{
+					$pLabel = ChangeShipmentLabel::model()->findAll('phbn = :ref or pref = :ref',[':ref'=>$s->ref]);
+					$pLabel = end($pLabel);
+					$imparcel = !empty($pLabel)?ImParcel::model()->find('hbn = :ref or ref = :ref',[":ref"=>$pLabel->newref]):null;
+
+					if(!empty($imparcel))
+					{
+						$siLine->type = $siLine->type | SiReconcileLine::CHANGED_LABEL_TYPE;
+						$siLine->mdata['pref'] = $s->ref;
+					}
+				}
+		
+				$siLine->model = 'ImParcel';
+				$siLine->weight = $s->weight;
+				$siLine->item_code = $s->item_code;
+				$siLine->value = $s->amount_ex_gst;
+				$siLine->courier_cubic = $s->courier_cubic;
+				$siLine->postcode = $s->postcode;
+				Yii::app()->name = $this->appName;
+				/** when the parcel is found**/
+				if(!empty($imparcel))
+				{
+					$siLine->fid = $imparcel->id;
+				}else
+				{
+					$siLine->type = $siLine->type | SiReconcileLine::EMPTY_PARCEL_TYPE;
+				}
+
+				if(!empty($imparcel)&&$siLine->item_code=='item')
+				{
+					$siLine->fid = $imparcel->id;
+					$siLine->charge_code = @$imparcel->mdata['chargecode'];
+					$siLine->cs_charge_weight = $siLine->getCSChargeWeight();
+					Yii::app()->name = $this->appName;
+					$org = Org::model()->findByPk($supplierInvoice->org_id);
+
+					$orgRate = OrgRate::model()->find(" org_id = :orgId",[":orgId"=>$org->id]);
+					$orgRateId = $orgRate->id;
+					if(empty($orgRateId))
+					{
+						$orgRateId = 999999;
+					}
+					$cust_check_weight = $imparcel->weight;
+					$our_charge_weight = floatval(isset($imparcel->mdata['charge_client_weight']) ? $imparcel->mdata['charge_client_weight'] : $imparcel->chargeWeight());
+					Yii::app()->name = $this->appName;
+
+					$siLine->manifest_weight = 0;
+					$chargevalue = $imparcel->getCouiercost();
+					Yii::app()->name = $this->appName;
+		
+					$siLine->cust_check_weight = number_format($cust_check_weight, 4, '.', '');
+					$siLine->our_charge_weight = number_format($our_charge_weight, 4, '.', '');
+					$siLine->postcode = empty($siLine->postcode)?$imparcel->cnee->postcode:$siLine->postcode;
+					$siLine->my_charge = number_format($chargevalue, 4, '.', '');
+					$siLine->agent_id = $imparcel->agent_id;
+					$siLine->getCSChargeWeight();
+					Yii::app()->name = $this->appName;
+					$siLine->getChargeWeightDiff();
+					Yii::app()->name = $this->appName;
+					$siLine->getWeight();
+					Yii::app()->name = $this->appName;
+					$cargoProcessId = null;
+					if(!empty($s->mdata['cargo_process_id']))
+					{
+						$siLine->mdata['cargo_process_id'] = $s->mdata['cargo_process_id'];
+					}
+
+					if(!empty($orgRateId))
+					{
+						if(!empty($s->mdata['cargo_process_id'])) $cargoProcessId = $s->mdata['cargo_process_id'];
+						$ourRate =Shipment::getCourierCostByShipment($siLine->ref, $orgRateId, $siLine->weight,false,true,false,"",$cargoProcessId);
+						Yii::app()->name = $this->appName;
+						$ourRateManifest =Shipment::getCourierCostByShipment($siLine->ref, $orgRateId, $siLine->manifest_weight,false,true,false,"",$cargoProcessId);
+						Yii::app()->name = $this->appName;
+						$siLine->my_value = number_format($ourRate['price'], 4, '.', '');
+						$siLine->my_value_m = number_format($ourRateManifest['price'], 4, '.', '');
+					}else
+					{
+						$siLine->my_value = 0;
+						$siLine->my_value_m = 0;
+						$siLine->type =$siLine->type | SiReconcileLine::EMPTY_ORG_RATE_TYPE;
+					}
+		
+				}
+				else
+				{
+					$siLine->charge_code = "";
+					$siLine->cust_check_weight = 0;
+					$siLine->our_charge_weight = 0;
+					$siLine->manifest_weight = 0;
+					$siLine->my_value = 0;
+					$siLine->my_value_m = 0;
+					$siLine->my_charge = 0;
+					$siLine->agent_id = 0;
+					$siLine->cs_charge_weight = 0;
+					$siLine->weight_diff = 0;
+					$siLine->org_charge_weight=0;
+				}
+		
+				$siLine->confirm_status = 0;
+				$siLine->checkErrorsAndSetType();
+				Yii::app()->name = $this->appName;
+				if(!$siLine->save())
+				{
+					print_r($siLine);
+					return false;
+				}
+		}
+
+		$this->splitSiReconcileToDpmt($siReconcile);
+		return true;
+	}
+
+	/*2023-03-31 this function is for saving the Auspost weight check invoice into si reconcile, for only checking weight diff*/
+	public function saveAuspostWeightCheckSiReconcile($supplierInvoice,$supplierInvoiceLines)
+	{
+		$siReconcile = new SiReconcile();
+		$siReconcile->supplier_invoice_id = $supplierInvoice->id;
+		$siReconcile->org_id = $supplierInvoice->org_id;
+		$siReconcile->type = $supplierInvoice->type;
+		$siReconcile->create = date('Y-m-d H:i:s');
+		$siReconcile->status = SiReconcile::WEIGHT_CHECKING_STATUS;
+		$siReconcile->flag = 0;
+		$siReconcile->total = number_format($supplierInvoice->total, 4, '.', '');
+		$siReconcile->total_confirmed = 0;
+		$siReconcile->total_gst = number_format($supplierInvoice->gst, 4, '.', '');
+		$siReconcile->total_gst_confirmed = 0;
+		$siReconcile->total_ex_gst = number_format($supplierInvoice->total_ex_gst, 4, '.', '');
+		$siReconcile->total_ex_gst_confirmed = 0;
+		$siReconcile->confirm_status = SiReconcile::ERROR_CONFIRMED+SiReconcile::RATE_CONFIRMED+SiReconcile::WEIGHT_CONFIRMED+SiReconcile::SURCHARGE_CONFIRMED;
+		Yii::app()->name = $this->appName;
+		if(!$siReconcile->save())
+		{
+			print_r($siReconcile);
+			return false;
+		}
+			
+		foreach ($supplierInvoiceLines as $key => $s) 
+		{
+			$siLine = new SiReconcileLine();
+			$siLine->rec_id = $siReconcile->id;
+			$siLine->ref = $s->ref;
+			$siLine->type = 0;
+		
+			$imparcel = ImParcel::model()->find('(hbn = :ref or ref = :ref) and status!=100',[":ref"=>$s->ref]);
+			if(empty($imparcel))
+			{
+				$pLabel = ChangeShipmentLabel::model()->findAll('phbn = :ref or pref = :ref',[':ref'=>$s->ref]);
+				$pLabel = end($pLabel);
+				$imparcel = !empty($pLabel)?ImParcel::model()->find('hbn = :ref or ref = :ref',[":ref"=>$pLabel->newref]):null;
+
+				if(!empty($imparcel))
+				{
+					$siLine->type = $siLine->type | SiReconcileLine::CHANGED_LABEL_TYPE;
+					$siLine->mdata['pref'] = $s->ref;
+				}
+			}
+		
+			$siLine->model = 'ImParcel';
+			$siLine->weight = $s->weight;
+			$siLine->item_code = $s->item_code;
+			$siLine->value = $s->amount_ex_gst;
+			$siLine->courier_cubic = $s->courier_cubic;
+			$siLine->postcode = $s->postcode;
+			Yii::app()->name = $this->appName;
+			/** when the parcel is found**/
+			if(!empty($imparcel))
+			{
+				$siLine->ref = $imparcel->ref;
+			}
+
+			if(!empty($imparcel)&&$siLine->item_code=='item')
+			{
+				$siLine->fid = $imparcel->id;
+				$siLine->charge_code = $imparcel->mdata['chargecode'];
+				$siLine->cs_charge_weight = $siLine->getCSChargeWeight();
+				Yii::app()->name = $this->appName;
+
+				if($siLine->isPureCBMSiReconcileLine())
+				{
+					$orgRateId = $this->getOrgRateId($imparcel,$siLine->parent->parent->mdata['template'],$siLine->parent->org_id);
+					$cust_check_weight = $imparcel->myChargeCBM();
+					$our_charge_weight = $imparcel->myChargeCBM();
+					Yii::app()->name = $this->appName;
+					$siLine->manifest_weight = 0;
+				}else
+				{
+					$orgRateId = $this->getOrgRateId($imparcel,$supplierInvoice->mdata['template']);
+					$cust_check_weight = $imparcel->weight;
+					$our_charge_weight = floatval(isset($imparcel->mdata['charge_client_weight']) ? $imparcel->mdata['charge_client_weight'] : $imparcel->chargeWeight());
+					Yii::app()->name = $this->appName;
+
+					$siLine->manifest_weight = empty($imparcel->mdata["manifest_weight"])?0:$imparcel->mdata["manifest_weight"];
+					$siLine->manifest_weight = number_format($siLine->manifest_weight, 4, '.', '');
+
+				}
+				$chargevalue = $imparcel->getCouiercost();
+				Yii::app()->name = $this->appName;
+		
+				$siLine->cust_check_weight = number_format($cust_check_weight, 4, '.', '');
+				$siLine->our_charge_weight = number_format($our_charge_weight, 4, '.', '');
+				$siLine->postcode = empty($siLine->postcode)?$imparcel->cnee->postcode:$siLine->postcode;
+				$siLine->my_charge = number_format($chargevalue, 4, '.', '');
+				$siLine->agent_id = $imparcel->agent_id;
+				$siLine->getCSChargeWeight();
+				Yii::app()->name = $this->appName;
+				$siLine->getChargeWeightDiff();
+				Yii::app()->name = $this->appName;
+				$siLine->getWeight();
+				Yii::app()->name = $this->appName;
+				$isNoFuel = false;
+				if(!empty($s->mdata['no_fuel']))
+				{
+					$siLine->mdata['no_fuel'] = 1;
+					$isNoFuel = true;
+				}
+				
+				if(!empty($s->mdata['surcharge_criteria']))
+				{
+					$siLine->mdata['surcharge_criteria'] = $s->mdata['surcharge_criteria'];
+				}
+
+				$mDate = $imparcel->getManifestDate();
+				if(!empty($mDate))
+				{
+					$month = date("Y-m",strtotime($mDate));
+				}
+		
+				if(!empty($orgRateId))
+				{
+					if($siLine->isPureCBMSiReconcileLine(false))
+					{
+						$courierCubic = $siLine->org_charge_weight;
+						$ourRate =Shipment::getCourierCostByShipment($siLine->ref, $orgRateId,$courierCubic,false,true,$isNoFuel,$month);
+						Yii::app()->name = $this->appName;
+						$siLine->my_value = number_format($ourRate['price'], 4, '.', '');
+						$siLine->my_value_m = 0;
+					}else
+					{
+						$ourRate =Shipment::getCourierCostByShipment($siLine->ref, $orgRateId, $siLine->weight,false,true,$isNoFuel,$month);
+						Yii::app()->name = $this->appName;
+						$ourRateManifest =Shipment::getCourierCostByShipment($siLine->ref, $orgRateId, $siLine->manifest_weight,false,true,$isNoFuel,$month);
+						Yii::app()->name = $this->appName;
+						$siLine->my_value = number_format($ourRate['price'], 4, '.', '');
+						$siLine->my_value_m = number_format($ourRateManifest['price'], 4, '.', '');
+					}
+				}else
+				{
+					$siLine->my_value = 0;
+					$siLine->my_value_m = 0;
+					$siLine->type =$siLine->type | SiReconcileLine::EMPTY_ORG_RATE_TYPE;
+				}
+		
+			}elseif(!empty($imparcel)&&$siLine->item_code!='item')
+			{
+				$siLine->fid = $imparcel->id;
+				$siLine->charge_code = $imparcel->mdata['chargecode'];
+				$siLine->cust_check_weight = 0;
+				$siLine->our_charge_weight = 0;
+				$siLine->manifest_weight = 0;
+				$siLine->my_value = 0;
+				$siLine->my_value_m = 0;
+				$siLine->my_charge = 0;
+				$siLine->agent_id = 0;
+				$siLine->cs_charge_weight = 0;
+				$siLine->weight_diff = 0;
+				$siLine->org_charge_weight=0;
+			}/** when the parcel is not found**/
+			else
+			{
+				$siLine->fid = 0;
+				$siLine->type = $siLine->type | SiReconcileLine::EMPTY_PARCEL_TYPE;
+				$siLine->charge_code = "";
+				$siLine->cust_check_weight = 0;
+				$siLine->our_charge_weight = 0;
+				$siLine->manifest_weight = 0;
+				$siLine->my_value = 0;
+				$siLine->my_value_m = 0;
+				$siLine->my_charge = 0;
+				$siLine->agent_id = 0;
+				$siLine->cs_charge_weight = 0;
+				$siLine->weight_diff = 0;
+				$siLine->org_charge_weight=0;
+			}
+		
+			$siLine->confirm_status = SiReconcile::ERROR_CONFIRMED+SiReconcile::RATE_CONFIRMED+SiReconcile::WEIGHT_CONFIRMED+SiReconcile::SURCHARGE_CONFIRMED;
+			$siLine->checkErrorsAndSetType();
+			Yii::app()->name = $this->appName;
+			if(!$siLine->save())
+			{
+				print_r($siLine);
+				return false;
+			}
+		}
+
+
+
+		$this->splitSiReconcileToDpmt($siReconcile);
+		return true;
+	}
+
+	
+	public function saveUBITollSupplierInvoiceToSiReconcile($supplierInvoice,$supplierInvoiceLines,$background = false)
+	{
+		$imparcelService = new ImParcelService();
+		Yii::app()->name = $this->appName;
+		if($background)
+		{
+			$siReconcile = SiReconcile::model()->find("supplier_invoice_id = :id",[':id'=>$supplierInvoice->id]);
+			$siReconcile->mdata['command_run'] = 0;
+			$siReconcile->save();
+			Yii::app()->name = $this->appName;
+			$continueId = empty($siReconcile->mdata['continue'])?0:$siReconcile->mdata['continue'];
+		}else
+		{
+			$siReconcile = new SiReconcile();
+			$siReconcile->supplier_invoice_id = $supplierInvoice->id;
+			$siReconcile->org_id = $supplierInvoice->org_id;
+			$siReconcile->type = $supplierInvoice->type;
+			$siReconcile->create = date('Y-m-d H:i:s');
+			$siReconcile->status = SiReconcile::SURCHARGE_CHECKING_STATUS;
+			$siReconcile->flag = 0;
+			$siReconcile->total = number_format($supplierInvoice->total, 4, '.', '');
+			$siReconcile->confirm_status = (SiReconcile::ERROR_CONFIRMED+SiReconcile::WEIGHT_CONFIRMED+SiReconcile::RATE_CONFIRMED);
+			$siReconcile->total_gst = number_format($supplierInvoice->gst, 4, '.', '');
+			$siReconcile->total_gst_confirmed = 0;
+			$siReconcile->total_ex_gst = number_format($supplierInvoice->total_ex_gst, 4, '.', '');
+			$siReconcile->total_ex_gst_confirmed = 0;
+			$siReconcile->mdata['command_run'] = 1;
+			if(!$siReconcile->save())
+			{
+				print_r($siReconcile);
+				return 2;
+			}
+			return 2;
+		}
+
+		foreach ($supplierInvoiceLines as $key => $s) 
+		{
+
+				$siLine = new SiReconcileLine();
+				$siLine->rec_id = $siReconcile->id;
+				$siLine->ref = $s->ref;
+				$siLine->type = 0;
+		
+				$imparcel = ImParcel::model()->find('(hbn = :ref or ref = :ref) and status!=100',[":ref"=>$s->ref]);
+				if(empty($imparcel))
+				{
+					$pLabel = ChangeShipmentLabel::model()->findAll('phbn = :ref or pref = :ref',[':ref'=>$s->ref]);
+					$pLabel = end($pLabel);
+					$imparcel = !empty($pLabel)?ImParcel::model()->find('hbn = :ref or ref = :ref',[":ref"=>$pLabel->newref]):null;
+
+					if(!empty($imparcel))
+					{
+						$siLine->type = $siLine->type | SiReconcileLine::CHANGED_LABEL_TYPE;
+						$siLine->mdata['pref'] = $s->ref;
+					}
+				}
+		
+				$siLine->model = 'ImParcel';
+				$siLine->weight = $s->weight;
+				$siLine->item_code = $s->item_code;
+				$siLine->value = $s->amount_ex_gst;
+				$siLine->courier_cubic = $s->courier_cubic;
+				$siLine->mdata['label_number'] = $s->mdata['label_number'];
+				$siLine->postcode = $s->postcode;
+				$siLine->charge_code = "";
+				$siLine->cust_check_weight = 0;
+				$siLine->our_charge_weight = 0;
+				$siLine->manifest_weight = 0;
+				$siLine->my_value = 0;
+				$siLine->my_value_m = 0;
+				$siLine->my_charge = 0;
+				$siLine->agent_id = 0;
+				$siLine->cs_charge_weight = 0;
+				$siLine->weight_diff = 0;
+				$siLine->org_charge_weight=0;
+
+
+				$suStatus = false;
+
+				Yii::app()->name = $this->appName;
+				/** when the parcel is found**/
+				if(!empty($imparcel))
+				{
+					$siLine->fid = $imparcel->id;
+					$siLine->agent_id = $imparcel->agent_id;
+					$siLine->charge_code = $imparcel->mdata['chargecode'];
+					$siLine->postcode = $imparcel->cnee->postcode;
+					[$suStatus,$myValue,$weight,$thisCBM] = $imparcelService->checkParcelLabelSurcharge($imparcel,$siLine->mdata['label_number'],$siLine->item_code);
+					if($suStatus==1)
+					{
+						$siLine->my_value = $myValue;
+						$siLine->cust_check_weight = number_format($weight, 4, '.', '');
+						$siLine->our_charge_weight = number_format($weight, 4, '.', '');
+						$siLine->cs_charge_weight = number_format($weight, 4, '.', '');
+						$siLine->courier_cubic = number_format($thisCBM, 4, '.', '');
+
+					}elseif($suStatus==2)
+					{
+						$siLine->type =$siLine->type | SiReconcileLine::EMPTY_ORG_RATE_TYPE;
+					}
+				}
+				else
+				{
+					$siLine->fid = 0;
+					$siLine->type = $siLine->type | SiReconcileLine::EMPTY_PARCEL_TYPE;
+					$siLine->my_value = 0;
+					$siLine->my_value_m = 0;
+					$siLine->my_charge = 0;
+					$siLine->agent_id = 0;
+					$siLine->cs_charge_weight = 0;
+					$siLine->weight_diff = 0;
+					$siLine->org_charge_weight=0;
+				}
+		
+				$siLine->confirm_status = 0;
+				$siLine->checkErrorsAndSetType();
+				Yii::app()->name = $this->appName;
+				if(!$siLine->save())
+				{
+					print_r($siLine);
+					return false;
+				}
+
+		}
+
+		$this->splitSiReconcileToDpmt($siReconcile);
+		return true;
+	}
+
+
+	private function saveMultiManualSupplierInvoiceToSiReconcile($supplierInvoices,$supplierInvoiceLineArr)
+	{
+		foreach ($supplierInvoices as $key => $supplierInvoice) {
+			$this->saveManualSupplierInvoiceToSiReconcile($supplierInvoice,$supplierInvoiceLineArr[$supplierInvoice->inv_no]);
+		}
+
+		return true;
+	}
+	private function saveManualSupplierInvoiceToSiReconcile($supplierInvoice,$supplierInvoiceLines,$isParcel = false)
+	{
+		$siReconcile = new SiReconcile();
+		$siReconcile->supplier_invoice_id = $supplierInvoice->id;
+		$siReconcile->org_id = $supplierInvoice->org_id;
+		$siReconcile->type = $supplierInvoice->type;
+		$siReconcile->create = date('Y-m-d H:i:s');
+		$siReconcile->status = SiReconcile::ERROR_CHECKING_STATUS;
+		$siReconcile->flag = 0;
+		$siReconcile->total = number_format($supplierInvoice->total, 4, '.', '');
+		$siReconcile->total_confirmed = 0;
+		$siReconcile->total_gst = number_format($supplierInvoice->gst, 4, '.', '');
+		$siReconcile->total_gst_confirmed = 0;
+		$siReconcile->total_ex_gst = number_format($supplierInvoice->total_ex_gst, 4, '.', '');
+		$siReconcile->total_ex_gst_confirmed = 0;
+		$siReconcile->mdata = $supplierInvoice->mdata;
+		$siReconcile->save();
+		
+		foreach ($supplierInvoiceLines as $key => $s) 
+		{
+			$duInvoices = [];
+			$siLine = new SiReconcileLine();
+			$siLine->rec_id = $siReconcile->id;
+			$siLine->ref = $s->ref;
+			$siLine->type = 0;
+			$consol = ImcoConsol::model()->find(['condition'=>'(no = :no or awb=:no or json_value(meta,"$.container_no") =:no)  and type !=90 and status!=100','params'=>[":no"=>$s->ref],'order'=>'status desc']);
+			if(empty($consol))
+			{
+				$consol = DmawbConsol::model()->find('(no = :no or awb=:no or json_value(meta,"$.container_no") =:no)  and type !=90 and status!=100',[":no"=>$s->ref]);
+			}
+			if(empty($consol))
+			{
+				$siLine->type = $siLine->type | SiReconcileLine::EMPTY_CONSOL;
+				$siLine->model = '';
+				$siLine->fid = 0;
+				$siLine->type = $siLine->type | SiReconcileLine::EMPTY_CONSOL;
+			}else
+			{
+				$siLine->fid = $consol->id;
+				$siLine->model = Consol::$types[$consol->type];
+				if($supplierInvoice->mdata['template']=='consol_manual_brownways')
+				{
+					$cn=SiReconcileLine::model()->with(["parent"])->find("fid=:fid and parent.type = :type and parent.status!=100 and json_value(parent.meta,'$.template')='consol_manual_brownways' ",[":fid"=>$siLine->fid,":type"=>SiReconcile::TYPE_MANUAL]);
+					if(!empty($cn))
+					{
+						$siLine->type = $siLine->type|SiReconcileLine::FOUND_IN_OTHER;
+						$duInvoices[] = $cn->parent->parent->inv_no;
+					}
+				}
+			}
+			Yii::app()->name = $this->appName;
+			$siLine->weight = $s->weight;
+			$siLine->item_code = $s->item_code;
+			$siLine->value = $s->amount_ex_gst;
+			$siLine->courier_cubic = 0;
+			$siLine->postcode = "";
+			$siLine->det = $s->det;
+			$siLine->charge_code = "";
+			$siLine->mdata = $s->mdata;
+			$siLine->mdata['amount'] = $s->amount;
+			$siLine->mdata['gst'] = $s->gst;
+			$siLine->mdata['qty'] = $s->qty;
+			$siLine->cust_check_weight = 0;
+			$siLine->our_charge_weight = 0;
+			$siLine->manifest_weight = 0;
+			$siLine->my_value = 0;
+			$siLine->my_value_m = 0;
+			$siLine->my_charge = 0;
+			$siLine->agent_id = 0;
+			$siLine->cs_charge_weight = 0;
+			$siLine->weight_diff = 0;
+			$siLine->org_charge_weight=0;
+			$siLine->confirm_status = 0;
+			$siLine->value = number_format($s->qty*$s->mdata['price'], 2, '.', '');
+			if(!empty($duInvoices))
+			{
+				$siLine->mdata['found_invoice'] = $duInvoices;
+			}
+			if(!empty($s->weight))
+			{
+				$cgbWeight = empty($consol->mdata['cgb_wt'])?0:$consol->mdata['cgb_wt'];
+				$siLine->weight = $s->weight;
+				$siLine->our_charge_weight = $cgbWeight;
+				$siLine->my_value = number_format($cgbWeight*$s->mdata['check_price'], 2, '.', '');
+				if(!empty($s->mdata['check_price_min']))
+				{
+					$siLine->my_value = number_format(max($siLine->my_value,$s->mdata['check_price_min']), 2, '.', '');
+				}
+				$siLine->diff = number_format($siLine->value - $siLine->my_value, 4, '.', '');
+			}else
+			{
+				$siLine->my_value = $siLine->value;
+				$siLine->diff = 0;
+			}
+
+
+			$siLine->checkErrorsAndSetTypeForManual();
+			Yii::app()->name = $this->appName;
+			$siLine->save();
+		}
+
+		$this->splitSiReconcileToDpmt($siReconcile);
+		
+		if($supplierInvoice->mdata['template']=="consol_manual_brownways")
+		{
+			$supplierInvoice->mdata['template'] = 'consol_manual_weight';
+			$supplierInvoice->save();
+		}
+
+		return true;
+	}
+
+	// private function saveBrownwaysManualSupplierInvoiceToSiReconcile($supplierInvoices,$supplierInvoiceLineArr)
+	// {
+	// 	foreach ($supplierInvoices as $key => $supplierInvoice) {
+	// 		$this->saveBrownwaysManualSupplierInvoiceToSiReconcileLine($supplierInvoice,$supplierInvoiceLineArr[$supplierInvoice->inv_no]);
+	// 	}
+
+	// 	return true;
+	// }
+	private function saveBrownwaysManualSupplierInvoiceToSiReconcile($supplierInvoice,$supplierInvoiceLines,$isParcel = false)
+	{
+		$siReconcile = new SiReconcile();
+		$siReconcile->supplier_invoice_id = $supplierInvoice->id;
+		$siReconcile->org_id = $supplierInvoice->org_id;
+		$siReconcile->type = $supplierInvoice->type;
+		$siReconcile->create = date('Y-m-d H:i:s');
+		$siReconcile->status = SiReconcile::ERROR_CHECKING_STATUS;
+		$siReconcile->flag = 0;
+		$siReconcile->total = number_format($supplierInvoice->total, 4, '.', '');
+		$siReconcile->total_confirmed = 0;
+		$siReconcile->total_gst = number_format($supplierInvoice->gst, 4, '.', '');
+		$siReconcile->total_gst_confirmed = 0;
+		$siReconcile->total_ex_gst = number_format($supplierInvoice->total_ex_gst, 4, '.', '');
+		$siReconcile->total_ex_gst_confirmed = 0;
+		$siReconcile->mdata = $supplierInvoice->mdata;
+		$siReconcile->save();
+		foreach ($supplierInvoiceLines[$supplierInvoice->inv_no] as $key => $s) 
+		{
+			$siLine = new SiReconcileLine();
+			$siLine->rec_id = $siReconcile->id;
+			$siLine->ref = $s->ref;
+			$siLine->type = 0;		
+			$consol = Consol::model()->find('no = :no or awb=:no or json_value(meta,"$.container_no") =:no',[":no"=>$s->ref]);
+			if(empty($consol))
+			{
+				$siLine->type = $siLine->type | SiReconcileLine::EMPTY_CONSOL;
+				$siLine->model = '';
+				$siLine->fid = 0;
+				$siLine->type = $siLine->type | SiReconcileLine::EMPTY_CONSOL;
+			}else
+			{
+				$siLine->fid = $consol->id;
+				$siLine->model = Consol::$types[$consol->type];
+			}
+			Yii::app()->name = $this->appName;
+			$siLine->weight = $s->weight;
+			$siLine->item_code = $s->item_code;
+			$siLine->value = $s->amount_ex_gst;
+			$siLine->courier_cubic = 0;
+			$siLine->postcode = "";
+			$siLine->det = $s->det;
+			$siLine->charge_code = "";
+			$siLine->mdata = $s->mdata;
+			$siLine->mdata['amount'] = $s->amount;
+			$siLine->mdata['gst'] = $s->gst;
+			$siLine->mdata['qty'] = $s->qty;
+			$siLine->cust_check_weight = 0;
+			$siLine->our_charge_weight = 0;
+			$siLine->manifest_weight = 0;
+			$siLine->my_value = 0;
+			$siLine->my_value_m = 0;
+			$siLine->my_charge = 0;
+			$siLine->agent_id = 0;
+			$siLine->cs_charge_weight = 0;
+			$siLine->weight_diff = 0;
+			$siLine->org_charge_weight=0;
+			$siLine->confirm_status = 0;
+			$siLine->value = number_format($s->qty*$s->mdata['price'], 2, '.', '');
+			
+			if(!empty($s->weight))
+			{
+				$cgbWeight = empty($consol->mdata['cgb_wt'])?0:$consol->mdata['cgb_wt'];
+				$siLine->weight = $s->weight;
+				$siLine->our_charge_weight = $cgbWeight;
+				$siLine->my_value = number_format($cgbWeight*$s->mdata['check_price'], 2, '.', '');
+				$siLine->diff = number_format($siLine->value - $siLine->my_value, 4, '.', '');
+			}else
+			{
+				$siLine->my_value = $siLine->value;
+				$siLine->diff = 0;
+			}
+
+
+			$siLine->checkErrorsAndSetTypeForManual();
+			Yii::app()->name = $this->appName;
+			$siLine->save();
+		}
+
+		$this->splitSiReconcileToDpmt($siReconcile);
+	
+		return true;
+	}
+
+	public function saveAuspostSupplierInvoiceToSiReconcile($supplierInvoice,$supplierInvoiceLines,$background = false)
+	{
+		$continueId = 0;
+		$endId = 999999999;
+		$aus = new AusPostAPI('syd');
+		if($background)
+		{
+			$siReconcile = SiReconcile::model()->find("supplier_invoice_id = :id",[':id'=>$supplierInvoice->id]);
+			$siReconcile->mdata['command_run'] = 0;
+			$siReconcile->save();
+			Yii::app()->name = $this->appName;
+			$continueId = empty($siReconcile->mdata['continue'])?0:$siReconcile->mdata['continue'];
+			$endId = empty($siReconcile->mdata['end'])?999999999:$siReconcile->mdata['end'];
+		}else
+		{
+			$siReconcile = new SiReconcile();
+			$siReconcile->supplier_invoice_id = $supplierInvoice->id;
+			$siReconcile->org_id = $supplierInvoice->org_id;
+			$siReconcile->type = $supplierInvoice->type;
+			$siReconcile->create = date('Y-m-d H:i:s');
+			$siReconcile->status = SiReconcile::ERROR_CHECKING_STATUS;
+			$siReconcile->flag = 0;
+			$siReconcile->total = number_format($supplierInvoice->total, 4, '.', '');
+			$siReconcile->total_ex_gst_api = 0;
+			$siReconcile->total_confirmed = 0;
+			$siReconcile->total_gst = number_format($supplierInvoice->gst, 4, '.', '');
+			$siReconcile->total_gst_confirmed = 0;
+			$siReconcile->total_ex_gst = number_format($supplierInvoice->total_ex_gst, 4, '.', '');
+			$siReconcile->total_ex_gst_confirmed = 0;
+			$siReconcile->mdata['command_run'] = 1;
+			$siReconcile->save();
+			Yii::app()->name = $this->appName;
+			if(count($supplierInvoiceLines)>100 && $background==false)
+			{
+				$siReconcile->mdata['command_run'] = 1;
+				if(!$siReconcile->save())
+				{
+					print_r($siReconcile);
+					return 2;
+				}
+				return 2;
+			}else
+			{
+				if(!$siReconcile->save())
+				{
+					print_r($siReconcile);
+					return false;
+				}
+			}
+
+		}
+		if($background)
+		{
+			if($supplierInvoice->mdata['template']=="AUSPOST")
+			{
+				$this->doAuspostSiLineBatch($supplierInvoice,$supplierInvoiceLines,$siReconcile,$continueId,$endId);
+			}else if($supplierInvoice->mdata['template']=="AUSPOST-item")
+			{
+				$this->doAuspostItemSiLineBatch($supplierInvoice,$supplierInvoiceLines,$siReconcile);
+			}
+		
+		}else
+		{
+			$this->doAuspostSiLine($supplierInvoice,$supplierInvoiceLines,$siReconcile,$continueId);
+		}
+
+		
+		return true;
+	}
+
+	private function doAuspostSiLineBatch($supplierInvoice,$allSupplierInvoiceLines,$siReconcile,$continueId,$endId)
+	{
+		$batchSupplier=[];
+		foreach ($allSupplierInvoiceLines as $key => $supplierInvoice) 
+		{
+			if($key%2==0)
+			{
+				$batchSupplier[]=[];
+			}
+			if($supplierInvoice->id<$continueId||$supplierInvoice->id>$endId) continue;
+
+			$batchSupplier[count($batchSupplier)-1][]=$supplierInvoice;
+		}
+
+		foreach ($batchSupplier as $key2 => $supplierInvoiceLines) 
+		{
+			if($this->appName=='TLA')
+			{
+				$transaction = Yii::app()->db_tla->beginTransaction();
+			}else
+			{
+				$transaction = Yii::app()->db->beginTransaction();
+			}
+			try
+			{
+				foreach ($supplierInvoiceLines as $key => $s) 
+				{
+					$siLineP = new SiReconcileLine();
+					$siLineP->rec_id = $siReconcile->id;
+					$siLineP->ref = $s->ref;
+					$siLineP->type = 0;
+					$siLineP->model = $s->ref;
+					$siLineP->weight = $s->weight;
+					$siLineP->item_code = $s->item_code;
+					$siLineP->value = number_format($s->amount_ex_gst, 4, '.', '');
+					$siLineP->courier_cubic = $s->courier_cubic;
+					$siLineP->postcode = $s->postcode;
+					/** when the parcel is found**/
+					$siLineP->fid = 0;
+					$siLineP->type = 0;
+					$siLineP->charge_code = "";
+					$siLineP->cust_check_weight = 0;
+					$siLineP->our_charge_weight = 0;
+					$siLineP->manifest_weight = 0;
+					$siLineP->my_value = 0;
+					$siLineP->my_value_m = 0;
+					$siLineP->my_charge = 0;
+					$siLineP->agent_id = 0;
+					$siLineP->cs_charge_weight = 0;
+					$siLineP->weight_diff = 0;
+					$siLineP->org_charge_weight=0;
+					$siLineP->confirm_status = 0;
+					$siLineP->checkErrorsAndSetType();
+					Yii::app()->name = $this->appName;
+					$siLineP->save();
+
+					if($siLineP->item_code=="eparcel")
+					{
+						$allAPTranships = Tranship::model()->with('shipment')->findAll('shipment.status<=90 and json_value(t.meta,"$.oid") = :apmanifest',[":apmanifest"=>$siLineP->ref]);
+						$aupostInfoArr = [];
+						$aupostSids = [];
+						$auType = 'syd';
+						if(!empty($allAPTranships))
+						{
+							foreach (AusPostAPI::$api_accounts_info as $key => $api_accounts) {
+								if(preg_match('/^'.$api_accounts['id'].'/', $allAPTranships[0]->connote))
+								{
+									$auType = $key;
+								}
+							}
+						}
+
+						/******************* get the eparcel info from auspost api***************************/
+						$aus = new AusPostAPI($auType);
+						$batchShipments=[];
+						$itemArr = [];
+						foreach ($allAPTranships as $key => $apTranship) 
+						{
+							if($key%200==0)
+							{
+								$batchShipments[]=[];
+							}
+							$batchShipments[count($batchShipments)-1][]=$apTranship->mdata['sid'];
+						}
+						$auShipmentArr = [];
+						foreach ($batchShipments as $key => $bs) {
+							$result = $aus->getShipments(join(',',$bs))->shipments;
+							if(!empty($result))
+							{
+								$auShipmentArr = array_merge($auShipmentArr, $result);
+							}
+						}
+						if(count($auShipmentArr)==0) continue;
+						
+						foreach ($auShipmentArr as $key => $auShipment) {
+							$itemArr = [];
+							foreach ($auShipment->items as $key => $item) {
+								$itemArr[] = [$item->weight,$item->postage_details->price->calculated_price_ex_gst,$item->tracking_details->article_id];
+							}
+							$fuelSurcharge = isset($auShipment->shipment_summary->fuel_surcharge)?$auShipment->shipment_summary->fuel_surcharge:0;
+							$aupostInfoArr[$auShipment->shipment_id] = ['itemArr'=>$itemArr,'fuelSurcharge'=>$fuelSurcharge];
+						}
+
+						if(empty($itemArr)) continue;
+
+
+						/******************* calculate all eparcel of the Ap manifest***************************/
+						$myValueTotal =0;
+						$myValueMTotal = 0;
+						$totalWeight = 0;
+						$totalCustCheckWeight = 0;
+						$totalManifestWeight = 0;
+						$totalWeightDiff = 0;
+						$totalApiValue = 0;
+						$totalFuel = 0;
+						$siLinePFuel = new SiReconcileLine();
+						$siLine = null;
+						foreach ($allAPTranships as $key => $apTranship) 
+						{
+							$itemArr = $aupostInfoArr[$apTranship->mdata['sid']]['itemArr'];
+							$fuelSurcharge = $aupostInfoArr[$apTranship->mdata['sid']]['fuelSurcharge'];
+							$imparcel = $apTranship->shipment;
+
+							$siLine = new SiReconcileLine();
+							$siLine->rec_id = $siReconcile->id;
+							$siLine->inline_pid = $siLineP->id;
+							$siLine->ref = $apTranship->connote;
+							$siLine->type = 0;
+							
+							$siLine->model = 'ImParcel';
+							$siLine->weight = 0;
+							$siLine->value = 0;
+
+							if(!empty($itemArr))
+							{
+								foreach ($itemArr as $key => $item) 
+								{
+									$siLine->weight += $item[0];
+								}
+							}else
+							{
+								continue;
+							}
+
+							$siLine->weight = number_format($siLine->weight, 4, '.', '');
+							$siLine->item_code = 'item';
+							foreach ($itemArr as $key => $item) 
+							{
+								$siLine->value += $item[1];
+							}
+							$siLine->value = number_format($siLine->value, 4, '.', '');
+							$siLine->courier_cubic = 0;
+							$siLine->postcode = $imparcel->cnee->postcode;
+							$siLine->mdata['auInfo'] = json_encode($aupostInfoArr[$auShipment->shipment_id]);
+							/** when the parcel is found**/
+							if(!empty($imparcel))
+							{
+								$siLine->fid = $imparcel->id;
+								$siLine->charge_code = $imparcel->mdata['chargecode'];
+								$siLine->cs_charge_weight = $siLine->getCSChargeWeight();
+								$orgRateId = $this->getOrgRateId($imparcel,$supplierInvoice->mdata['template']);
+								$cust_check_weight = $imparcel->weight;
+								$our_charge_weight = floatval(isset($imparcel->mdata['charge_client_weight']) ? $imparcel->mdata['charge_client_weight'] : $imparcel->	chargeWeight());
+								$chargevalue = $imparcel->getCouiercost();
+						
+								$siLine->cust_check_weight = number_format($cust_check_weight, 4, '.', '');
+								$siLine->our_charge_weight = number_format($our_charge_weight, 4, '.', '');
+						
+								$siLine->manifest_weight = empty($imparcel->mdata["manifest_weight"])?0:$imparcel->mdata["manifest_weight"];
+								$siLine->manifest_weight = number_format($siLine->manifest_weight, 4, '.', '');
+								$siLine->my_charge = number_format($chargevalue, 4, '.', '');
+								$siLine->agent_id = $imparcel->agent_id;
+								$siLine->getCSChargeWeight();
+								$siLine->getChargeWeightDiff();
+								$siLine->getWeight();
+								$siLine->inline_pid = $siLineP->id;
+
+						
+								if(!empty($orgRateId))
+								{
+									$ourRate =Shipment::getCourierCostByShipment($siLine->ref, $orgRateId, $siLine->weight,false,true);
+									Yii::app()->name = $this->appName;
+									$ourRateManifest =Shipment::getCourierCostByShipment($siLine->ref, $orgRateId, $imparcel->mdata['manifest_weight'],false,true);
+									Yii::app()->name = $this->appName;
+									$siLine->my_value = number_format($ourRate['price'], 4, '.', '');
+									$myValueTotal+=$siLine->my_value;
+									$siLine->my_value_m = number_format($ourRateManifest['price'], 4, '.', '');
+									$myValueMTotal+=$siLine->my_value_m;
+								}else
+								{
+									$siLine->my_value = 0;
+									$siLine->my_value_m = 0;
+									$siLine->type =$siLine->type | SiReconcileLine::EMPTY_ORG_RATE_TYPE;
+								}
+								$totalApiValue+=$siLine->value;
+								$totalWeight+=$siLine->weight;
+								$totalCustCheckWeight+=$siLine->cust_check_weight;
+								$totalManifestWeight+=$siLine->manifest_weight;
+								$totalWeightDiff+=$siLine->weight_diff;
+						
+							}else/** when the parcel is not found**/
+							{
+								$siLine->fid = 0;
+								$siLine->type = $siLine->type | SiReconcileLine::EMPTY_PARCEL_TYPE;
+								$siLine->charge_code = "";
+								$siLine->cust_check_weight = 0;
+								$siLine->our_charge_weight = 0;
+								$siLine->manifest_weight = 0;
+								$siLine->my_value = 0;
+								$siLine->my_value_m = 0;
+								$siLine->my_charge = 0;
+								$siLine->agent_id = 0;
+								$siLine->cs_charge_weight = 0;
+								$siLine->weight_diff = 0;
+								$siLine->org_charge_weight=0;
+							}
+						
+							$siLine->confirm_status = 0;
+							$siLine->checkErrorsAndSetType();
+							Yii::app()->name = $this->appName;
+							$siLine->save();
+
+							if($fuelSurcharge!=0)
+							{
+								if($totalFuel==0)
+								{
+									$siLinePFuel->setAttributes($siLineP->getAttributes());
+									$siLinePFuel->id = null;
+									$siLinePFuel->item_code='eparcel-fuel';
+									$siLinePFuel->checkErrorsAndSetType();
+									if(($siLine->type&SiReconcileLine::TYPE_3PL)>0)
+									{
+										$siLinePFuel->type = $siLinePFuel->type|SiReconcileLine::TYPE_3PL;
+									}
+									Yii::app()->name = $this->appName;
+									$siLinePFuel->save();
+								}
+
+								$siLineFuel = new SiReconcileLine();
+								$siLineFuel->setAttributes($siLine->getAttributes());
+								$siLineFuel->id = null;
+								$siLineFuel->inline_pid = $siLinePFuel->id;
+								$siLineFuel->item_code = 'fuel';
+								$siLineFuel->value = $fuelSurcharge;
+								$siLineFuel->api_value = $fuelSurcharge;
+								$siLineFuel->my_value = $fuelSurcharge;
+								$siLineFuel->checkErrorsAndSetType();
+								Yii::app()->name = $this->appName;
+								$siLineFuel->save();
+								$siLineFuel->meta = 0;
+								$totalFuel +=$fuelSurcharge;
+							}
+						}
+
+						if(!empty($siLine)&&($siLine->type&SiReconcileLine::TYPE_3PL)>0)
+						{
+							$siLineP->type = $siLneP->type|SiReconcileLine::TYPE_3PL;
+						}
+						$siLineP->api_value = number_format($totalApiValue, 4, '.', '');
+						$siLineP->my_value = number_format($myValueTotal, 4, '.', '');
+						$siLineP->my_value_m = number_format($myValueMTotal, 4, '.', '');
+						$siLineP->weight = number_format($totalWeight, 4, '.', '');
+						$siLineP->cust_check_weight = number_format($totalCustCheckWeight, 4, '.', '');
+						$siLineP->manifest_weight= number_format($totalManifestWeight, 4, '.', '');
+						$siLineP->weight_diff= number_format($totalWeightDiff, 4, '.', '');
+
+						if($totalFuel>0)
+						{
+							$siLinePFuel->value = $totalFuel;
+							$siLinePFuel->api_value = $totalFuel;
+							$siLinePFuel->my_value = $totalFuel;
+							Yii::app()->name = $this->appName;
+							$siLinePFuel->save();
+							$siLineP->value = number_format($siLineP->value-$siLinePFuel->value, 4, '.', '');
+						}
+
+						$siReconcile->total_ex_gst_api +=$siLineP->api_value;
+						$siReconcile->total_ex_gst_my +=$siLineP->my_value;
+						Yii::app()->name = $this->appName;
+						$siLineP->save();
+					}else if($siLineP->item_code=="letter")
+					{
+						$mail_no = $siLineP->ref;
+						$accrual_value = 0;
+						Yii::app()->name = $this->appName;
+						$consol = ElmsConsol::model()->find('awb = :awb', [':awb' => $mail_no]);
+						if (!empty($consol)) {
+							Yii::app()->name = 'PCAE';
+							$bl = BillingLine::model()->find('org_id = :oid AND billing_ref = :ref', [':oid' => Org::ORGID_COURIER_AUPOST, ':ref' => $consol->no]);
+							$accrual_value = floatval(@$bl->accrual_amount);
+							if(empty($accrual_value))
+							{
+								Yii::app()->name = 'TLA';
+								$bl = BillingLine::model()->find('org_id = :oid AND billing_ref = :ref', [':oid' => Org::ORGID_COURIER_AUPOST, ':ref' => $consol->no]);
+								$accrual_value = floatval(@$bl->accrual_amount);
+							}
+						}
+						Yii::app()->name = $this->appName;
+						// imco
+						if (empty($consol)) {
+							$consol = ImcoConsol::model()->find('JSON_VALUE(meta, "$.elms") = :no OR JSON_QUERY(meta, "$.elms") LIKE :no2', [':no' => $mail_no, ':no2' => '%' . $mail_no . '%']);
+							if (!empty($consol)) {
+								Yii::app()->name = 'PCAE';
+								$bl = BillingLine::model()->find('(org_id = :oid1 OR (org_id = :oid2 AND `desc` LIKE "%LETTER")) AND billing_ref = :ref', [':oid1' => Org::ORGID_COURIER_AUSLETTER, ':oid2' => Org::ORGID_COURIER_AUPOST, ':ref' => $consol->no]);
+								$accrual_value = floatval(@$bl->accrual_amount);
+								if(empty($accrual_value))
+								{
+									Yii::app()->name = 'TLA';
+									$bl = BillingLine::model()->find('(org_id = :oid1 OR (org_id = :oid2 AND `desc` LIKE "%LETTER")) AND billing_ref = :ref', [':oid1' => Org::ORGID_COURIER_AUSLETTER, ':oid2' => Org::ORGID_COURIER_AUPOST, ':ref' => $consol->no]);
+									$accrual_value = floatval(@$bl->accrual_amount);
+								}
+							}
+						}
+						Yii::app()->name = $this->appName;
+						if(!empty($accrual_value))
+						{
+							$siLineP->my_value = number_format($accrual_value, 4, '.', '');
+						}else
+						{
+							$siLineP->type = $siLineP->type | SiReconcileLine::EMPTY_CONSOL;
+						}
+						$siReconcile->total_ex_gst_api +=$siLineP->api_value;
+						$siReconcile->total_ex_gst_my +=$siLineP->my_value;
+						Yii::app()->name = $this->appName;
+						$siLineP->save();
+					}else if($siLineP->item_code=="RTS")
+					{
+						$imparcel = ImParcel::model()->find('ref = :ref or ref = :3plRef',[':ref'=>$siLineP->ref,':3plRef'=>"3PLN-".$siLineP->ref]);
+						$siLineP->my_value = 10;
+						if(!empty($imparcel))
+						{
+							$siLineP->fid - $imparcel->id;
+							if(!$imparcel->checkRTSReceived())
+							{
+								$siLineP->type = $siLineP->type|SiReconcileLine::NOT_FOUND_RTS;
+							}
+						}else
+						{
+							$siLineP->type = $siLineP->type|SiReconcileLine::EMPTY_PARCEL_TYPE;
+						}
+						Yii::app()->name = $this->appName;
+						$siLineP->save();
+					}
+				}
+
+				$transaction->commit();
+			}catch(Exception $e)
+			{
+				$transaction->rollback();
+				echo "failure";
+			} 
+			echo "1";
+		}
+		$siReconcile->total_ex_gst_api = number_format($siReconcile->total_ex_gst_api, 4, '.', '');
+		$siReconcile->total_ex_gst_my = number_format($siReconcile->total_ex_gst_my, 4, '.', '');
+		Yii::app()->name = $this->appName;
+		$siReconcile->save();
+	}
+
+	private function getHandlingAuspostItems($allSupplierInvoiceLines,$siLineP=null)
+	{
+		if(empty($allSupplierInvoiceLines))
+		{
+			$allSupplierInvoiceLines = SupplierInvoiceLine::model()->findAll("inv_id = :inv_id and (json_value(meta,'$.aumanifest') = :ref or ref = :ref)",[":inv_id"=>$siLineP->parent->supplier_invoice_id,":ref"=>$siLineP->ref]);
+		}
+
+		$mySupplierInvoiceLines = [];
+		$apRelations = [];
+		$apRelationsFuel = [];
+		foreach ($allSupplierInvoiceLines as $key => $thisS) {
+			if($thisS->item_code=='item')
+			{
+				if(empty($mySupplierInvoiceLines['eparcel_'.$thisS->mdata['aumanifest']]))
+				{
+					$supplierInvoiceLine = new SupplierInvoiceLine();
+					$supplierInvoiceLine->ref = $thisS->mdata['aumanifest'];
+					$supplierInvoiceLine->item_code = 'eparcel';
+					$supplierInvoiceLine->amount_ex_gst += $thisS->amount_ex_gst;
+					$supplierInvoiceLine->amount_ex_gst = number_format($supplierInvoiceLine->amount_ex_gst, 4, '.', '');
+					$supplierInvoiceLine->postcode = '';
+					$supplierInvoiceLine->gst += $thisS->gst;
+					$supplierInvoiceLine->gst = number_format($supplierInvoiceLine->gst, 4, '.', '');
+
+					$supplierInvoiceLine->det = "";
+					$supplierInvoiceLine->courier_cubic = 0;
+					$supplierInvoiceLine->weight = 0;
+					$supplierInvoiceLine->qty = 1;
+					$supplierInvoiceLine->amount += $thisS->amount;
+					$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount, 4, '.', '');
+					$supplierInvoiceLine->cdeadwt = 0;
+					$supplierInvoiceLine->mdata['aumanifest_value'] = $thisS->mdata['aumanifest_value'];
+					$mySupplierInvoiceLines['eparcel_'.$thisS->mdata['aumanifest']] = $supplierInvoiceLine;
+
+					$apRelations[$supplierInvoiceLine->ref] = [];
+					$apRelations[$supplierInvoiceLine->ref][$thisS->ref] = [$thisS]; 
+				}else
+				{
+					$supplierInvoiceLine = $mySupplierInvoiceLines['eparcel_'.$thisS->mdata['aumanifest']];
+					$supplierInvoiceLine->amount_ex_gst += $thisS->amount_ex_gst;
+					$supplierInvoiceLine->amount_ex_gst = number_format($supplierInvoiceLine->amount_ex_gst, 4, '.', '');
+					$supplierInvoiceLine->gst += $thisS->gst;
+					$supplierInvoiceLine->gst = number_format($supplierInvoiceLine->gst, 4, '.', '');
+					$supplierInvoiceLine->amount += $thisS->amount;
+					$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount, 4, '.', '');
+					$mySupplierInvoiceLines['eparcel_'.$thisS->mdata['aumanifest']] = $supplierInvoiceLine;
+
+					if(empty($apRelations[$thisS->mdata['aumanifest']][$thisS->ref]))
+					{
+						$apRelations[$thisS->mdata['aumanifest']][$thisS->ref] = [$thisS];
+					}else
+					{
+						$apRelations[$thisS->mdata['aumanifest']][$thisS->ref][] = $thisS;
+					}
+				}
+
+				if(!empty($thisS->mdata['fuel_charge']))
+				{
+					if(empty($mySupplierInvoiceLines['eparcel-fuel_'.$thisS->mdata['aumanifest']]))
+					{
+						$supplierInvoiceLine = new SupplierInvoiceLine();
+						$supplierInvoiceLine->ref = $thisS->mdata['aumanifest'];
+						$supplierInvoiceLine->item_code = 'eparcel-fuel';
+						$supplierInvoiceLine->amount_ex_gst += $thisS->mdata['fuel_charge']-$thisS->mdata['fuel_gst'];
+						$supplierInvoiceLine->amount_ex_gst = number_format($supplierInvoiceLine->amount_ex_gst, 4, '.', '');
+						$supplierInvoiceLine->postcode = '';
+						$supplierInvoiceLine->gst += $thisS->mdata['fuel_gst'];
+						$supplierInvoiceLine->gst = number_format($supplierInvoiceLine->gst, 4, '.', '');
+
+						$supplierInvoiceLine->det = "";
+						$supplierInvoiceLine->courier_cubic = 0;
+						$supplierInvoiceLine->weight = 0;
+						$supplierInvoiceLine->qty = 1;
+						$supplierInvoiceLine->amount += $thisS->mdata['fuel_charge'];
+						$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount, 4, '.', '');
+						$supplierInvoiceLine->cdeadwt = 0;
+						$mySupplierInvoiceLines['eparcel-fuel_'.$thisS->mdata['aumanifest']] = $supplierInvoiceLine;
+
+						$apRelationsFuel[$supplierInvoiceLine->ref] = [];
+						$apRelationsFuel[$supplierInvoiceLine->ref][$thisS->ref] = [$thisS]; 
+					}else
+					{
+						$supplierInvoiceLine = $mySupplierInvoiceLines['eparcel_'.$thisS->mdata['aumanifest']];
+						$supplierInvoiceLine->amount_ex_gst += $thisS->amount_ex_gst;
+						$supplierInvoiceLine->amount_ex_gst = number_format($supplierInvoiceLine->amount_ex_gst, 4, '.', '');
+						$supplierInvoiceLine->gst += $thisS->gst;
+						$supplierInvoiceLine->gst = number_format($supplierInvoiceLine->gst, 4, '.', '');
+						$supplierInvoiceLine->amount += $thisS->amount;
+						$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount, 4, '.', '');
+						$mySupplierInvoiceLines['eparcel_'.$thisS->mdata['aumanifest']] = $supplierInvoiceLine;
+
+						if(empty($apRelationsFuel[$thisS->mdata['aumanifest']][$thisS->ref]))
+						{
+							$apRelationsFuel[$thisS->mdata['aumanifest']][$thisS->ref] = [$thisS];
+						}else
+						{
+							$apRelationsFuel[$thisS->mdata['aumanifest']][$thisS->ref][] = $thisS;
+						}
+					}
+				}
+			}else
+			{
+				$mySupplierInvoiceLines[] = $thisS;
+			}
+
+
+		}
+		return [$mySupplierInvoiceLines,$apRelations,$apRelationsFuel];
+	}
+	private function doAuspostItemSiLineBatch($supplierInvoice,$allSupplierInvoiceLines,$siReconcile)// for new auspost report
+	{
+		[$mySupplierInvoiceLines,$apRelations,$apRelationsFuel] = $this->getHandlingAuspostItems($allSupplierInvoiceLines);
+			foreach ($mySupplierInvoiceLines as $key => $s) 
+			{
+				if($this->appName=='TLA')
+				{
+					$transaction = Yii::app()->db_tla->beginTransaction();
+				}else
+				{
+					$transaction = Yii::app()->db->beginTransaction();
+				}
+				try
+				{
+				$siLineP = new SiReconcileLine();
+				$siLineP->rec_id = $siReconcile->id;
+				$siLineP->ref = $s->ref;
+				$siLineP->type = 0;
+				$siLineP->model = $s->ref;
+				$siLineP->weight = $s->weight;
+				$siLineP->item_code = $s->item_code;
+				$siLineP->value = number_format($s->amount_ex_gst, 4, '.', '');
+				$siLineP->courier_cubic = $s->courier_cubic;
+				$siLineP->postcode = $s->postcode;
+				/** when the parcel is found**/
+				$siLineP->fid = 0;
+				$siLineP->type = 0;
+				$siLineP->charge_code = "";
+				$siLineP->cust_check_weight = 0;
+				$siLineP->our_charge_weight = 0;
+				$siLineP->manifest_weight = 0;
+				$siLineP->my_value = 0;
+				$siLineP->my_value_m = 0;
+				$siLineP->my_charge = 0;
+				$siLineP->agent_id = 0;
+				$siLineP->cs_charge_weight = 0;
+				$siLineP->weight_diff = 0;
+				$siLineP->org_charge_weight=0;
+				$siLineP->confirm_status = 0;
+				$siLineP->checkErrorsAndSetType();
+				Yii::app()->name = $this->appName;
+				$siLineP->save();
+				if($siLineP->item_code=="eparcel")
+				{
+					/******************* calculate all eparcel of the Ap manifest***************************/
+					$myValueTotal =0;
+					$myValueMTotal = 0;
+					$totalWeight = 0;
+					$totalCustCheckWeight = 0;
+					$totalManifestWeight = 0;
+					$totalWeightDiff = 0;
+					$totalApiValue = 0;
+					$totalFuel = 0;
+					$siLinePFuel = new SiReconcileLine();
+					$siLine = null;
+					foreach ($apRelations[$siLineP->ref] as $key => $items) {
+						$siLine = new SiReconcileLine();
+						$siLine->rec_id = $siReconcile->id;
+						$siLine->inline_pid = $siLineP->id;
+						$siLine->ref = $key;
+						$siLine->type = 0;
+						
+						$siLine->model = 'ImParcel';
+						$siLine->weight = 0;
+						$siLine->value = 0;
+						foreach ($items as $key => $item) {
+							if($item->weight>0)
+							{
+								$siLine->weight += $item->weight;
+							}else
+							{
+								$siLine->weight += floatval($item->mdata['declare_weight']);
+							}
+
+						}
+						$siLine->weight = number_format($siLine->weight, 4, '.', '');
+						$siLine->item_code = 'item';
+						foreach ($items as $key => $item) {
+							$siLine->value += $item->amount_ex_gst;
+						}
+						$siLine->value = number_format($siLine->value, 4, '.', '');
+						$this->handlingItemLine($siLine,$siLineP->id,$myValueTotal,$myValueMTotal,$totalWeight,$totalCustCheckWeight,$totalManifestWeight,$totalWeightDiff);
+					}
+					if(!empty($siLine)&&($siLine->type&SiReconcileLine::TYPE_3PL)>0)
+					{
+						$siLineP->type = $siLneP->type|SiReconcileLine::TYPE_3PL;
+					}
+					$siLineP->api_value = number_format(0, 4, '.', '');
+					$siLineP->my_value = number_format($myValueTotal, 4, '.', '');
+					$siLineP->my_value_m = number_format($myValueMTotal, 4, '.', '');
+					$siLineP->weight = number_format($totalWeight, 4, '.', '');
+					$siLineP->cust_check_weight = number_format($totalCustCheckWeight, 4, '.', '');
+					$siLineP->manifest_weight= number_format($totalManifestWeight, 4, '.', '');
+					$siLineP->weight_diff= number_format($totalWeightDiff, 4, '.', '');
+
+					$siReconcile->total_ex_gst_my +=$siLineP->my_value;
+					Yii::app()->name = $this->appName;
+					$siLineP->save();
+				}elseif($siLineP->item_code=="eparcel-fuel")
+				{
+										/******************* calculate all eparcel fuel of the Ap manifest***************************/
+					$myValueTotal =0;
+					$myValueMTotal = 0;
+					$totalWeight = 0;
+					$totalCustCheckWeight = 0;
+					$totalManifestWeight = 0;
+					$totalWeightDiff = 0;
+					$totalApiValue = 0;
+					$totalFuel = 0;
+					$siLinePFuel = new SiReconcileLine();
+					$siLine = null;
+					foreach ($apRelationsFuel[$siLineP->ref] as $key => $items) {
+						echo "1";
+						$siLine = new SiReconcileLine();
+						$siLine->rec_id = $siReconcile->id;
+						$siLine->inline_pid = $siLineP->id;
+						$siLine->ref = $key;
+						$siLine->type = 0;
+						$siLine->model = 'ImParcel';
+						$siLine->weight = 0;
+						foreach ($items as $key => $item) {
+							if(!empty($item->weight))
+							{
+								$siLine->weight += $item->weight;
+							}else
+							{
+								$siLine->weight += $item->mdata['declare_weight'];
+							}
+						}
+						$siLine->value = 0;
+						$siLine->weight = number_format($siLine->weight, 4, '.', '');
+						$siLine->item_code = 'fuel';
+						foreach ($items as $key => $item) {
+							$siLine->value += $item->amount_ex_gst;
+						}
+						$siLine->value = number_format($siLine->value, 4, '.', '');
+						$this->handlingFuelLine($siLine,$siLineP->id,$myValueTotal,$myValueMTotal,$totalWeight,$totalCustCheckWeight,$totalManifestWeight,$totalWeightDiff);
+					}
+					if(!empty($siLine)&&($siLine->type&SiReconcileLine::TYPE_3PL)>0)
+					{
+						$siLineP->type = $siLneP->type|SiReconcileLine::TYPE_3PL;
+					}
+					$siLineP->api_value = number_format(0, 4, '.', '');
+					$siLineP->my_value = number_format($myValueTotal, 4, '.', '');
+					$siLineP->my_value_m = number_format($myValueMTotal, 4, '.', '');
+					$siLineP->weight = number_format($totalWeight, 4, '.', '');
+					$siLineP->cust_check_weight = number_format($totalCustCheckWeight, 4, '.', '');
+					$siLineP->manifest_weight= number_format($totalManifestWeight, 4, '.', '');
+					$siLineP->weight_diff= number_format($totalWeightDiff, 4, '.', '');
+					$siReconcile->total_ex_gst_my +=$siLineP->my_value;
+					Yii::app()->name = $this->appName;
+					$siLineP->save();
+				}else if($siLineP->item_code=="letter")
+				{
+					$mail_no = $siLineP->ref;
+					$accrual_value = 0;
+					Yii::app()->name = $this->appName;
+					$consol = ElmsConsol::model()->find('awb = :awb', [':awb' => $mail_no]);
+					if (!empty($consol)) {
+						Yii::app()->name = 'PCAE';
+						$bl = BillingLine::model()->find('org_id = :oid AND billing_ref = :ref', [':oid' => Org::ORGID_COURIER_AUPOST, ':ref' => $consol->no]);
+						$accrual_value = floatval(@$bl->accrual_amount);
+						if(empty($accrual_value))
+						{
+							Yii::app()->name = 'TLA';
+							$bl = BillingLine::model()->find('org_id = :oid AND billing_ref = :ref', [':oid' => Org::ORGID_COURIER_AUPOST, ':ref' => $consol->no]);
+							$accrual_value = floatval(@$bl->accrual_amount);
+						}
+					}
+					Yii::app()->name = $this->appName;
+					// imco
+					if (empty($consol)) {
+						$consol = ImcoConsol::model()->find('JSON_VALUE(meta, "$.elms") = :no OR JSON_QUERY(meta, "$.elms") LIKE :no2', [':no' => $mail_no, ':no2' => '%' . $mail_no . '%']);
+						if (!empty($consol)) {
+							Yii::app()->name = 'PCAE';
+							$bl = BillingLine::model()->find('(org_id = :oid1 OR (org_id = :oid2 AND `desc` LIKE "%LETTER")) AND billing_ref = :ref', [':oid1' => Org::ORGID_COURIER_AUSLETTER, ':oid2' => Org::ORGID_COURIER_AUPOST, ':ref' => $consol->no]);
+							$accrual_value = floatval(@$bl->accrual_amount);
+							if(empty($accrual_value))
+							{
+								Yii::app()->name = 'TLA';
+								$bl = BillingLine::model()->find('(org_id = :oid1 OR (org_id = :oid2 AND `desc` LIKE "%LETTER")) AND billing_ref = :ref', [':oid1' => Org::ORGID_COURIER_AUSLETTER, ':oid2' => Org::ORGID_COURIER_AUPOST, ':ref' => $consol->no]);
+								$accrual_value = floatval(@$bl->accrual_amount);
+							}
+						}
+					}
+					Yii::app()->name = $this->appName;
+					if(!empty($accrual_value))
+					{
+						$siLineP->my_value = number_format($accrual_value, 4, '.', '');
+					}else
+					{
+						$siLineP->type = $siLineP->type | SiReconcileLine::EMPTY_CONSOL;
+					}
+					$siReconcile->total_ex_gst_api +=$siLineP->api_value;
+					$siReconcile->total_ex_gst_my +=$siLineP->my_value;
+					Yii::app()->name = $this->appName;
+					$siLineP->save();
+				}else if($siLineP->item_code=="RTS")
+				{
+					$imparcel = ImParcel::model()->find('ref = :ref or ref = :3plRef',[':ref'=>$siLineP->ref,':3plRef'=>"3PLN-".$siLineP->ref]);
+					$siLineP->my_value = 10;
+					if(!empty($imparcel))
+					{
+						$siLineP->fid - $imparcel->id;
+						if(!$imparcel->checkRTSReceived())
+						{
+							$siLineP->type = $siLineP->type|SiReconcileLine::NOT_FOUND_RTS;
+						}
+					}else
+					{
+						$siLineP->type = $siLineP->type|SiReconcileLine::EMPTY_PARCEL_TYPE;
+					}
+					Yii::app()->name = $this->appName;
+					$siLineP->save();
+				}else
+				{
+					if(!empty($siLineP->ref)&&$siLineP->ref=="TSUNKNOW")
+					{
+						$consol = ImcoConsol::model()->find("ref = :ref",[":ref"=>$siLineP->ref]);
+						if(!empty($consol))
+						{
+							$siLineP->fid = $consol->id;
+							$siLineP->model = get_class($consol);
+							$siLineP->type = 0;
+							Yii::app()->name = $this->appName;
+							$siLineP->save();
+						}
+					}else if(!empty($siLineP->ref)&&$siLineP->ref!="TSUNKNOW")
+					{
+						$imparcel = ImParcel::model()->find("ref = :ref",[":ref"=>$siLineP->ref]);
+						if(!empty($imparcel))
+						{
+							$siLineP->fid = $imparcel->id;
+							Yii::app()->name = $this->appName;
+							$siLineP->save();
+						}else
+						{
+							$consol = ImcoConsol::model()->find("ref = :ref",[":ref"=>'TSUNKNOW']);
+							if(!empty($consol))
+							{
+								$siLineP->fid = $consol->id;
+								$siLineP->model = get_class($consol);
+								$siLineP->type = 0;
+								Yii::app()->name = $this->appName;
+								$siLineP->save();
+							}
+						}
+					}
+				}
+					$transaction->commit();
+				}catch(Exception $e)
+				{
+					$transaction->rollback();
+					echo "failure";
+				} 
+			}
+
+		$siReconcile->total_ex_gst_api = number_format(0, 4, '.', '');
+		$siReconcile->total_ex_gst_my = number_format($siReconcile->total_ex_gst_my, 4, '.', '');
+		Yii::app()->name = $this->appName;
+		$siReconcile->save();
+		$this->splitSiReconcileToDpmt($siReconcile);
+	}
+
+	private function handlingItemLine(&$siLine,$siLinePId,&$myValueTotal,&$myValueMTotal,&$totalWeight,&$totalCustCheckWeight,&$totalManifestWeight,&$totalWeightDiff)
+	{
+		$imparcel = ImParcel::model()->find('ref = :ref or ref = :3plRef',[':ref'=>$siLine->ref,':3plRef'=>"3PLN-".$siLine->ref]);
+		$siLine->courier_cubic = 0;
+		/** when the parcel is found**/
+		if(!empty($imparcel))
+		{
+			$siLine->postcode = $imparcel->cnee->postcode;
+			$siLine->fid = $imparcel->id;
+			$siLine->charge_code = $imparcel->mdata['chargecode'];
+			$siLine->cs_charge_weight = $siLine->getCSChargeWeight();
+			$orgRateId = $this->getOrgRateId($imparcel,$supplierInvoice->mdata['template']);
+			$cust_check_weight = $imparcel->weight;
+			$our_charge_weight = floatval(isset($imparcel->mdata['charge_client_weight']) ? $imparcel->mdata['charge_client_weight'] : $imparcel->chargeWeight());
+			$chargevalue = $imparcel->getCouiercost();
+		
+			$siLine->cust_check_weight = number_format($cust_check_weight, 4, '.', '');
+			$siLine->our_charge_weight = number_format($our_charge_weight, 4, '.', '');
+		
+			$siLine->manifest_weight = empty($imparcel->mdata["manifest_weight"])?0:$imparcel->mdata["manifest_weight"];
+			$siLine->manifest_weight = number_format($siLine->manifest_weight, 4, '.', '');
+			$siLine->my_charge = number_format($chargevalue, 4, '.', '');
+			$siLine->agent_id = $imparcel->agent_id;
+			$siLine->getCSChargeWeight();
+			$siLine->getChargeWeightDiff();
+			$siLine->getWeight();
+			$siLine->inline_pid = $siLinePId;
+			if(!empty($orgRateId))
+			{
+				$ourRate =Shipment::getCourierCostByShipment($siLine->ref, $orgRateId, $siLine->weight,false,true);
+				Yii::app()->name = $this->appName;
+				$ourRateManifest =Shipment::getCourierCostByShipment($siLine->ref, $orgRateId, $imparcel->mdata['manifest_weight'],false,true);
+				Yii::app()->name = $this->appName;
+				$siLine->my_value = number_format(round($ourRate['price'],2), 4, '.', '');
+				$myValueTotal+=$siLine->my_value;
+				$siLine->my_value_m = number_format(round($ourRateManifest['price'],2), 4, '.', '');
+				$myValueMTotal+=$siLine->my_value_m;
+			}else
+			{
+				$siLine->my_value = 0;
+				$siLine->my_value_m = 0;
+				$siLine->type =$siLine->type | SiReconcileLine::EMPTY_ORG_RATE_TYPE;
+			}
+			$totalWeight+=$siLine->weight;
+			$totalCustCheckWeight+=$siLine->cust_check_weight;
+			$totalManifestWeight+=$siLine->manifest_weight;
+			$totalWeightDiff+=$siLine->weight_diff;
+		
+		}else/** when the parcel is not found**/
+		{
+			$siLine->fid = 0;
+			$siLine->type = $siLine->type | SiReconcileLine::EMPTY_PARCEL_TYPE;
+			$siLine->charge_code = "";
+			$siLine->cust_check_weight = 0;
+			$siLine->our_charge_weight = 0;
+			$siLine->manifest_weight = 0;
+			$siLine->my_value = 0;
+			$siLine->my_value_m = 0;
+			$siLine->my_charge = 0;
+			$siLine->agent_id = 0;
+			$siLine->cs_charge_weight = 0;
+			$siLine->weight_diff = 0;
+			$siLine->org_charge_weight=0;
+		}
+		
+		$siLine->confirm_status = 0;
+		$siLine->checkErrorsAndSetType();
+		Yii::app()->name = $this->appName;
+		$siLine->save();
+
+	}
+
+	private function handlingFuelLine(&$siLine,$siLinePId,&$myValueTotal,&$myValueMTotal,&$totalWeight,&$totalCustCheckWeight,&$totalManifestWeight,&$totalWeightDiff)
+	{
+		$imparcel = ImParcel::model()->find('ref = :ref or ref = :3plRef',[':ref'=>$siLine->ref,':3plRef'=>"3PLN-".$siLine->ref]);
+		$siLine->courier_cubic = 0;
+		/** when the parcel is found**/
+		if(!empty($imparcel))
+		{
+			$siLine->postcode = $imparcel->cnee->postcode;
+			$percent = $siLine->mdata['fuel_percent'];
+			$siLine->fid = $imparcel->id;
+			$siLine->charge_code = $imparcel->mdata['chargecode'];
+			$siLine->cs_charge_weight = $siLine->getCSChargeWeight();
+			$orgRateId = $this->getOrgRateId($imparcel,$supplierInvoice->mdata['template']);
+			$cust_check_weight = $imparcel->weight;
+			$our_charge_weight = floatval(isset($imparcel->mdata['charge_client_weight']) ? $imparcel->mdata['charge_client_weight'] : $imparcel->chargeWeight());
+			$chargevalue = $imparcel->getCouiercost();
+		
+			$siLine->cust_check_weight = number_format($cust_check_weight, 4, '.', '');
+			$siLine->our_charge_weight = number_format($our_charge_weight, 4, '.', '');
+		
+			$siLine->manifest_weight = empty($imparcel->mdata["manifest_weight"])?0:$imparcel->mdata["manifest_weight"];
+			$siLine->manifest_weight = number_format($siLine->manifest_weight, 4, '.', '');
+			$siLine->my_charge = number_format(0, 4, '.', '');
+			$siLine->agent_id = $imparcel->agent_id;
+			$siLine->inline_pid = $siLinePId;
+			if(!empty($orgRateId))
+			{
+				$ourRate =Shipment::getCourierCostByShipment($siLine->ref, $orgRateId, $siLine->weight,false,true);
+				Yii::app()->name = $this->appName;
+				$ourRateManifest =Shipment::getCourierCostByShipment($siLine->ref, $orgRateId, $imparcel->mdata['manifest_weight'],false,true);
+				Yii::app()->name = $this->appName;
+				$siLine->my_value = number_format($ourRate['price'], 4, '.', '');
+				$myValueTotal+=$siLine->my_value;
+				$siLine->my_value_m = number_format($ourRateManifest['price'], 4, '.', '');
+				$myValueMTotal+=$siLine->my_value_m;
+			}else
+			{
+				$siLine->my_value = 0;
+				$siLine->my_value_m = 0;
+				$siLine->type =$siLine->type | SiReconcileLine::EMPTY_ORG_RATE_TYPE;
+			}
+			$totalWeight+=$siLine->weight;
+			$totalCustCheckWeight+=$siLine->cust_check_weight;
+			$totalManifestWeight+=$siLine->manifest_weight;
+			$totalWeightDiff+=$siLine->weight_diff;
+		
+		}else/** when the parcel is not found**/
+		{
+			$siLine->fid = 0;
+			$siLine->type = $siLine->type | SiReconcileLine::EMPTY_PARCEL_TYPE;
+			$siLine->charge_code = "";
+			$siLine->cust_check_weight = 0;
+			$siLine->our_charge_weight = 0;
+			$siLine->manifest_weight = 0;
+			$siLine->my_value = 0;
+			$siLine->my_value_m = 0;
+			$siLine->my_charge = 0;
+			$siLine->agent_id = 0;
+			$siLine->cs_charge_weight = 0;
+			$siLine->weight_diff = 0;
+			$siLine->org_charge_weight=0;
+		}
+		$siLine->value = number_format($siLine->value*$percent, 4, '.', '');
+		$siLine->my_value = number_format($siLine->my_value*$percent, 4, '.', '');
+		$siLine->my_value_m = number_format($siLine->my_value_m*$percent, 4, '.', '');
+		$siLine->confirm_status = 0;
+		$siLine->checkErrorsAndSetType();
+		Yii::app()->name = $this->appName;
+		$siLine->save();
+
+	}
+
+	private function doAuspostSiLine($supplierInvoice,$supplierInvoiceLines,$siReconcile,$continueId)
+	{
+		foreach ($supplierInvoiceLines as $key => $s) 
+		{
+			$siLineP = new SiReconcileLine();
+			$siLineP->rec_id = $siReconcile->id;
+			$siLineP->ref = $s->ref;
+			$siLineP->type = 0;
+			$siLineP->model = $s->ref;
+			$siLineP->weight = $s->weight;
+			$siLineP->item_code = $s->item_code;
+			$siLineP->value = number_format($s->amount_ex_gst, 4, '.', '');
+			$siLineP->courier_cubic = $s->courier_cubic;
+			$siLineP->postcode = $s->postcode;
+			/** when the parcel is found**/
+			$siLineP->fid = 0;
+			$siLineP->type = 0;
+			$siLineP->charge_code = "";
+			$siLineP->cust_check_weight = 0;
+			$siLineP->our_charge_weight = 0;
+			$siLineP->manifest_weight = 0;
+			$siLineP->my_value = 0;
+			$siLineP->my_value_m = 0;
+			$siLineP->my_charge = 0;
+			$siLineP->agent_id = 0;
+			$siLineP->cs_charge_weight = 0;
+			$siLineP->weight_diff = 0;
+			$siLineP->org_charge_weight=0;
+			$siLineP->confirm_status = 0;
+			$siLineP->checkErrorsAndSetType();
+			Yii::app()->name = $this->appName;
+			$siLineP->save();
+
+			if($siLineP->item_code=="eparcel")
+			{
+				$allAPTranships = Tranship::model()->with('shipment')->findAll('shipment.status<=90 and json_value(t.meta,"$.oid") = :apmanifest',[":apmanifest"=>$siLineP->ref]);
+				$aupostInfoArr = [];
+				$aupostSids = [];
+				$auType = 'syd';
+				if(!empty($allAPTranships))
+				{
+					foreach (AusPostAPI::$api_accounts_info as $key => $api_accounts) {
+						if(preg_match('/^'.$api_accounts['id'].'/', $allAPTranships[0]->connote))
+						{
+							$auType = $key;
+						}
+					}
+				}
+
+				/******************* get the eparcel info from auspost api***************************/
+				$aus = new AusPostAPI($auType);
+				$batchShipments=[];
+				$itemArr = [];
+				foreach ($allAPTranships as $key => $apTranship) 
+				{
+					if($key%200==0)
+					{
+						$batchShipments[]=[];
+					}
+					$batchShipments[count($batchShipments)-1][]=$apTranship->mdata['sid'];
+				}
+				$auShipmentArr = [];
+				foreach ($batchShipments as $key => $bs) {
+					$result = $aus->getShipments(join(',',$bs))->shipments;
+					if(!empty($result))
+					{
+						$auShipmentArr = array_merge($auShipmentArr, $result);
+					}
+				}
+				if(count($auShipmentArr)==0) continue;
+				
+				foreach ($auShipmentArr as $key => $auShipment) {
+					$itemArr = [];
+					foreach ($auShipment->items as $key => $item) {
+						$itemArr[] = [$item->weight,$item->postage_details->price->calculated_price_ex_gst,$item->tracking_details->article_id];
+					}
+					$fuelSurcharge = isset($auShipment->shipment_summary->fuel_surcharge)?$auShipment->shipment_summary->fuel_surcharge:0;
+					$aupostInfoArr[$auShipment->shipment_id] = ['itemArr'=>$itemArr,'fuelSurcharge'=>$fuelSurcharge];
+				}
+
+				if(empty($itemArr)) continue;
+
+
+				/******************* calculate all eparcel of the Ap manifest***************************/
+				$myValueTotal =0;
+				$myValueMTotal = 0;
+				$totalWeight = 0;
+				$totalCustCheckWeight = 0;
+				$totalManifestWeight = 0;
+				$totalWeightDiff = 0;
+				$totalApiValue = 0;
+				$totalFuel = 0;
+				$siLinePFuel = new SiReconcileLine();
+				$siLine = null;
+				foreach ($allAPTranships as $key => $apTranship) 
+				{
+					$itemArr = $aupostInfoArr[$apTranship->mdata['sid']]['itemArr'];
+					$fuelSurcharge = $aupostInfoArr[$apTranship->mdata['sid']]['fuelSurcharge'];
+					$imparcel = $apTranship->shipment;
+
+					$siLine = new SiReconcileLine();
+					$siLine->rec_id = $siReconcile->id;
+					$siLine->inline_pid = $siLineP->id;
+					$siLine->ref = $apTranship->connote;
+					$siLine->type = 0;
+					
+					$siLine->model = 'ImParcel';
+					$siLine->weight = 0;
+					$siLine->value = 0;
+
+					if(!empty($itemArr))
+					{
+						foreach ($itemArr as $key => $item) 
+						{
+							$siLine->weight += $item[0];
+						}
+					}else
+					{
+						continue;
+					}
+
+					$siLine->weight = number_format($siLine->weight, 4, '.', '');
+					$siLine->item_code = 'item';
+					foreach ($itemArr as $key => $item) 
+					{
+						$siLine->value += $item[1];
+					}
+					$siLine->value = number_format($siLine->value, 4, '.', '');
+					$siLine->courier_cubic = 0;
+					$siLine->postcode = $imparcel->cnee->postcode;
+					$siLine->mdata['auInfo'] = json_encode($aupostInfoArr[$auShipment->shipment_id]);
+					/** when the parcel is found**/
+					if(!empty($imparcel))
+					{
+						$siLine->fid = $imparcel->id;
+						$siLine->charge_code = $imparcel->mdata['chargecode'];
+						$siLine->cs_charge_weight = $siLine->getCSChargeWeight();
+						$orgRateId = $this->getOrgRateId($imparcel,$supplierInvoice->mdata['template']);
+						$cust_check_weight = $imparcel->weight;
+						$our_charge_weight = floatval(isset($imparcel->mdata['charge_client_weight']) ? $imparcel->mdata['charge_client_weight'] : $imparcel->	chargeWeight());
+						$chargevalue = $imparcel->getCouiercost();
+				
+						$siLine->cust_check_weight = number_format($cust_check_weight, 4, '.', '');
+						$siLine->our_charge_weight = number_format($our_charge_weight, 4, '.', '');
+				
+						$siLine->manifest_weight = empty($imparcel->mdata["manifest_weight"])?0:$imparcel->mdata["manifest_weight"];
+						$siLine->manifest_weight = number_format($siLine->manifest_weight, 4, '.', '');
+						$siLine->my_charge = number_format($chargevalue, 4, '.', '');
+						$siLine->agent_id = $imparcel->agent_id;
+						$siLine->getCSChargeWeight();
+						$siLine->getChargeWeightDiff();
+						$siLine->getWeight();
+						$siLine->inline_pid = $siLineP->id;
+
+				
+						if(!empty($orgRateId))
+						{
+							$ourRate =Shipment::getCourierCostByShipment($siLine->ref, $orgRateId, $siLine->weight,false,true);
+							Yii::app()->name = $this->appName;
+							$ourRateManifest =Shipment::getCourierCostByShipment($siLine->ref, $orgRateId, $imparcel->mdata['manifest_weight'],false,true);
+							Yii::app()->name = $this->appName;
+							$siLine->my_value = number_format($ourRate['price'], 4, '.', '');
+							$myValueTotal+=$siLine->my_value;
+							$siLine->my_value_m = number_format($ourRateManifest['price'], 4, '.', '');
+							$myValueMTotal+=$siLine->my_value_m;
+						}else
+						{
+							$siLine->my_value = 0;
+							$siLine->my_value_m = 0;
+							$siLine->type =$siLine->type | SiReconcileLine::EMPTY_ORG_RATE_TYPE;
+						}
+						$totalApiValue+=$siLine->value;
+						$totalWeight+=$siLine->weight;
+						$totalCustCheckWeight+=$siLine->cust_check_weight;
+						$totalManifestWeight+=$siLine->manifest_weight;
+						$totalWeightDiff+=$siLine->weight_diff;
+				
+					}else/** when the parcel is not found**/
+					{
+						$siLine->fid = 0;
+						$siLine->type = $siLine->type | SiReconcileLine::EMPTY_PARCEL_TYPE;
+						$siLine->charge_code = "";
+						$siLine->cust_check_weight = 0;
+						$siLine->our_charge_weight = 0;
+						$siLine->manifest_weight = 0;
+						$siLine->my_value = 0;
+						$siLine->my_value_m = 0;
+						$siLine->my_charge = 0;
+						$siLine->agent_id = 0;
+						$siLine->cs_charge_weight = 0;
+						$siLine->weight_diff = 0;
+						$siLine->org_charge_weight=0;
+					}
+				
+					$siLine->confirm_status = 0;
+					$siLine->checkErrorsAndSetType();
+					Yii::app()->name = $this->appName;
+					$siLine->save();
+
+					if($fuelSurcharge!=0)
+					{
+						if($totalFuel==0)
+						{
+							$siLinePFuel->setAttributes($siLineP->getAttributes());
+							$siLinePFuel->id = null;
+							$siLinePFuel->item_code='eparcel-fuel';
+							$siLinePFuel->checkErrorsAndSetType();
+							if(($siLine->type&SiReconcileLine::TYPE_3PL)>0)
+							{
+								$siLinePFuel->type = $siLinePFuel->type|SiReconcileLine::TYPE_3PL;
+							}
+							Yii::app()->name = $this->appName;
+							$siLinePFuel->save();
+						}
+
+						$siLineFuel = new SiReconcileLine();
+						$siLineFuel->setAttributes($siLine->getAttributes());
+						$siLineFuel->id = null;
+						$siLineFuel->inline_pid = $siLinePFuel->id;
+						$siLineFuel->item_code = 'fuel';
+						$siLineFuel->value = $fuelSurcharge;
+						$siLineFuel->api_value = $fuelSurcharge;
+						$siLineFuel->my_value = $fuelSurcharge;
+						$siLineFuel->checkErrorsAndSetType();
+						Yii::app()->name = $this->appName;
+						$siLineFuel->save();
+						$siLineFuel->meta = 0;
+						$totalFuel +=$fuelSurcharge;
+					}
+				}
+
+				if(!empty($siLine)&&($siLine->type&SiReconcileLine::TYPE_3PL)>0)
+				{
+					$siLineP->type = $siLneP->type|SiReconcileLine::TYPE_3PL;
+				}
+				$siLineP->api_value = number_format($totalApiValue, 4, '.', '');
+				$siLineP->my_value = number_format($myValueTotal, 4, '.', '');
+				$siLineP->my_value_m = number_format($myValueMTotal, 4, '.', '');
+				$siLineP->weight = number_format($totalWeight, 4, '.', '');
+				$siLineP->cust_check_weight = number_format($totalCustCheckWeight, 4, '.', '');
+				$siLineP->manifest_weight= number_format($totalManifestWeight, 4, '.', '');
+				$siLineP->weight_diff= number_format($totalWeightDiff, 4, '.', '');
+
+				if($totalFuel>0)
+				{
+					$siLinePFuel->value = $totalFuel;
+					$siLinePFuel->api_value = $totalFuel;
+					$siLinePFuel->my_value = $totalFuel;
+					Yii::app()->name = $this->appName;
+					$siLinePFuel->save();
+					$siLineP->value = number_format($siLineP->value-$siLinePFuel->value, 4, '.', '');
+				}
+
+				$siReconcile->total_ex_gst_api +=$siLineP->api_value;
+				$siReconcile->total_ex_gst_my +=$siLineP->my_value;
+				Yii::app()->name = $this->appName;
+				$siLineP->save();
+			}else if($siLineP->item_code=="letter")
+			{
+				$mail_no = $siLineP->ref;
+				$accrual_value = 0;
+				Yii::app()->name = $this->appName;
+				$consol = ElmsConsol::model()->find('awb = :awb', [':awb' => $mail_no]);
+				if (!empty($consol)) {
+					Yii::app()->name = 'PCAE';
+					$bl = BillingLine::model()->find('org_id = :oid AND billing_ref = :ref', [':oid' => Org::ORGID_COURIER_AUPOST, ':ref' => $consol->no]);
+					$accrual_value = floatval(@$bl->accrual_amount);
+					if(empty($accrual_value))
+					{
+						Yii::app()->name = 'TLA';
+						$bl = BillingLine::model()->find('org_id = :oid AND billing_ref = :ref', [':oid' => Org::ORGID_COURIER_AUPOST, ':ref' => $consol->no]);
+						$accrual_value = floatval(@$bl->accrual_amount);
+					}
+				}
+				Yii::app()->name = $this->appName;
+				// imco
+				if (empty($consol)) {
+					$consol = ImcoConsol::model()->find('JSON_VALUE(meta, "$.elms") = :no OR JSON_QUERY(meta, "$.elms") LIKE :no2', [':no' => $mail_no, ':no2' => '%' . $mail_no . '%']);
+					if (!empty($consol)) {
+						Yii::app()->name = 'PCAE';
+						$bl = BillingLine::model()->find('(org_id = :oid1 OR (org_id = :oid2 AND `desc` LIKE "%LETTER")) AND billing_ref = :ref', [':oid1' => Org::ORGID_COURIER_AUSLETTER, ':oid2' => Org::ORGID_COURIER_AUPOST, ':ref' => $consol->no]);
+						$accrual_value = floatval(@$bl->accrual_amount);
+						if(empty($accrual_value))
+						{
+							Yii::app()->name = 'TLA';
+							$bl = BillingLine::model()->find('(org_id = :oid1 OR (org_id = :oid2 AND `desc` LIKE "%LETTER")) AND billing_ref = :ref', [':oid1' => Org::ORGID_COURIER_AUSLETTER, ':oid2' => Org::ORGID_COURIER_AUPOST, ':ref' => $consol->no]);
+							$accrual_value = floatval(@$bl->accrual_amount);
+						}
+					}
+				}
+				Yii::app()->name = $this->appName;
+				if(!empty($accrual_value))
+				{
+					$siLineP->my_value = number_format($accrual_value, 4, '.', '');
+				}else
+				{
+					$siLineP->type = $siLineP->type | SiReconcileLine::EMPTY_CONSOL;
+				}
+				$siReconcile->total_ex_gst_api +=$siLineP->api_value;
+				$siReconcile->total_ex_gst_my +=$siLineP->my_value;
+				Yii::app()->name = $this->appName;
+				$siLineP->save();
+			}else if($siLineP->item_code=="RTS")
+			{
+				$imparcel = ImParcel::model()->find('ref = :ref or ref = :3plRef',[':ref'=>$siLineP->ref,':3plRef'=>"3PLN-".$siLineP->ref]);
+				$siLineP->my_value = 10;
+				if(!empty($imparcel))
+				{
+					$siLineP->fid - $imparcel->id;
+					if(!$imparcel->checkRTSReceived())
+					{
+						$siLineP->type = $siLineP->type|SiReconcileLine::NOT_FOUND_RTS;
+					}
+				}else
+				{
+					$siLineP->type = $siLineP->type|SiReconcileLine::EMPTY_PARCEL_TYPE;
+				}
+				Yii::app()->name = $this->appName;
+				$siLineP->save();
+			}
+		}
+		$siReconcile->total_ex_gst_api = number_format($siReconcile->total_ex_gst_api, 4, '.', '');
+		$siReconcile->total_ex_gst_my = number_format($siReconcile->total_ex_gst_my, 4, '.', '');
+		Yii::app()->name = $this->appName;
+		$siReconcile->save();
+	}
+
+	private function saveBrokerSupplierInvoiceToSiReconcile($supplierInvoiceArr,$supplierInvoiceArrLines)
+	{
+		foreach ($supplierInvoiceArr as $key => $supplierInvoice)
+		{
+			$supplierInvoiceLines = $supplierInvoiceArrLines[$supplierInvoice->inv_no];
+			$siReconcile = new SiReconcile();
+			$siReconcile->supplier_invoice_id = $supplierInvoice->id;
+			$siReconcile->org_id = $supplierInvoice->org_id;
+			$siReconcile->type = $supplierInvoice->type;
+			$siReconcile->create = date('Y-m-d H:i:s');
+			$siReconcile->status = SiReconcile::ERROR_CHECKING_STATUS;
+			$siReconcile->flag = 0;
+			$siReconcile->total = number_format($supplierInvoice->total, 4, '.', '');
+			$siReconcile->total_confirmed = 0;
+			$siReconcile->total_gst = number_format($supplierInvoice->gst, 4, '.', '');
+			$siReconcile->total_gst_confirmed = 0;
+			$siReconcile->total_ex_gst = number_format($supplierInvoice->total_ex_gst, 4, '.', '');
+			$siReconcile->total_ex_gst_confirmed = 0;
+			$siReconcile->mdata = $supplierInvoice->mdata;
+			$siReconcile->save();
+			
+			foreach ($supplierInvoiceLines as $key => $s) 
+			{
+				$siLine = new SiReconcileLine();
+				$siLine->rec_id = $siReconcile->id;
+				$siLine->ref = $s->ref;
+				$siLine->type = 0;
+				$siLine->value = number_format($s->amount_ex_gst, 4, '.', '');
+				$siLine->mdata = $s->mdata;
+				$imparcel = ImParcel::model()->find('hbn = :hbn and status !=100',[":hbn"=>$s->ref]);
+				if(empty($imparcel))
+				{
+					$siLine->type = $siLine->type | SiReconcileLine::EMPTY_PARCEL_TYPE;
+					$siLine->model = '';
+					$siLine->fid = 0;
+					$siLine->my_value = 0;
+					$siLine->mdata['accrual_gst'] = 0;
+					$siLine->diff = $siLine->value;
+				}else
+				{
+					$siLine->fid = $imparcel->id;
+					$siLine->model = 'ImParcel';
+					$invoice = null;
+					$bResult = $this->findBrokerInvoice($imparcel);
+					Yii::app()->name = $this->appName;
+
+					if(preg_match('/\//i', $invNo))
+					{
+						$oldInvNo = explode('/', $invNo)[0];
+						$oldSupplierInvoices = SupplierInvoice::model()->findAll("inv_no like :inv_no and status =1",[":inv_no"=>"%".$oldInvNo."%"]);
+						if(!empty($oldSupplierInvoices))
+						{
+							$value = 0;
+							foreach ($oldSupplierInvoices as $key => $oldSupplierInvoice) {
+								$sR = SiReconcile::model()->find('supplier_invoice_id = :id',[":id"=>$oldSupplierInvoice->id]);
+								$value +=$sR->lines[0]->value;
+							}
+
+							if(!empty($bResult))
+							{
+								$siLine->my_value = $bResult[1];
+								$siLine->mdata['accrual_gst'] = $bResult[2];
+								$siLine->diff = $value-$bResult[1];
+							}else
+							{
+								$siLine->my_value = 0;
+								$siLine->mdata['accrual_gst'] = 0;
+								$siLine->diff =  $value;
+							}
+
+						}
+					}else
+					{
+						if(!empty($bResult))
+						{
+							$siLine->my_value = $bResult[1];
+							$siLine->mdata['accrual_gst'] = $bResult[2];
+							$siLine->diff = $siLine->value-$bResult[1];
+						}else
+						{
+							$siLine->my_value = 0;
+							$siLine->mdata['accrual_gst'] = 0;
+							$siLine->diff = $siLine->value;
+						}
+					}
+				}
+
+				$siLine->my_value = number_format($siLine->my_value,4,'.','');
+				$siLine->mdata['accrual_gst'] = number_format($siLine->mdata['accrual_gst'],4,'.','');
+				$siLine->diff =  number_format($siLine->diff,4,'.','');
+				$siLine->weight = number_format($s->weight,4,'.','');
+				$siLine->item_code = $s->item_code;
+				$siLine->courier_cubic = number_format($s->courier_cubic, 4, '.', '');
+				$siLine->postcode = 0;
+				$siLine->det = $s->det;
+				$siLine->charge_code = "";
+				$siLine->mdata['amount'] =  number_format($s->amount, 4, '.', '');
+				$siLine->mdata['gst'] =  number_format($s->gst, 4, '.', '');
+				$siLine->mdata['qty'] = 1;
+				$siLine->cust_check_weight = 0;
+				$siLine->our_charge_weight = 0;
+				$siLine->manifest_weight = 0;
+				$siLine->my_value_m = 0;
+				$siLine->my_charge = 0;
+				$siLine->agent_id = 0;
+				$siLine->cs_charge_weight = 0;
+				$siLine->weight_diff = 0;
+				$siLine->org_charge_weight=0;
+				$siLine->confirm_status = 0;
+
+
+
+				$siLine->save();
+			}
+
+		}
+	
+		return true;
+	}
+
+	private function saveTerminalSupplierInvoiceToSiReconcile($supplierInvoice,$supplierInvoiceLines)
+	{
+		$siReconcile = new SiReconcile();
+		$siReconcile->supplier_invoice_id = $supplierInvoice->id;
+		$siReconcile->org_id = $supplierInvoice->org_id;
+		$siReconcile->type = $supplierInvoice->type;
+		$siReconcile->create = date('Y-m-d H:i:s');
+		$siReconcile->status = SiReconcile::ERROR_CHECKING_STATUS;
+		$siReconcile->flag = 0;
+		$siReconcile->total = number_format($supplierInvoice->total, 4, '.', '');
+		$siReconcile->total_confirmed = 0;
+		$siReconcile->total_gst = number_format($supplierInvoice->gst, 4, '.', '');
+		$siReconcile->total_gst_confirmed = 0;
+		$siReconcile->total_ex_gst = number_format($supplierInvoice->total_ex_gst, 4, '.', '');
+		$siReconcile->total_ex_gst_confirmed = 0;
+		$siReconcile->mdata = $supplierInvoice->mdata;
+		$siReconcile->save();
+		
+		foreach ($supplierInvoiceLines as $key => $s) 
+		{
+			$siLine = new SiReconcileLine();
+			$siLine->rec_id = $siReconcile->id;
+			$siLine->ref = $s->ref;
+			$siLine->type = 0;
+	
+			$consol = ImcoConsol::model()->find('awb = :awb and status != 100',[":awb"=>$s->ref]);
+			if(empty($consol))
+			{
+				$consol = DmawbConsol::model()->find('awb = :awb and status != 100',[":awb"=>$s->ref]);
+				if(!empty($consol))
+				{
+					$log = Log::model()->find("model=:model and lid =:lid and json_value(meta,'$.NOA_Email') is not null",[":model"=>get_class($consol),":lid"=>$consol->id]);
+					if(!empty($log))
+					{
+						$importsMail = ImportsMail::model()->find("no = :no and plain_body like '%EWE%'",[":no"=>$log->extra['NOA_Email']]);
+						if(!empty($importsMail))
+						{
+							$imConsol = new ImcoConsol('create');
+				            $imConsol->owner_id = Org::ORGID_CLIENT_EWE_GROUP;
+				            $imConsol->service = Consol::AIRCONSOL;
+				            $imConsol->eta = $consol->eta;
+				            $imConsol->awb = $consol->awb;
+				            $imConsol->dpt_id = $consol->dpt_id;
+				            $imConsol->pod = $consol->pod;
+				            $imConsol->pol = "HKHKG";
+				            $imConsol->flight = $consol->flight;
+				            $imConsol->airline = $consol->airline;
+				            $imConsol->save();
+				            $consol = $imConsol;
+						}
+					}
+				}
+			}
+
+
+			if(empty($consol))
+			{
+				$siLine->type = $siLine->type | SiReconcileLine::EMPTY_CONSOL;
+				$siLine->model = '';
+				$siLine->fid = 0;
+				$siLine->type = $siLine->type | SiReconcileLine::EMPTY_CONSOL;
+				$siLine->our_charge_weight =0;
+			}else
+			{
+				$siLine->fid = $consol->id;
+				$siLine->model = Consol::$types[$consol->type];
+				$siLine->our_charge_weight =empty($consol->mdata['cgb_wt'])?0:$consol->mdata['cgb_wt'];
+			}
+			Yii::app()->name = $this->appName;
+			$siLine->weight = $s->weight;
+			$siLine->item_code = $s->item_code;
+			$siLine->value = $s->amount_ex_gst;
+			$siLine->courier_cubic = 0;
+			$siLine->postcode = 0;
+			$siLine->det = $s->det;
+			$siLine->charge_code = "";
+			$siLine->mdata = $s->mdata;
+			$siLine->mdata['amount'] = $s->amount;
+			$siLine->mdata['gst'] = $s->gst;
+			$siLine->mdata['qty'] = $s->qty;
+			$siLine->cust_check_weight = 0;
+			$siLine->manifest_weight = 0;
+
+			$siLine->my_value = $siLine->getAirportAccural($siLine->item_code,$siReconcile->org_id, $siLine->our_charge_weight,false,false,$siLine->fid);
+			$siLine->diff = number_format($siLine->value - $siLine->my_value, 4, '.', '');
+			$siLine->my_value_m = 0;
+			$siLine->my_charge = 0;
+			$siLine->agent_id = 0;
+			$siLine->cs_charge_weight = 0;
+			$siLine->weight_diff = 0;
+			$siLine->org_charge_weight=0;
+			$siLine->confirm_status = 0;
+			Yii::app()->name = $this->appName;
+			$siLine->save();
+		}
+	
+		return true;
+	}
+
+	private function saveTerminalMultiSupplierInvoiceToSiReconcile($supplierInvoiceArr,$supplierInvoiceArrLines)
+	{
+		foreach ($supplierInvoiceArr as $key => $supplierInvoice) {
+			$siReconcile = new SiReconcile();
+			$siReconcile->supplier_invoice_id = $supplierInvoice->id;
+			$siReconcile->org_id = $supplierInvoice->org_id;
+			$siReconcile->type = $supplierInvoice->type;
+			$siReconcile->create = date('Y-m-d H:i:s');
+			$siReconcile->status = SiReconcile::RATE_CHECKING_STATUS;
+			$siReconcile->confirm_status = SiReconcile::ERROR_CONFIRMED;
+			$siReconcile->flag = 0;
+			$siReconcile->total = number_format($supplierInvoice->total, 4, '.', '');
+			$siReconcile->total_confirmed = 0;
+			$siReconcile->total_gst = number_format($supplierInvoice->gst, 4, '.', '');
+			$siReconcile->total_gst_confirmed = 0;
+			$siReconcile->total_ex_gst = number_format($supplierInvoice->total_ex_gst, 4, '.', '');
+			$siReconcile->total_ex_gst_confirmed = 0;
+			$siReconcile->mdata = $supplierInvoice->mdata;
+			$siReconcile->save();
+			
+			$supplierInvoiceLines = $supplierInvoiceArrLines[$supplierInvoice->inv_no];
+			foreach ($supplierInvoiceLines as $key => $s) 
+			{
+				$siLine = new SiReconcileLine();
+				$siLine->rec_id = $siReconcile->id;
+				$siLine->ref = $s->ref;
+				$siLine->type = 0;
+		
+				$consol = ImcoConsol::model()->find('awb = :awb and status != 100',[":awb"=>$s->ref]);
+				if(empty($consol))
+				{
+					$consol = DmawbConsol::model()->find('awb = :awb and status != 100',[":awb"=>$s->ref]);
+				}
+				$consolId =0;
+				if(empty($consol))
+				{
+					$siLine->type = $siLine->type | SiReconcileLine::EMPTY_CONSOL;
+					$siLine->model = '';
+					$siLine->fid = 0;
+					$siLine->type = $siLine->type | SiReconcileLine::EMPTY_CONSOL;
+					$siLine->our_charge_weight =0;
+				}else
+				{
+					$siLine->fid = $consol->id;
+					$siLine->model = Consol::$types[$consol->type];
+					$siLine->our_charge_weight =empty($consol->mdata['cgb_wt'])?0:$consol->mdata['cgb_wt'];
+					$consolId = $siLine->fid;
+				}
+				Yii::app()->name = $this->appName;
+
+				$siLine->weight = $s->weight;
+				$siLine->item_code = $s->item_code;
+				$siLine->value = $s->amount_ex_gst;
+				$siLine->courier_cubic = 0;
+				$siLine->postcode = 0;
+				$siLine->det = $s->det;
+				$siLine->charge_code = "";
+				$siLine->mdata = $s->mdata;
+				$siLine->mdata['amount'] = $s->amount;
+				$siLine->mdata['gst'] = $s->gst;
+				$siLine->mdata['qty'] = $s->qty;
+				$siLine->cust_check_weight = 0;
+				$siLine->manifest_weight = 0;
+				$siLine->confirm_status = SiReconcile::ERROR_CONFIRMED;
+
+				$siLine->my_value = $siLine->getAirportAccural($siLine->item_code,$siReconcile->org_id, $siLine->our_charge_weight,false,false,$siLine->fid );
+				$siLine->diff = number_format($siLine->value - $siLine->my_value, 4, '.', '');
+				$siLine->my_value_m = 0;
+				$siLine->my_charge = 0;
+				$siLine->agent_id = 0;
+				$siLine->cs_charge_weight = 0;
+				$siLine->weight_diff = 0;
+				$siLine->org_charge_weight=0;
+				$siLine->confirm_status = 0;
+				Yii::app()->name = $this->appName;
+				$siLine->save();
+			}
+
+		}
+		
+	
+		return true;
+	}
+
+
+	public function findBrokerInvoice($imparcel)
+	{
+		$bResult = [];
+		$shipment = Shipment::model()->findByPk($imparcel->id);
+		$consol = Consol::model()->findByPk($imparcel->consol_id);
+		Yii::app()->name = 'TLA';
+		// if(!empty($consol))
+		// {
+		// 	if($consol->isTLA())
+		// 	{
+		// 		Yii::app()->name = 'TLA';
+		// 	}else
+		// 	{
+		// 		Yii::app()->name = 'PCAE';
+		// 	}
+		// }
+		// first check CA
+		if (!empty($shipment) && !empty($consol)) {
+			$invoice = Invoice::model()->find(['condition' => 'pid = :pid AND consol_id = :consol_id AND type = :type AND status NOT IN (8, 10)', 'params' => [':pid' => $shipment->id, ':consol_id' => $consol->id, ':type' => Invoice::INVOICE_TYPE_CASUAL], 'order' => 'id DESC']);
+			if (!empty($invoice)) {
+				$bResult = $invoice->getCustomBrokerAmount();
+			}
+		}
+		// then check CA fully credit
+		if (empty($invoice) && !empty($shipment) && !empty($consol)) {
+			$invoice = Invoice::model()->find(['condition' => 'pid = :pid AND consol_id = :consol_id AND type = :type AND status = 8', 'params' => [':pid' => $shipment->id, ':consol_id' => $consol->id, ':type' => Invoice::INVOICE_TYPE_CASUAL], 'order' => 'id DESC']);
+			if (!empty($invoice)) {
+				$bResult= $invoice->getCustomBrokerAmount();
+			}
+		}
+
+		// then check CA for dmawbconsol shipment
+		if (empty($invoice) && !empty($consol) && get_class($consol) == 'DmawbConsol' && count($consol->shipments) == 1) {
+			$invoice = Invoice::model()->find(['condition' => 'pid = :pid AND consol_id = :consol_id AND type = :type AND status NOT IN (8, 10)', 'params' => [':pid' => $consol->shipments[0]->id, ':consol_id' => $consol->id, ':type' => Invoice::INVOICE_TYPE_CASUAL], 'order' => 'id DESC']);
+			if (!empty($invoice)) {
+				$bResult = $invoice->getCustomBrokerAmount();
+			}
+		}
+
+		// then check DI
+		if (empty($invoice) && !empty($shipment) && !empty($consol)) {
+			$invoices = Invoice::model()->findAll('consol_id = :consol_id AND type = :type AND status NOT IN (8, 10)', [':consol_id' => $consol->id, ':type' => Invoice::INVOICE_TYPE_DIRECT_MAWB]);
+			foreach ($invoices as $invoice) {
+				$bResult = $invoice->getCustomBrokerAmount();
+				if (!empty($bResult[1])) {
+					break;
+				}
+			}
+		}
+
+		// then check OT
+		if (empty($invoice) && !empty($shipment) && !empty($consol)) {
+			$invoices = Invoice::model()->findAll('consol_id = :consol_id AND type = :type AND status NOT IN (8, 10)', [':consol_id' => $consol->id, ':type' => Invoice::INVOICE_TYPE_OTHERS]);
+			foreach ($invoices as $invoice) {
+				$bResult = $invoice->getCustomBrokerAmount();
+				if (!empty($bResult[1])) {
+					break;
+				}
+			}
+		}
+		return $bResult;
+	}
+
+	private function prepareFWSYD2020($data,&$invoiceLines,&$invoice)
+	{
+		unset($data[1]);
+		foreach ($data as $key => $d) 
+		{
+			if(!in_array(strtolower($d[9]),["item","miscellaneous"]))
+			{
+				continue;
+			}
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->ref = $d[5];
+			$supplierInvoiceLine->item_code = strtolower($d[9]);
+			$supplierInvoiceLine->postcode = $d[29];
+			$supplierInvoiceLine->det = "";
+			$supplierInvoiceLine->courier_cubic = 0;
+			$weight = 0;
+			if(empty($d[12]))
+			{
+				$weightRange = $d[16];
+				$weight = $weightRange=='300GM'?0.3:0;
+			}else
+			{
+				$weight = $d[12];
+			}
+			$supplierInvoiceLine->weight = number_format($weight, 4, '.', '');
+			$supplierInvoiceLine->qty = 1;
+			$supplierInvoiceLine->amount_ex_gst = number_format($d[19], 4, '.', '');
+			$supplierInvoiceLine->gst = number_format($supplierInvoiceLine->amount_ex_gst*0.1, 4, '.', '');
+			$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst+$supplierInvoiceLine->gst, 4, '.', '');
+			$supplierInvoiceLine->cdeadwt = number_format($weight, 4, '.', '');
+
+			$invoiceLines[] = $supplierInvoiceLine;
+			$invoice->total+= $supplierInvoiceLine->amount;
+			$invoice->gst+= $supplierInvoiceLine->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+		}
+
+
+		$invoice->total = number_format($invoice->total, 4, '.', '');
+		$invoice->gst = number_format($invoice->gst, 4, '.', '');
+		$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+
+	}
+
+	private function prepareFWSYD2022($data,&$invoiceLines,&$invoice)
+	{
+		unset($data[1]);
+		foreach ($data as $key => $d) 
+		{
+			if(!is_numeric($d[6]))
+			{
+				continue;
+			}
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->ref = $d[2];
+			$supplierInvoiceLine->item_code = "item";
+			$supplierInvoiceLine->postcode = $d[15];
+			$supplierInvoiceLine->det = "";
+			$supplierInvoiceLine->courier_cubic = 0;
+			$weight = $d[6];
+
+			$supplierInvoiceLine->weight = number_format($weight, 4, '.', '');
+			$supplierInvoiceLine->qty = 1;
+			$supplierInvoiceLine->amount_ex_gst = number_format($d[10], 4, '.', '');
+			$supplierInvoiceLine->gst = number_format($supplierInvoiceLine->amount_ex_gst*0.1, 4, '.', '');
+			$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst+$supplierInvoiceLine->gst, 4, '.', '');
+			$supplierInvoiceLine->cdeadwt = number_format($weight, 4, '.', '');
+
+			$invoiceLines[] = $supplierInvoiceLine;
+			$invoice->total+= $supplierInvoiceLine->amount;
+			$invoice->gst+= $supplierInvoiceLine->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+		}
+
+
+		$invoice->total = number_format($invoice->total, 4, '.', '');
+		$invoice->gst = number_format($invoice->gst, 4, '.', '');
+		$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+
+	}
+
+	private function prepareFWSYD($data,&$invoiceLines,&$invoice)
+	{
+		foreach ($data as $key => $value) {
+			if($value[1]=='Customer')
+			{
+				unset($data[$key]);
+				break;
+			}
+		}
+
+		foreach ($data as $key => $d) 
+		{
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->ref = $d[2];
+			$supplierInvoiceLine->item_code = 'item';
+			$supplierInvoiceLine->postcode = $d[19];
+			$supplierInvoiceLine->det = "";
+			$supplierInvoiceLine->courier_cubic = 0;
+			$weight = 0;
+			$weight = $d[6];
+			$supplierInvoiceLine->weight = number_format($weight, 3, '.', '');
+			$supplierInvoiceLine->cdeadwt = number_format($weight, 3, '.', '');
+			$supplierInvoiceLine->qty = 1;
+			$supplierInvoiceLine->amount_ex_gst = number_format($d[10], 4, '.', '');
+			$supplierInvoiceLine->gst = number_format($supplierInvoiceLine->amount_ex_gst*0.1, 4, '.', '');
+			$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst+$supplierInvoiceLine->gst, 4, '.', '');
+			$invoiceLines[] = $supplierInvoiceLine;
+			$invoice->total+= number_format($supplierInvoiceLine->amount, 4, '.', '');
+			$invoice->gst+= number_format($supplierInvoiceLine->gst, 4, '.', '');
+			$invoice->total_ex_gst+= number_format($supplierInvoiceLine->amount_ex_gst, 4, '.', '');
+		}
+
+		$invoice->total = number_format($invoice->total, 4, '.', '');
+		$invoice->gst = number_format($invoice->gst, 4, '.', '');
+		$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+	}
+
+	private function prepareTNT($data,&$invoiceLines,&$invoice)
+	{
+		$rate = $data[0];
+		$sur = $data[1];
+		unset($rate[1]);
+		unset($sur[1]);
+		foreach ($rate as $key => $d) 
+		{
+			if(empty($d[1])) continue;
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->ref = $d[2];
+			$supplierInvoiceLine->item_code = 'item';
+			$supplierInvoiceLine->postcode = $d[3];
+			$supplierInvoiceLine->det = "";
+			$supplierInvoiceLine->courier_cubic = $d[5];
+			$weight = 0;
+			$weight = $d[4];
+			$supplierInvoiceLine->weight = $weight;
+			$supplierInvoiceLine->qty = 1;
+			$supplierInvoiceLine->amount_ex_gst = number_format($d[7], 4, '.', '');
+			$supplierInvoiceLine->cdeadwt = number_format($weight, 4, '.', '');
+			$supplierInvoiceLine->gst = number_format($supplierInvoiceLine->amount_ex_gst*0.1, 4, '.', '');
+			$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst+$supplierInvoiceLine->gst, 4, '.', '');
+			$supplierInvoiceLine->mdata['no_fuel'] = 1;
+			$invoiceLines[] = $supplierInvoiceLine;
+			$invoice->total+= $supplierInvoiceLine->amount;
+			$invoice->gst+= $supplierInvoiceLine->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+
+
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->ref = $d[2];
+			$supplierInvoiceLine->item_code = 'fuel';
+			$supplierInvoiceLine->postcode = $d[3];
+			$supplierInvoiceLine->det = "";
+			$supplierInvoiceLine->courier_cubic = $d[5];
+			$weight = 0;
+			$weight = $d[4];
+			$supplierInvoiceLine->weight = $weight;
+			$supplierInvoiceLine->qty = 1;
+			$supplierInvoiceLine->amount_ex_gst = number_format($d[6], 4, '.', '');
+			$supplierInvoiceLine->gst = number_format($supplierInvoiceLine->amount_ex_gst*0.1, 4, '.', '');
+			$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst+$supplierInvoiceLine->gst, 4, '.', '');
+			$supplierInvoiceLine->cdeadwt = number_format($weight, 4, '.', '');
+
+			$invoiceLines[] = $supplierInvoiceLine;
+			$invoice->total+= $supplierInvoiceLine->amount;
+			$invoice->gst+= $supplierInvoiceLine->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+		}
+
+		foreach ($sur as $key => $d) 
+		{
+			if(empty($d[1])) continue;
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->ref = $d[1];
+			$supplierInvoiceLine->item_code = $d[2];
+			$supplierInvoiceLine->postcode = '';
+			$supplierInvoiceLine->det = "";
+			$supplierInvoiceLine->courier_cubic = 0;
+			$weight = 0;
+			$supplierInvoiceLine->weight = $weight;
+			$supplierInvoiceLine->qty = 1;
+			$supplierInvoiceLine->amount_ex_gst = number_format($d[3], 4, '.', '');
+			$supplierInvoiceLine->gst = number_format($supplierInvoiceLine->amount_ex_gst*0.1, 4, '.', '');
+			$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst+$supplierInvoiceLine->gst, 4, '.', '');
+			$supplierInvoiceLine->cdeadwt = number_format($weight, 4, '.', '');
+			$invoiceLines[] = $supplierInvoiceLine;
+			$invoice->total+= $supplierInvoiceLine->amount;
+			$invoice->gst+= $supplierInvoiceLine->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+		}
+
+		$invoice->total = number_format($invoice->total, 4, '.', '');
+		$invoice->gst = number_format($invoice->gst, 4, '.', '');
+		$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+	}
+
+	private function prepareEizToll($data,&$invoiceLines,&$invoice)
+	{
+		$rate = $data;
+		unset($rate[1]);
+		foreach ($rate as $key => $d) 
+		{
+			if(empty($d[1])) continue;
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$p = ImParcel::model()->find('hbn=:hbn and status !=100',[":hbn"=>$d[1]]);
+			$pack = json_decode($d[17]);
+			$cbm = 0;
+			$weight =0;
+			$bulkWeight =0;
+			foreach ($pack as $ka => $pa) {
+				$sweight = ceil($pa->weight);
+
+				$cbm += (($pa->width*$pa->length*$pa->height)*$pa->qty)/1000000;
+				$scbm = ($pa->width*$pa->length*$pa->height)/1000000;
+
+				if(ceil($scbm*250)>$sweight)
+				{
+					$weight+=ceil($scbm*250)*$pa->qty;
+				}else
+				{
+					$weight+=$sweight*$pa->qty;
+				}
+			}
+			$exGst = $d[6]/1.1;
+			$gst = $d[6] - $exGst;
+			if(preg_match('/AOE/i', $d[5]))
+			{
+				$ref = explode(',', $d[5])[0];
+			}else
+			{
+				$ref = $d[4];
+			}
+			$postcode = $d[15];
+			if(!empty($p))
+			{
+				$ref = $p->ref;
+				$postcode = $p->cnee->postcode;
+			}
+			$supplierInvoiceLine->ref = $ref;
+			$supplierInvoiceLine->item_code = 'item';
+			$supplierInvoiceLine->postcode = $postcode;
+			$supplierInvoiceLine->det = "";
+			$supplierInvoiceLine->courier_cubic = number_format($cbm, 4, '.', '');
+			$weight = number_format($weight,4, '.', '');
+			$supplierInvoiceLine->weight = $weight;
+			$supplierInvoiceLine->qty = 1;
+			$supplierInvoiceLine->amount_ex_gst = number_format($exGst, 4, '.', '');
+			$supplierInvoiceLine->cdeadwt = number_format($weight, 4, '.', '');
+			$supplierInvoiceLine->gst = number_format($gst, 4, '.', '');
+			$supplierInvoiceLine->amount = number_format($d[6], 4, '.', '');
+			$invoiceLines[] = $supplierInvoiceLine;
+			$invoice->total+= $supplierInvoiceLine->amount;
+			$invoice->gst+= $supplierInvoiceLine->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+		}
+
+		$invoice->total = number_format($invoice->total, 4, '.', '');
+		$invoice->gst = number_format($invoice->gst, 4, '.', '');
+		$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+	}
+
+	private function prepareUbiToll($data,&$invoiceLines,&$invoice)
+	{
+		$rate = $data;
+		$head = $rate[1];
+		unset($rate[1]);
+		$index = 0;
+		foreach ($head as $key => $value) {
+			if($value=="Total (ex GST)")
+			{
+				$index = $key;
+			}
+		}
+		$shipments = ['unknow surcharge'=>[],'item'=>[]];
+		foreach ($rate as $key => $d) 
+		{
+			if(empty($d[59])) continue;
+			$thisRef = !empty($d[$index+2])?$d[$index+2]:$d[59];
+			$itemCode = empty($d[$index+2])?'unknow surcharge':'item';
+			if(empty($shipments[$itemCode][$thisRef]))
+			{
+				$thisShipment = new stdClass();
+				$thisShipment->ref = $thisRef;
+				$thisShipment->cbm = !empty($d[32])?(($d[32]*$d[33]*$d[34])/1000000):0;
+				$thisShipment->weight = $d[62];
+				$thisShipment->postcode = $d[11];
+				$thisShipment->amount_ex_gst = is_numeric($d[$index])?$d[$index]:0;
+				$thisShipment->gst =  number_format($thisShipment->amount_ex_gst*0.1, 4, '.', '');
+				$thisShipment->amount =  number_format($thisShipment->amount_ex_gst*1.1, 4, '.', '');
+			}else
+			{
+				$thisShipment = $shipments[$itemCode][$thisRef];
+				$thisShipment->cbm +=  !empty($d[32])?(($d[32]*$d[33]*$d[34])/1000000):0;
+				$thisShipment->weight =$d[62];
+				$thisShipment->amount_ex_gst += is_numeric($d[$index])?$d[$index]:0;
+				$thisShipment->gst =  number_format($thisShipment->amount_ex_gst*0.1, 4, '.', '');
+				$thisShipment->amount =  number_format($thisShipment->amount_ex_gst*1.1, 4, '.', '');
+			}
+
+			$shipments[$itemCode][$thisRef] = $thisShipment;
+		}
+
+		foreach ($shipments as $itemCode => $itemShipments) 
+		{
+			foreach ($itemShipments as $key => $d) {
+				$supplierInvoiceLine = new SupplierInvoiceLine();
+				$supplierInvoiceLine->ref = $d->ref;
+				$supplierInvoiceLine->item_code =  $itemCode;
+				$supplierInvoiceLine->postcode = $d->postcode;
+				$supplierInvoiceLine->det = "";
+				$supplierInvoiceLine->courier_cubic = number_format($d->cbm, 4, '.', '');
+				$supplierInvoiceLine->weight =number_format($d->weight, 4, '.', '');
+				$supplierInvoiceLine->qty = 1;
+				$supplierInvoiceLine->amount_ex_gst = number_format($d->amount_ex_gst, 4, '.', '');
+				$supplierInvoiceLine->cdeadwt = number_format($d->weight, 4, '.', '');
+				$supplierInvoiceLine->gst = number_format($d->gst, 4, '.', '');
+				$supplierInvoiceLine->amount = number_format($d->amount, 4, '.', '');
+				$invoiceLines[] = $supplierInvoiceLine;
+				$invoice->total+= $supplierInvoiceLine->amount;
+				$invoice->gst+= $supplierInvoiceLine->gst;
+				$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+			}
+		}
+
+		$invoice->total = number_format($invoice->total, 4, '.', '');
+		$invoice->gst = number_format($invoice->gst, 4, '.', '');
+		$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+	}
+
+	private function prepareUbiAupost($data,&$invoiceLines,&$invoice)
+	{
+		$rate = $data;
+		$header = $rate[1];
+		unset($rate[1]);
+		$shipments = ['unknow surcharge'=>[],'item'=>[]];
+		$eindex = 0;
+		$totalIndex = 0;
+		$fuelIndex = 0;
+
+		foreach ($header as $key => $value) {
+			if($value=="Emergency surcharge(ex GST)")
+			{
+				$eindex = $key;
+			}
+			if($value=="Fuel Surcharge(ex GST)")
+			{
+				$fuelIndex = $key;
+			}
+			if($value=="Subtotal (ex GST)")
+			{
+				$totalIndex = $key;
+			}
+		}
+
+		foreach ($rate as $key => $d) 
+		{
+			if(empty($d[1])) continue;
+			$thisHBN = $d[2];
+			$itemCode = empty($d[2])?'unknow surcharge':'item';
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->ref = $thisHBN;
+			$supplierInvoiceLine->item_code =  $itemCode;
+			$supplierInvoiceLine->postcode = $d[10];
+			$supplierInvoiceLine->det = "";
+			$supplierInvoiceLine->courier_cubic = 0.001;
+			$supplierInvoiceLine->weight =number_format(floatval($d[18]), 4, '.', '');
+			$supplierInvoiceLine->qty = 1;
+			$supplierInvoiceLine->amount_ex_gst = number_format(floatval($d[$totalIndex]), 4, '.', '');
+			$supplierInvoiceLine->cdeadwt = number_format(floatval($d[18]), 4, '.', '');
+			$supplierInvoiceLine->gst = number_format(floatval($d[$totalIndex]*0.1), 4, '.', '');
+			$supplierInvoiceLine->amount = number_format(floatval($d[$totalIndex]*1.1), 4, '.', '');
+			$supplierInvoiceLine->mdata["no_fuel"] = 1;
+
+			$invoiceLines[] = $supplierInvoiceLine;
+
+			$invoice->total+= $supplierInvoiceLine->amount;
+			$invoice->gst+= $supplierInvoiceLine->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+
+			if(!empty($fuelIndex)&&!empty($d[$fuelIndex]))
+			{
+
+				$supplierInvoiceLineFuel = new SupplierInvoiceLine();
+				$supplierInvoiceLineFuel->ref = $thisHBN;
+				$supplierInvoiceLineFuel->item_code =  "fuel";
+				$supplierInvoiceLineFuel->postcode = $d[10];
+				$supplierInvoiceLineFuel->det = "";
+				$supplierInvoiceLineFuel->courier_cubic = 0.001;
+				$supplierInvoiceLineFuel->weight =number_format(floatval($d[18]), 4, '.', '');
+				$supplierInvoiceLineFuel->qty = 1;
+				$supplierInvoiceLineFuel->amount_ex_gst = number_format(floatval($d[$fuelIndex]), 4, '.', '');
+				$supplierInvoiceLineFuel->cdeadwt = number_format(floatval($d[18]), 4, '.', '');
+				$supplierInvoiceLineFuel->gst = number_format(floatval($d[$fuelIndex]*0.1), 4, '.', '');
+				$supplierInvoiceLineFuel->amount = number_format(floatval($d[$fuelIndex]*1.1), 4, '.', '');
+				$invoiceLines[] = $supplierInvoiceLineFuel;
+				$invoice->total+= $supplierInvoiceLineFuel->amount;
+				$invoice->gst+= $supplierInvoiceLineFuel->gst;
+				$invoice->total_ex_gst+= $supplierInvoiceLineFuel->amount_ex_gst;
+			}
+
+
+			if(!empty($eindex)&&!empty($d[$eindex]))
+			{
+
+
+				$supplierInvoiceLineSurcharge = new SupplierInvoiceLine();
+				$supplierInvoiceLineSurcharge->ref = $thisHBN;
+				$supplierInvoiceLineSurcharge->item_code =  "Levy";
+				$supplierInvoiceLineSurcharge->postcode = $d[10];
+				$supplierInvoiceLineSurcharge->det = "";
+				$supplierInvoiceLineSurcharge->courier_cubic = 0.001;
+				$supplierInvoiceLineSurcharge->weight =number_format(floatval($d[18]), 4, '.', '');
+				$supplierInvoiceLineSurcharge->qty = 1;
+				$supplierInvoiceLineSurcharge->amount_ex_gst = number_format(floatval($d[$eindex]), 4, '.', '');
+				$supplierInvoiceLineSurcharge->cdeadwt = number_format(floatval($d[18]), 4, '.', '');
+				$supplierInvoiceLineSurcharge->gst = number_format(floatval($d[$eindex]*0.1), 4, '.', '');
+				$supplierInvoiceLineSurcharge->amount = number_format(floatval($d[$eindex]*1.1), 4, '.', '');
+				$invoiceLines[] = $supplierInvoiceLineSurcharge;
+				$invoice->total+= $supplierInvoiceLineSurcharge->amount;
+				$invoice->gst+= $supplierInvoiceLineSurcharge->gst;
+				$invoice->total_ex_gst+= $supplierInvoiceLineSurcharge->amount_ex_gst;
+
+			}
+		}
+		$invoice->total = number_format($invoice->total, 4, '.', '');
+		$invoice->gst = number_format($invoice->gst, 4, '.', '');
+		$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+	}
+
+	private function prepareMyToll($data,&$invoiceLines,&$invoice)
+	{
+		$rate = $data;
+		foreach ($rate as $key => $value) {
+			unset($rate[$key]);
+			if( trim($value[1])=='Account')
+			{
+				break;
+			}
+
+		}
+
+		foreach ($rate as $key => $d) 
+		{
+			if(empty($d[4])) continue;
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->ref = $d[4];
+			if($d[11]=='RTS')
+			{
+				$supplierInvoiceLine->item_code = 'RTS';
+			}else
+			{
+				$supplierInvoiceLine->item_code = 'item';
+			}
+			$supplierInvoiceLine->postcode = $d[9];
+			$supplierInvoiceLine->det = "";
+			$supplierInvoiceLine->courier_cubic = number_format($d[20], 4, '.', '');
+			$supplierInvoiceLine->weight =number_format($d[21], 4, '.', '');
+			$supplierInvoiceLine->qty = 1;
+			$supplierInvoiceLine->amount_ex_gst = number_format($d[29], 4, '.', '');
+			$supplierInvoiceLine->cdeadwt = number_format($d[19], 4, '.', '');
+			$supplierInvoiceLine->gst = number_format($d[30], 4, '.', '');
+			$supplierInvoiceLine->amount = number_format($d[31], 4, '.', '');
+			$invoiceLines[] = $supplierInvoiceLine;
+			$invoice->total+= $supplierInvoiceLine->amount;
+			$invoice->gst+= $supplierInvoiceLine->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+		}
+
+		$invoice->total = number_format($invoice->total, 4, '.', '');
+		$invoice->gst = number_format($invoice->gst, 4, '.', '');
+		$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+	}
+
+	private function prepareMyTollCSV($data,&$invoiceLines,&$invoice)
+	{
+		$rate = $data;
+		unset($rate[1]);
+		foreach ($rate as $key => $d) 
+		{
+			foreach ($d as $k => $value) {
+				$d[$k] = str_replace('$', '', $d[$k]);
+			}
+			if(empty($d[3])) continue;
+			$mySurcharge = 0;
+			for ($i=28; $i < 37; $i+=2){
+				$mySurcharge+=$this->getMyTollCSVSurcharge($i,$d,$invoiceLines,$invoice);
+			}
+
+
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->ref = $d[3];
+			$supplierInvoiceLine->item_code = 'item';
+			$supplierInvoiceLine->postcode = $d[12];
+			$supplierInvoiceLine->det = "";
+			$supplierInvoiceLine->courier_cubic = number_format(floatval($d[15]), 4, '.', '');
+			$supplierInvoiceLine->weight =number_format(floatval($d[17]), 4, '.', '');
+			$supplierInvoiceLine->qty = 1;
+			$supplierInvoiceLine->amount_ex_gst = number_format(floatval($d[22])-floatval($d[21])-$mySurcharge, 4, '.', '');
+			$supplierInvoiceLine->cdeadwt = number_format(floatval($d[17]), 4, '.', '');
+			$supplierInvoiceLine->gst = number_format($supplierInvoiceLine->amount_ex_gst*0.1, 4, '.', '');
+			$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst*1.1, 4, '.', '');
+			$invoiceLines[] = $supplierInvoiceLine;
+			$invoice->total+= $supplierInvoiceLine->amount;
+			$invoice->gst+= $supplierInvoiceLine->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+		}
+
+		$invoice->total = number_format($invoice->total, 4, '.', '');
+		$invoice->gst = number_format($invoice->gst, 4, '.', '');
+		$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+	}
+
+	private function prepareFLHunter($data,&$invoiceLines,&$invoice)
+	{
+		$rate = $data;
+		unset($rate[1]);
+		$header = $rate[2];
+		unset($rate[2]);
+		$totalExGstIndex = 0;
+		foreach ($header as $key => $value) {
+			if($value=="Total ex GST")
+			{
+				$totalExGstIndex = $key;
+				break;
+			}
+		}
+		$additionnal = 0;
+		$addIndex = 0;
+		foreach ($rate as $key => $d)
+		{
+			if($d[2]=="Additional Extras")
+			{
+				$addIndex = $key;
+				break;
+			}
+		}
+
+		foreach ($rate as $key => $d) 
+		{
+			if(empty($d[1]))
+			{
+				continue;
+			}
+
+			$mySurcharge = 0;
+			for ($i=16; $i < $totalExGstIndex; $i+=1){
+				$mySurcharge+=$this->getFLHunterSurcharge($i,$d,$invoiceLines,$invoice,$header);
+			}
+
+			if(!empty($d[15]))
+			{
+				$supplierInvoiceLine = new SupplierInvoiceLine();
+				$supplierInvoiceLine->ref = $d[2];
+				$supplierInvoiceLine->item_code = 'item';
+				$supplierInvoiceLine->postcode = $d[6];
+				$supplierInvoiceLine->det = "";
+				$supplierInvoiceLine->courier_cubic = number_format(floatval($d[9]), 4, '.', '');
+				$supplierInvoiceLine->weight = empty($d[11])?number_format(floatval($d[10]), 4, '.', ''):number_format(floatval($d[11]), 4, '.', '');
+				$supplierInvoiceLine->qty = 1;
+				$supplierInvoiceLine->amount_ex_gst = number_format($d[15], 4, '.', '');
+				$supplierInvoiceLine->cdeadwt = number_format(floatval($d[10]), 4, '.', '');
+				$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst*1.1, 4, '.', '');
+				$supplierInvoiceLine->gst = number_format($supplierInvoiceLine->amount_ex_gst*0.1, 4, '.', '');
+				$supplierInvoiceLine->mdata['no_fuel'] = 1;
+				$invoiceLines[] = $supplierInvoiceLine;
+				$invoice->total+= $supplierInvoiceLine->amount;
+				$invoice->gst+= $supplierInvoiceLine->gst;
+				$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+			}
+		}
+
+		foreach ($rate as $key => $d) 
+		{
+			if($key<=$addIndex||empty($d[2]))
+			{
+				continue;
+			}
+			
+			for ($i=17; $i < $totalExGstIndex; $i+=1){
+				$mySurcharge+=$this->getFLHunterSurcharge($i,$d,$invoiceLines,$invoice,$header);
+			}
+
+
+			$itemCode = "";
+			$code = empty($d[3])?$d[7]:$d[3];
+			if(preg_match("/Tail-Lift/i",$code))
+			{
+				$itemArr = explode(" (",$code);
+			}else
+			{
+				$itemArr = explode(" - ",$code);
+				if(count($itemArr)==1)
+				{
+					$itemArr = explode(" (",$code);
+					if(count($itemArr)==2)
+					{
+						$itemArr[1] = explode(")",$itemArr[1])[0];
+					}
+				}
+			}
+
+			$itemCode = $itemArr[0];
+
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->ref = $d[2];
+			$supplierInvoiceLine->item_code = $itemCode;
+			$supplierInvoiceLine->postcode = "";
+			$supplierInvoiceLine->det = "";
+			$supplierInvoiceLine->courier_cubic = 0;
+			$supplierInvoiceLine->weight = 0;
+			$supplierInvoiceLine->qty = 1;
+			$supplierInvoiceLine->amount_ex_gst = number_format(floatval($d[16]), 4, '.', '');
+			$supplierInvoiceLine->cdeadwt = 0;
+			$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst*1.1, 4, '.', '');
+			$supplierInvoiceLine->gst = number_format($supplierInvoiceLine->amount_ex_gst*0.1, 4, '.', '');
+			if(!empty($itemArr[1]))
+			{
+				$supplierInvoiceLine->mdata['surcharge_criteria'] = $itemArr[1];
+			}
+
+			$invoiceLines[] = $supplierInvoiceLine;
+			$invoice->total+= $supplierInvoiceLine->amount;
+			$invoice->gst+= $supplierInvoiceLine->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+		}
+
+
+
+		$invoice->total = number_format($invoice->total, 4, '.', '');
+		$invoice->gst = number_format($invoice->gst, 4, '.', '');
+		$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+	}
+
+	private function getMyTollCSVSurcharge($index,$d,&$invoiceLines,&$invoice)
+	{
+		if(!empty($d[$index]))
+		{
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->ref = $d[3];
+			$supplierInvoiceLine->item_code = $d[$index];
+			$supplierInvoiceLine->postcode = $d[12];
+			$supplierInvoiceLine->det = "";
+			$supplierInvoiceLine->courier_cubic = number_format(floatval($d[15]), 4, '.', '');
+			$supplierInvoiceLine->weight =number_format(floatval($d[17]), 4, '.', '');
+			$supplierInvoiceLine->qty = 1;
+			$supplierInvoiceLine->amount_ex_gst = number_format(floatval($d[$index+1]), 4, '.', '');
+			$supplierInvoiceLine->cdeadwt = number_format(floatval($d[17]), 4, '.', '');
+			$supplierInvoiceLine->gst = number_format(floatval($d[$index+1])*0.1, 4, '.', '');
+			$supplierInvoiceLine->amount = number_format(floatval($d[$index+1])*1.1, 4, '.', '');
+			$invoiceLines[] = $supplierInvoiceLine;
+			$invoice->total+= $supplierInvoiceLine->amount;
+			$invoice->gst+= $supplierInvoiceLine->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+			return $supplierInvoiceLine->amount_ex_gst;
+		}
+	}
+
+	private function getFLHunterSurcharge($index,$d,&$invoiceLines,&$invoice,$header)
+	{
+		if(!empty($d[$index]))
+		{
+			$itemCode = $header[$index];
+			if($itemCode=="Fuel Levy")
+			{
+				$itemCode = "fuel";
+			}
+
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->ref = $d[2];
+			$supplierInvoiceLine->item_code = $itemCode;
+			$supplierInvoiceLine->postcode = $d[6];
+			$supplierInvoiceLine->det = "";
+			$supplierInvoiceLine->courier_cubic = number_format(floatval($d[9]), 4, '.', '');
+			$supplierInvoiceLine->weight =number_format(floatval($d[11]), 4, '.', '');
+			$supplierInvoiceLine->qty = 1;
+			$supplierInvoiceLine->amount_ex_gst = number_format($d[$index], 4, '.', '');
+			$supplierInvoiceLine->cdeadwt = number_format(floatval($d[10]), 4, '.', '');
+			$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst*1.1, 4, '.', '');
+			$supplierInvoiceLine->gst = number_format($supplierInvoiceLine->amount_ex_gst*0.1, 4, '.', '');
+			$invoiceLines[] = $supplierInvoiceLine;
+			$invoice->total+= $supplierInvoiceLine->amount;
+			$invoice->gst+= $supplierInvoiceLine->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+			return $supplierInvoiceLine->amount_ex_gst;
+		}
+	}
+
+	private function prepareUbiTollSurcharge($data,&$invoiceLines,&$invoice)
+	{
+		$rate = $data;
+		$head = $rate[1];
+		unset($rate[1]);
+		$shipments = [];
+		$shipmentData = [];
+		$totalIndex = 0;
+		$startIndex = 0;
+		$connoteIndex= 0 ;
+		foreach ($head as $key => $value) {
+			if(preg_match('/TOTAL/i', $value))
+			{
+				$totalIndex = $key;
+			}
+
+			if(preg_match('/Tailgate/i', $value))
+			{
+				$startIndex = $key;
+			}
+		}
+		foreach ($rate as $key => $d) 
+		{
+			$itemCode = "";
+			for ($i=$startIndex;$i < $totalIndex; $i++)
+			{ 
+				if(!empty($d[$i])&&is_numeric($d[$i]))
+				{
+					if($i==$startIndex)
+					{
+						$itemCode  = "Tailgate";
+
+					}elseif($i==$startIndex+1)
+					{
+						$itemCode  = "MH";
+
+					}elseif($i==$startIndex+2)
+					{
+						$itemCode  = "OS";
+					}elseif($i==$startIndex+3)
+					{
+						$itemCode  = "Onforwarding";
+					}elseif($i==$startIndex+4)
+					{
+						$itemCode  = "Remote";
+					}elseif($i==$startIndex+5)
+					{
+						$itemCode  = "Redelivery";
+					}elseif($i==$startIndex+6)
+					{
+						$itemCode  = "Book";
+					}elseif($i==$startIndex+7)
+					{
+						$itemCode  = "Pickup";
+					}elseif($i==$startIndex+8)
+					{
+						$itemCode  = "Offshore";
+					}elseif($i==$startIndex+9)
+					{
+						$itemCode  = "Receiver_pay";
+					}elseif($i==$startIndex+10)
+					{
+						$itemCode  = "DG";
+					}elseif($i==$startIndex+11)
+					{
+						$itemCode  = "Manual Control";
+					}
+
+					$thisData = [$itemCode,$d[$i]];
+					if(empty($shipmentData[$d[1]]))
+					{
+						$shipmentData[$d[1]] = [[$itemCode,$d[$i],$d[1],$d[3]]];
+					}else
+					{
+						$shipmentData[$d[1]][] = [$itemCode,$d[$i],$d[1],$d[3]];
+					}
+				}
+			}
+		}
+		foreach ($shipmentData as $key => $subs) 
+		{
+			foreach ($subs as $key2 => $d) {
+				$supplierInvoiceLine = new SupplierInvoiceLine();
+				$supplierInvoiceLine->ref = $key;
+				$supplierInvoiceLine->item_code = $d[0];
+				$supplierInvoiceLine->postcode = '';
+				$supplierInvoiceLine->det = "";
+				$supplierInvoiceLine->courier_cubic = 0;
+				$supplierInvoiceLine->weight =0;
+				$supplierInvoiceLine->qty = 1;
+				$supplierInvoiceLine->amount_ex_gst = number_format($d[1], 4, '.', '');
+				$supplierInvoiceLine->cdeadwt = 0;
+				$supplierInvoiceLine->gst = number_format($d[1]*0.1, 4, '.', '');
+				$supplierInvoiceLine->amount = number_format($d[1]*1.1, 4, '.', '');
+				$supplierInvoiceLine->mdata['label_number']= $d[2];
+				$invoiceLines[] = $supplierInvoiceLine;
+				$invoice->total+= $supplierInvoiceLine->amount;
+				$invoice->gst+= $supplierInvoiceLine->gst;
+				$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+			}
+		}
+
+		$invoice->total = number_format($invoice->total, 4, '.', '');
+		$invoice->gst = number_format($invoice->gst, 4, '.', '');
+		$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+	}
+
+	private function prepareMyBorderCSV($data,&$invoiceLines,&$invoice)
+	{
+		$rate = $data;
+		unset($rate[1]);
+		foreach ($rate as $key => $d) 
+		{
+			if(empty($d[18])) continue;
+			$itemCode = $d[18];
+			if($itemCode=='Parcel')
+			{
+				$itemCode = 'item';
+			}
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->ref = trim($d[3]);
+			$supplierInvoiceLine->item_code = $itemCode;
+			$supplierInvoiceLine->postcode = '';
+			$supplierInvoiceLine->det = "";
+			$supplierInvoiceLine->courier_cubic = number_format(floatval($d[17]), 4, '.', '');
+			$supplierInvoiceLine->weight =number_format(floatval($d[25]), 4, '.', '');
+			$supplierInvoiceLine->qty = 1;
+			$supplierInvoiceLine->amount_ex_gst = number_format(floatval($d[20]), 4, '.', '');
+			$supplierInvoiceLine->cdeadwt = number_format(floatval($d[16]), 4, '.', '');
+			$supplierInvoiceLine->gst = number_format(floatval($d[19]-$d[20]), 4, '.', '');
+			$supplierInvoiceLine->amount = number_format(floatval($d[19]), 4, '.', '');
+			$invoiceLines[] = $supplierInvoiceLine;
+			$invoice->total+= $supplierInvoiceLine->amount;
+			$invoice->gst+= $supplierInvoiceLine->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+		}
+
+		$invoice->total = number_format($invoice->total, 4, '.', '');
+		$invoice->gst = number_format($invoice->gst, 4, '.', '');
+		$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+	}
+
+
+	// private function prepareMyBorderPDF($data,&$invoiceLines,&$invoice)
+	// {
+	// 	$rate = $data;
+	// 	unset($rate[1]);
+	// 	$refs = [];
+	// 	$chargeType = [];
+	// 	$charge = [];
+	// 	foreach ($rate as $key => $d) 
+	// 	{
+	// 		$pattern = '/(([a-zA-Z0-9]{5,})[\s]+)?([a-zA-Z]+\s{0,1}[a-zA-Z]+\s{0,1}[a-zA-Z]+\s{0,1}[a-zA-Z]+\s{0,1}[a-zA-Z]+) [\s]+([a-zA-Z]+\s{0,1}[a-zA-Z]+\s{0,1}[a-zA-Z]+\s{0,1}[a-zA-Z]+\s{0,1}[a-zA-Z]+) [\s]+([a-zA-Z]+\s{0,1}[a-zA-Z]+\s{0,1}[a-zA-Z]+\s{0,1}[a-zA-Z]+\s{0,1}[a-zA-Z]+) [\s]+(\d{1,3})[\s]+([0-9\.\s\%]+)[\s]+(\$[0-9\.]+)/';
+
+	// 		preg_match_all($pattern,$d[1],$m);
+	// 		$refs += $m[2];
+	// 		$chargeType += $m[3];
+	// 		$charge += $m[8];
+	// 		if(!empty($m[8][0]))
+	// 		{
+	// 			for ($i=0; $i <count($m[2]) ; $i++)
+	// 			{ 
+	// 				$refs[] = $m[2][$i];
+	// 				$chargeType[] = $m[3][$i];
+	// 				$charge[] = $m[8][$i];
+	// 			}
+	// 		}
+	// 	}
+			
+	// 		foreach ($refs as $key => $value) {
+	// 			if(empty($value))
+	// 			{
+	// 				$thisId = $key;
+	// 				while(empty($refs[$thisId]))
+	// 				{
+	// 					$thisId--;
+	// 					$refs[$key] = $refs[$thisId];
+	// 				}
+	// 			}
+	// 		}
+	// 		print_r($refs);
+
+
+	// 		// $itemCode = $d[18];
+	// 		// if($itemCode=='Parcel')
+	// 		// {
+	// 		// 	$itemCode = 'item';
+	// 		// }
+	// 		// $supplierInvoiceLine = new SupplierInvoiceLine();
+	// 		// $supplierInvoiceLine->ref = trim($d[3]);
+	// 		// $supplierInvoiceLine->item_code = $itemCode;
+	// 		// $supplierInvoiceLine->postcode = '';
+	// 		// $supplierInvoiceLine->det = "";
+	// 		// $supplierInvoiceLine->courier_cubic = number_format(floatval($d[17]), 4, '.', '');
+	// 		// $supplierInvoiceLine->weight =number_format(floatval($d[25]), 4, '.', '');
+	// 		// $supplierInvoiceLine->qty = 1;
+	// 		// $supplierInvoiceLine->amount_ex_gst = number_format(floatval($d[20]), 4, '.', '');
+	// 		// $supplierInvoiceLine->cdeadwt = number_format(floatval($d[16]), 4, '.', '');
+	// 		// $supplierInvoiceLine->gst = number_format(floatval($d[20])*1.1, 4, '.', '');
+	// 		// $supplierInvoiceLine->amount = number_format(floatval($d[19]), 4, '.', '');
+	// 		// $invoiceLines[] = $supplierInvoiceLine;
+	// 		// $invoice->total+= $supplierInvoiceLine->amount;
+	// 		// $invoice->gst+= $supplierInvoiceLine->gst;
+	// 		// $invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+	// 	print_r($charge);
+
+
+	// 	$invoice->total = number_format($invoice->total, 4, '.', '');
+	// 	$invoice->gst = number_format($invoice->gst, 4, '.', '');
+	// 	$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+	// }
+
+	private function prepareGV($data,&$invoiceLines,&$invoice)
+	{
+		$rate = $data;
+		$head = $rate[1];
+		$weightIndex = 0;
+		$consignmentIndex = 0;
+		$gvChargesIndex = 0;
+		$mhpIndex = 0;
+		$fuelIndex = 0;
+
+		foreach ($head as $key => $h) 
+		{
+			if(strtoupper($h)== strtoupper("Chargable weight"))
+			{
+				$weightIndex = $key;
+			}
+
+			if(strtoupper($h)==strtoupper("Consignment ID"))
+			{
+				$consignmentIndex = $key;
+			}
+
+			if(strtoupper($h)==strtoupper("Total"))
+			{
+				$gvChargesIndex = $key;
+			}
+
+			if(strtoupper($h)==strtoupper("Manual Handling Surcharge Amt"))
+			{
+				$mhpIndex = $key;
+			}
+
+			if(strtoupper($h)==strtoupper("Fuel Surcharge Amt"))
+			{
+				$fuelIndex = $key;
+			}
+
+		}
+		unset($rate[1]);
+		foreach ($rate as $key => $d) 
+		{
+			if(empty($d[15])) continue;
+			$itemCode = 'item';
+
+			$supplierInvoiceLineItem = new SupplierInvoiceLine();
+			$supplierInvoiceLineItem->ref = trim($d[$consignmentIndex]);
+			$supplierInvoiceLineItem->item_code = $itemCode;
+			$supplierInvoiceLineItem->postcode = '';
+			$supplierInvoiceLineItem->det = "";
+			$supplierInvoiceLineItem->courier_cubic = 0;
+			$supplierInvoiceLineItem->weight = $d[$weightIndex];
+			$supplierInvoiceLineItem->qty = 1;
+			$supplierInvoiceLineItem->cdeadwt = number_format(floatval($d[$weightIndex]), 4, '.', '');
+
+
+			$supplierInvoiceLineItem->amount_ex_gst = number_format(floatval($d[$gvChargesIndex]), 4, '.', '');
+			$supplierInvoiceLineItem->gst = number_format($supplierInvoiceLineItem->amount_ex_gst*0.1, 4, '.', '');
+			$supplierInvoiceLineItem->amount = number_format(floatval($supplierInvoiceLineItem->amount_ex_gst+$supplierInvoiceLineItem->gst), 4, '.', '');
+
+
+
+			if($mhpIndex>0)
+			{
+				$supplierInvoiceLineMhp = new SupplierInvoiceLine();
+				$supplierInvoiceLineMhp->ref = trim($d[$consignmentIndex]);
+				$supplierInvoiceLineMhp->item_code = 'MHP';
+				$supplierInvoiceLineMhp->postcode = '';
+				$supplierInvoiceLineMhp->det = "";
+				$supplierInvoiceLineMhp->courier_cubic = 0;
+				$supplierInvoiceLineMhp->weight = $d[$weightIndex];
+				$supplierInvoiceLineMhp->qty = 1;
+				$supplierInvoiceLineMhp->amount_ex_gst = number_format(floatval($d[$mhpIndex]), 4, '.', '');
+				$supplierInvoiceLineMhp->cdeadwt = number_format(floatval($d[$weightIndex]), 4, '.', '');
+				$supplierInvoiceLineMhp->gst = number_format($supplierInvoiceLineMhp->amount_ex_gst*0.1, 4, '.', '');
+				$supplierInvoiceLineMhp->amount = number_format(floatval($supplierInvoiceLineMhp->amount_ex_gst+$supplierInvoiceLineMhp->gst), 4, '.', '');
+
+				$supplierInvoiceLineItem->amount_ex_gst = $supplierInvoiceLineItem->amount_ex_gst-$supplierInvoiceLineMhp->amount_ex_gst;
+				$supplierInvoiceLineItem->gst = $supplierInvoiceLineItem->gst-$supplierInvoiceLineMhp->gst;
+				$supplierInvoiceLineItem->amount = $supplierInvoiceLineItem->amount-$supplierInvoiceLineMhp->amount;
+			}
+
+			// if($fuelIndex>0)
+			// {
+			// 	$supplierInvoiceLineFuel = new SupplierInvoiceLine();
+			// 	$supplierInvoiceLineFuel->ref = trim($d[$consignmentIndex]);
+			// 	$supplierInvoiceLineFuel->item_code = 'fuel';
+			// 	$supplierInvoiceLineFuel->postcode = '';
+			// 	$supplierInvoiceLineFuel->det = "";
+			// 	$supplierInvoiceLineFuel->courier_cubic = 0;
+			// 	$supplierInvoiceLineFuel->weight = $d[$weightIndex];
+			// 	$supplierInvoiceLineFuel->qty = 1;
+			// 	$supplierInvoiceLineFuel->amount_ex_gst = number_format(floatval($d[$fuelIndex]), 4, '.', '');
+			// 	$supplierInvoiceLineFuel->cdeadwt = number_format(floatval($d[$weightIndex]), 4, '.', '');
+			// 	$supplierInvoiceLineFuel->gst = number_format($supplierInvoiceLineFuel->amount_ex_gst*0.1, 4, '.', '');
+			// 	$supplierInvoiceLineFuel->amount = number_format(floatval($supplierInvoiceLineFuel->amount_ex_gst+$supplierInvoiceLineFuel->gst), 4, '.', '');
+
+
+			// 	$supplierInvoiceLineItem->amount_ex_gst = $supplierInvoiceLineItem->amount_ex_gst-$supplierInvoiceLineFuel->amount_ex_gst;
+			// 	$supplierInvoiceLineItem->gst = $supplierInvoiceLineItem->gst-$supplierInvoiceLineFuel->gst;
+			// 	$supplierInvoiceLineItem->amount = $supplierInvoiceLineItem->amount-$supplierInvoiceLineFuel->amount;
+			// }
+
+
+			$invoiceLines[] = $supplierInvoiceLineItem;
+			$invoice->total+= $supplierInvoiceLineItem->amount;
+			$invoice->gst+= $supplierInvoiceLineItem->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLineItem->amount_ex_gst;
+
+
+			$invoiceLines[] = $supplierInvoiceLineMhp;
+			$invoice->total+= $supplierInvoiceLineMhp->amount;
+			$invoice->gst+= $supplierInvoiceLineMhp->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLineMhp->amount_ex_gst;
+
+
+			// $invoiceLines[] = $supplierInvoiceLineFuel;
+			// $invoice->total+= $supplierInvoiceLineFuel->amount;
+			// $invoice->gst+= $supplierInvoiceLineFuel->gst;
+			// $invoice->total_ex_gst+= $supplierInvoiceLineFuel->amount_ex_gst;
+		}
+
+		$invoice->total = number_format($invoice->total, 4, '.', '');
+		$invoice->gst = number_format($invoice->gst, 4, '.', '');
+		$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+	}
+
+	private function prepareAllied($data,&$invoiceLines,&$invoice)
+	{
+		$rate = $data;
+		$head = $rate[1];
+		unset($rate[1]);
+		foreach ($rate as $key => $d) 
+		{
+			if(empty($d[5])) continue;
+			$itemCode = 'item';
+			$thisAmount = 0;
+			$supplierInvoiceLineItem = new SupplierInvoiceLine();
+			$supplierInvoiceLineItem->ref = trim($d[6]);
+			$supplierInvoiceLineItem->item_code = 'fuel';
+			$supplierInvoiceLineItem->postcode =  $d[16];
+			$supplierInvoiceLineItem->det = "";
+			$supplierInvoiceLineItem->courier_cubic = floatval($d[33]);
+			$supplierInvoiceLineItem->weight = number_format(floatval($d[21]), 4, '.', '');
+			$supplierInvoiceLineItem->qty = 1;
+			$supplierInvoiceLineItem->cdeadwt = number_format(floatval($d[21]), 4, '.', '');
+
+
+			$supplierInvoiceLineItem->amount_ex_gst = number_format(floatval($d[11])/1.1, 4, '.', '');
+			$supplierInvoiceLineItem->gst = number_format($supplierInvoiceLineItem->amount_ex_gst*0.1, 4, '.', '');
+			$supplierInvoiceLineItem->amount = number_format(floatval($d[11]), 4, '.', '');
+			$invoiceLines[] = $supplierInvoiceLineItem;
+			$invoice->total+= $supplierInvoiceLineItem->amount;
+			$invoice->gst+= $supplierInvoiceLineItem->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLineItem->amount_ex_gst;
+			$thisAmount+=$supplierInvoiceLineItem->amount;
+			$fuelFee = $supplierInvoiceLineItem->amount;
+
+
+
+			if(empty(trim($d[35]))||!preg_match('/TPL/',$d[6]))
+			{
+				$supplierInvoiceLineItem = new SupplierInvoiceLine();
+				$supplierInvoiceLineItem->ref = trim($d[6]);
+				$thisItemCode = "item";
+				if($d[18]=="RD")
+				{
+					$thisItemCode = "Redelivery";
+				}elseif($d[18]=="RTS")
+				{
+					$thisItemCode = "RETURN TO SENDER";
+				}elseif($d[18]=="TL")
+				{
+					$thisItemCode = "TAIL LIFT REQUIRED";
+				}elseif($d[18]=="FT")
+				{
+					$thisItemCode = "FUTILE PICKUP";
+				}elseif($d[18]=="EW")
+				{
+					$thisItemCode = "CUBIC WEIGHT";
+				}elseif($d[18]=="HU")
+				{
+					$thisItemCode = "HAND UNLOAD";
+				}elseif($d[18]=="HDU")
+				{
+					$thisItemCode = "HD UNDERCHARGED";
+				}elseif($d[18]=="WT")
+				{
+					$thisItemCode = "WAITING TIME";
+				}
+				$supplierInvoiceLineItem->item_code = $thisItemCode;
+				$supplierInvoiceLineItem->postcode = $d[16];
+				$supplierInvoiceLineItem->det = "";
+				$supplierInvoiceLineItem->courier_cubic = floatval($d[33]);
+				$supplierInvoiceLineItem->weight = number_format(floatval($d[21]), 4, '.', '');
+				$supplierInvoiceLineItem->qty = 1;
+				$supplierInvoiceLineItem->cdeadwt = number_format(floatval($d[21]), 4, '.', '');
+
+				$supplierInvoiceLineItem->amount_ex_gst = number_format(floatval($d[9]), 4, '.', '');
+				$supplierInvoiceLineItem->gst = number_format($supplierInvoiceLineItem->amount_ex_gst*0.1, 4, '.', '');
+				$supplierInvoiceLineItem->amount = number_format(floatval($d[9])+floatval($d[10]), 4, '.', '');
+				$supplierInvoiceLineItem->mdata['no_fuel'] = 1;
+
+
+
+				$invoiceLines[] = $supplierInvoiceLineItem;
+				$invoice->total+= $supplierInvoiceLineItem->amount;
+				$invoice->gst+= $supplierInvoiceLineItem->gst;
+				$invoice->total_ex_gst+= $supplierInvoiceLineItem->amount_ex_gst;
+				$thisAmount+=$supplierInvoiceLineItem->amount;
+			}else
+			{
+				$deliveryFeeArr = explode(", ",$d[35]);
+				$surchargeFee = 0;
+				foreach ($deliveryFeeArr as $key => $deliveryFee)
+				{
+					$thisArr = explode(": $",$deliveryFee);
+					$supplierInvoiceLineItem = new SupplierInvoiceLine();
+					$supplierInvoiceLineItem->ref = trim($d[6]);
+					if($thisArr[0]=="Job")
+					{
+						continue;
+					}else
+					{
+						$supplierInvoiceLineItem->item_code = $thisArr[0];
+					}
+					$supplierInvoiceLineItem->postcode = $d[16];
+					$supplierInvoiceLineItem->det = "";
+					$supplierInvoiceLineItem->courier_cubic = floatval($d[33]);
+					$supplierInvoiceLineItem->weight = number_format(floatval($d[21]), 4, '.', '');
+					$supplierInvoiceLineItem->qty = 1;
+					$supplierInvoiceLineItem->cdeadwt = number_format(floatval($d[21]), 4, '.', '');
+
+					$supplierInvoiceLineItem->amount_ex_gst = number_format(floatval($thisArr[1])/1.1, 4, '.', '');
+					$supplierInvoiceLineItem->gst = number_format($supplierInvoiceLineItem->amount_ex_gst*0.1, 4, '.', '');
+					$supplierInvoiceLineItem->amount = number_format(floatval($thisArr[1]), 4, '.', '');
+					$surchargeFee+=$supplierInvoiceLineItem->amount;
+
+
+					$invoiceLines[] = $supplierInvoiceLineItem;
+					$invoice->total+= $supplierInvoiceLineItem->amount;
+					$invoice->gst+= $supplierInvoiceLineItem->gst;
+					$invoice->total_ex_gst+= $supplierInvoiceLineItem->amount_ex_gst;
+					$thisAmount+=$supplierInvoiceLineItem->amount;
+				}
+
+				$supplierInvoiceLineItem = new SupplierInvoiceLine();
+				$supplierInvoiceLineItem->ref = trim($d[6]);
+				$thisItemCode = "item";
+				if($d[18]=="RD")
+				{
+					$thisItemCode = "Redelivery";
+				}elseif($d[18]=="RTS")
+				{
+					$thisItemCode = "RETURN TO SENDER";
+				}elseif($d[18]=="TL")
+				{
+					$thisItemCode = "TAIL LIFT REQUIRED";
+				}elseif($d[18]=="FT")
+				{
+					$thisItemCode = "FUTILE PICKUP";
+				}
+				$supplierInvoiceLineItem->item_code = $thisItemCode;
+				$supplierInvoiceLineItem->postcode = $d[16];
+				$supplierInvoiceLineItem->det = "";
+				$supplierInvoiceLineItem->courier_cubic = floatval($d[33]);
+				$supplierInvoiceLineItem->weight = number_format(floatval($d[21]), 4, '.', '');
+				$supplierInvoiceLineItem->qty = 1;
+				$supplierInvoiceLineItem->cdeadwt = number_format(floatval($d[21]), 4, '.', '');
+
+				$supplierInvoiceLineItem->amount_ex_gst = number_format(floatval($d[12]-$surchargeFee-$fuelFee)/1.1, 4, '.', '');
+				$supplierInvoiceLineItem->gst = number_format($supplierInvoiceLineItem->amount_ex_gst*0.1, 4, '.', '');
+				$supplierInvoiceLineItem->amount = number_format(floatval($supplierInvoiceLineItem->amount_ex_gst*1.1), 4, '.', '');
+				$supplierInvoiceLineItem->mdata['no_fuel'] = 1;
+
+				$invoiceLines[] = $supplierInvoiceLineItem;
+				$invoice->total+= $supplierInvoiceLineItem->amount;
+				$invoice->gst+= $supplierInvoiceLineItem->gst;
+				$invoice->total_ex_gst+= $supplierInvoiceLineItem->amount_ex_gst;
+				$thisAmount+=$supplierInvoiceLineItem->amount;
+
+
+			}
+
+		}
+		$invoice->total = number_format($invoice->total, 4, '.', '');
+		$invoice->gst = number_format($invoice->gst, 4, '.', '');
+		$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+	}
+
+	private function prepareOther($data,&$invoiceLines,&$invoice)
+	{
+		$rate = $data[0];
+		$sur = empty($data[1])?[]:$data[1];
+		unset($rate[1]);
+		unset($sur[1]);
+		foreach ($rate as $key => $d) 
+		{
+			if(empty($d[2])) continue;
+			$ref = $d[2];
+			if(preg_match('/^2.*(XC)$/i', $ref))
+			{
+				$ref = explode('XC', $ref)[0];
+			}
+
+			if(!empty($d[7]))
+			{
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->ref = $ref;
+			$supplierInvoiceLine->item_code = 'item';
+			$supplierInvoiceLine->postcode = $d[3];
+			$supplierInvoiceLine->det = "";
+			$supplierInvoiceLine->courier_cubic = $d[5];
+			$weight = 0;
+			$weight = $d[4];
+			$supplierInvoiceLine->weight = $weight;
+			$supplierInvoiceLine->qty = 1;
+			$supplierInvoiceLine->amount_ex_gst = number_format($d[7], 4, '.', '');
+			$supplierInvoiceLine->cdeadwt = number_format($weight, 4, '.', '');
+			$supplierInvoiceLine->mdata['no_fuel'] = 1;
+		
+			if(!empty($d[8])&&$d[8]=="free")
+			{
+				$supplierInvoiceLine->gst = 0;
+			}else
+			{
+				$supplierInvoiceLine->gst = number_format($supplierInvoiceLine->amount_ex_gst*0.1, 4, '.', '');
+			}
+
+			$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst+$supplierInvoiceLine->gst, 4, '.', '');
+			$invoiceLines[] = $supplierInvoiceLine;
+			$invoice->total+= $supplierInvoiceLine->amount;
+			$invoice->gst+= $supplierInvoiceLine->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+			}
+
+			if(!empty($d[6]))
+			{
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->ref = $ref;
+			$supplierInvoiceLine->item_code = 'fuel';
+			$supplierInvoiceLine->postcode = $d[3];
+			$supplierInvoiceLine->det = "";
+			$supplierInvoiceLine->courier_cubic = $d[5];
+			$weight = 0;
+			$weight = $d[4];
+			$supplierInvoiceLine->weight = $weight;
+			$supplierInvoiceLine->qty = 1;
+			$supplierInvoiceLine->amount_ex_gst = number_format($d[6], 4, '.', '');
+			if(!empty($d[8])&&$d[8]=="free")
+			{
+				$supplierInvoiceLine->gst = 0;
+			}else
+			{
+				$supplierInvoiceLine->gst = number_format($supplierInvoiceLine->amount_ex_gst*0.1, 4, '.', '');
+			}
+			$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst+$supplierInvoiceLine->gst, 4, '.', '');
+			$supplierInvoiceLine->cdeadwt = number_format($weight, 4, '.', '');
+
+			$invoiceLines[] = $supplierInvoiceLine;
+			$invoice->total+= $supplierInvoiceLine->amount;
+			$invoice->gst+= $supplierInvoiceLine->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+			}
+		}
+
+		foreach ($sur as $key => $d) 
+		{
+			if(empty($d[1])) continue;
+			$ref = $d[1];
+			if(preg_match('/^2.*(XC)$/i', $ref))
+			{
+				$ref = explode('XC', $ref)[0];
+			}
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->ref = $ref;
+			$supplierInvoiceLine->item_code = $d[2];
+			$supplierInvoiceLine->postcode = '';
+			$supplierInvoiceLine->det = "";
+			$supplierInvoiceLine->courier_cubic = 0;
+			$weight = 0;
+			$supplierInvoiceLine->weight = $weight;
+			$supplierInvoiceLine->qty = 1;
+			$supplierInvoiceLine->amount_ex_gst = number_format($d[3], 4, '.', '');
+			if(!empty($d[4])&&$d[4]=="free")
+			{
+				$supplierInvoiceLine->gst = 0;
+			}else
+			{
+				$supplierInvoiceLine->gst = number_format($supplierInvoiceLine->amount_ex_gst*0.1, 4, '.', '');
+			}
+			$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst+$supplierInvoiceLine->gst, 4, '.', '');
+			$supplierInvoiceLine->cdeadwt = number_format($weight, 4, '.', '');
+			$invoiceLines[] = $supplierInvoiceLine;
+			$invoice->total+= $supplierInvoiceLine->amount;
+			$invoice->gst+= $supplierInvoiceLine->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+		}
+
+		$invoice->total = number_format($invoice->total, 4, '.', '');
+		$invoice->gst = number_format($invoice->gst, 4, '.', '');
+		$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+	}
+
+	private function prepareTLDSupplier($data,&$invoiceLines,&$invoice)
+	{
+		$rate = $data;
+		$supplier = $rate[1][2];
+		unset($rate[1]);
+		unset($rate[2]);
+		if(empty($rate[3][1])) $rate[3];
+
+		$invoice->org_id = $supplier;
+		$fuel = 0;
+		if(empty($supplier)||empty(Org::model()->findByPk($supplier)))
+		{
+			$this->errors[] = "can't find supplier";
+			return;
+		}
+		foreach ($rate as $key => $d) 
+		{
+			if(preg_match('/\d{4}-\d{2}-\d{2}/',$d[1])) continue;
+			if(empty($d[1])||in_array($d[1], ['SUBTOTAL','TOTAL','Consignment No'])) continue;
+			if(preg_match("/Fuel\sLevy\s(\d{1,3}[.]*\d{0,3})/i",$d[1],$m))
+			{
+				$fuel = floatval($m[1])/100;
+				continue;
+			}
+
+			$ref = $d[1];
+			$supplierInvoiceLine1 = null;
+			if(!empty($d[3]))
+			{
+				$p = ImParcel::model()->find(" (ref =:ref or cref =:ref or hbn = :ref) and status!=100",[":ref"=>$ref]);
+
+				if(!empty($p))// when ref is for shipment
+				{
+					$supplierInvoiceLine1 = new SupplierInvoiceLine();
+					$supplierInvoiceLine1->ref = $ref;
+					$supplierInvoiceLine1->item_code = 'item';
+					$supplierInvoiceLine1->postcode = (empty($p)?"":$p->cnee->postcode);
+					$supplierInvoiceLine1->det = $d[2];
+					$supplierInvoiceLine1->courier_cubic = (empty($p)?0:$p->cbm*$p->pkg);
+					$weight = 0;
+					$weight = (empty($p)?0:$p->weight);
+					$weight = ($weight>($supplierInvoiceLine1->courier_cubic*250))?$weight:$supplierInvoiceLine1->courier_cubic*250;
+					$supplierInvoiceLine1->weight = $weight;
+					$supplierInvoiceLine1->qty = 1;
+					$supplierInvoiceLine1->amount_ex_gst = number_format(floatval($d[3]), 4, '.', '');
+					$supplierInvoiceLine1->cdeadwt = number_format($weight, 4, '.', '');
+				
+					if(empty($d[6]))
+					{
+						$supplierInvoiceLine1->gst = 0;
+					}else
+					{
+						$supplierInvoiceLine1->gst = number_format($supplierInvoiceLine1->amount_ex_gst*0.1, 4, '.', '');
+					}
+
+					$supplierInvoiceLine1->amount = number_format($supplierInvoiceLine1->amount_ex_gst+$supplierInvoiceLine1->gst, 4, '.', '');
+					$invoiceLines[] = $supplierInvoiceLine1;
+					$invoice->total+= $supplierInvoiceLine1->amount;
+					$invoice->gst+= $supplierInvoiceLine1->gst;
+					$invoice->total_ex_gst+= $supplierInvoiceLine1->amount_ex_gst;
+				}else// when ref is for cjob
+				{
+					$fba = AmazonInfo::model()->find("(booking_ref = :no or booking_ref = :no2 or booking_ref = :no3) and model='CargoProcessJob'",[":no"=>$ref,":no2"=>"ISA ".$ref,":no3"=>"ISA-".$ref]);
+					$job = null;
+					if(!empty($fba))
+					{
+						$job = CargoProcessJob::model()->findByPk($fba->fid);
+					}else
+					{
+						$fba2 = AmazonInfo::model()->find("(booking_ref = :no or booking_ref = :no2 or booking_ref = :no3) and model='CargoProcess'",[":no"=>$ref,":no2"=>"ISA ".$ref,":no3"=>"ISA-".$ref]);
+						if(!empty($fba2))
+						{
+							$ca = CargoProcess::model()->findByPk($fba2->fid);
+							$cj = CargoProcessJobRelations::model()->find('cargo_process_id= :cid and active = 1',[":cid"=>$ca->id]);
+							if(!empty($cj))
+							{
+								$job = CargoProcessJob::model()->findByPk($cj->job_id);
+							}
+						}
+
+						if(empty($job))
+						{
+							$job = CargoProcessJob::model()->find("job_no = :no",[":no"=>$ref]);
+						}
+					}
+
+					if(!empty($job))// when ref is the FBA ISA number
+					{
+						$shipments = [];
+						$totalWeight = 0;
+						foreach ($job->job_interstate_relations as $k2 => $jr) {
+							$weight = 0;
+							$weight = (empty($jr->cargo_process->shipment)?0:$jr->cargo_process->getWeight());
+							$weight = ($weight>($jr->cargo_process->getTotalCBM()*250))?$weight:$jr->cargo_process->getTotalCBM()*250;
+
+							$shipments[] = [$jr->cargo_process->shipment,$weight,$jr->cargo_process->getTotalCBM(),$jr->cargo_process->id];
+							$totalWeight+= $weight;
+						}
+
+						foreach($shipments as $k2 =>$s)
+						{
+							$p = $s[0];
+							$supplierInvoiceLine1 = new SupplierInvoiceLine();
+							$supplierInvoiceLine1->ref = $p->ref;
+							$supplierInvoiceLine1->item_code = 'item';
+							$supplierInvoiceLine1->postcode = (empty($p)?"":$p->cnee->postcode);
+							$supplierInvoiceLine1->det = $d[2];
+							$supplierInvoiceLine1->courier_cubic = $s[2];
+							$supplierInvoiceLine1->weight = $s[1];
+							$supplierInvoiceLine1->qty = 1;
+							$supplierInvoiceLine1->amount_ex_gst = number_format(floatval($d[3]*($s[1]/$totalWeight)), 4, '.', '');
+							$supplierInvoiceLine1->cdeadwt = number_format($s[1], 4, '.', '');
+						
+							if(empty($d[6]))
+							{
+								$supplierInvoiceLine1->gst = 0;
+							}else
+							{
+								$supplierInvoiceLine1->gst = number_format($supplierInvoiceLine1->amount_ex_gst*0.1, 4, '.', '');
+							}
+
+							$supplierInvoiceLine1->amount = number_format($supplierInvoiceLine1->amount_ex_gst+$supplierInvoiceLine1->gst, 4, '.', '');
+							$supplierInvoiceLine1->mdata['cargo_process_id'] = $s[3];
+							$invoiceLines[] = $supplierInvoiceLine1;
+							$invoice->total+= $supplierInvoiceLine1->amount;
+							$invoice->gst+= $supplierInvoiceLine1->gst;
+							$invoice->total_ex_gst+= $supplierInvoiceLine1->amount_ex_gst;
+						}
+						
+						if($job->status==CargoProcessJob::DELETED)
+						{
+							$this->errors[] = $d[1]." related cargo process job ".$job->job_no." was cancelled";
+							return;
+						}
+					}else
+					{
+						if($ref=="fastway"||$ref=="FASTWAY"||preg_match("/^CAM/",$ref))
+						{
+							$supplierInvoiceLine1 = new SupplierInvoiceLine();
+							$supplierInvoiceLine1->ref = $ref;
+							$supplierInvoiceLine1->item_code = 'item';
+							$supplierInvoiceLine1->postcode = "";
+							$supplierInvoiceLine1->det = $d[2];
+							$supplierInvoiceLine1->courier_cubic = 0;
+							$supplierInvoiceLine1->weight = 0;
+							$supplierInvoiceLine1->qty = 1;
+							$supplierInvoiceLine1->amount_ex_gst = number_format(floatval($d[3]), 4, '.', '');
+							$supplierInvoiceLine1->cdeadwt = number_format(0, 4, '.', '');
+							if(empty($d[6]))
+							{
+								$supplierInvoiceLine1->gst = 0;
+							}else
+							{
+								$supplierInvoiceLine1->gst = number_format($supplierInvoiceLine1->amount_ex_gst*0.1, 4, '.', '');
+							}
+
+							$supplierInvoiceLine1->amount = number_format($supplierInvoiceLine1->amount_ex_gst+$supplierInvoiceLine1->gst, 4, '.', '');
+							$invoiceLines[] = $supplierInvoiceLine1;
+							$invoice->total+= $supplierInvoiceLine1->amount;
+							$invoice->gst+= $supplierInvoiceLine1->gst;
+							$invoice->total_ex_gst+= $supplierInvoiceLine1->amount_ex_gst;
+						}else
+						{
+							$this->errors[] = $key.":".$ref." is not found";
+						}
+
+					}
+				}
+				
+			}
+
+			if(!empty($d[5]))
+			{
+				$p = ImParcel::model()->find(" (ref =:ref or cref =:ref or hbn = :ref) and status!=100",[":ref"=>$ref]);
+				$ca = null;
+				if(!empty($p))// when ref is for shipment
+				{	
+					$supplierInvoiceLine = new SupplierInvoiceLine();
+					$supplierInvoiceLine->ref = $ref;
+					$supplierInvoiceLine->postcode = (empty($p)?"":$p->cnee->postcode);
+					$supplierInvoiceLine->det = $d[2];
+					$supplierInvoiceLine->courier_cubic = (empty($p)?0:$p->cbm*$p->pkg);
+					$weight = 0;
+					$weight = (empty($p)?0:$p->weight);
+					$weight = ($weight>($supplierInvoiceLine->courier_cubic*250))?$weight:$supplierInvoiceLine->courier_cubic*250;
+					$supplierInvoiceLine->weight = $weight;
+					$supplierInvoiceLine->qty = 1;
+					$supplierInvoiceLine->item_code = $d[4];
+					$supplierInvoiceLine->amount_ex_gst = number_format(floatval($d[5]), 4, '.', '');
+					$supplierInvoiceLine->cdeadwt = number_format($weight, 4, '.', '');
+				
+					if(empty($d[6]))
+					{
+						$supplierInvoiceLine->gst = 0;
+					}else
+					{
+						$supplierInvoiceLine->gst = number_format($supplierInvoiceLine->amount_ex_gst*0.1, 4, '.', '');
+					}
+
+					$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst+$supplierInvoiceLine->gst, 4, '.', '');
+					$invoiceLines[] = $supplierInvoiceLine;
+					$invoice->total+= $supplierInvoiceLine->amount;
+					$invoice->gst+= $supplierInvoiceLine->gst;
+					$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+				}else// when ref is for cjob
+				{
+					$fba = AmazonInfo::model()->find("(booking_ref = :no or booking_ref = :no2 or booking_ref = :no3) and model='CargoProcessJob'",[":no"=>$ref,":no2"=>"ISA ".$ref,":no3"=>"ISA-".$ref]);
+					$job = null;
+					if(!empty($fba))
+					{
+						$job = CargoProcessJob::model()->findByPk($fba->fid);
+					}else
+					{
+						$fba2 = AmazonInfo::model()->find("(booking_ref = :no or booking_ref = :no2 or booking_ref = :no3) and model='CargoProcess'",[":no"=>$ref,":no2"=>"ISA ".$ref,":no3"=>"ISA-".$ref]);
+						if(!empty($fba2))
+						{
+							$ca = CargoProcess::model()->findByPk($fba2->fid);
+							$cj = CargoProcessJobRelations::model()->find('cargo_process_id= :cid and active = 1',[":cid"=>$ca->id]);
+							if(!empty($cj))
+							{
+								$job = CargoProcessJob::model()->findByPk($cj->job_id);
+							}
+						}
+
+						if(empty($job))
+						{
+							$job = CargoProcessJob::model()->find("job_no = :no",[":no"=>$ref]);
+						}
+					}
+
+					if(!empty($job))// when ref is the FBA ISA number
+					{
+						$shipments = [];
+						$totalWeight = 0;
+						foreach ($job->job_interstate_relations as $k2 => $jr) {
+							$weight = 0;
+							$weight = (empty($jr->cargo_process->shipment)?0:$jr->cargo_process->getWeight());
+							$weight = ($weight>($jr->cargo_process->getTotalCBM()*250))?$weight:$jr->cargo_process->getTotalCBM()*250;
+
+							$shipments[] = [$jr->cargo_process->shipment,$weight,$jr->cargo_process->getTotalCBM(),$jr->cargo_process->id];
+							$totalWeight+= $weight;
+						}
+
+						foreach($shipments as $k2 =>$s)
+						{
+							$p = $s[0];
+							$supplierInvoiceLine = new SupplierInvoiceLine();
+							$supplierInvoiceLine->ref = $ref;
+							$supplierInvoiceLine->postcode = (empty($p)?"":$p->cnee->postcode);
+							$supplierInvoiceLine->det = $d[2];
+							$supplierInvoiceLine->courier_cubic = $s[2];
+							$supplierInvoiceLine->weight = $s[1];
+							$supplierInvoiceLine->qty = 1;
+							$supplierInvoiceLine->item_code = $d[4];
+							$supplierInvoiceLine->amount_ex_gst = number_format(floatval($d[5]*($s[1]/$totalWeight)), 4, '.', '');
+							$supplierInvoiceLine->cdeadwt = number_format($s[1], 4, '.', '');
+							
+							if(empty($d[6]))
+							{
+								$supplierInvoiceLine->gst = 0;
+							}else
+							{
+								$supplierInvoiceLine->gst = number_format($supplierInvoiceLine->amount_ex_gst*0.1, 4, '.', '');
+							}
+
+							$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst+$supplierInvoiceLine->gst, 4, '.', '');
+							$supplierInvoiceLine->mdata['cargo_process_id'] = $s[3];
+							$invoiceLines[] = $supplierInvoiceLine;
+							$invoice->total+= $supplierInvoiceLine->amount;
+							$invoice->gst+= $supplierInvoiceLine->gst;
+							$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+						}
+						
+						if($job->status==CargoProcessJob::DELETED)
+						{
+							$this->errors[] = $d[1]." related cargo process job ".$job->job_no." was cancelled";
+							return;
+						}
+					}else
+					{
+						if($ref=="fastway"||$ref=="FASTWAY"||preg_match("/^CAM/",$ref))
+						{
+							$supplierInvoiceLine = new SupplierInvoiceLine();
+							$supplierInvoiceLine->ref = $ref;
+							$supplierInvoiceLine->item_code = $d[4];
+							$supplierInvoiceLine->postcode = "";
+							$supplierInvoiceLine->det = $d[2];
+							$supplierInvoiceLine->courier_cubic = 0;
+							$supplierInvoiceLine->weight = 0;
+							$supplierInvoiceLine->qty = 1;
+							$supplierInvoiceLine->amount_ex_gst = number_format(floatval($d[5]), 4, '.', '');
+							$supplierInvoiceLine->cdeadwt = number_format(0, 4, '.', '');
+							if(empty($d[6]))
+							{
+								$supplierInvoiceLine->gst = 0;
+							}else
+							{
+								$supplierInvoiceLine->gst = number_format($supplierInvoiceLine->amount_ex_gst*0.1, 4, '.', '');
+							}
+
+							$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst+$supplierInvoiceLine->gst, 4, '.', '');
+							$invoiceLines[] = $supplierInvoiceLine;
+							$invoice->total+= $supplierInvoiceLine->amount;
+							$invoice->gst+= $supplierInvoiceLine->gst;
+							$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+						}else
+						{
+							$this->errors[] = $key.":".$ref." is not found";
+						}
+
+					}
+				}
+
+
+				
+			}
+		}
+
+		if(!empty($fuel))
+		{
+			$checkInvoiceLines = $invoiceLines;
+			foreach($invoiceLines as $key => $invoiceLine)
+			{
+				$supplierInvoiceLine1 = new SupplierInvoiceLine();
+				$supplierInvoiceLine1->ref = $invoiceLine->ref;
+				$supplierInvoiceLine1->item_code = 'fuel';
+				$supplierInvoiceLine1->postcode = $invoiceLine->postcode;
+				$supplierInvoiceLine1->det = "";
+				$supplierInvoiceLine1->courier_cubic = $invoiceLine->courier_cubic;
+				$supplierInvoiceLine1->weight = $invoiceLine->weight;
+				$supplierInvoiceLine1->qty = 1;
+				$supplierInvoiceLine1->amount_ex_gst = number_format($invoiceLine->amount_ex_gst*$fuel, 4, '.', '');
+				$supplierInvoiceLine1->cdeadwt = $invoiceLine->cdeadwt;
+				
+				if(empty($invoiceLine->gst))
+				{
+					$supplierInvoiceLine1->gst = 0;
+				}else
+				{
+					$supplierInvoiceLine1->gst = number_format($supplierInvoiceLine1->amount_ex_gst*0.1, 4, '.', '');
+				}
+
+				$supplierInvoiceLine1->amount = number_format($supplierInvoiceLine1->amount_ex_gst+$supplierInvoiceLine1->gst, 4, '.', '');
+				$invoiceLines[] = $supplierInvoiceLine1;
+				$invoice->total+= $supplierInvoiceLine1->amount;
+				$invoice->gst+= $supplierInvoiceLine1->gst;
+				$invoice->total_ex_gst+= $supplierInvoiceLine1->amount_ex_gst;
+			}
+		}
+	}
+
+	private function prepareSTARTRACK($data,&$invoiceLines,&$invoice)
+	{
+		unset($data[1]);
+		$totalItem = 0;
+		foreach ($data as $key => $d) 
+		{
+			if($d[5]=='GST') continue;
+			$item_code = 'item';
+			if(empty($d[2]))
+			{
+				$item_code = substr($d[53],-3);
+			}
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->ref = $d[5];
+			$supplierInvoiceLine->postcode = empty($d[18])?"":$d[18];
+			$supplierInvoiceLine->item_code = $item_code;
+			$supplierInvoiceLine->gst =  number_format($d[12]*0.1, 4, '.', '');
+			$supplierInvoiceLine->det = "";
+			$supplierInvoiceLine->courier_cubic = empty($d[10])?0:$d[10];
+			$weight = empty($d[11])?0:$d[11];
+			$supplierInvoiceLine->weight = $weight;
+			$supplierInvoiceLine->qty = 1;
+			$supplierInvoiceLine->amount_ex_gst = number_format((empty($d[12])?0:$d[12]), 4, '.', '');
+			$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst+$supplierInvoiceLine->gst, 4, '.', '');
+			$supplierInvoiceLine->cdeadwt =  $weight;
+			$invoiceLines[] = $supplierInvoiceLine;
+			$invoice->total+= $supplierInvoiceLine->amount;
+			$invoice->gst+= $supplierInvoiceLine->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+			if($item_code=='item')
+			{
+				$totalItem += $supplierInvoiceLine->amount_ex_gst;
+			}
+		}
+
+		foreach ($invoiceLines as $k1 => $value) {
+			if($value->item_code=="FSR")
+			{
+				foreach ($invoiceLines as $key2 => $il) 
+				{
+					if($il->item_code!='item') continue;
+					$supplierInvoiceLine = new SupplierInvoiceLine();
+					$supplierInvoiceLine->ref = $il->ref;
+					$supplierInvoiceLine->postcode = $il->postcode;
+					$supplierInvoiceLine->item_code = 'fuel';
+					$supplierInvoiceLine->amount_ex_gst = number_format((($il->amount_ex_gst/$totalItem)*$value->amount_ex_gst), 4, '.', '');
+					$supplierInvoiceLine->gst =  number_format($supplierInvoiceLine->amount_ex_gst*0.1, 4, '.', '');
+					$supplierInvoiceLine->det = "";
+					$supplierInvoiceLine->courier_cubic = 0;
+					$supplierInvoiceLine->weight = 0;
+					$supplierInvoiceLine->qty = 1;
+					$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst+$supplierInvoiceLine->gst, 4, '.', '');
+					$supplierInvoiceLine->cdeadwt =  0;
+					$invoiceLines[] = $supplierInvoiceLine;
+				}
+				unset($invoiceLines[$k1]);
+			}
+		}
+		$invoice->total = number_format($invoice->total, 4, '.', '');
+		$invoice->gst = number_format($invoice->gst, 4, '.', '');
+		$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+	}
+
+	private function prepareAUSPOST($data,&$invoiceLines,&$invoice)
+	{
+		unset($data[1]);
+		foreach ($data as $key => $d) 
+		{
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->ref = $d[10];
+			$supplierInvoiceLine->item_code = $d[9];
+			if($d[14]=="")
+			{
+				$d[14] = 0;
+			}
+			$supplierInvoiceLine->amount_ex_gst = number_format($d[13]-$d[14], 4, '.', '');
+			if($supplierInvoiceLine->item_code=="Return To Sender")
+			{
+				$supplierInvoiceLine->item_code = 'RTS';
+			}else if($supplierInvoiceLine->item_code=="eParcel")
+			{
+				$supplierInvoiceLine->item_code = 'eparcel';
+			}else if($supplierInvoiceLine->amount_ex_gst<0)
+			{
+				$supplierInvoiceLine->item_code = 'credit';
+			}else
+			{
+				$supplierInvoiceLine->item_code = 'letter';
+			}
+			$supplierInvoiceLine->postcode = '';
+			$supplierInvoiceLine->gst = number_format($d[14], 4, '.', '');
+			$supplierInvoiceLine->det = "";
+			$supplierInvoiceLine->courier_cubic = 0;
+			$supplierInvoiceLine->weight = 0;
+			$supplierInvoiceLine->qty = 1;
+			$supplierInvoiceLine->amount = number_format($supplierInvoiceLine->amount_ex_gst+$supplierInvoiceLine->gst, 4, '.', '');
+			$supplierInvoiceLine->cdeadwt = 0;
+			$invoiceLines[] = $supplierInvoiceLine;
+			$invoice->total+= $supplierInvoiceLine->amount;
+			$invoice->gst+= $supplierInvoiceLine->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+
+		}
+		$invoice->total = number_format($invoice->total, 4, '.', '');
+		$invoice->gst = number_format($invoice->gst, 4, '.', '');
+		$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+	}
+
+	private function prepareAUSPOSTItem($data,&$invoiceLines,&$invoice)
+	{
+		unset($data[1]);
+		foreach ($data as $key => $d) 
+		{
+			$supplierInvoiceLine = new SupplierInvoiceLine();
+			$supplierInvoiceLine->ref = $d[50];
+			$supplierInvoiceLine->item_code = $d[21];
+			if($d[14]=="")
+			{
+				$d[14] = 0;
+			}
+			$supplierInvoiceLine->amount_ex_gst = number_format($d[27], 4, '.', '');
+			if($supplierInvoiceLine->item_code=="Unmanifest Article")
+			{
+				$supplierInvoiceLine->item_code = 'Unmanifest';
+			}elseif($supplierInvoiceLine->item_code=="AP Manual Handling Surcharge")
+			{
+				$supplierInvoiceLine->item_code = 'MHP';
+			}elseif($supplierInvoiceLine->item_code=="AP Parcels Domestic Fuel Surcharge")
+			{
+				$supplierInvoiceLine->item_code = 'DFS';
+			}elseif($supplierInvoiceLine->item_code=="eParcel Return To Sender")
+			{
+				$supplierInvoiceLine->item_code = 'RTS';
+			}else if(in_array($supplierInvoiceLine->item_code,["Parcel Post with Signature","PACK AND TRACK INTERNATIONAL","Express Post with Signature","eParcel Post Return"]))
+			{
+				$supplierInvoiceLine->item_code = 'item';
+				$supplierInvoiceLine->mdata['fuel_percent'] = $d[33];
+				$supplierInvoiceLine->mdata['fuel_charge'] = $d[34];
+				$supplierInvoiceLine->mdata['fuel_gst'] = $d[35];
+				$supplierInvoiceLine->mdata['no_fuel'] = 1;
+			}else if($supplierInvoiceLine->amount_ex_gst<0)
+			{
+				$supplierInvoiceLine->item_code = 'credit';
+			}else if(in_array($supplierInvoiceLine->item_code,['Imprint Large Charge Letters Regular','Imprint Small Charge Letters Regular']))
+			{
+				$supplierInvoiceLine->ref = $d[13];
+				$supplierInvoiceLine->item_code = 'letter';
+			}else
+			{
+				$supplierInvoiceLine->ref = "TSUNKNOW";
+			}
+
+
+			$supplierInvoiceLine->postcode = '';
+			$supplierInvoiceLine->gst = number_format($d[26], 4, '.', '');
+			$supplierInvoiceLine->det = "";
+			$supplierInvoiceLine->courier_cubic = 0;
+			$weight = empty($d[53])?$d[59]:$d[53];
+			$supplierInvoiceLine->weight = number_format($d[53], 4, '.', '');
+			$supplierInvoiceLine->qty = 1;
+			$supplierInvoiceLine->amount = number_format($d[24], 4, '.', '');
+			$supplierInvoiceLine->cdeadwt = 0;
+			$supplierInvoiceLine->mdata['aumanifest'] = $d[13];
+			$supplierInvoiceLine->mdata['aumanifest_value'] = $d[28];
+			$supplierInvoiceLine->mdata['declare_weight'] = number_format($d[59], 4, '.', '');
+			$invoiceLines[] = $supplierInvoiceLine;
+			$invoice->total+= $supplierInvoiceLine->amount;
+			$invoice->gst+= $supplierInvoiceLine->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLine->amount_ex_gst;
+
+		}
+		$invoice->total = number_format($invoice->total, 4, '.', '');
+		$invoice->gst = number_format($invoice->gst, 4, '.', '');
+		$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+	}
+
+	public function getOrgRateId($imparcel,$template,$orgId = false)
+	{
+		if(!empty($orgId))
+		{
+			switch($orgId)
+			{
+				case Org::ORGID_SUPPLIER_AUSTWAY:
+					$orgRateId = ImportChargeCode::AUSTWAY_TRUCK_DELIVERY;
+					if(!empty($imparcel))
+					{
+						if($imparcel->agent_id==Org::ORGID_CLIENT_AUSTWAY)
+						{
+							$orgRateId = ImportChargeCode::AUSTWAY_TRUCK_DELIVERY;
+						}else if($imparcel->agent_id==Org::ORGID_CLIENT_ZHONGWAI)
+						{
+							$orgRateId = ImportChargeCode::ZHONGWAI_TRUCK_DELIVERY;
+						}else
+						{
+							$orgRateId = ImportChargeCode::TRUCK_DELIVERY;
+						}
+					}
+					break;
+			}
+			if(!empty($orgRateId))
+			{
+				return $orgRateId;
+			}
+		}
+
+
+		if(!empty($imparcel))
+		{
+			if(!empty($imparcel->cargo_process)&&$imparcel->cargo_process->status!=CargoProcess::DELETED)
+			{
+				if(!empty($imparcel->cargo_process->mdata['orgRateId']))
+				{
+					return $imparcel->cargo_process->mdata['orgRateId'];
+				}else
+				{
+					return 9999999999;
+				}
+			}
+			$orgId = 0;
+			$last = count($imparcel->trans)-1;
+			if($last<0)
+			{
+				if(!empty($imparcel->mdata['org_id'])) $orgId = $imparcel->mdata['org_id'];
+				if(empty($orgId))
+				{
+					return 0;
+				}
+			}
+
+			if(empty($orgId))
+			{
+				$orgId = $imparcel->trans[$last]->org_id;
+			}
+			$orgRateId = 0;
+			switch ($orgId) {
+				case Org::ORGID_COURIER_STARTRACK:
+					$orgRateId = ImportChargeCode::STARTRACK_SYDNEY;
+					if (preg_match("/4XHZ\d{8}/", $imparcel->ref)) {
+						$orgRateId = ImportChargeCode::STARTRACK_MEL;
+					}
+					break;
+
+				case Org::ORGID_COURIER_TNT:
+					if(!empty($imparcel->mdata['org_rate_id']))
+					{
+						$orgRateId = $imparcel->mdata['org_rate_id'];
+						$mDate = $imparcel->getManifestDate();
+						if(empty($mDate)) $mDate = date("Y-m-d");
+						$or = OrgRate::model()->findByPk($orgRateId);
+						$code = explode('_amazon', $or->code);
+						$newOrgRate = OrgRate::model()->find('code = :code and (vfrom <= :date and vto > :date)',[":code"=>$code[0].$code[1],":date"=>$mDate]);
+						if(!empty($newOrgRate))
+						{
+							$orgRateId = $newOrgRate->id;
+						}
+						break;
+					}else
+					{
+						$orgRateId = ImportChargeCode::TNT_SYDNEY_ID;
+						if (preg_match("/PCD\d{9}/", $imparcel->ref)) {
+							$orgRateId = ImportChargeCode::TNT_MELBOURNE_ID;
+						}
+						if (preg_match("/BPC\d{9}/", $imparcel->ref)) {
+							$orgRateId = ImportChargeCode::TNT_BRISBANE_ID;
+						}
+
+					}
+					break;
+
+				case Org::ORGID_COURIER_TNT_TOP:
+					if(!empty($imparcel->mdata['org_rate_id']))
+					{
+						$orgRateId = $imparcel->mdata['org_rate_id'];
+						$mDate = $imparcel->getManifestDate();
+						if(empty($mDate)) $mDate = date("Y-m-d");
+						$or = OrgRate::model()->findByPk($orgRateId);
+						$code = explode('_amazon', $or->code);
+						$newOrgRate = OrgRate::model()->find('code = :code and (vfrom <= :date and vto > :date)',[":code"=>$code[0].$code[1],":date"=>$mDate]);
+						if(!empty($newOrgRate))
+						{
+							$orgRateId = $newOrgRate->id;
+						}
+						break;
+					}else
+					{
+						$orgRateId = ImportChargeCode::TNT_SYDNEY_ID_TOP;
+						if (preg_match("/LMA\d{9}/i", $imparcel->ref))
+						{
+							$orgRateId = ImportChargeCode::TNT_MELBOURNE_ID_TOP;
+						}else if(preg_match("/TBC\d{9}/i", $imparcel->ref))
+						{
+							$orgRateId = ImportChargeCode::TNT_BRISBANE_ID_TOP;
+						}else if(preg_match("/LPC\d{9}/i", $imparcel->ref))
+						{
+							$orgRateId = ImportChargeCode::TNT_PERTH_ID_TOP;
+						}
+					}
+					break;
+
+				case Org::ORGID_COURIER_AUPOST:
+					$orgRateId = ImportChargeCode::SYDNEY_AUPOST_ID_2020;
+					$mDate = $imparcel->getManifestDate();
+					if(empty($mDate)) $mDate = date("Y-m-d");
+					$specialAuCode = '';
+					if(!empty($imparcel->mdata['org_rate_id']))
+					{
+						$orgRateId = $imparcel->mdata['org_rate_id'];
+						if($orgRateId==ImportChargeCode::SYDNEY_AUPOST_ID)
+						{
+							$orgRateId = ImportChargeCode::SYDNEY_AUPOST_ID_2020;
+						}
+					}else
+					{
+						if (preg_match("/(AMQ|333UF)\d{7}/", $imparcel->ref)) {
+							$orgRateId = ImportChargeCode::SYDNEY_AUPOST_ID_2020;
+						} elseif (preg_match("/33EVH\d{7}/i", $imparcel->ref)) {
+							$orgRateId = ImportChargeCode::MELBOUNE_AUPOST_ID;
+						} elseif (preg_match("/33EVJ\d{7}/i", $imparcel->ref)) {
+							$orgRateId = ImportChargeCode::BRISBANE_AUPOST_ID;
+						} elseif (preg_match("/34AWE\d{7}/i", $imparcel->ref))
+						{
+							$orgRateId = ImportChargeCode::PERTH_AUPOST_ID;
+						}elseif(preg_match("/LH|CH/i", $imparcel->ref))
+						{
+							$specialAuCode = ImportChargeCode::AUPOST_INTERNATIONAL_CODE;
+						}
+
+						if(!empty($imparcel->mdata['aupost_int']))
+						{
+							$specialAuCode = ImportChargeCode::AUPOST_INTERNATIONAL_CODE;
+						}else if(!empty($imparcel->mdata['aupost_exp']))
+						{
+							$specialAuCode = ImportChargeCode::AUPOST_EXPRESS_CODE;
+						}else if(!empty($imparcel->mdata['aupost_return']))
+						{
+							$specialAuCode = ImportChargeCode::AUPOST_RETURN_CODE;
+						}
+					}
+					if(!empty($specialAuCode))
+					{
+						$newOrgRate = OrgRate::model()->find('code = :code and (vfrom <= :date and vto > :date)',[":code"=>$specialAuCode,":date"=>$mDate]);
+					}else
+					{
+						$thisOrgRate = OrgRate::model()->findByPk($orgRateId);
+						$code = explode('au_post',$thisOrgRate->code)[1];
+						$code = "sire".$code;
+						$newOrgRate = OrgRate::model()->find('code = :code and (vfrom <= :date and vto > :date)',[":code"=>$code,":date"=>$mDate]);
+					}
+					if(!empty($newOrgRate))
+					{
+						$orgRateId = $newOrgRate->id;
+					}
+					break;
+
+				case Org::ORGID_COURIER_UBI:
+					$orgRateId = $imparcel->mdata['org_rate_id'];
+					break;
+
+				case Org::ORGID_COURIER_DFE:
+				case Org::ORGID_COURIER_DFE_TOP:
+					$orgRateId = $imparcel->mdata['org_rate_id'];
+					$thisOrgRate = OrgRate::model()->findByPk($orgRateId);
+					$mDate = $imparcel->getManifestDate();
+					if(empty($mDate)) $mDate = date("Y-m-d");
+					$newOrgRate = OrgRate::model()->find('code = :code and (vfrom <= :date and vto > :date)',[":code"=>$thisOrgRate->code,":date"=>$mDate]);
+					if(!empty($newOrgRate))
+					{
+						$orgRateId = $newOrgRate->id;
+					}
+					break;
+				case Org::ORGID_COURIER_EIZ_TOLL:
+					$orgRateId = $imparcel->mdata['org_rate_id'];
+					$thisOrgRate = OrgRate::model()->findByPk($orgRateId);
+					$mDate = $imparcel->getManifestDate();
+					if(empty($mDate)) $mDate = date("Y-m-d");
+					$newOrgRate = OrgRate::model()->find('code = :code and (vfrom <= :date and vto > :date)',[":code"=>$thisOrgRate->code,":date"=>$mDate]);
+					if(!empty($newOrgRate))
+					{
+						$orgRateId = $newOrgRate->id;
+					}
+					break;
+
+				case Org::ORGID_COURIER_UBI:
+					$orgRateId = $imparcel->mdata['org_rate_id'];
+					$thisOrgRate = OrgRate::model()->findByPk($orgRateId);
+					$mDate = $imparcel->getManifestDate();
+					if(empty($mDate)) $mDate = date("Y-m-d");
+					$newOrgRate = OrgRate::model()->find('code = :code and (vfrom <= :date and vto > :date)',[":code"=>$thisOrgRate->code,":date"=>$mDate]);
+					if(!empty($newOrgRate))
+					{
+						$orgRateId = $newOrgRate->id;
+					}
+					break;
+
+				case Org::ORGID_COURIER_TOLL_IPEC:
+				case Org::ORGID_COURIER_BORDER:
+				case Org::ORGID_COURIER_FL_HUNTER:
+				case Org::ORGID_COURIER_GV_AUPOST:
+				case Org::ORGID_COURIER_ALLIED_TOP:
+					$orgRateId = $imparcel->mdata['org_rate_id'];
+					$thisOrgRate = OrgRate::model()->findByPk($orgRateId);
+					$mDate = $imparcel->getManifestDate();
+					if(empty($mDate)) $mDate = date("Y-m-d");
+					$newOrgRate = OrgRate::model()->find('code = :code and (vfrom <= :date and vto > :date)',[":code"=>$thisOrgRate->code,":date"=>$mDate]);
+					if(!empty($newOrgRate))
+					{
+						$orgRateId = $newOrgRate->id;
+					}
+					break;
+
+				
+				default:
+					$orgRateId = empty($imparcel->mdata['org_rate_id'])?0:$imparcel->mdata['org_rate_id'];
+					break;
+			}
+
+			if (preg_match("/TLS\d{9}/i", $imparcel->ref))
+			{
+				$orgRateId = ImportChargeCode::TNT_SYDNEY_ID_TOP;
+			}
+			else if (preg_match("/LMA\d{9}/i", $imparcel->ref))
+			{
+				$orgRateId = ImportChargeCode::TNT_MELBOURNE_ID_TOP;
+			}else if(preg_match("/TBC\d{9}/i", $imparcel->ref))
+			{
+				$orgRateId = ImportChargeCode::TNT_BRISBANE_ID_TOP;
+			}else if(preg_match("/LPC\d{9}/i", $imparcel->ref))
+			{
+				$orgRateId = ImportChargeCode::TNT_PERTH_ID_TOP;
+			}
+
+
+		}
+		if(empty($orgRateId))
+		{
+			switch($template)
+			{
+				case 'FWSYD2020':
+				case 'FWSYD2021':
+					if(!empty($imparcel->mdata['org_rate_id']))
+					{
+						$orgRateId = $imparcel->mdata['org_rate_id'];
+					}else
+					{
+						$orgRateId = ImportChargeCode::FASTWAY_ID;
+					}
+					$thisOrgRate = OrgRate::model()->findByPk($orgRateId);
+					$mDate = $imparcel->getManifestDate();
+					if(empty($mDate)) $mDate = date("Y-m-d");
+					$newOrgRate = OrgRate::model()->find('code = :code and (vfrom <= :date and vto > :date)',[":code"=>$thisOrgRate->code,":date"=>$mDate]);
+					if(!empty($newOrgRate))
+					{
+						$orgRateId = $newOrgRate->id;
+					}
+					break;
+
+				case 'FWSYDOLD':
+					$orgRateId = ImportChargeCode::FASTWAY_ID_OLD;
+					break;
+			}
+		}
+		return $orgRateId;
+	}
+	
+
+	public function updateSiReconciliationStatus($model, $status,$dpmt = false)
+	{
+		$check = false;
+		$srd = null;
+				//for dpmts
+		if(!empty($dpmt))
+		{
+			$srd = SiReconcileDpmt::model()->find('si_reconcile_id = :sid and dpmt =:dpmt',[':sid'=>$model->id,':dpmt'=>$dpmt]);
+		}
+		$myStatus = $model->status;
+		$checkModel = $model;
+		if($srd!=null)
+		{
+			$myStatus = $srd->status;
+			$checkModel = $srd;
+		}
+
+
+		if($model->parent->type==SiReconcile::TYPE_TERMINAL)
+		{
+			if($myStatus == SiReconcile::ERROR_CHECKING_STATUS && $status == SiReconcile::RATE_CHECKING_STATUS)
+			{
+				if($model->havingErrorParcels($dpmt)>0)
+				{
+					if(($checkModel->confirm_status&SiReconcile::ERROR_CONFIRMED)==0)
+					{
+						return $this->getResult(false,'Having Error Parcels, please dealing with those Parcel, or input confirm file');
+					}else
+					{
+						$check = true;
+						$model->status = SiReconcile::RATE_CHECKING_STATUS;
+						if(!empty($srd))
+						{
+							$srd->status = SiReconcile::RATE_CHECKING_STATUS;
+						}
+					}
+				}else
+				{
+					$model->status = SiReconcile::RATE_CHECKING_STATUS;
+					$check = true;
+					if(!empty($srd))
+					{
+						$srd->status = SiReconcile::RATE_CHECKING_STATUS;
+					}
+				}
+			}
+
+			if($myStatus == SiReconcile::RATE_CHECKING_STATUS && $status == SiReconcile::LINKING_BILLING_STATUS)
+			{
+				if(($checkModel->confirm_status&SiReconcile::RATE_CONFIRMED)==0)
+				{
+					return $this->getResult(false,'Please input confirm file first and then done the process');
+				}else
+				{
+					$model->status = SiReconcile::LINKING_BILLING_STATUS;
+					if(!empty($srd))
+					{
+						$srd->status = SiReconcile::LINKING_BILLING_STATUS;
+					}
+					$check = true;
+				}
+			}
+		}/*************************************************TYPE_MANUAL//TYPE_EXPENSE*************************************************************/
+		else if($model->parent->type==SiReconcile::TYPE_MANUAL||$model->parent->type==SiReconcile::TYPE_EXPENSE)
+		{
+			if($myStatus == SiReconcile::ERROR_CHECKING_STATUS)// for ERROR check
+			{
+				if($model->havingErrorParcels($dpmt)>0)
+				{
+					if(($checkModel->confirm_status&SiReconcile::ERROR_CONFIRMED)==0)
+					{
+						return $this->getResult(false,'Having Error Parcels, please dealing with those Parcel, or input confirm file');
+					}else
+					{
+						$check = true;
+						$model->status =  $status;
+						if(!empty($srd))
+						{
+							$srd->status =  $status;
+						}
+					}
+				}else
+				{
+					$model->status =  $status;
+					$check = true;
+					if(!empty($srd))
+					{
+						$srd->status =  $status;
+					}
+				}
+			}
+			/************** when rate check*******************/
+			if($myStatus == SiReconcile::RATE_CHECKING_STATUS)// for ERROR check
+			{
+				if(($checkModel->confirm_status&SiReconcile::RATE_CONFIRMED)==0)
+				{
+					return $this->getResult(false,'Please input confirm file first and then done the process');
+				}else
+				{
+					$model->status = SiReconcile::LINKING_BILLING_STATUS;
+					$check = true;
+					if(!empty($srd))
+					{
+						$srd->status = SiReconcile::LINKING_BILLING_STATUS;
+					}
+				}
+			}
+
+			
+		}/*************************************************TYPE_COURIER*************************************************************/
+		else if($model->parent->type==SiReconcile::TYPE_COURIER)
+		{
+			if($myStatus == SiReconcile::ERROR_CHECKING_STATUS && $status == SiReconcile::WEIGHT_CHECKING_STATUS)
+			{
+				if($model->havingErrorParcels($dpmt)>0)
+				{
+					if(($checkModel->confirm_status&SiReconcile::ERROR_CONFIRMED)==0)
+					{
+						return $this->getResult(false,'Having Error Parcels, please dealing with those Parcel, or input confirm file');
+					}else
+					{
+						$check = true;
+						$model->status = SiReconcile::WEIGHT_CHECKING_STATUS;
+						if(!empty($srd))
+						{
+							$srd->status = SiReconcile::WEIGHT_CHECKING_STATUS;
+						}
+					}
+				}else
+				{
+					$model->status = SiReconcile::WEIGHT_CHECKING_STATUS;
+					$check = true;
+					if(!empty($srd))
+					{
+						$srd->status = SiReconcile::WEIGHT_CHECKING_STATUS;
+					}
+				}
+			}
+
+			/**update Weight Checking status to be rate checking status**/
+			if($myStatus == SiReconcile::WEIGHT_CHECKING_STATUS && $status == SiReconcile::RATE_CHECKING_STATUS)
+			{
+				if(($checkModel->confirm_status&SiReconcile::WEIGHT_CONFIRMED)==0)
+				{
+					return $this->getResult(false,'Please input confirm file first and then done the process');
+				}else
+				{
+					$model->status = SiReconcile::RATE_CHECKING_STATUS;
+					$check = true;
+					if(!empty($srd))
+					{
+						$srd->status = SiReconcile::RATE_CHECKING_STATUS;
+					}
+				}
+
+			}
+
+
+			/**********************************************************************************/
+
+			if($myStatus == SiReconcile::RATE_CHECKING_STATUS && $status == SiReconcile::SURCHARGE_CHECKING_STATUS)
+			{
+				if(($checkModel->confirm_status&SiReconcile::RATE_CONFIRMED)==0)
+				{
+					return $this->getResult(false,'Please input confirm file first and then done the process');
+				}else
+				{
+					$model->status = SiReconcile::SURCHARGE_CHECKING_STATUS;
+					$check = true;
+					if(!empty($srd))
+					{
+						$srd->status = SiReconcile::SURCHARGE_CHECKING_STATUS;
+					}
+				}
+			}
+
+			/*********************************************************************************/
+			if($myStatus == SiReconcile::SURCHARGE_CHECKING_STATUS&& $status == SiReconcile::LINKING_BILLING_STATUS)
+			{
+				if($model->havingSurcharge($dpmt)>0)
+				{
+					if(($checkModel->confirm_status&SiReconcile::SURCHARGE_CONFIRMED)==0)
+					{
+						return $this->getResult(false,'Please input confirm file first and then done the process');
+					}else
+					{
+						$model->status = SiReconcile::LINKING_BILLING_STATUS;
+						$check = true;
+						if(!empty($srd))
+						{
+							$srd->status = SiReconcile::LINKING_BILLING_STATUS;
+						}
+					}
+				}else
+				{
+					$model->status = SiReconcile::LINKING_BILLING_STATUS;
+					if(!empty($srd))
+					{
+						$srd->status = SiReconcile::LINKING_BILLING_STATUS;
+					}
+					$check = true;
+				}
+			}
+		}
+
+
+		/*******************************************************************************/
+		if($myStatus == SiReconcile::LINKING_BILLING_STATUS&&$status == SiReconcile::SI_RECONCILE_DONE_STATUS)
+		{
+			if(($checkModel->confirm_status&SiReconcile::BLILLING_LINKED)==0)
+			{
+				return $this->getResult(false,'Please link the billing first');
+			}else
+			{
+				$model->status = SiReconcile::SI_RECONCILE_DONE_STATUS;
+				$check = true;
+				if(!empty($srd))
+				{
+					$srd->status = SiReconcile::SI_RECONCILE_DONE_STATUS;
+				}
+			}
+
+		}
+
+		/*****************************************************************************/
+		if($check)
+		{
+			/******** TLD supplier********/
+			if($model->parent->mdata['template']=="TLD-supplier")
+			{
+				if($model->status==SiReconcile::WEIGHT_CHECKING_STATUS)
+				{
+					$model->status=SiReconcile::RATE_CHECKING_STATUS;
+					$model->confirm_status = $model->confirm_status|SiReconcile::WEIGHT_CONFIRMED;
+					foreach($model->lines as $kk2=>$line)
+					{
+						$line->confirm_status = $line->confirm_status|SiReconcile::WEIGHT_CONFIRMED;
+						$line->save();
+					}
+
+					if(!empty($srd))
+					{
+						$srd->confirm_status  = $srd->confirm_status|SiReconcile::WEIGHT_CONFIRMED;
+						$srd->status = SiReconcile::RATE_CHECKING_STATUS;
+					}
+
+				}elseif($model->status==SiReconcile::SURCHARGE_CHECKING_STATUS)
+				{
+					$model->status=SiReconcile::LINKING_BILLING_STATUS;
+					$model->confirm_status = $model->confirm_status|SiReconcile::SURCHARGE_CONFIRMED;
+					foreach($model->lines as $kk2=>$line)
+					{
+						$line->confirm_status = $line->confirm_status|SiReconcile::SURCHARGE_CONFIRMED;
+						$line->save();
+					}
+
+					if(!empty($srd))
+					{
+						$srd->confirm_status  = $srd->confirm_status|SiReconcile::SURCHARGE_CONFIRMED;
+						$srd->status = SiReconcile::LINKING_BILLING_STATUS;
+					}
+
+				}
+			}
+
+			$model->save();
+			if(!empty($srd))
+			{
+				$srd->save();
+			}
+			return $this->getResult(true,'Done');
+		}
+
+		return $this->getResult(false,'Failure');
+	}
+
+
+	private function prepareRateSiReconcileLines($model,$dpmt = false)
+	{
+		$lines1 = [];
+		$lines2 = [];
+		$thisLines = [];
+		if(!empty($model->lines))
+		{
+			$thisLines = $model->lines;
+			$inv_no = $model->parent->inv_no;
+		}else if(!empty($model->inlines))
+		{
+			$thisLines = $model->inlines;
+			$inv_no = $model->parent->parent->inv_no;
+		}
+
+		$thisLines = SiReconcile::getDpmtLines($thisLines,$dpmt);
+		foreach ($thisLines as $key => $line) {
+			if(($line->confirm_status&SiReconcile::ERROR_CONFIRMED)==0)
+			{
+				unset($thisLines[$key]);
+			}
+		}
+
+		if($model->type == SiReconcile::TYPE_COURIER)
+		{
+			foreach ($thisLines as $key => $line) 
+			{
+				if(strtolower($line->item_code)=='item')
+				{
+					if(empty($line->imparcel->consol_id))
+					{
+						$lines2[] = [$line->id,$line->ref,$line->item_code,$inv_no, $line->postcode, '',$line->weight, $line->value,$line->my_value, ($line->value-$line->my_value),$line->value];
+					}else
+					{
+						$lines1[] = [$line->id,$line->ref,$line->item_code,$inv_no, $line->postcode,$line->imparcel->cnee->suburb,$line->weight, $line->value, $line->my_value, ($line->value-$line->my_value), $line->value];
+					}
+				}
+			}
+
+			if($model->parent->org_id == Org::ORGID_COURIER_AUPOST)
+			{
+				$lines2[] = [];
+				$lines2[] = ["Summary:"];
+				foreach ($thisLines as $key => $line) 
+				{
+					if(in_array(strtolower($line->item_code),['eparcel','letter']))
+					{
+						$lines2[] = [$line->id,$line->ref,$line->item_code,$inv_no, $line->postcode,'', $line->weight, $line->value,$line->my_value, ($line->value-$line->my_value), $line->value];
+					}
+				}
+			}
+		}else
+		{
+			foreach ($thisLines as $key => $line) 
+			{
+				$fid = 0;
+				if($line->model=="ImParcel")
+				{
+					if(!empty($line->imparcel->consol_id))
+					{
+						$fid = $line->imparcel->consol_id;
+					}
+				}elseif(!empty($line->model))
+				{
+					$fid = $line->fid;
+				}
+				if(empty($fid))
+				{
+					$lines2[] = [$line->id,$line->ref,$line->item_code,$inv_no, $line->postcode, '',$line->weight, $line->value,$line->my_value, ($line->value-$line->my_value), $line->value];
+				}else
+				{
+					$lines1[] = [$line->id,$line->ref,$line->item_code,$inv_no, $line->postcode,@$line->imparcel->cnee->suburb,$line->weight, $line->value, $line->my_value, ($line->value-$line->my_value), $line->value];
+				}
+			}
+		}
+
+		return ['lines1'=>$lines1,'lines2'=>$lines2];
+
+	}
+
+	private function exportRateDiffData($org_id,$lines1,$lines2,$filename="1")
+	{
+		$xsl=new oExcel();
+		$i=1;
+		$xsl->addRow($i++, ['index','ref','item code','invoice','postcode','suburb','weight','Courier Cost','TLA Cost','Diff','confirm_cost']);
+		foreach ($lines1 as $key => $line) {
+			$xsl->addRow($i++, $line);
+		}
+
+		if(!empty($lines2))
+		{
+			$xsl->addRow($i++, []);
+			$xsl->addRow($i++, ["Empty In Consol"]);
+			$xsl->addRow($i++, []);
+			foreach ($lines2 as $key => $line) {
+				$xsl->addRow($i++, $line);
+			}
+		}
+		$tempfile = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.$filename.'_rate_diff_export.xlsx';
+		$xsl->output($tempfile);
+	}
+
+
+	private function prepareErrorList($model,$dpmt = false)
+	{
+		$lines1 = [];
+		$lines2 = [];
+		$thisLines = [];
+		if(!empty($model->lines))
+		{
+			$thisLines = $model->lines;
+		}else if(!empty($model->inlines))
+		{
+			$thisLines = $model->inlines;
+		}
+		$thisLines = SiReconcile::getDpmtLines($thisLines,$dpmt);
+		if($model->type == SiReconcile::TYPE_COURIER)
+		{
+			foreach ($thisLines as $key => $line) 
+			{
+				if(in_array(strtolower($line->item_code),['item']))
+				{
+					if(empty($line->imparcel->consol_id))
+					{
+						$lines2[] = [$line->id,$line->ref,$line->item_code, $line->getErrorTypes(','),$line->getItemType()];
+					}else
+					{
+						$lines1[] = [$line->id,$line->ref,$line->item_code, $line->getErrorTypes(','),$line->getItemType()];
+					}
+				}
+			}
+
+			if($model->parent->org_id == Org::ORGID_COURIER_AUPOST)
+			{
+				$lines2[] = [];
+				$lines2[] = ["summary:"];
+				foreach ($thisLines as $key => $line) 
+				{
+					if(in_array(strtolower($line->item_code),['eparcel','letter','eparcel-fuel']))
+					{
+						$lines2[] = [$line->id,$line->ref,$line->item_code, $line->getErrorTypes(','),$line->getItemType()];
+					}
+				}
+
+				$lines2[] = [];
+				$lines2[] = ["Surcharge"];
+				foreach ($thisLines as $key => $line) 
+				{
+					if(!in_array(strtolower($line->item_code),['eparcel','letter','eparcel-fuel','item']))
+					{
+						$lines2[] = [$line->id,$line->ref,$line->item_code, $line->getErrorTypes(','),$line->getItemType()];
+					}
+				}
+			}
+		}else
+		{
+			foreach ($thisLines as $key => $line) 
+			{
+				$fid = 0;
+				if($line->model=="ImParcel")
+				{
+					if(!empty($line->imparcel->consol_id))
+					{
+						$fid = $line->imparcel->consol_id;
+					}
+				}elseif(!empty($line->model))
+				{
+					$fid = $line->fid;
+				}
+				if(empty($fid))
+				{
+					if($model->parent->mdata['template']=='consol_manual_weight')
+					{
+						$lines2[] = [$line->id,$line->ref,$line->item_code, $line->getErrorTypes(','),$line->getItemType(),$line->weight,
+									$line->our_charge_weight,$line->value,$line->my_value,$line->diff];
+					}else
+					{
+						$lines2[] = [$line->id,$line->ref,$line->item_code, $line->getErrorTypes(','),$line->getItemType()];
+					}
+				}else
+				{
+					if($model->parent->mdata['template']=='consol_manual_weight')
+					{
+						$lines1[] = [$line->id,$line->ref,$line->item_code, $line->getErrorTypes(','),$line->getItemType(),$line->weight,
+									$line->our_charge_weight,$line->value,$line->my_value,$line->diff];
+					}else
+					{
+						$lines1[] = [$line->id,$line->ref,$line->item_code, $line->getErrorTypes(','),$line->getItemType()];
+					}
+				}
+			}
+		}
+
+		return ['lines1'=>$lines1,'lines2'=>$lines2];
+
+	}
+
+	private function exportErrorList($org_id,$lines1,$lines2,$filename="1",$template)
+	{
+		$xsl=new oExcel();
+		$i=1;
+		if($template=="consol_manual_weight")
+		{
+			$xsl->addRow($i++, ['index','ref','item_code','Error Types','parcel Type','weight','our_charge_weight','value','my_value','Diff']);
+		}else
+		{
+			$xsl->addRow($i++, ['index','ref','item_code','Error Types','parcel Type']);
+		}
+		foreach ($lines1 as $key => $line) {
+			$xsl->addRow($i++, $line);
+		}
+
+		if(!empty($lines2))
+		{
+			$xsl->addRow($i++, []);
+			$xsl->addRow($i++, ["Empty In Consol"]);
+			$xsl->addRow($i++, []);
+			foreach ($lines2 as $key => $line) {
+				$xsl->addRow($i++, $line);
+			}
+		}
+		$tempfile = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.$filename.'invoice_error_export.xlsx';
+		$xsl->output($tempfile);
+	}
+
+
+	private function prepareDisputeList($oModel,$dpmt = false)
+	{
+		$model = new SiReconcileLine();
+		$model->unsetAttributes();
+		$model->rec_id = $oModel->id;
+		$model->confirm_status = [0,1,2,3];
+		if($model->parent->org_id==Org::ORGID_COURIER_AUPOST)
+		{
+			$model->itemCodesNot = ['fuel','item'];
+		}
+		$theLines = $model->search(false)->data;
+
+
+		$lines1 = [];
+		$lines2 = [];
+		$thisLines = [];
+		$inv_no = $oModel->parent->inv_no;
+		if(!empty($theLines))
+		{
+			$thisLines = $theLines;
+		}
+		$thisLines = SiReconcile::getDpmtLines($thisLines,$dpmt);
+		foreach ($thisLines as $key => $line) {
+			if(($line->confirm_status&SiReconcile::ERROR_CONFIRMED)==0)
+			{
+				unset($thisLines[$key]);
+			}
+		}
+
+		foreach ($thisLines as $key => $line) 
+		{
+			if(empty($line->imparcel->consol_id))
+			{
+				$lines2[] = [$line->id,$line->ref,$inv_no, $line->postcode, '',$line->weight, $line->value,$line->my_value, ($line->value-$line->my_value),empty($line->mdata['confirm_cost_ex_gst'])?$line->value:$line->value-$line->mdata['']];
+			}else
+			{
+				$lines1[] = [$line->id,$line->ref,$inv_no, $line->postcode,$line->imparcel->cnee->suburb,$line->weight, $line->value, $line->my_value, ($line->value-$line->my_value), $line->value];
+			}
+		}
+
+		return ['lines1'=>$lines1,'lines2'=>$lines2];
+
+	}
+
+	private function exportDisputeData($org_id,$lines1,$lines2,$filename="1")
+	{
+		$xsl=new oExcel();
+		$i=1;
+		$xsl->addRow($i++, ['index','ref','invoice','postcode','suburb','weight','Courier Cost','TLA Cost','Diff','dispute_amount_ex_gst']);
+		foreach ($lines1 as $key => $line) {
+			$xsl->addRow($i++, $line);
+		}
+
+		if(!empty($lines2))
+		{
+			$xsl->addRow($i++, []);
+			$xsl->addRow($i++, ["Empty In Consol"]);
+			$xsl->addRow($i++, []);
+			foreach ($lines2 as $key => $line) {
+				$xsl->addRow($i++, $line);
+			}
+		}
+		$tempfile = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.$filename.'_dispute_export.xlsx';
+		$xsl->output($tempfile);
+	}
+
+
+
+
+
+	private function prepareWeightDiffLines($model,$dpmt = false)
+	{
+		$lines1 = [];
+		$lines2 = [];
+		$thisLines = [];
+		if(!empty($model->lines))
+		{
+			$thisLines = $model->lines;
+			$inv_no = $model->parent->inv_no;
+		}else if(!empty($model->inlines))
+		{
+			$thisLines = $model->inlines;
+			$inv_no = $model->parent->parent->inv_no;
+		}
+
+		$thisLines = SiReconcile::getDpmtLines($thisLines,$dpmt);
+		foreach ($thisLines as $key => $line) {
+			if(($line->confirm_status&SiReconcile::ERROR_CONFIRMED)==0)
+			{
+				unset($thisLines[$key]);
+			}
+		}
+
+		foreach ($thisLines as $key => $line) 
+		{
+			if(strtolower($line->item_code)=='item')
+			{
+				if(empty($line->imparcel->consol_id))
+				{
+					$lines2[] = [$line->id,$line->ref,$line->item_code,'', $inv_no, $line->postcode, ($line->org_charge_weight>0?$line->org_charge_weight:$line->weight), $line->cs_charge_weight,@$line->imparcel->mdata['manifest_weight'], $line->weight_diff];
+				}else
+				{
+					$lines1[] = [$line->id,$line->ref,$line->item_code,$line->imparcel->agent_id, $inv_no, $line->postcode,($line->org_charge_weight>0?$line->org_charge_weight:$line->weight), $line->cs_charge_weight, @$line->imparcel->mdata['manifest_weight'], $line->weight_diff];
+				}
+			}
+		}
+
+		if($model->parent->org_id == Org::ORGID_COURIER_AUPOST)
+		{
+			$lines2[] = [];
+			$lines2[] = ["Summary:"];
+			foreach ($thisLines as $key => $line) 
+			{
+				if(in_array(strtolower($line->item_code),['eparcel','letter']))
+				{
+					$lines2[] = [$line->id,$line->ref,$line->item_code,'', $inv_no, $line->postcode, $line->weight, $line->value,$line->my_value, ($line->value-$line->my_value)];
+				}
+			}
+		}
+
+		return ['lines1'=>$lines1,'lines2'=>$lines2];
+
+	}
+
+	private function exportWeightDiffData($org_id,$lines1,$lines2,$filename = "1")
+	{
+		$xsl=new oExcel();
+		$i=1;
+		$xsl->addRow($i++, ['index','ref','item code','agent','invoice','postcode','org charge weight(cbm)','customer charge weight(cbm)','manifest weight','diff']);
+		foreach ($lines1 as $key => $line) {
+			$xsl->addRow($i++, $line);
+		}
+
+		if(!empty($lines2))
+		{
+			$xsl->addRow($i++, []);
+			$xsl->addRow($i++, ["Empty In Consol"]);
+			$xsl->addRow($i++, []);
+			foreach ($lines2 as $key => $line) {
+				$xsl->addRow($i++, $line);
+			}
+		}
+		$tempfile = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.$filename.'invoice_weight_diff_export.xlsx';
+		$xsl->output($tempfile);
+	}
+
+
+	private function prepareSurchargeDiffLines($model,$dpmt = false)
+	{
+		$lines1 = [];
+		$lines2 = [];
+		$thisLines = [];
+		if(!empty($model->lines))
+		{
+			$thisLines = $model->lines;
+			$inv_no = $model->parent->inv_no;
+		}else if(!empty($model->inlines))
+		{
+			$thisLines = $model->inlines;
+			$inv_no = $model->parent->parent->inv_no;
+		}
+
+		$thisLines = SiReconcile::getDpmtLines($thisLines,$dpmt);
+		foreach ($thisLines as $key => $line) {
+			if(($line->confirm_status&SiReconcile::ERROR_CONFIRMED)==0&&$line->parent->org_id == 101)
+			{
+				unset($thisLines[$key]);
+			}
+		}
+
+
+
+		foreach ($thisLines as $key => $line) 
+		{
+			if(($model->parent->org_id != Org::ORGID_COURIER_AUPOST && strtolower($line->item_code)!='item')||($model->parent->org_id == Org::ORGID_COURIER_AUPOST&&!in_array(strtolower($line->item_code),['eparcel','letter','item','eparcel-fuel'])))
+			{
+				if(empty($line->imparcel->consol_id))
+				{
+					$lines2[] = [$line->id,$line->ref,$line->item_code, $inv_no, $line->postcode, $line->weight, $line->value,$line->my_value, ($line->value-$line->my_value), $line->value,$line->getErrorTypes(',')];
+				}else
+				{
+					$lines1[] = [$line->id,$line->ref,$line->item_code, $inv_no, $line->postcode,$line->weight, $line->value, $line->my_value, ($line->value-$line->my_value), $line->value,$line->getErrorTypes(',')];
+				}
+			}
+		}
+
+		if($model->parent->org_id == Org::ORGID_COURIER_AUPOST)
+		{
+			$lines2[] = [];
+			$lines2[] = ["summary:"];
+			foreach ($thisLines as $key => $line) 
+			{
+				if(in_array(strtolower($line->item_code),['eparcel-fuel']))
+				{
+					$lines2[] = [$line->id,$line->ref,$line->item_code, $inv_no, $line->postcode,$line->weight, $line->value, $line->my_value, ($line->value-$line->my_value),$line->getErrorTypes(',')];
+				}
+			}
+		}
+
+		return ['lines1'=>$lines1,'lines2'=>$lines2];
+	}
+
+	private function exportSurchargeDiffData($org_id,$lines1,$lines2,$filename="1")
+	{
+		$xsl=new oExcel();
+		$i=1;
+		$xsl->addRow($i++, ['index','ref','item code','invoice','postcode','weight','value','my_value','diff','confirm_cost','error type']);
+		foreach ($lines1 as $key => $line) {
+			$xsl->addRow($i++, $line);
+		}
+
+		if(!empty($lines2))
+		{
+			$xsl->addRow($i++, []);
+			$xsl->addRow($i++, ["Empty In Consol"]);
+			$xsl->addRow($i++, []);
+			foreach ($lines2 as $key => $line) {
+				$xsl->addRow($i++, $line);
+			}
+		}
+		$tempfile = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.$filename.'invoice_surcharge_diff_export.xlsx';
+		$xsl->output($tempfile);
+	}
+
+	public function exportEizInfo($model,$filename="1",$dpmt= false)
+	{
+		$lines1 = [];
+		$lines2 = [];
+		$thisLines = [];
+		if(!empty($model->lines))
+		{
+			$thisLines = $model->lines;
+			$inv_no = $model->parent->inv_no;
+		}else if(!empty($model->inlines))
+		{
+			$thisLines = $model->inlines;
+			$inv_no = $model->parent->parent->inv_no;
+		}
+
+		$thisLines = SiReconcile::getDpmtLines($thisLines,$dpmt);
+		$xsl=new oExcel();
+		$i=1;
+		$xsl->addRow($i++, ['hbn','ref','eiz_ref','Charge Customer Weight','value','TLA_value','weight','qty','length','width','height']);
+		foreach ($thisLines as $key => $line) {
+			if(empty($line->imparcel)) continue;
+			$trans = $line->imparcel->trans;
+			if(end($trans)->org_id==Org::ORGID_COURIER_EIZ_TOLL)
+			{
+				$packInfos = $line->imparcel->mdata['eiz']['package'];
+				$eizId = $line->imparcel->mdata['eiz']['remoteConsignment_id'];
+				$chargeWeight = empty($line->imparcel->mdata['charge_weight'])?$line->imparcel->chargeWeight():$line->imparcel->mdata['charge_weight'];
+				$row = [$line->imparcel->hbn,$line->imparcel->ref,$eizId,$chargeWeight,$line->value,$line->my_value];
+				foreach ($packInfos as $key => $packInfo) {
+					$row[] = $packInfo['weight'];
+					$row[] = $packInfo['qty'];
+					$row[] = $packInfo['length'];
+					$row[] = $packInfo['width'];
+					$row[] = $packInfo['height'];
+				}
+				$xsl->addRow($i++, $row);
+			}
+			continue;
+		}
+		$tempfile = Yii::app()->basePath.DIRECTORY_SEPARATOR."runtime".DIRECTORY_SEPARATOR.$filename.'eiz_info.xlsx';
+		$xsl->output($tempfile);
+	}
+
+
+	public function updateLine($model, $action,$ref = false)
+	{
+		$this->appName = Yii::app()->name;
+		if($action=='refresh_cost')
+		{
+			if($model->item_code=='eparcel'&&$model->parent->parent->mdata['template']=='AUSPOST')
+			{
+				$siLineP = $model;
+				$inlines = $siLineP->inlines;
+				$myValueTotal =0;
+				$myValueMTotal = 0;
+				foreach ($inlines as $key => $siLine) 
+				{
+					
+					if(!empty($siLine->my_value))
+					{
+						$imparcel = $siLine->imparcel;
+						$orgRateId = $this->getOrgRateId($imparcel,'');				
+						if(!empty($orgRateId))
+						{
+							$ourRate =Shipment::getCourierCostByShipment($siLine->ref, $orgRateId, $siLine->weight,false,true);
+							Yii::app()->name = $this->appName;
+							$ourRateManifest =Shipment::getCourierCostByShipment($siLine->ref, $orgRateId, $imparcel->mdata['manifest_weight'],false,true);
+							Yii::app()->name = $this->appName;
+							$siLine->my_value = number_format($ourRate['price'], 4, '.', '');
+							$myValueTotal+=$siLine->my_value;
+							$siLine->my_value_m = number_format($ourRateManifest['price'], 4, '.', '');
+							$myValueMTotal+=$siLine->my_value_m;
+						}else
+						{
+							$siLine->my_value = 0;
+							$siLine->my_value_m = 0;
+							$siLine->type =$siLine->type | SiReconcileLine::EMPTY_ORG_RATE_TYPE;
+						}
+				
+					}
+					Yii::app()->name = $this->appName;
+					$siLine->save();
+				}
+				$siLineP->my_value = number_format($myValueTotal, 4, '.', '');
+				$siLineP->my_value_m = number_format($myValueMTotal, 4, '.', '');
+				Yii::app()->name = $this->appName;
+				$siLineP->save();
+				return $this->getResult(true,'success');
+			}
+		}
+		else if($action=='refresh')
+		{
+			if($model->item_code=='eparcel'&&$model->parent->parent->mdata['template']=='AUSPOST')
+			{
+				$siLineP = $model;
+				$allAPTranships = Tranship::model()->with('shipment')->findAll('shipment.status<=90 and json_value(t.meta,"$.oid") = :apmanifest',[":apmanifest"=>$siLineP->ref]);
+				$aupostInfoArr = [];
+				$aupostSids = [];
+				$auType = 'syd';
+				if(!empty($allAPTranships))
+				{
+					foreach (AusPostAPI::$api_accounts_info as $key => $api_accounts) {
+						if(preg_match('/^'.$api_accounts['id'].'/', $allAPTranships[0]->connote))
+						{
+							$auType = $key;
+						}
+					}
+				}
+
+				/******************* get the eparcel info from auspost api***************************/
+				$aus = new AusPostAPI($auType);
+				$batchShipments=[];
+				foreach ($allAPTranships as $key => $apTranship) 
+				{
+					if($key%200==0)
+					{
+						$batchShipments[]=[];
+					}
+					$batchShipments[count($batchShipments)-1][]=$apTranship->mdata['sid'];
+				}
+				$auShipmentArr = [];
+				foreach ($batchShipments as $key => $bs) {
+					$result = $aus->getShipments(join(',',$bs))->shipments;
+					if(!empty($result))
+					{
+						$auShipmentArr = array_merge($auShipmentArr, $result);
+					}
+				}
+				if(count($auShipmentArr)==0) return $this->getResult(true,'failure');
+				
+				foreach ($auShipmentArr as $key => $auShipment) {
+					$itemArr = [];
+					foreach ($auShipment->items as $key => $item) {
+						$itemArr[] = [$item->weight,$item->postage_details->price->calculated_price_ex_gst,$item->tracking_details->article_id];
+					}
+					$fuelSurcharge = isset($auShipment->shipment_summary->fuel_surcharge)?$auShipment->shipment_summary->fuel_surcharge:0;
+					$aupostInfoArr[$auShipment->shipment_id] = ['itemArr'=>$itemArr,'fuelSurcharge'=>$fuelSurcharge];
+				}
+
+				if(empty($itemArr)) return $this->getResult(true,'failure');
+
+
+
+				/******************* calculate all eparcel of the Ap manifest***************************/
+				$myValueTotal =0;
+				$myValueMTotal = 0;
+				$totalWeight = 0;
+				$totalCustCheckWeight = 0;
+				$totalManifestWeight = 0;
+				$totalWeightDiff = 0;
+				$totalApiValue = 0;
+				$totalFuel = 0;
+				$siLinePFuel = new SiReconcileLine();
+				$siLine = null;
+				foreach ($allAPTranships as $key => $apTranship) 
+				{
+					$itemArr = $aupostInfoArr[$apTranship->mdata['sid']]['itemArr'];
+					$fuelSurcharge = $aupostInfoArr[$apTranship->mdata['sid']]['fuelSurcharge'];
+					$imparcel = $apTranship->shipment;
+
+					$siLine = new SiReconcileLine();
+					$siLine->rec_id = $siLineP->parent->id;
+					$siLine->inline_pid = $siLineP->id;
+					$siLine->ref = $apTranship->connote;
+					$siLine->type = 0;
+					
+					$siLine->model = 'ImParcel';
+					$siLine->weight = 0;
+					$siLine->value = 0;
+					if(!empty($itemArr))
+					{
+						foreach ($itemArr as $key => $item) 
+						{
+							$siLine->weight += $item[0];
+						}
+					}else
+					{
+						continue;
+					}
+
+					$siLine->weight = number_format($siLine->weight, 4, '.', '');
+					$siLine->item_code = 'item';
+					foreach ($itemArr as $key => $item) 
+					{
+						$siLine->value += $item[1];
+					}
+					$siLine->value = number_format($siLine->value, 4, '.', '');
+					$siLine->courier_cubic = 0;
+					$siLine->postcode = $imparcel->cnee->postcode;
+					$siLine->mdata['auInfo'] = json_encode($aupostInfoArr[$auShipment->shipment_id]);
+					/** when the parcel is found**/
+					if(!empty($imparcel))
+					{
+						$siLine->fid = $imparcel->id;
+						$siLine->charge_code = $imparcel->mdata['chargecode'];
+						$siLine->cs_charge_weight = $siLine->getCSChargeWeight();
+						$orgRateId = $this->getOrgRateId($imparcel,$supplierInvoice->mdata['template']);
+						$cust_check_weight = $imparcel->weight;
+						$our_charge_weight = floatval(isset($imparcel->mdata['charge_client_weight']) ? $imparcel->mdata['charge_client_weight'] : $imparcel->	chargeWeight());
+						$chargevalue = $imparcel->getCouiercost();
+						Yii::app()->name = $this->appName;
+				
+						$siLine->cust_check_weight = number_format($cust_check_weight, 4, '.', '');
+						$siLine->our_charge_weight = number_format($our_charge_weight, 4, '.', '');
+				
+						$siLine->manifest_weight = empty($imparcel->mdata["manifest_weight"])?0:$imparcel->mdata["manifest_weight"];
+						$siLine->manifest_weight = number_format($siLine->manifest_weight, 4, '.', '');
+						$siLine->my_charge = number_format($chargevalue, 4, '.', '');
+						$siLine->agent_id = $imparcel->agent_id;
+						$siLine->getCSChargeWeight();
+						Yii::app()->name = $this->appName;
+						$siLine->getChargeWeightDiff();
+						Yii::app()->name = $this->appName;
+						$siLine->getWeight();
+						Yii::app()->name = $this->appName;
+						$siLine->inline_pid = $siLineP->id;
+
+				
+						if(!empty($orgRateId))
+						{
+							$ourRate =Shipment::getCourierCostByShipment($siLine->ref, $orgRateId, $siLine->weight,false,true);
+							Yii::app()->name = $this->appName;
+							$ourRateManifest =Shipment::getCourierCostByShipment($siLine->ref, $orgRateId, $imparcel->mdata['manifest_weight'],false,true);
+							Yii::app()->name = $this->appName;
+							$siLine->my_value = number_format($ourRate['price'], 4, '.', '');
+							$myValueTotal+=$siLine->my_value;
+							$siLine->my_value_m = number_format($ourRateManifest['price'], 4, '.', '');
+							$myValueMTotal+=$siLine->my_value_m;
+						}else
+						{
+							$siLine->my_value = 0;
+							$siLine->my_value_m = 0;
+							$siLine->type =$siLine->type | SiReconcileLine::EMPTY_ORG_RATE_TYPE;
+						}
+						$totalApiValue+=$siLine->value;
+						$totalWeight+=$siLine->weight;
+						$totalCustCheckWeight+=$siLine->cust_check_weight;
+						$totalManifestWeight+=$siLine->manifest_weight;
+						$totalWeightDiff+=$siLine->weight_diff;
+				
+					}else/** when the parcel is not found**/
+					{
+						$siLine->fid = 0;
+						$siLine->type = $siLine->type | SiReconcileLine::EMPTY_PARCEL_TYPE;
+						$siLine->charge_code = "";
+						$siLine->cust_check_weight = 0;
+						$siLine->our_charge_weight = 0;
+						$siLine->manifest_weight = 0;
+						$siLine->my_value = 0;
+						$siLine->my_value_m = 0;
+						$siLine->my_charge = 0;
+						$siLine->agent_id = 0;
+						$siLine->cs_charge_weight = 0;
+						$siLine->weight_diff = 0;
+						$siLine->org_charge_weight=0;
+					}
+				
+					$siLine->confirm_status = 0;
+					$siLine->checkErrorsAndSetType();
+					Yii::app()->name = $this->appName;
+					$siLine->save();
+
+					if($fuelSurcharge!=0)
+					{
+						if($totalFuel==0)
+						{
+							$siLinePFuel->setAttributes($siLineP->getAttributes());
+							$siLinePFuel->id = null;
+							$siLinePFuel->item_code='eparcel-fuel';
+							$siLinePFuel->checkErrorsAndSetType();
+							if(($siLine->type&SiReconcileLine::TYPE_3PL)>0)
+							{
+								$siLinePFuel->type = $siLinePFuel->type|SiReconcileLine::TYPE_3PL;
+							}
+							Yii::app()->name = $this->appName;
+							$siLinePFuel->save();
+						}
+
+						$siLineFuel = new SiReconcileLine();
+						$siLineFuel->setAttributes($siLine->getAttributes());
+						$siLineFuel->id = null;
+						$siLineFuel->inline_pid = $siLinePFuel->id;
+						$siLineFuel->item_code = 'fuel';
+						$siLineFuel->value = $fuelSurcharge;
+						$siLineFuel->api_value = $fuelSurcharge;
+						$siLineFuel->my_value = $fuelSurcharge;
+						$siLineFuel->checkErrorsAndSetType();
+						Yii::app()->name = $this->appName;
+						$siLineFuel->save();
+						$siLineFuel->meta = 0;
+						$totalFuel +=$fuelSurcharge;
+					}
+				}
+
+				if(!empty($siLine)&&($siLine->type&SiReconcileLine::TYPE_3PL)>0)
+				{
+					$siLineP->type = $siLneP->type|SiReconcileLine::TYPE_3PL;
+				}
+				$siLineP->api_value = number_format($totalApiValue, 4, '.', '');
+				$siLineP->my_value = number_format($myValueTotal, 4, '.', '');
+				$siLineP->my_value_m = number_format($myValueMTotal, 4, '.', '');
+				$siLineP->weight = number_format($totalWeight, 4, '.', '');
+				$siLineP->cust_check_weight = number_format($totalCustCheckWeight, 4, '.', '');
+				$siLineP->manifest_weight= number_format($totalManifestWeight, 4, '.', '');
+				$siLineP->weight_diff= number_format($totalWeightDiff, 4, '.', '');
+
+				if($totalFuel>0)
+				{
+					$siLinePFuel->value = $totalFuel;
+					$siLinePFuel->api_value = $totalFuel;
+					$siLinePFuel->my_value = $totalFuel;
+					Yii::app()->name = $this->appName;
+					$siLinePFuel->save();
+					$siLineP->value = number_format($siLineP->value-$siLinePFuel->value, 4, '.', '');
+				}
+				Yii::app()->name = $this->appName;
+				$siLineP->save();
+				return $this->getResult(true,'success');
+			}if($model->item_code=='eparcel'&&$model->parent->parent->mdata['template']=='AUSPOST-item')
+			{
+				$siLineP = $model;
+				[$mySupplierInvoiceLines,$apRelations,$apRelationsFuel] = $this->getHandlingAuspostItems(null,$siLineP);
+				/******************* calculate all eparcel of the Ap manifest***************************/
+					$oldMyValue = $siLineP->my_value;
+					$myValueTotal =0;
+					$myValueMTotal = 0;
+					$totalWeight = 0;
+					$totalCustCheckWeight = 0;
+					$totalManifestWeight = 0;
+					$totalWeightDiff = 0;
+					$totalApiValue = 0;
+					$totalFuel = 0;
+					$siLine = null;
+					foreach ($apRelations[$siLineP->ref] as $key => $items) {
+						$siLine = new SiReconcileLine();
+						$siLine->rec_id = $siReconcile->id;
+						$siLine->inline_pid = $siLineP->id;
+						$siLine->ref = $key;
+						$siLine->type = 0;
+						
+						$siLine->model = 'ImParcel';
+						$siLine->weight = 0;
+						$siLine->value = 0;
+						foreach ($items as $key => $item) {
+							if($item->weight>0)
+							{
+								$siLine->weight += $item->weight;
+							}else
+							{
+								$siLine->weight += floatval($item->mdata['declare_weight']);
+							}
+
+						}
+						$siLine->weight = number_format($siLine->weight, 4, '.', '');
+						$siLine->item_code = 'item';
+						foreach ($items as $key => $item) {
+							$siLine->value += $item->amount_ex_gst;
+						}
+						$siLine->value = number_format($siLine->value, 4, '.', '');
+						$this->handlingItemLine($siLine,$siLineP->id,$myValueTotal,$myValueMTotal,$totalWeight,$totalCustCheckWeight,$totalManifestWeight,$totalWeightDiff);
+					}
+					if(!empty($siLine)&&($siLine->type&SiReconcileLine::TYPE_3PL)>0)
+					{
+						$siLineP->type = $siLneP->type|SiReconcileLine::TYPE_3PL;
+					}
+					$siLineP->api_value = number_format(0, 4, '.', '');
+					$siLineP->my_value = number_format($myValueTotal, 4, '.', '');
+					$siLineP->my_value_m = number_format($myValueMTotal, 4, '.', '');
+					$siLineP->weight = number_format($totalWeight, 4, '.', '');
+					$siLineP->cust_check_weight = number_format($totalCustCheckWeight, 4, '.', '');
+					$siLineP->manifest_weight= number_format($totalManifestWeight, 4, '.', '');
+					$siLineP->weight_diff= number_format($totalWeightDiff, 4, '.', '');
+					$siLineP->parent->total_ex_gst_my = $siLineP->parent->total_ex_gst_my-$oldMyValue+$siLineP->my_value;
+					Yii::app()->name = $this->appName;
+					$siLineP->save();
+					$siLineP->parent->save();
+				return $this->getResult(true,'success');
+			}else if($model->item_code == 'letter')
+			{
+				$siLineP = $model;
+				$mail_no = $siLineP->ref;
+				$accrual_value = 0;
+				Yii::app()->name = $this->appName;
+				$consol = ElmsConsol::model()->find('awb = :awb', [':awb' => $mail_no]);
+				if (!empty($consol)) {
+					Yii::app()->name = 'PCAE';
+					$bl = BillingLine::model()->find('org_id = :oid AND billing_ref = :ref', [':oid' => Org::ORGID_COURIER_AUPOST, ':ref' => $consol->no]);
+					$accrual_value = floatval(@$bl->accrual_amount);
+					if(empty($accrual_value))
+					{
+						Yii::app()->name = 'TLA';
+						$bl = BillingLine::model()->find('org_id = :oid AND billing_ref = :ref', [':oid' => Org::ORGID_COURIER_AUPOST, ':ref' => $consol->no]);
+						$accrual_value = floatval(@$bl->accrual_amount);
+					}
+				}
+				Yii::app()->name = $this->appName;
+				// imco
+				if (empty($consol)) {
+					$consol = ImcoConsol::model()->find('JSON_VALUE(meta, "$.elms") = :no OR JSON_QUERY(meta, "$.elms") LIKE :no2', [':no' => $mail_no, ':no2' => '%' . $mail_no . '%']);
+					if (!empty($consol)) {
+						Yii::app()->name = 'PCAE';
+						$bl = BillingLine::model()->find('(org_id = :oid1 OR (org_id = :oid2 AND `desc` LIKE "%LETTER")) AND billing_ref = :ref', [':oid1' => Org::ORGID_COURIER_AUSLETTER, ':oid2' => Org::ORGID_COURIER_AUPOST, ':ref' => $consol->no]);
+						$accrual_value = floatval(@$bl->accrual_amount);
+						if(empty($accrual_value))
+						{
+							Yii::app()->name = 'TLA';
+							$bl = BillingLine::model()->find('(org_id = :oid1 OR (org_id = :oid2 AND `desc` LIKE "%LETTER")) AND billing_ref = :ref', [':oid1' => Org::ORGID_COURIER_AUSLETTER, ':oid2' => Org::ORGID_COURIER_AUPOST, ':ref' => $consol->no]);
+							$accrual_value = floatval(@$bl->accrual_amount);
+						}
+					}
+				}
+				Yii::app()->name = $this->appName;
+				if(!empty($accrual_value))
+				{
+					$siLineP->my_value = number_format($accrual_value, 4, '.', '');
+					$siLineP->type = ($siLineP->type | SiReconcileLine::EMPTY_CONSOL)^SiReconcileLine::EMPTY_CONSOL;
+				}else
+				{
+					$siLineP->type = $siLineP->type | SiReconcileLine::EMPTY_CONSOL;
+				}
+				Yii::app()->name = $this->appName;
+				$siLineP->save();
+				return $this->getResult(true,'success');
+			}
+			else 
+			{
+				if($model->parent->type==SiReconcile::TYPE_TERMINAL)
+				{
+					if($this->refreshTerminalConsol($model))
+					{
+						return $this->getResult(true,'success');
+					}else
+					{
+						return $this->getResult(false,'consol is not found');
+					}
+				}
+
+
+				if($this->refreshShipment($model,$action))
+				{
+					return $this->getResult(true,'success');
+				}else
+				{
+					return $this->getResult(false,'shipment is not found');
+				}
+			}
+		}
+
+		if($action=='save')
+		{
+			if($this->saveAndRefreshShipment($model,$action,$ref))
+			{
+				return $this->getResult(true,'success');
+			}else
+			{
+				return $this->getResult(false,'no is not found');
+			}
+		}
+
+	}
+
+	public function refreshShipment($model,$action)
+	{
+		$imparcel = ImParcel::model()->find('hbn =:ref or ref = :ref and status !=100',[":ref"=>$model->ref]);
+		if(!empty($imparcel))
+		{
+			$mDate = $imparcel->getManifestDate();
+			if(!empty($mDate))
+			{
+				$month = date("Y-m",strtotime($mDate));
+			}else
+			{
+				$month = date("Y-m",strtotime($model->parent->parent->inv_date));
+			}
+		}
+
+		if(empty($imparcel))
+		{
+			$pLabel = ChangeShipmentLabel::model()->findAll('phbn =:ref or pref = :ref',[':ref'=>$model->ref]);
+			$pLabel = end($pLabel);
+			$imparcel = !empty($pLabel)?ImParcel::model()->find('hbn =:ref or ref = :ref',[":ref"=>$pLabel->newref]):null;
+
+			if(!empty($imparcel))
+			{
+				$model->type = $model->type | SiReconcileLine::CHANGED_LABEL_TYPE;
+				$model->mdata['pref'] = $model->ref;
+			}
+		}
+
+		/** when the parcel is found**/
+		if(!empty($imparcel))
+		{
+			$model->type = 0;
+			$model->fid = $imparcel->id;
+			$model->charge_code = $imparcel->mdata['chargecode'];
+			$model->cs_charge_weight = $model->getCSChargeWeight();
+			if($model->isPureCBMSiReconcileLine())
+			{
+				$orgRateId = $this->getOrgRateId($imparcel,$model->parent->parent->mdata['template'],$model->parent->org_id);
+				$cust_check_weight = $imparcel->myChargeCBM();
+				$our_charge_weight = $imparcel->myChargeCBM();
+				$model->manifest_weight = 0;
+			}else
+			{
+				$orgRateId = $this->getOrgRateId($imparcel,$model->parent->parent->mdata['template']);
+				$cust_check_weight = $imparcel->weight;
+				$our_charge_weight = floatval(isset($imparcel->mdata['charge_client_weight']) ? $imparcel->mdata['charge_client_weight'] : $imparcel->chargeWeight());
+
+				$model->manifest_weight = empty($imparcel->mdata["manifest_weight"])?0:$imparcel->mdata["manifest_weight"];
+				$model->manifest_weight = number_format($model->manifest_weight, 4, '.', '');
+
+			}
+			$chargevalue = $imparcel->getCouiercost();
+	
+			$model->cust_check_weight = number_format($cust_check_weight, 4, '.', '');
+			$model->our_charge_weight = number_format($our_charge_weight, 4, '.', '');
+			$model->postcode = empty($model->postcode)?$imparcel->cnee->postcode:$model->postcode;
+			$model->my_charge = number_format($chargevalue, 4, '.', '');
+			$model->agent_id = $imparcel->agent_id;
+			$model->getCSChargeWeight(true);
+			$model->getChargeWeightDiff(true);
+			$model->getWeight(true);
+			$isNoFuel = false;
+			if(!empty($model->mdata['no_fuel']))
+			{
+				$isNoFuel = true;
+			}
+			$cargoProcessId = null;
+			if(!empty($model->mdata['cargo_process_id']))
+			{
+				$cargoProcessId = $model->mdata['cargo_process_id'];
+			}
+	
+			if(!empty($orgRateId))
+			{
+				if($model->isPureCBMSiReconcileLine(false))
+				{
+					$courierCubic = $model->org_charge_weight;
+					$ourRate =Shipment::getCourierCostByShipment($model->ref, $orgRateId, $courierCubic,false,true,$isNoFuel,$month,$cargoProcessId);
+					$model->my_value = number_format($ourRate['price'], 4, '.', '');
+					$model->my_value_m = 0;
+				}else
+				{
+					$ourRate =Shipment::getCourierCostByShipment($model->ref, $orgRateId, $model->weight,false,true,$isNoFuel,$month,$cargoProcessId);
+					$ourRateManifest =Shipment::getCourierCostByShipment($model->ref, $orgRateId, $model->manifest_weight,false,true,$isNoFuel,$month,$cargoProcessId);
+					$model->my_value = number_format($ourRate['price'], 4, '.', '');
+					$model->my_value_m = number_format($ourRateManifest['price'], 4, '.', '');
+				}
+			}else
+			{
+				$model->my_value = 0;
+				$model->my_value_m = 0;
+				$model->type =$model->type | SiReconcileLine::EMPTY_ORG_RATE_TYPE;
+			}
+			Yii::app()->name = $this->appName;
+			$model->checkErrorsAndSetType();
+			$model->save();
+			return true;
+		}else
+		{
+			return false;
+		}
+	}
+
+	public function refreshTerminalConsol($siLine)
+	{
+		$siLine->type = 0;
+		$consol = ImcoConsol::model()->find('awb = :awb and status != 100',[":awb"=>$siLine->ref]);
+		if(empty($consol))
+		{
+			$consol = DmawbConsol::model()->find('awb = :awb and status != 100',[":awb"=>$siLine->ref]);
+			if(!empty($consol))
+			{
+				$log = Log::model()->find("model=:model and lid =:lid and json_value(meta,'$.NOA_Email') is not null",[":model"=>get_class($consol),":lid"=>$consol->id]);
+				if(!empty($log))
+				{
+					$importsMail = ImportsMail::model()->find("no = :no and plain_body like '%EWE%'",[":no"=>$log->extra['NOA_Email']]);
+					if(!empty($importsMail))
+					{
+						$imConsol = new ImcoConsol('create');
+			            $imConsol->owner_id = Org::ORGID_CLIENT_EWE_GROUP;
+			            $imConsol->service = Consol::AIRCONSOL;
+			            $imConsol->eta = $consol->eta;
+			            $imConsol->awb = $consol->awb;
+			            $imConsol->dpt_id = $consol->dpt_id;
+			            $imConsol->pod = $consol->pod;
+			            $imConsol->flight = $consol->flight;
+			            $imConsol->airline = $consol->airline;
+			            $imConsol->pol = "HKHKG";
+			            $imConsol->save();
+			            $consol = $imConsol;
+					}
+				}
+			}
+		}
+
+		if(empty($consol))
+		{
+			$siLine->type = $siLine->type | SiReconcileLine::EMPTY_CONSOL;
+			$siLine->model = '';
+			$siLine->fid = 0;
+			$siLine->type = $siLine->type | SiReconcileLine::EMPTY_CONSOL;
+			$siLine->our_charge_weight =0;
+		}else
+		{
+			$siLine->fid = $consol->id;
+			$siLine->model = Consol::$types[$consol->type];
+			$siLine->our_charge_weight =empty($consol->mdata['cgb_wt'])?0:$consol->mdata['cgb_wt'];
+		}
+
+		Yii::app()->name = $this->appName;
+		$siLine->my_value = $siLine->getAirportAccural($siLine->item_code,$siLine->parent->org_id, $siLine->our_charge_weight,false,false,$siLine->fid);
+		$siLine->diff = number_format($siLine->value - $siLine->my_value, 4, '.', '');
+		Yii::app()->name = $this->appName;
+		$siLine->save();
+		return true;
+	}
+
+	public function saveAndRefreshShipment($model,$action,$ref)
+	{
+		$this->appName = Yii::app()->name;
+		if($model->parent->type ==SiReconcile::TYPE_BROKER)
+		{
+			$model->ref = $ref;
+			$imparcel = ImParcel::model()->find('ref = :ref or hbn = :ref',[":ref"=>$model->ref]);
+			if(!empty($imparcel))
+			{
+				$model->fid = $imparcel->id;
+				$model->model = 'ImParcel';
+				$bResult = $this->findBrokerInvoice($imparcel);
+				Yii::app()->name = $this->appName;
+				$invNo = $model->parent->parent->inv_no;
+				if(preg_match('/\//i', $invNo))
+				{
+					$oldInvNo = explode('/', $invNo)[0];
+					$oldSupplierInvoices = SupplierInvoice::model()->findAll("(inv_no like :oinv_no  and inv_no != :invNo ) and status =1",[":oinv_no"=>"%".$oldInvNo."%","invNo"=>$invNo]);
+					if(empty($oldSupplierInvoices))
+					{
+						if(Yii::app()->name=='TLA')
+						{
+							Yii::app()->name = 'PCAE';
+						}else
+						{
+							Yii::app()->name = 'TLA';
+						}
+						$oldSupplierInvoices = SupplierInvoice::model()->findAll("(inv_no like :oinv_no  and inv_no != :invNo ) and status =1",[":oinv_no"=>"%".$oldInvNo."%","invNo"=>$invNo]);
+
+						Yii::app()->name = $this->appName;
+					}
+					if(!empty($oldSupplierInvoices))
+					{
+						$value = 0;
+						foreach ($oldSupplierInvoices as $key => $oldSupplierInvoice) {
+							$sR = SiReconcile::model()->find('supplier_invoice_id = :id',[":id"=>$oldSupplierInvoice->id]);
+							$value +=$sR->lines[0]->value;
+						}
+
+						if(!empty($bResult))
+						{
+							$model->my_value = $bResult[1];
+							$model->mdata['accrual_gst'] = $bResult[2];
+							$model->diff = $value-$bResult[1];
+						}
+
+					}else
+					{
+						if(!empty($bResult))
+						{
+							$model->my_value = $bResult[1];
+							$model->mdata['accrual_gst'] = $bResult[2];
+							$model->diff = $model->value-$bResult[1];
+						}
+					}
+				}else
+				{
+					if(!empty($bResult))
+					{
+						$model->my_value = $bResult[1];
+						$model->mdata['accrual_gst'] = $bResult[2];
+						$model->diff = $model->value-$bResult[1];
+					}
+				}
+				$model->type = ($model->type | SiReconcileLine::EMPTY_PARCEL_TYPE)^SiReconcileLine::EMPTY_PARCEL_TYPE;
+
+				$model->save();
+
+
+				return true;
+			}else
+			{
+				return false;
+			}
+
+		}
+		if($model->parent->type ==SiReconcile::TYPE_MANUAL||$model->parent->type ==SiReconcile::TYPE_EXPENSE)
+		{
+			$model->ref = $ref;
+			$consol = Consol::model()->find('no = :no',[":no"=>$model->ref]);
+			if(empty($consol))
+			{
+				return false;
+			}else
+			{
+				$model->type = 0;
+				$model->fid = $consol->id;
+				$model->model = Consol::$types[$consol->type];
+				$model->checkErrorsAndSetType();
+				$model->save();
+				return true;
+			}
+		}
+		
+	}
+
+
+
+
+
+
+	public function exportRateDiffExcel($model,$filename="1",$dpmt= false)
+	{
+		$lines = $this->prepareRateSiReconcileLines($model,$dpmt);
+		$this->exportRateDiffData($model->parent->org_id,$lines['lines1'],$lines['lines2'],$filename);
+	}
+
+	public function exportDisputeExcel($model,$filename="1",$dpmt= false)
+	{
+		$lines = $this->prepareDisputeList($model,$dpmt);
+		$this->exportDisputeData($model->parent->org_id,$lines['lines1'],$lines['lines2'],$filename);
+	}
+
+	public function exportErrorListExcel($model,$filename="1",$dpmt= false)
+	{
+		$lines = $this->prepareErrorList($model,$dpmt);
+		$this->exportErrorList($model->parent->org_id,$lines['lines1'],$lines['lines2'],$filename,$model->parent->mdata['template']);
+	}
+
+	public function exportWeightDiffExcel($model,$filename="1",$dpmt= false)
+	{
+		$lines = $this->prepareWeightDiffLines($model,$dpmt);
+		$this->exportWeightDiffData($model->parent->org_id,$lines['lines1'],$lines['lines2'],$filename);
+	}
+
+	public function exportSurchargeDiff($model,$filename="1",$dpmt= false)
+	{
+		$lines = $this->prepareSurchargeDiffLines($model,$dpmt);
+		$this->exportSurchargeDiffData($model->parent->org_id,$lines['lines1'],$lines['lines2'],$filename);
+	}
+	public function saveImparcelCogsRelation($siReconcileLine,$dpmt = 10)
+	{
+		CogsLine::updateCogsLineActual($siReconcileLine->imparcel->id,$siReconcileLine->value,$siReconcileLine->my_value,$siReconcileLine->item_code,$siReconcileLine,$dpmt);
+		$cogsLine = CogsLine::model()->find('fid =:fid and model = "ImParcel" and item_code=:item_code',[":fid"=>$siReconcileLine->imparcel->id,":item_code"=>$siReconcileLine->item_code]);
+		$exist = CogsLineHasSiReconcileLine::model()->find('cogs_line_id=:cogs_line_id and si_reconcile_line_id=:si_reconcile_line_id',["cogs_line_id"=>$cogsLine->id,"si_reconcile_line_id"=>$siReconcileLine->id]);
+		if(empty($exist))
+		{
+			$cogsLineRelation = new CogsLineHasSiReconcileLine();
+			$cogsLineRelation->cogs_line_id = $cogsLine->id;
+			$cogsLineRelation->si_reconcile_line_id = $siReconcileLine->id;
+			try
+			{
+				$cogsLineRelation->save();
+			}catch(Exception $e)
+			{
+
+			}
+		}
+	}
+
+	private function saveConsolCogsRelation($siReconcileLine)
+	{
+		$cogs = new CogsLine();
+		$cogs->type = 1;
+		$cogs->charge_code = $siReconcileLine->mdata['charge_code'];
+		$cogs->status = 1;
+		$cogs->org_id = $siReconcileLine->parent->org_id;
+		$cogs->fid = $siReconcileLine->fid;
+		$cogs->model = $siReconcileLine->model;
+		$cogs->created = $siReconcileLine->parent->create;
+		$cogs->dpmt = 10;
+		$cogs->gst = $siReconcileLine->mdata['gst_type'];
+		$cogs->desc = $siReconcileLine->det;
+		$cogs->qty = $siReconcileLine->mdata['qty'];
+		$cogs->price =  number_format($siReconcileLine->mdata['price'], 2, '.', '');
+		$cogs->dpt_id = 106;
+		$cogs->currency = $siReconcileLine->parent->parent->currency;
+		$cogs->actual_amount =   number_format($siReconcileLine->mdata['amount'], 2, '.', '');
+		$cogs->accrual_amount =   number_format($siReconcileLine->mdata['amount'], 2, '.', '');
+		$cogs->accrual_gst_amount  =  number_format($siReconcileLine->mdata['gst'], 2, '.', '');
+		$cogs->actual_gst_amount =   number_format($siReconcileLine->mdata['gst'], 2, '.', '');
+		$cogs->item_code = $siReconcileLine->item_code;
+		if(!$cogs->save())
+		{
+			print_r($cogs);
+			return false;
+		}
+
+		$cogsLineRelation = new CogsLineHasSiReconcileLine();
+		$cogsLineRelation->cogs_line_id = $cogs->id;
+		$cogsLineRelation->si_reconcile_line_id = $siReconcileLine->id;
+		try
+		{
+			$cogsLineRelation->save();
+		}catch(Exception $e)
+		{
+
+		}
+		return true;
+	}
+
+	private function saveConsolCogsRelationForUnknow($siReconcileLine,$dpmt=10)
+	{
+		$exist = CogsLineHasSiReconcileLine::model()->find('si_reconcile_line_id=:si_reconcile_line_id',["si_reconcile_line_id"=>$siReconcileLine->id]);
+		if(empty($exist))
+		{
+			$cogs = new CogsLine();
+			$cogs->type = 1;
+			$cogs->charge_code = Invoice::$delivery_charge_code[$dpmt];
+			$cogs->status = 1;
+			$cogs->org_id = $siReconcileLine->parent->org_id;
+			$cogs->fid = $siReconcileLine->fid;
+			$cogs->model = $siReconcileLine->model;
+			$cogs->created = $siReconcileLine->parent->create;
+			$cogs->dpmt = $dpmt;
+			$cogs->gst = Invoice::$InvoiceCostTaxRateSimple['free'];
+			$cogs->desc = $siReconcileLine->det;
+			$cogs->qty = 1;
+			$cogs->price =  number_format($siReconcileLine->value, 2, '.', '');
+			$cogs->dpt_id = 106;
+			$cogs->currency = $siReconcileLine->parent->parent->currency;
+			$cogs->actual_amount =   number_format($siReconcileLine->value, 2, '.', '');
+			$cogs->accrual_amount =   number_format($siReconcileLine->my_value, 2, '.', '');
+			$cogs->accrual_gst_amount  = 0;
+			$cogs->actual_gst_amount =   0;
+			$cogs->item_code = $siReconcileLine->item_code;
+			if(!$cogs->save())
+			{
+				print_r($cogs);
+				return false;
+			}
+
+			$cogsLineRelation = new CogsLineHasSiReconcileLine();
+			$cogsLineRelation->cogs_line_id = $cogs->id;
+			$cogsLineRelation->si_reconcile_line_id = $siReconcileLine->id;
+			try
+			{
+				$cogsLineRelation->save();
+			}catch(Exception $e)
+			{
+
+			}
+		}
+		return true;
+	}
+
+	public function linkBilling($model,$dpmt = false)
+	{
+		$this->appName = Yii::app()->name;
+		switch ($model->type) {
+			case SiReconcile::TYPE_COURIER:
+				return $this->linkParcelBilling($model,$dpmt);
+				break;
+			case SiReconcile::TYPE_EXPENSE:
+			case SiReconcile::TYPE_MANUAL:
+				return $this->linkManualBilling($model,$dpmt);
+				break;
+			case SiReconcile::TYPE_TERMINAL:
+				return $this->linkTerminalBilling($model,$dpmt);
+				break;
+			
+			default:
+				# code...
+				break;
+		}
+	}
+	public function linkTerminalBilling($model)
+	{
+		$transaction = Yii::app()->db->beginTransaction();
+		try
+		{
+			$errors = [];
+			$siReconcileLines = SiReconcileLine::model()->findAll('rec_id = :rec_id and t.confirm_status >=4',[':rec_id'=>$model->id]);
+				foreach ($siReconcileLines as $key => $siReconcileLine)
+				{
+					if(($siReconcileLine->confirm_status&SiReconcile::RATE_CONFIRMED)>0&&($siReconcileLine->confirm_status&SiReconcile::BLILLING_LINKED)==0)
+					{
+						if(!empty($siReconcileLine->fid))
+						{
+							if(!$this->saveConsolCogsRelation($siReconcileLine))
+							{
+								$transaction->rollback();
+								return $this->getResult(false,"Linked Failure");
+							}
+							$siReconcileLine->confirm_status = $siReconcileLine->confirm_status | SiReconcile::BLILLING_LINKED;
+							$siReconcileLine->update(['confirm_status']);
+						}
+					}
+				}
+
+			$model->confirm_status = $model->confirm_status | SiReconcile::BLILLING_LINKED;
+			$model->update(['confirm_status']);
+
+			$transaction->commit();
+
+		}catch(Exception $e)
+		{
+			throw $e;
+			$transaction->rollback();
+		}
+
+		if(empty($errors))
+		{
+			return $this->getResult(true,"Success");
+		}else
+		{
+			return $this->getResult(false,"Success ".join(',',$errors));
+		}
+	}
+
+	public function linkManualBilling($model)
+	{
+		if(($model->confirm_status&SiReconcile::BLILLING_LINKED)==0)
+		{
+			$transaction = Yii::app()->db->beginTransaction();
+			try
+			{
+				$errors = [];
+				$siReconcileLines = SiReconcileLine::model()->findAll('rec_id = :rec_id and (t.confirm_status >=1 or t.type = 0)',[':rec_id'=>$model->id]);
+					foreach ($siReconcileLines as $key => $siReconcileLine)
+					{
+						if(($siReconcileLine->confirm_status&SiReconcile::ERROR_CONFIRMED)>0||$siReconcileLine->isNormalType())
+						{
+							if(!empty($siReconcileLine->fid))
+							{
+								if(!$this->saveConsolCogsRelation($siReconcileLine))
+								{
+									$transaction->rollback();
+									return $this->getResult(false,"Linked Failure");
+								}
+								$siReconcileLine->confirm_status = $siReconcileLine->confirm_status | SiReconcile::BLILLING_LINKED;
+								$siReconcileLine->update(['confirm_status']);
+							}
+						}
+					}
+
+				$model->confirm_status = $model->confirm_status | SiReconcile::BLILLING_LINKED;
+				$model->update(['confirm_status']);
+
+				$transaction->commit();
+
+			}catch(Exception $e)
+			{
+				throw $e;
+				$transaction->rollback();
+			}
+		}
+
+		if(empty($errors))
+		{
+			return $this->getResult(true,"Success");
+		}else
+		{
+			return $this->getResult(false,"Success ".join(',',$errors));
+		}
+	}
+
+
+	public function linkParcelBilling($model,$dpmt = false)
+	{
+
+		$insertDpmt = empty($dpmt)?Invoice::DPMT_IMPORT:$dpmt;
+		$srd = SiReconcileDpmt::model()->find('si_reconcile_id = :sid and dpmt =:dpmt',[':sid'=>$model->id,':dpmt'=>$insertDpmt]);
+
+		$transaction = Yii::app()->db->beginTransaction();
+		$transaction_tla = Yii::app()->db_tla->beginTransaction();
+		try
+		{
+			$errors = [];
+			if($model->parent->org_id!=Org::ORGID_COURIER_AUPOST)
+			{
+				$siReconcileLines = SiReconcileLine::model()->with('parent')->findAll('rec_id = :rec_id and item_code not in ("eparcel","eparcel-fuel") and t.confirm_status >1',[':rec_id'=>$model->id]);
+				$siReconcileLines = SiReconcile::getDpmtLines($siReconcileLines,$dpmt);
+				foreach ($siReconcileLines as $key => $siReconcileLine)
+				{
+					if(($siReconcileLine->confirm_status&SiReconcile::RATE_CONFIRMED)>0||($siReconcileLine->confirm_status&SiReconcile::SURCHARGE_CONFIRMED)>0)
+					{
+						if(!empty($siReconcileLine->imparcel))
+						{
+							$this->saveImparcelCogsRelation($siReconcileLine,$insertDpmt);
+							$siReconcileLine->confirm_status = $siReconcileLine->confirm_status | SiReconcile::BLILLING_LINKED;
+							Yii::app()->name = $this->appName;
+							$siReconcileLine->update(['confirm_status']);
+						}
+					}
+				}
+
+			}else
+			{
+				$siReconcileLines = SiReconcileLine::model()->with('parent')->findAll('rec_id = :rec_id and t.confirm_status >1',[':rec_id'=>$model->id]);
+				$siReconcileLines = SiReconcile::getDpmtLines($siReconcileLines,$dpmt);
+				foreach ($siReconcileLines as $key => $siReconcileLine)
+				{
+					if(($siReconcileLine->confirm_status&SiReconcile::RATE_CONFIRMED)>0||($siReconcileLine->confirm_status&SiReconcile::SURCHARGE_CONFIRMED)>0)
+					{
+						if(in_array($siReconcileLine->item_code,['letter']))
+						{
+							$consol = ElmsConsol::model()->find('awb = :awb', [':awb' => $siReconcileLine->ref]);
+							// imco
+							if (empty($consol)) 
+							{
+								$consol = ImcoConsol::model()->find('JSON_VALUE(meta, "$.elms") = :no OR JSON_QUERY(meta, "$.elms") LIKE :no2', [':no' => $siReconcileLine->ref, ':no2' => '%' . $siReconcileLine->ref . '%']);
+								if(!empty($consol))
+								{
+									$cogsLine = CogsLine::model()->find('fid =:fid and model = "ImcoConsol" and item_code="letter"',[":fid"=>$consol->id]);
+								}else
+								{
+									$errors[] = $siReconcileLine->ref." not found;";
+									continue;
+								}
+							}else
+							{
+								$cogsLine = CogsLine::model()->find('fid =:fid and model = "ElmsConsol" and item_code="letter"',[":fid"=>$consol->id]);
+							}
+							if(empty($cogsLine))
+							{
+								$cogsLine = new CogsLine();
+								$cogsLine->type = 1;
+								$cogsLine->charge_code = Invoice::$delivery_charge_code[$insertDpmt];
+								$cogsLine->status = 1;
+								$cogsLine->org_id = $siReconcileLine->parent->org_id;
+								$cogsLine->fid = $consol->id;
+								$cogsLine->model = Consol::$types[$consol->type];
+								$cogsLine->created = $consol->created;
+								$cogsLine->dpmt = $insertDpmt;
+								$cogsLine->gst = Invoice::$InvoiceCostTaxRateSimple['free'];
+								$cogsLine->desc = "";
+								$cogsLine->qty = 1;
+								$cogsLine->price = 0;
+								$cogsLine->dpt_id = $consol->dpt_id;
+								$cogsLine->currency = 1;
+								$cogsLine->actual_amount = $siReconcileLine->value;
+								$cogsLine->accrual_amount = $siReconcileLine->my_value;
+								$cogsLine->accrual_gst_amount  = 0;
+								$cogsLine->actual_gst_amount = 0;
+								$cogsLine->item_code = $siReconcileLine->item_code;
+								$cogsLine->save();
+							}else
+							{
+								$cogsLine->fid = $consol->id;
+								$cogsLine->actual_amount = $siReconcileLine->value;
+								$cogsLine->accrual_amount = $siReconcileLine->my_value;
+								$cogsLine->item_code = $siReconcileLine->item_code;
+								$cogsLine->save();
+							}
+							$exist = CogsLineHasSiReconcileLine::model()->count('si_reconcile_line_id=:si_reconcile_line_id',["si_reconcile_line_id"=>$siReconcileLine->id]);
+							if($exist==0)
+							{
+								$cogsLineRelation = new CogsLineHasSiReconcileLine();
+								$cogsLineRelation->cogs_line_id = $cogsLine->id;
+								$cogsLineRelation->si_reconcile_line_id = $siReconcileLine->id;
+								Yii::app()->name = $this->appName;
+								$cogsLineRelation->save();
+							}
+							$siReconcileLine->confirm_status = $siReconcileLine->confirm_status | SiReconcile::BLILLING_LINKED;
+							Yii::app()->name = $this->appName;
+							$siReconcileLine->update(['confirm_status']);
+
+
+						}else if(in_array($siReconcileLine->item_code,['eparcel','eparcel-fuel']))
+						{
+							foreach ($siReconcileLine->inlines as $key => $inline)
+							{
+								if(!empty($inline->imparcel))
+								{
+									$this->saveImparcelCogsRelation($inline,$insertDpmt);
+									$inline->confirm_status = $inline->confirm_status | SiReconcile::BLILLING_LINKED;
+									Yii::app()->name = $this->appName;
+									$inline->update(['confirm_status']);
+								}
+							}
+
+							$siReconcileLine->confirm_status = $siReconcileLine->confirm_status | SiReconcile::BLILLING_LINKED;
+							Yii::app()->name = $this->appName;
+							$siReconcileLine->update(['confirm_status']);
+						}else if(in_array($siReconcileLine->item_code,['RTS']))
+						{
+							$manifest = Manifest::model()->find('ref="'.$siReconcileLine->ref.'"');
+							$consol = ImParcel::model()->findByPk($manifest->lines[0]->fid)->consol;
+							$exist = CogsLineHasSiReconcileLine::model()->find('si_reconcile_line_id=:si_reconcile_line_id',["si_reconcile_line_id"=>$siReconcileLine->id]);
+							if(empty($exist))
+							{
+								$cogsLine = new CogsLine();
+								$cogsLine->type = 1;
+								$cogsLine->charge_code = Invoice::$delivery_charge_code[$insertDpmt];
+								$cogsLine->status = 1;
+								$cogsLine->org_id = $siReconcileLine->parent->org_id;
+								$cogsLine->fid =$consol->id;
+								$cogsLine->model = Consol::$types[$consol->type];
+								$cogsLine->created = date("Y-m-d");
+								$cogsLine->dpmt = $insertDpmt;
+								$cogsLine->gst = Invoice::$InvoiceCostTaxRateSimple['free'];
+								$cogsLine->desc = "";
+								$cogsLine->qty = 1;
+								$cogsLine->price = 0;
+								$cogsLine->dpt_id = $consol->dpt_id;
+								$cogsLine->currency = 1;
+								$cogsLine->actual_amount = $siReconcileLine->value;
+								$cogsLine->accrual_amount = $siReconcileLine->my_value;
+								$cogsLine->accrual_gst_amount  = 0;
+								$cogsLine->actual_gst_amount = 0;
+								$cogsLine->item_code = $siReconcileLine->item_code;
+								$cogsLine->save();
+								
+								$cogsLineRelation = new CogsLineHasSiReconcileLine();
+								$cogsLineRelation->cogs_line_id = $cogsLine->id;
+								$cogsLineRelation->si_reconcile_line_id = $siReconcileLine->id;
+								Yii::app()->name = $this->appName;
+								$cogsLineRelation->save();
+								$siReconcileLine->confirm_status = $siReconcileLine->confirm_status | SiReconcile::BLILLING_LINKED;
+								Yii::app()->name = $this->appName;
+								$siReconcileLine->update(['confirm_status']);
+							}
+						}else
+						{
+							if($siReconcileLine->model=="ImcoConsol")
+							{
+								if(!empty($siReconcileLine->fid))
+								{
+									$this->saveConsolCogsRelationForUnknow($siReconcileLine,$insertDpmt);
+									$siReconcileLine->confirm_status = $siReconcileLine->confirm_status | SiReconcile::BLILLING_LINKED;
+									Yii::app()->name = $this->appName;
+									$siReconcileLine->update(['confirm_status']);
+								}
+							}
+						}
+
+					}
+				}
+
+			}
+
+			$model->confirm_status = $model->confirm_status | SiReconcile::BLILLING_LINKED;
+			if(!empty($srd))
+			{
+				$srd->confirm_status = $srd->confirm_status | SiReconcile::BLILLING_LINKED;
+				Yii::app()->name = $this->appName;
+				$srd->update(['confirm_status']);
+			}
+			Yii::app()->name = $this->appName;
+			$model->update(['confirm_status']);
+
+			$transaction->commit();
+			$transaction_tla->commit();
+
+		}catch(Exception $e)
+		{
+			throw $e;
+			$transaction->rollback();
+			$transaction_tla->rollback();
+		}
+
+
+		if(empty($errors))
+		{
+			return $this->getResult(true,"Success");
+		}else
+		{
+			return $this->getResult(false,"Success ".join(',',$errors));
+		}
+	}
+
+	public function createDisputeCase($ids,$data,$file = null,$dpmt = 10)
+	{
+		$transaction = Yii::app()->db->beginTransaction();
+		try
+		{
+			if(empty($file))
+			{
+				$siReconcileLines = SiReconcileLine::model()->findAll('id in ('.join(',',$ids).')');
+			}else
+			{
+				$data = $this->getFileData($file);
+				$data = $data[0];
+				if(empty($data))
+				{
+					return $this->getResult(false,'Invalid Template');
+				}
+				unset($data[1]);
+				$ids = [];
+				$values = [];
+				foreach ($data as $key => $d) {
+					if(!empty($d[1]))
+					{
+						if(is_numeric($d[1]))
+						{
+							$ids[] = $d[1];
+							$values[$d[1]] = $d[10];
+						}
+					}
+				}
+				$siReconcileLines = SiReconcileLine::model()->findAll('id in ('.join(',',$ids).')');
+			}
+			
+			$dispute = new Dispute();
+			$dispute->rec_id = $siReconcileLines[0]->rec_id;
+			$dispute->type = 0;
+			$dispute->status = 0;
+			$dispute->flag = 0;
+			$dispute->create = date('Y-m-d H:i:s');
+			$dispute->save();
+
+			if(!empty($file))
+			{
+				foreach ($siReconcileLines as $key => $value) {
+					$old = DisputeLine::model()->find('si_reconcile_line_id = :id and credit_amount_ex_gst = 0',[':id'=>$value->id]);
+					if(empty($old))
+					{
+						$disputeLine = new DisputeLine();
+						$disputeLine->type = 0;
+						$disputeLine->status = 0;
+						$disputeLine->flag = 0;
+						$disputeLine->dispute_id = $dispute->id;
+						$disputeLine->si_reconcile_line_id = $value->id;
+						$disputeLine->note = "";
+						$disputeLine->dispute_amount_ex_gst = number_format(floatval($values[$value->id]), 2, '.', '');
+						$disputeLine->dpmt = $dpmt;
+						$disputeLine->save();
+					}
+				}
+
+
+			}else
+			{
+				foreach ($siReconcileLines as $key => $value) {
+					$old = DisputeLine::model()->find('si_reconcile_line_id = :id and credit_amount_ex_gst = 0',[':id'=>$value->id]);
+					if(empty($old))
+					{
+						$disputeLine = new DisputeLine();
+						$disputeLine->type = 0;
+						$disputeLine->status = 0;
+						$disputeLine->flag = 0;
+						$disputeLine->dispute_id = $dispute->id;
+						$disputeLine->si_reconcile_line_id = $value->id;
+						$disputeLine->note = @$data[$value->id]['note'];
+						$disputeLine->dispute_amount_ex_gst = @$data[$value->id]['dispute_amount_ex_gst'];
+						$disputeLine->dpmt = $dpmt;
+						$disputeLine->save();
+					}
+				}
+			}
+			$transaction->commit();
+			if(!empty($dispute->id))
+			{
+				$tlaTaskService = new TlaTaskService();
+				$after14Days = date("Y-m-d 18:00:00",strtotime('+14 day',strtotime(date("Y-m-d 18:00:00"))));
+				$tlaTaskService->createNewTlaTask(DisputeSupplierTask::$my_type,"","SiReconcile",$dispute->rec_id,Org::TLA_DEPARTMENT_SYDNEY,0,"",["dispute_id"=>$dispute->id],[],User::currentUserID(),$after14Days);
+			}
+			return $this->getResult(true,"success");
+		}catch(Exception $e)
+		{
+			$transaction->rollback();
+		}
+		return $this->getResult(false,"System Error");
+	}
+
+	public static function generateReconciliationWeightDiffInvoice($id,$recId,$consolIds = null,$ids = null)
+	{
+		$appName = Yii::app()->name;
+		$recon = SiReconcile::model()->findByPk($recId);
+		sleep(rand(1,10));
+		$caKey = "REC_WD".$recId;// this cache is for making this process to be single thread processing
+		$check = self::getCacheData($caKey);
+		if(!empty($check))
+		{
+			$recon->addError("Processing","Processing");
+			return $recon;
+		}else
+		{
+			sleep(rand(1,10));
+			self::setCacheData($caKey,["1"]);
+		}
+		/**************************************************************************************************************************/
+		
+		$res = null;
+		$consolArr = [];
+		$idArr = [];
+		if(empty($id))
+		{
+			$consolArr = explode(',', $consolIds);
+		}
+
+		if(empty($id))
+		{
+			$idArr = explode(',', $ids);
+		}
+		
+
+		$lineModel = new SiReconcileLine();
+
+
+		if(!empty($id))
+		{
+			$res = $lineModel->findAll(' id = :id and rec_id = :rec_id and fid>0 and item_code="item"',["id"=>$id,"rec_id"=>$recId]);
+		}else
+		{
+			$res = $lineModel->findAll('rec_id = :rec_id and fid>0 and item_code="item"',["rec_id"=>$recId]);
+		}
+		$allWeightDiffAmount =empty($recon->mdata['allWeightDiffAmount'])?0:$recon->mdata['allWeightDiffAmount'];
+		$weightDiffInvoice = empty($recon->mdata['weightDiffInvoice'])?[]:$recon->mdata['weightDiffInvoice'];
+		$recon->mdata['allWeightDiffAmount'] = $allWeightDiffAmount;
+		$recon->mdata['weightDiffInvoice'] = $weightDiffInvoice;
+		if(empty($id))
+		{
+			$recon->mdata['generateAllWeightDiff'] = 1;
+		}
+
+		$ccode=InvLine::WEIGHTCCODEAUTO;
+		$oldRecord = new Invoice();
+		$model = null;
+		$consolReArr = [];
+		$shipment = null;
+		foreach ($res as $key => $re) 
+		{
+			if($re->item_code!='item')
+			{
+				continue;
+			}
+			if (($re->parent->org_id == Org::ORGID_COURIER_TNT && !empty($re->mdata['tnt_type']) && $re->mdata['tnt_type'] != 'Shipment')||$re->fid==0||($re->confirm_status&SiReconcile::WEIGHT_CONFIRMED)==0) continue;
+			if(empty($id))
+			{
+				if(in_array($re->imparcel->consol_id,$consolArr))
+				{
+
+					if(empty($consolReArr[$re->imparcel->consol_id]))
+					{
+						$consolReArr[$re->imparcel->consol_id] = [];
+					}
+					if(empty($consolReArr[$re->imparcel->consol_id][$re->imparcel->agent_id]))
+					{
+						$consolReArr[$re->imparcel->consol_id][$re->imparcel->agent_id] = [];
+					}
+					$consolReArr[$re->imparcel->consol_id][$re->imparcel->agent_id][]=$re;//getArrReToConsol, so that it can be dealed with together
+				} 
+			}else
+			{
+				$consolReArr[$re->imparcel->consol_id] = [];
+				$consolReArr[$re->imparcel->consol_id][$re->imparcel->agent_id][]=$re;//getArrReToConsol, so that it can be dealed with together
+			}
+			Yii::app()->name = $appName;
+		}
+		$transaction=Yii::app()->db->beginTransaction();
+		try
+		{
+			foreach ($consolReArr as $key => $coArr) 
+			{
+				$pid = [];
+				foreach ($coArr as $key2 => $reArr) 
+				{
+					Yii::app()->name = $appName;
+					$model = new Invoice();
+					$shipment = $reArr[0]->imparcel;
+					Yii::app()->name = $appName;
+					$dpt_id = $shipment->ddpt_id;
+					$dpmt = Invoice::INVOICE_TYPE_IMPORT;
+					$to_id = $shipment->agent_id;
+					$includingGST = false;
+					if (isset($shipment->agent->extra['incl_gst']) && $shipment->agent->extra['incl_gst'] == 1) {
+						$includingGST = true;
+					}
+
+					if($to_id==Org::ORGID_COURIER_D2Z_SUB||$to_id==Org::ORGID_COURIER_D2Z)
+					{
+						$to_id = Org::ORGID_COURIER_D2Z_CUSTOMER;
+					}
+					$currency = Invoice::CURRENCY_AUD;
+					$consol = $shipment->consol;
+					Yii::app()->name = $appName;
+					if(empty($consol))
+					{
+						continue;
+					}
+					$consolId = $shipment->consol_id;
+					$awb = $consol->awb;
+					$model->mdata['pid'] = [];
+					foreach ($reArr as $key3 => $re) 
+					{
+						if(empty($id))
+						{
+							if(!in_array($re->id,$idArr))
+							{
+								continue;
+							}
+						}
+						$shipment = ImParcel::model()->findByPk($re->fid);
+						Yii::app()->name = $appName;
+						$oldRecord = Invoice::model()->find("meta like '%pid{$shipment->id}%' and meta like '%{$ccode}%' and (type = :type or type= :typeo) and status != :status1 and status != :status3",[":type"=>Invoice::	INVOICE_TYPE_WEIGHT_DIFF,":typeo"=>Invoice::	INVOICE_TYPE_OTHERS,":status1"=>Invoice::INVOICE_STATUS_CACELLED,":status3"=>Invoice::INVOICE_STATUS_FULLY_CREDITED]);
+						if($oldRecord!=null)
+						{
+							if(!empty($id))
+							{
+								throw new Exception('recordExist');//if it is single generate, return the invoice
+							}else
+							{
+								echo $oldRecord->no;
+								continue;
+							}
+						}
+						Yii::app()->name = $appName;
+						$cicc = $re->getCourierWeightInvoiceByChargeCode();
+						$ci = $re->getChargedInvoice();
+						$amount = $cicc-$ci;
+						$cwcc = $re->getCourierWeightByChargeCode();
+						$ocw = $re->ourChargeWeight();
+						if($amount<=0.02||($cwcc-$ocw)<0.01)
+						{
+							continue;
+						}
+						$amount = round($amount,2);
+						if(empty($model->id))
+						{
+							$model->type = Invoice::INVOICE_TYPE_WEIGHT_DIFF;
+							$model->dpt_id = $dpt_id;
+							$model->dpmt = $dpmt;
+							$model->to_id = $to_id;
+							$model->currency = $currency;
+							$model->consol_id = $consolId;
+							$model->status = 1;
+							$model->date=date('Y-m-d');
+							$model->due=date('Y-m-d');
+							if($shipment->isTLA())
+							{
+								Yii::app()->name='TLA';
+							}else
+							{
+								Yii::app()->name='HVLV';
+							}
+							$model->save();
+						}
+						$il = new InvLine;
+						$il->inv_id = $model->id;
+						$il->ccode = InvLine::WEIGHTCCODE;
+						if($re->isPureCBMSiReconcileLine())
+						{
+							$il->det = $shipment->ref.'/actual CBM '.$cwcc.'cbm, was '.$ocw.'cbm/Correct invoice $'.$cicc.', was inv. $'.$ci;
+						}else
+						{
+							$il->det = $shipment->ref.'/actual weight '.$cwcc.'kg, was '.$ocw.'kg/Correct invoice $'.$cicc.', was inv. $'.$ci;
+						}
+
+						$il->amount = $amount;
+						$gst = 0;
+						$il->qty = 1;
+						$il->fid = $consol->id;
+						$il->model = $consol->getType();
+						if($includingGST)
+						{
+							$gst = round($il->amount * 10 / 100, 2);
+							$il->tax = 'OUTPUT';
+						}else{
+							$gst = 0;
+							$il->tax = 'EXEMPTOUTPUT';
+						}
+						$il->amount += $gst;
+						$il->gst = $gst;
+						// linked invoice line with related console if needed
+						if (!empty($shipment)) {
+							$il->fid = $shipment->id;
+							$il->model = "Shipment";
+						}
+						if($shipment->isTLA())
+						{
+							Yii::app()->name='TLA';
+						}else
+						{
+							Yii::app()->name='HVLV';
+						}
+
+						$il->save();
+						$re->mdata['wd_inv_line_id'] = $il->id;
+						$re->mdata['wd_inv_id'] = $il->inv_id;
+						$re->update(['meta']);
+
+						$pid[] ='pid'.$shipment->id;
+					}
+				}
+				$model = Invoice::model()->findByPk($il->inv_id);
+				if(!empty($model->id))
+				{
+					$model->getTotal();
+					$model->mdata['awb'] = $awb;
+					$model->mdata['name'] = $model->cust->name;
+					$model->mdata['address'] = $model->cust->getAddress();
+					$model->mdata['payterm'] = empty($model->cust->extra['payterm']) ? 'COD' : $model->cust->extra['payterm'] . ' days';
+					$model->mdata['ccode'] = $ccode;
+					$model->mdata['pid'] = $pid;
+					$model->update(["total","gst","meta"]);
+					$allWeightDiffAmount+=$model->total-$model->gst;
+					$weightDiffInvoice[]=['invoiceId'=>$model->id,'amount'=>$model->total];
+				}
+			}
+			$recon->mdata['allWeightDiffAmount'] = $allWeightDiffAmount;
+			$recon->mdata['weightDiffInvoice'] = $weightDiffInvoice;
+			Yii::app()->name = $appName;
+			$recon->save();
+			$transaction->commit();
+		}
+		catch(Exception $ex)
+		{
+			$transaction->rollback();
+			Log::log2file("ReconciliationWeightDiffGenerateError".$shipment->ref."=>".$ex->getMessage(), "weightDiff_err_log", "transaction");
+		}
+
+
+		if(!empty($oldRecord))
+		{
+			return $oldRecord;
+		}else
+		{
+			return $model;
+		}
+
+		Yii::app()->cache->delete($caKey);
+	}
+
+	public static function generateReconciliationSurchargeInvoice($id,$recId,$consolIds = null,$ids = null)
+	{
+		$orgFlexibleRateService = new OrgFlexibleRateService();
+		$appName = Yii::app()->name;
+		$res = null;
+		$consolArr = [];
+		$idArr = [];
+		if(empty($id))
+		{
+			$consolArr = explode(',', $consolIds);
+		}
+
+		if(empty($id))
+		{
+			$idArr = explode(',', $ids);
+		}
+		$recon = SiReconcile::model()->findByPk($recId);
+
+		$lineModel = new SiReconcileLine();
+
+		if($recon->org_id!=Org::ORGID_COURIER_EIZ_TOLL)
+		{
+			if(!empty($id))
+			{
+				$res = $lineModel->findAll(' id = :id and rec_id = :rec_id and fid>0 and item_code!="item"',["id"=>$id,"rec_id"=>$recId]);
+			}else
+			{
+				$res = $lineModel->findAll('rec_id = :rec_id and fid>0 and item_code!="item"',["rec_id"=>$recId]);
+			}
+		}else
+		{
+			if(!empty($id))
+			{
+				$res = $lineModel->findAll(' id = :id and rec_id = :rec_id and fid>0',["id"=>$id,"rec_id"=>$recId]);
+			}else
+			{
+				$res = $lineModel->findAll('rec_id = :rec_id and fid>0',["rec_id"=>$recId]);
+			}
+		}
+
+		$allSurchargeAmount =empty($recon->mdata['allSurchargeAmount'])?0:$recon->mdata['allSurchargeAmount'];
+		$surchargeInvoice = empty($recon->mdata['surchargeInvoice'])?[]:$recon->mdata['surchargeInvoice'];
+		$recon->mdata['allSurchargeAmount'] = $allSurchargeAmount;
+		$recon->mdata['surchargeInvoice'] = $surchargeInvoice;
+		if(empty($id))
+		{
+			$recon->mdata['generateAllSurcharge'] = 1;
+		}
+
+		$ccode=InvLine::SURCHARGECCODE;
+		$oldRecord = new Invoice();
+		$model = null;
+		$consolReArr = [];
+		$shipment = null;
+		foreach ($res as $key => $re) 
+		{
+			if(!in_array($re->id,$idArr))
+			{
+				continue;
+			}
+
+
+			if($recon->org_id!=Org::ORGID_COURIER_EIZ_TOLL)
+			{
+				if(!in_array(strtoupper($re->item_code),['RED','OS0','OS1','MHP','SD0','SD1','MHR','RSD','RD1','RD2','TAILGATE',"MH","OS","ONFORWARDING","REMOTE","REDELIVERY","Book","MI","MO","TG","FR","RESIDENTIAL DELIVERY","RESIDENTIAL CHARGE","RESIDENTIAL ADDRESS","TAILGATE","TAILLIFT","TAIL LIFT","TAIL-LIFT","EXCESS LENGTH","EXCESS FREIGHT","REDIRECTION","REDELIVERY","HOME DELIVERY","MANUAL HANDLING FEE","WIDTH SURCHARGE","LENGTH SURCHARGE","DEPOT HANDLING SURCHARGE","TAIL-LIFT TRUCK","HX RESIDENTIAL CHARGE","TAILGATE TRUCK"]))
+				{
+					continue;
+				}
+			}
+			if(empty($re->imparcel->consol_id)) continue;
+
+			if(!in_array($re->imparcel->consol_id,$consolArr)) continue;
+			if(empty($consolReArr[$re->imparcel->consol_id]))
+			{
+				$consolReArr[$re->imparcel->consol_id] = [];
+			}
+			if(empty($consolReArr[$re->imparcel->consol_id][$re->imparcel->agent_id]))
+			{
+				$consolReArr[$re->imparcel->consol_id][$re->imparcel->agent_id] = [];
+			}
+			$consolReArr[$re->imparcel->consol_id][$re->imparcel->agent_id][]=$re;//getArrReToConsol, so that it can be dealed with together
+		}
+		$transaction=Yii::app()->db->beginTransaction();
+		try
+		{
+			foreach ($consolReArr as $key => $coArr) 
+			{
+				foreach ($coArr as $key2 => $reArr) 
+				{
+					Yii::app()->name = $appName;
+					$model = new Invoice();
+					$shipment = $reArr[0]->imparcel;
+					$dpt_id = $shipment->ddpt_id;
+					$dpmt = Invoice::INVOICE_TYPE_IMPORT;
+					$to_id = $shipment->agent_id;
+					$includingGST = false;
+					if (isset($shipment->agent->extra['incl_gst']) && $shipment->agent->extra['incl_gst'] == 1) {
+						$includingGST = true;
+					}
+					if($to_id==Org::ORGID_COURIER_D2Z_SUB||$to_id==Org::ORGID_COURIER_D2Z)
+					{
+						$to_id = Org::ORGID_COURIER_D2Z_CUSTOMER;
+					}
+					$currency = Invoice::CURRENCY_AUD;
+					$consol = $shipment->consol;
+					if(empty($consol))
+					{
+						continue;
+					}
+					if($shipment->consol->is3PLOnly()) continue;
+					
+					$consolId = $shipment->consol_id;
+					$awb = $consol->awb;
+					$model->mdata['pid'] = [];
+
+					if($recon->org_id==Org::ORGID_COURIER_EIZ_TOLL)
+					{
+						foreach ($reArr as $key3 => $re) 
+						{
+							if(empty($id))
+							{
+								if(!in_array($re->id,$idArr))
+								{
+									continue;
+								}
+							}
+							if(($re->value-$re->my_value)<6) continue;
+							$shipment = ImParcel::model()->find(' ref = :ref ',[":ref"=>$re->ref]);
+							$oldRecord = $re->getSurchargeInvoice();
+							if($oldRecord!=null)
+							{
+								if(!empty($id))
+								{
+									throw new Exception('recordExist');//if it is single generate, return the invoice
+								}else
+								{
+									continue;
+								}
+							}
+							$amount = 0;
+							$amountQty= 0;
+							if(ImParcelService::isEizToll($shipment))
+							{
+								$rates = SystemSetting::getSurchargeChargeRate(strtoupper('TOLLOS'));
+								$rate = null;
+
+								if(!empty($re->mdata['package']))
+								{
+									$packages = $re->mdata['package'];
+								}else
+								{
+									$packages = $shipment->mdata['eiz']['package'];
+								}
+								foreach($packages as $key => $pack)
+								{
+									$qty = $pack['qty'];
+									$weight = $pack['weight'];
+									$length = $pack['length'];
+									$height = $pack['height'];
+									$width =  $pack['width'];
+									$bultWeight = ($length*$height*$width)*250/1000000;
+									$myRate = null;
+									foreach ($rates as $key => $rate)
+									{
+										if(($weight>=$rate[4]&&$weight<=$rate[5])||($bultWeight>=$rate[6]&&$bultWeight<=$rate[7]))
+										{
+											$myRate = $rate;
+											break;
+										}
+
+										if(($length>=$rate[2]&&$length<=$rate[3])||($height>=$rate[2]&&$height<=$rate[3])||($width>=$rate[2]&&$width<=$rate[3]))
+										{
+											$myRate = $rate;
+											break;
+										}
+									}
+
+									if(!empty($myRate))
+									{
+										$amount += $myRate[0]*$qty;
+										$amountQty+=$qty;
+									}
+									
+								}
+							}else
+							{
+								$amount = 0;
+								$amountQty = 1;
+								$rates = SystemSetting::getSurchargeChargeRate(strtoupper('ALLIEDOS'));
+								$rates2 = SystemSetting::getSurchargeChargeRate(strtoupper('ALLIEDLEN'));
+								$rate = null;
+								$amountRe =[];
+								$allBultWeight = 0;
+								$allWeight = 0;
+								$allQty = 0;
+
+								if(!empty($re->mdata['package']))
+								{
+									$packages = $re->mdata['package'];
+								}else
+								{
+									$packages = $shipment->mdata['eiz']['package'];
+								}
+								if(empty($packages))
+								{
+									echo $re->ref;
+									continue;
+								}
+								foreach($packages as $key => $pack)
+								{
+									$qty = $pack['qty'];
+									$weight = $pack['weight'];
+									$length = $pack['length'];
+									$height = $pack['height'];
+									$width =  $pack['width'];
+									$bultWeight = ($length*$height*$width)*250/1000000;
+									$allWeight += $weight*$qty;
+									$allBultWeight += $bultWeight;
+									$allQty += $qty;
+								}
+								$myRate = null;
+								$myRate2 = null;
+								foreach ($rates as $key => $rate)
+								{
+									if(($allWeight>=$rate[4]&&$allWeight<=$rate[5])||($allBultWeight>=$rate[6]&&$allBultWeight<=$rate[7]))
+									{
+										$myRate = $rate;
+										break;
+									}
+								}
+
+								foreach ($rates2 as $key => $rate)
+								{
+									if(($length>=$rate[4]&&$length<=$rate[5])||($height>=$rate[4]&&$height<=$rate[5])||($width>=$rate[4]&&$width<=$rate[5]))
+									{
+										$myRate2 = $rate;
+										break;
+									}
+								}
+
+								if(!empty($myRate))
+								{
+									$amount += $myRate[0];
+								}
+
+								if(!empty($myRate2))
+								{
+									$amount += $myRate2[0];
+								}
+
+								$label = 'ALLIED';
+							}
+
+
+							if($amount<=0)
+							{
+								continue;
+							}
+
+							$amount = round(($amount*1.139)/$amountQty,2);
+							if(empty($model->id))
+							{
+								$model->type = Invoice::INVOICE_TYPE_OTHERS;
+								$model->dpt_id = $dpt_id;
+								$model->dpmt = $dpmt;
+								$model->to_id = $to_id;
+								$model->currency = $currency;
+								$model->consol_id = $consolId;
+								$model->status = 1;
+								$model->date=date('Y-m-d');
+								$model->due=date('Y-m-d');
+								$model->save();
+							}
+							$il = new InvLine;
+							$il->inv_id = $model->id;
+							$il->ccode = InvLine::SURCHARGECODEARR['MHP'];
+							$il->det = $shipment->ref.'/MHP';
+							$il->amount = $amount;
+							$gst = 0;
+							$il->qty = $amountQty;
+							$il->fid = $consol->id;
+							$il->model = $consol->getType();
+							if($includingGST)
+							{
+								$gst = round($il->amount * 10 / 100, 2);
+								$il->tax = 'OUTPUT';
+							}else{
+								$gst = 0;
+								$il->tax = 'EXEMPTOUTPUT';
+							}
+							$il->amount += $gst;
+							$il->gst = $gst;
+
+							// linked invoice line with related console if needed
+							if (!empty($consol)) {
+								$il->fid = $consol->id;
+								$il->model = $consol->getType();
+							}
+							$il->save();
+							$re->mdata['surcharge_inv_line_id'] = $il->id;
+							$re->mdata['surcharge_inv_id'] = $il->inv_id;
+							$re->update(['meta']);
+							$model->mdata['pid'][] = 'pid'.$shipment->id;
+						}
+					}
+					elseif(($recon->org_id==Org::ORGID_COURIER_UBI&&$recon->parent->mdata['template']=="UBI-toll-surcharge")||$recon->org_id==Org::ORGID_COURIER_TOLL_IPEC)
+					{
+						foreach ($reArr as $key3 => $re) 
+						{
+
+							$shipment = ImParcel::model()->find(' ref = :ref ',[":ref"=>$re->ref]);
+							if(empty($shipment))
+							{
+								continue;
+							}
+
+							$oldRecord = $re->getSurchargeInvoice();
+							if($oldRecord!=null)
+							{
+								if(!empty($id))
+								{
+									throw new Exception('recordExist');//if it is single generate, return the invoice
+								}else
+								{
+									continue;
+								}
+							}
+
+							$amount = 0;
+							$amountQty = 1;
+							$charged = 0;
+							$total = 0;
+							$rate = null;
+							$chargedList = [];
+							$det = "";
+
+
+							[$amount,$total,$charged,$finalCodes,$isCharged] = ReconcileService::handlingSingleSiReconcileSurchargeLine($re,$re->parent,$orgFlexibleRateService,$chargedList);
+							if(is_numeric($amount))
+							{
+								if(empty($finalCodes))
+								{
+									$unknownLine[] = [$re->ref,$re->item_code,$re->value,$re->id,(empty($re->mdata['surcharge_charge'])?$re->value:$re->mdata['surcharge_charge']),@$re->mdata['surcharge_inv_id']];
+									continue;
+								}
+
+								
+								$amountStr = '';
+								$amountStr.='='.$total."-".$charged;
+								$label ='TOLL';
+								$det = $shipment->ref.'/SURCHARGE|'.$amountStr."|".join(',',$finalCodes);
+								
+								if($amount<=0)
+								{
+									continue;
+								}
+							}else
+							{
+								$amount = 0;
+								if($recon->org_id==Org::ORGID_COURIER_UBI)
+								{
+									$rates = SystemSetting::getSurchargeChargeRate(strtoupper('UBI'));
+								}else
+								{
+									$rates = SystemSetting::getSurchargeChargeRate(strtoupper('MYTOLL'));
+								}
+
+								if(!empty($rates[$re->item_code]))
+								{
+									switch ($rates[$re->item_code][1])
+									{
+										case 'shipment':
+											$amount = $rates[$re->item_code][0];
+											break;
+
+										case 'pcs':
+											$amount = $rates[$re->item_code][0]*$shipment->pkg;
+											break;
+
+										case 'ipercent':
+											$amount = round($re->value*$rates[$re->item_code][0]);
+											break;
+										
+										default:
+											$amount = $re->value;
+											break;
+									}
+								}
+
+								$label ='TOLL';
+								$det = $shipment->ref.'/SURCHARGE';
+								
+								if($amount<=0)
+								{
+									continue;
+								}
+							}
+							
+
+							$amount = round($amount/$amountQty,2);
+							if(empty($model->id))
+							{
+								$model->type = Invoice::INVOICE_TYPE_OTHERS;
+								$model->dpt_id = $dpt_id;
+								$model->dpmt = $dpmt;
+								$model->to_id = $to_id;
+								$model->currency = $currency;
+								$model->consol_id = $consolId;
+								$model->status = 1;
+								$model->date=date('Y-m-d');
+								$model->due=date('Y-m-d');
+								$model->save();
+							}
+							$il = new InvLine;
+							$il->inv_id = $model->id;
+							$il->ccode = (!empty($finalCodes)?join(',',$finalCodes):(isset(InvLine::SURCHARGECODEARR[$re->item_code])?InvLine::SURCHARGECODEARR[$re->item_code]:$re->item_code));
+							$il->det = $det;
+							$il->amount = $amount;
+							$gst = 0;
+							$il->qty = $amountQty;
+							$il->fid = $consol->id;
+							$il->model = $consol->getType();
+							if($includingGST)
+							{
+								$gst = round($il->amount * 10 / 100, 2);
+								$il->tax = 'OUTPUT';
+							}else{
+								$gst = 0;
+								$il->tax = 'EXEMPTOUTPUT';
+							}
+							$il->amount += $gst;
+							$il->gst = $gst;
+
+							// linked invoice line with related console if needed
+							if (!empty($consol)) {
+								$il->fid = $consol->id;
+								$il->model = $consol->getType();
+							}
+							$il->save();
+							$re->mdata['surcharge_inv_line_id'] = $il->id;
+							$re->mdata['surcharge_inv_id'] = $il->inv_id;
+							$re->update(['meta']);
+							$model->mdata['pid'][] = 'pid'.$shipment->id;
+
+						}
+					}elseif($recon->org_id==Org::ORGID_COURIER_FL_HUNTER)
+					{
+						foreach ($reArr as $key3 => $re) 
+						{
+							$shipment = ImParcel::model()->find(' ref = :ref ',[":ref"=>$re->ref]);
+							if(empty($shipment))
+							{
+								continue;
+							}
+
+							$oldRecord = $re->getSurchargeInvoice();
+							if($oldRecord!=null)
+							{
+								if(!empty($id))
+								{
+									throw new Exception('recordExist');//if it is single generate, return the invoice
+								}else
+								{
+									continue;
+								}
+							}
+
+							$amount = 0;
+							$amountQty = 1;
+							$rate = null;
+							if(!in_array(strtoupper($re->item_code),["RESIDENTIAL DELIVERY","RESIDENTIAL CHARGE","RESIDENTIAL ADDRESS","TAILGATE","TAILLIFT","TAIL LIFT","TAIL-LIFT","EXCESS LENGTH","EXCESS FREIGHT","REDIRECTION","REDELIVERY","TAIL-LIFT TRUCK","HX RESIDENTIAL CHARGE"]))
+							{
+								continue;
+							}
+
+							$rates = SystemSetting::getSurchargeChargeRate(strtoupper('FLHUNTER'));
+
+							if(!empty($rates[$re->item_code]))
+							{
+								$thisRate = null;
+								if(isset($rates[$re->item_code][number_format($re->value,0,'.','').""]))
+								{
+									$thisRate = $rates[$re->item_code][number_format($re->value,0,'.','').""];
+								}else
+								{
+									$thisRate = $rates[$re->item_code];
+								}
+								switch ($thisRate[1])
+								{
+									case 'shipment':
+										$amount = $thisRate[0];
+										break;
+
+									case 'kg':
+										$amount = $thisRate[2]+$re->weight*$thisRate[3];
+										break;
+									
+									default:
+										$amount = $re->value;
+										break;
+								}
+							}
+
+							$label ='HUNTER';
+							
+							
+							if($amount<=0)
+							{
+								continue;
+							}
+
+							$amount = round($amount/$amountQty,2);
+							if(empty($model->id))
+							{
+								$model->type = Invoice::INVOICE_TYPE_OTHERS;
+								$model->dpt_id = $dpt_id;
+								$model->dpmt = $dpmt;
+								$model->to_id = $to_id;
+								$model->currency = $currency;
+								$model->consol_id = $consolId;
+								$model->status = 1;
+								$model->date=date('Y-m-d');
+								$model->due=date('Y-m-d');
+								$model->save();
+							}
+							$il = new InvLine;
+							$il->inv_id = $model->id;
+							$il->ccode = (isset(InvLine::SURCHARGECODEARR[$re->item_code])?InvLine::SURCHARGECODEARR[$re->item_code]:$re->item_code);
+							$il->det = $shipment->ref.'/SURCHARGE';
+							$il->amount = $amount;
+							$gst = 0;
+							$il->qty = $amountQty;
+							$il->fid = $consol->id;
+							$il->model = $consol->getType();
+							if($includingGST)
+							{
+								$gst = round($il->amount * 10 / 100, 2);
+								$il->tax = 'OUTPUT';
+							}else{
+								$gst = 0;
+								$il->tax = 'EXEMPTOUTPUT';
+							}
+							$il->amount += $gst;
+							$il->gst = $gst;
+
+							// linked invoice line with related console if needed
+							if (!empty($consol)) {
+								$il->fid = $consol->id;
+								$il->model = $consol->getType();
+							}
+							$il->save();
+							$re->mdata['surcharge_inv_line_id'] = $il->id;
+							$re->mdata['surcharge_inv_id'] = $il->inv_id;
+							$re->update(['meta']);
+							$model->mdata['pid'][] = 'pid'.$shipment->id;
+
+						}
+					}elseif($recon->org_id==Org::ORGID_COURIER_ALLIED_TOP)
+					{
+						foreach ($reArr as $key3 => $re) 
+						{
+							if(in_array($re->item_code,["On fwd delivery"])) continue;
+							$shipment = ImParcel::model()->find(' ref = :ref ',[":ref"=>$re->ref]);
+							if(empty($shipment))
+							{
+								$unknownLine[] = [$re->ref,$re->item_code,$re->value,$re->id,(empty($re->mdata['surcharge_charge'])?$re->value:$re->mdata['surcharge_charge']),@$re->mdata['surcharge_inv_id']];
+								continue;
+							}
+
+							$oldRecord = $re->getSurchargeInvoice();
+							if($oldRecord!=null)
+							{
+								if(!empty($id))
+								{
+									throw new Exception('recordExist');//if it is single generate, return the invoice
+								}else
+								{
+									continue;
+								}
+							}
+
+							$amount = 0;
+							$amountQty = 1;
+							$charged = 0;
+							$total = 0;
+							$rate = null;
+							$chargedList = [];
+							[$amount,$total,$charged,$finalCodes,$isCharged] = ReconcileService::handlingSingleSiReconcileSurchargeLine($re,$re->parent,$orgFlexibleRateService,$chargedList);
+							if($isCharged&&$amount<=0)
+							{
+								continue;
+							}
+							if(empty($finalCodes))
+							{
+								$unknownLine[] = [$re->ref,$re->item_code,$re->value,$re->id,(empty($re->mdata['surcharge_charge'])?$re->value:$re->mdata['surcharge_charge']),@$re->mdata['surcharge_inv_id']];
+								continue;
+							}
+
+							
+							$amountStr = '';
+							$amountStr.='='.$total."-".$charged;
+							$label ='ALLIED';
+							
+							
+							if($amount<=0)
+							{
+								continue;
+							}
+
+
+							$amount = round($amount/$amountQty,2);
+							if(empty($model->id))
+							{
+								$model->type = Invoice::INVOICE_TYPE_OTHERS;
+								$model->dpt_id = $dpt_id;
+								$model->dpmt = $dpmt;
+								$model->to_id = $to_id;
+								$model->currency = $currency;
+								$model->consol_id = $consolId;
+								$model->status = 1;
+								$model->date=date('Y-m-d');
+								$model->due=date('Y-m-d');
+								$model->save();
+							}
+
+							$il = new InvLine;
+							$il->inv_id = $model->id;
+							$il->ccode = (!empty($finalCodes)?join(',',$finalCodes):(isset(InvLine::SURCHARGECODEARR[$re->item_code])?InvLine::SURCHARGECODEARR[$re->item_code]:$re->item_code));
+							$il->det = $shipment->ref.'/SURCHARGE|'.$amountStr."|".join(',',$finalCodes);
+							$il->amount = $amount;
+							$gst = 0;
+							$il->qty = $amountQty;
+							$il->fid = $consol->id;
+							$il->model = $consol->getType();
+							if($includingGST)
+							{
+								$gst = round($il->amount * 10 / 100, 2);
+								$il->tax = 'OUTPUT';
+							}else{
+								$gst = 0;
+								$il->tax = 'EXEMPTOUTPUT';
+							}
+							$il->amount += $gst;
+							$il->gst = $gst;
+
+							// linked invoice line with related console if needed
+							if (!empty($consol)) {
+								$il->fid = $consol->id;
+								$il->model = $consol->getType();
+							}
+							$il->save();
+							$re->mdata['surcharge_inv_line_id'] = $il->id;
+							$re->mdata['surcharge_inv_id'] = $il->inv_id;
+							$re->update(['meta']);
+							$model->mdata['pid'][] = 'pid'.$shipment->id;
+
+						}
+					}elseif($recon->org_id==Org::ORGID_COURIER_TNT_TOP)
+					{
+						foreach ($reArr as $key3 => $re) 
+						{
+							if(empty($id))
+							{
+								if(!in_array($re->id,$idArr))
+								{
+									continue;
+								}
+							}
+							$shipment = ImParcel::model()->find(' ref = :ref ',[":ref"=>$re->ref]);
+							$oldRecord = $re->getSurchargeInvoice();
+							if($oldRecord!=null)
+							{
+								if(!empty($id))
+								{
+									throw new Exception('recordExist');//if it is single generate, return the invoice
+								}else
+								{
+									continue;
+								}
+							}
+
+							$shipment = ImParcel::model()->find(' ref = :ref ',[":ref"=>$re->ref]);
+							if(empty($shipment))
+							{
+								continue;
+							}
+							$amount = 0;
+							$rate = null;
+							$amount = 0;
+							$amountQty = 1;
+							$charged = 0;
+							$total = 0;
+							$rate = null;
+							$chargedList = [];
+							$det = "";
+
+							[$amount,$total,$charged,$finalCodes,$isCharged] = ReconcileService::handlingSingleSiReconcileSurchargeLine($re,$re->parent,$orgFlexibleRateService,$chargedList);
+							if(is_numeric($amount))
+							{
+								if(empty($finalCodes))
+								{
+									$unknownLine[] = [$re->ref,$re->item_code,$re->value,$re->id,(empty($re->mdata['surcharge_charge'])?$re->value:$re->mdata['surcharge_charge']),@$re->mdata['surcharge_inv_id']];
+									continue;
+								}
+
+								
+								$amountStr = '';
+								$amountStr.='='.$total."-".$charged;
+								$det = $shipment->ref.'/SURCHARGE|'.$amountStr."|".join(',',$finalCodes);
+								
+								if($amount<=0)
+								{
+									continue;
+								}
+							}else
+							{
+								$amount = 0;
+								$amountQty = 1;
+								$rate = SystemSetting::getSurchargeChargeRate(strtoupper($re->item_code));
+								if($rate[1]=="fixed")
+								{
+									$amount = $rate[0];
+								}else if($rate[1]=='pkg')
+								{
+									$amount = $rate[0]*round($re->value/$rate[2]);
+									$amountQty = round($re->value/$rate[2]);
+								}else if($rate[1]=='kg')
+								{
+									$amount = $rate[0]*$shipment->chargeWeight();
+								}else if($rate[1]=='cbm')
+								{
+									$amount = $rate[0]*$shipment->myChargeCBM();
+								}else if($rate[1]=='ipercent')
+								{
+									$re2 = SiReconcileLine::model()->with(["parent"])->find("parent.status>=4 and ref = :ref and item_code='item'",[":ref"=>$re->ref]);
+									if(!empty($re2))
+									{
+										$cicc = $re2->getCourierWeightInvoiceByChargeCode()*$rate[0];
+										$amount = $cicc;
+									}
+								}
+								if($amount<=0)
+								{
+									continue;
+								}
+								$amount = round($amount/$amountQty,2);
+								$det  = $shipment->ref.'/'.$re->item_code;
+							}
+
+
+							if(empty($model->id))
+							{
+								$model->type = Invoice::INVOICE_TYPE_OTHERS;
+								$model->dpt_id = $dpt_id;
+								$model->dpmt = $dpmt;
+								$model->to_id = $to_id;
+								$model->currency = $currency;
+								$model->consol_id = $consolId;
+								$model->status = 1;
+								$model->date=date('Y-m-d');
+								$model->due=date('Y-m-d');
+								$model->save();
+							}
+							$il = new InvLine;
+							$il->inv_id = $model->id;
+							$il->ccode = (!empty($finalCodes)?join(',',$finalCodes):(isset(InvLine::SURCHARGECODEARR[$re->item_code])?InvLine::SURCHARGECODEARR[$re->item_code]:$re->item_code));
+							$il->det = $det;
+							$il->amount = $amount;
+							$gst = 0;
+							$il->qty =$amountQty;
+							$il->fid = $consol->id;
+							$il->model = $consol->getType();
+							if($includingGST)
+							{
+								$gst = round($il->amount * 10 / 100, 2);
+								$il->tax = 'OUTPUT';
+							}else{
+								$gst = 0;
+								$il->tax = 'EXEMPTOUTPUT';
+							}
+							$il->amount += $gst;
+							$il->gst = $gst;
+
+							// linked invoice line with related console if needed
+							if (!empty($consol)) {
+								$il->fid = $consol->id;
+								$il->model = $consol->getType();
+							}
+							$il->save();
+							$re->mdata['surcharge_inv_line_id'] = $il->id;
+							$re->mdata['surcharge_inv_id'] = $il->inv_id;
+							$re->update(['meta']);
+							$model->mdata['pid'][] = 'pid'.$shipment->id;
+						}
+					}
+					else
+					{
+						foreach ($reArr as $key3 => $re) 
+						{
+							if(empty($id))
+							{
+								if(!in_array($re->id,$idArr))
+								{
+									continue;
+								}
+							}
+							$shipment = ImParcel::model()->find(' ref = :ref ',[":ref"=>$re->ref]);
+							$oldRecord = $re->getSurchargeInvoice();
+							if($oldRecord!=null)
+							{
+								if(!empty($id))
+								{
+									throw new Exception('recordExist');//if it is single generate, return the invoice
+								}else
+								{
+									continue;
+								}
+							}
+							$amount = 0;
+							$amountQty = 1;
+							$rate = SystemSetting::getSurchargeChargeRate(strtoupper($re->item_code));
+							if($rate[1]=="fixed")
+							{
+								$amount = $rate[0];
+							}else if($rate[1]=='pkg')
+							{
+								$amount = $rate[0]*round($re->value/$rate[2]);
+								$amountQty = round($re->value/$rate[2]);
+							}else if($rate[1]=='kg')
+							{
+								$amount = $rate[0]*$shipment->chargeWeight();
+							}else if($rate[1]=='cbm')
+							{
+								$amount = $rate[0]*$shipment->myChargeCBM();
+							}else if($rate[1]=='ipercent')
+							{
+								$re2 = SiReconcileLine::model()->with(["parent"])->find("parent.status>=4 and ref = :ref and item_code='item'",[":ref"=>$re->ref]);
+								if(!empty($re2))
+								{
+									$cicc = $re2->getCourierWeightInvoiceByChargeCode()*$rate[0];
+									$amount = $cicc;
+								}
+							}
+							if($amount<=0)
+							{
+								continue;
+							}
+							$amount = round($amount/$amountQty,2);
+							if(empty($model->id))
+							{
+								$model->type = Invoice::INVOICE_TYPE_OTHERS;
+								$model->dpt_id = $dpt_id;
+								$model->dpmt = $dpmt;
+								$model->to_id = $to_id;
+								$model->currency = $currency;
+								$model->consol_id = $consolId;
+								$model->status = 1;
+								$model->date=date('Y-m-d');
+								$model->due=date('Y-m-d');
+								$model->save();
+							}
+							$il = new InvLine;
+							$il->inv_id = $model->id;
+							$il->ccode = (isset(InvLine::SURCHARGECODEARR[$re->item_code])?InvLine::SURCHARGECODEARR[$re->item_code]:$re->item_code);
+							$il->det = $shipment->ref.'/'.$re->item_code;
+							$il->amount = $amount;
+							$gst = 0;
+							$il->qty =$amountQty;
+							$il->fid = $consol->id;
+							$il->model = $consol->getType();
+							if($includingGST)
+							{
+								$gst = round($il->amount * 10 / 100, 2);
+								$il->tax = 'OUTPUT';
+							}else{
+								$gst = 0;
+								$il->tax = 'EXEMPTOUTPUT';
+							}
+							$il->amount += $gst;
+							$il->gst = $gst;
+
+							// linked invoice line with related console if needed
+							if (!empty($consol)) {
+								$il->fid = $consol->id;
+								$il->model = $consol->getType();
+							}
+							$il->save();
+							$re->mdata['surcharge_inv_line_id'] = $il->id;
+							$re->mdata['surcharge_inv_id'] = $il->inv_id;
+							$re->update(['meta']);
+							$model->mdata['pid'][] = 'pid'.$shipment->id;
+						}
+					}
+					
+					if(!empty($model->id))
+					{
+						$model->getTotal();
+						$model->mdata['awb'] = $awb;
+						$model->mdata['name'] = $model->cust->name;
+						$model->mdata['address'] = $model->cust->getAddress();
+						$model->mdata['payterm'] = empty($model->cust->extra['payterm']) ? 'COD' : $model->cust->extra['payterm'] . ' days';
+						$model->mdata['ccode'] = $ccode;
+						$model->update(["total","gst","meta"]);
+						$allSurchargeAmount+=$model->total-$model->gst;
+						$surchargeInvoice[]=['invoiceId'=>$model->id,'amount'=>$model->total];
+					}
+				}
+			}
+			$recon->mdata['allSurchargeAmount'] = $allSurchargeAmount;
+			$recon->mdata['surchargeInvoice'] = $surchargeInvoice;
+			$recon->save();
+			$transaction->commit();
+		}
+		catch(Exception $ex)
+		{
+			$transaction->rollback();
+			Log::log2file("ReconciliationSurchargeGenerateError".$shipment->ref."=>".$ex->getMessage(), "surcharge_err_log", "transaction");
+		}
+
+
+		if(!empty($oldRecord))
+		{
+			return $oldRecord;
+		}else
+		{
+			return $model;
+		}
+	}
+
+	public function updateDisputeStatus($ids,$data)
+	{
+		$transaction = Yii::app()->db->beginTransaction();
+		try
+		{
+			$disputeLines = DisputeLine::model()->findAll('id in ('.join(',',$ids).')');
+			$disputeLines[0]->parent->status = 1;
+			$disputeLines[0]->parent->save();
+
+			foreach ($disputeLines as $key => $dl) {
+
+				$siReconcileLines = SiReconcileLine::model()->findAll('ref = :ref and rec_id = :rec_id',[":ref"=>$dl->line->ref,":rec_id"=>$dl->line->rec_id]);
+				foreach ($siReconcileLines as $key => $line)
+				{
+					$dmodel = DisputeLine::model()->find("si_reconcile_line_id = :sid and dispute_id = :did",[":sid"=>$line->id,":did"=>$dl->dispute_id]);
+					if(!empty($dmodel)&&$dmodel->id!=$dl->id)
+					{	
+						if(empty($data[$dl->id]['creditAmountExGst']))
+						{
+							$dmodel->credit_amount_ex_gst = 0;
+							$dmodel->status = DisputeLine::Failure;
+							$dmodel->save();
+						}else
+						{
+							$dmodel->credit_amount_ex_gst = 0;
+							$dmodel->status = DisputeLine::Success;
+							$dmodel->save();
+						}
+					}
+				}
+
+
+				if(empty($data[$dl->id]['creditAmountExGst']))
+				{
+					$dl->credit_amount_ex_gst = 0;
+					$dl->status = DisputeLine::Failure;
+				}else
+				{
+					$dl->credit_amount_ex_gst = $data[$dl->id]['creditAmountExGst'];
+					$dl->status = DisputeLine::Success;
+				}
+				$dl->save();
+			}
+			$transaction->commit();
+			return $this->getResult(true,"success");
+		}catch(Exception $e)
+		{
+			$transaction->rollback();
+		}
+		return $this->getResult(false,"System Error");
+	}
+
+	public function confirmBrokerDiff($model)
+	{
+		$model->confirm_status = $model->confirm_status | SiReconcile::RATE_CONFIRMED;
+		$model->update(['confirm_status']);
+		$model->parent->confirm_status = $model->parent->confirm_status | SiReconcile::RATE_CONFIRMED;
+		$model->parent->update(['confirm_status']);
+		return $this->getResult(true,'Success');
+	}
+
+	/*************************For Broker invoice Linking Billing*********************/
+	public function brokerLinkingBilling($data)
+	{
+		$success = 0;
+		$failure = 0;
+		$this->appName = Yii::app()->name;
+		foreach ($data as $key => $siReconcile)
+		{
+			$siReconcileLine = $siReconcile->lines[0];
+			if(($siReconcile->confirm_status & SiReconcile::BLILLING_LINKED)==0 && $siReconcileLine->isInBrokerField())
+			{
+				$cogs = new CogsLine();
+				$cogs->type = 1;
+				$cogs->charge_code = '91032';
+				$cogs->status = 1;
+				$cogs->org_id = $siReconcileLine->parent->parent->org_id;
+				$cogs->fid = $siReconcileLine->fid;
+				$cogs->model = 'ImParcel';
+				$cogs->created = $siReconcileLine->imparcel->created;
+				$cogs->dpmt = 10;
+				$cogs->desc = "";
+				$cogs->qty = 1;
+				$cogs->price = $siReconcileLine->value;
+				$cogs->dpt_id = $siReconcileLine->imparcel->ddpt_id;
+				$cogs->currency = 1;
+				$cogs->actual_amount = $siReconcileLine->value;
+				$cogs->accrual_amount = $siReconcileLine->value;
+				$cogs->accrual_gst_amount  = $siReconcileLine->mdata['gst'];
+				$cogs->actual_gst_amount = $siReconcileLine->mdata['gst'];
+				$cogs->item_code = $siReconcileLine->item_code;
+
+				if($siReconcileLine->mdata['gst']>0)
+				{
+					$cogs->gst =  Invoice::$InvoiceCostTaxRateSimple['on'];
+				}else
+				{
+					$cogs->gst =  Invoice::$InvoiceCostTaxRateSimple['free'];
+				}
+				if($cogs->save())
+				{
+					$success++;
+				}
+				$exist = CogsLineHasSiReconcileLine::model()->find('cogs_line_id=:cogs_line_id and si_reconcile_line_id=:si_reconcile_line_id',["cogs_line_id"=>$cogs->id,"si_reconcile_line_id"=>$siReconcileLine->id]);
+				if(empty($exist))
+				{
+					$cogsLineRelation = new CogsLineHasSiReconcileLine();
+					$cogsLineRelation->cogs_line_id = $cogs->id;
+					$cogsLineRelation->si_reconcile_line_id = $siReconcileLine->id;
+					try
+					{
+						$cogsLineRelation->save();
+					}catch(Exception $e)
+					{
+						throw $e;
+						
+					}
+				}
+				$siReconcile->total_gst_confirmed = json_encode([SiReconcile::RATE_CHECKING_STATUS=>$siReconcile->total_gst]);
+				$siReconcile->total_ex_gst_confirmed =  json_encode([SiReconcile::RATE_CHECKING_STATUS=>$siReconcile->total_ex_gst]);
+				$siReconcile->total_confirmed =  json_encode([SiReconcile::RATE_CHECKING_STATUS=>$siReconcile->total]);
+
+				$siReconcileLine->confirm_status = $siReconcileLine->confirm_status | SiReconcile::BLILLING_LINKED;
+				$siReconcile->confirm_status = $siReconcile->confirm_status | SiReconcile::BLILLING_LINKED;
+				Yii::app()->name = $this->appName;
+				$siReconcileLine->update(['confirm_status']);
+				$siReconcile->save();
+			}else
+			{
+				$failure++;
+			}
+
+		}
+
+		return $this->getResult(false,'success:'.$success." Failure:".$failure);
+	}
+
+
+
+	public function manualErrorChecking($data)
+	{
+		$success = 0;
+		$failure = 0;
+		foreach ($data as $key => $siReconcile)
+		{
+			if(($siReconcile->status ==SiReconcile::ERROR_CHECKING_STATUS&&empty($siReconcile->havingErrorParcels())) ||($siReconcile->status ==SiReconcile::ERROR_CHECKING_STATUS && $siReconcile->confirm_status & siReconcile::ERROR_CONFIRMED))
+			{
+				if($siReconcile->mdata['template']=="consol_manual_brownways")
+				{
+					$result = $this->updateSiReconciliationStatus($siReconcile,SiReconcile::RATE_CHECKING_STATUS);
+				}else
+				{
+					$result = $this->updateSiReconciliationStatus($siReconcile,SiReconcile::LINKING_BILLING_STATUS);
+				}
+
+				if($result['done'])
+				{
+					$success++;
+				}
+			}else
+			{
+				$failure++;
+			}
+
+		}
+
+		return $this->getResult(false,'success:'.$success." Failure:".$failure);
+	}
+
+	public function manualLinkingBilling($data)
+	{
+		$success = 0;
+		$failure = 0;
+		foreach ($data as $key => $siReconcile)
+		{
+			if($siReconcile->status ==SiReconcile::LINKING_BILLING_STATUS)
+			{
+				$result = $this->linkBilling($siReconcile);
+				if($result['done'])
+				{
+					$success++;
+				}
+			}else
+			{
+				$failure++;
+			}
+
+		}
+
+		return $this->getResult(false,'success:'.$success." Failure:".$failure);
+	}
+
+	public function deleteSiReconcile($siReconcile)
+	{
+		$siReconcile->status = 100;
+		$siReconcile->save();
+		$siReconcile->parent->status = 100;
+		$siReconcile->parent->save();
+		return $this->getResult(true,'success');
+	}
+
+	public static function checkInvoiceExisting($invoiceNo)
+	{
+		if(empty($invoiceNo))false;
+		$inv = SupplierInvoice::model()->find("inv_no = :invNO and status != 100",[":invNO"=>$invoiceNo]);
+		return empty($inv)?false:true;
+	}
+
+	public static function generateReconciliationRTSInvoice($recId,$consolIds = null,$ids = null)
+	{
+		$invoice = new Invoice();
+		$appName = Yii::app()->name;
+		$res = null;
+		$consolArr = [];
+		$idArr = [];
+		if(empty($id))
+		{
+			$consolArr = explode(',', $consolIds);
+		}
+
+		if(empty($id))
+		{
+			$idArr = explode(',', $ids);
+		}
+
+		$res = SiReconcileLine::model()->findAll('rec_id = :recId and item_code="RTS"',[":recId"=>$recId]);
+		$chargePercent = 0;
+
+		$reportArr = [];
+		$agentReArr = [];
+		foreach ($res as $key => $re) 
+		{
+			$p = ImParcel::model()->find(' ref = :ref ',[":ref"=>$re->ref]);
+			if(empty($p))
+			{
+				continue;
+			}
+			$re->imparcel = $p;
+			if(empty($re->imparcel->consol_id)||!in_array($re->imparcel->consol_id,$consolArr)||!in_array($re->id, $idArr)||!ImParcelService::checkNoneImParcelRTSInvoice($p))
+			{
+				continue;
+			}
+			$agentReArr[$re->imparcel->agent_id][]=$re;//get ArrRe To Consol, so that it can be dealed with together
+		}
+
+		foreach ($agentReArr as $k => $reArr) 
+		{
+			$report = [];
+			$shipment = $reArr[0]->imparcel;
+			if(empty($shipment))
+			{
+				continue;
+			}
+			$dpt_id = $shipment->ddpt_id;
+			$dpmt = Invoice::INVOICE_TYPE_IMPORT;
+			$to_id = $shipment->agent_id;
+			$currency = Invoice::CURRENCY_AUD;
+			$consol = $shipment->consol;
+			if(empty($consol))
+			{
+				continue;
+			}
+			$agentId = $k;
+			$awb = $consol->awb;
+			$items = [];
+			$tt = 0;
+			foreach ($reArr as $key => $re) 
+			{
+				$p =$re->imparcel;
+
+				$trs = [];
+				$invoices = ImParcelService::getImParcelRTSInvoice($p);
+				$agentId = $p->agent_id;
+				$rtsFee = ImParcelService::getRtsRate($agentId, $p);
+				$rtsScanDate = empty($p->mdata['rts_scan_date'])?"":$p->mdata['rts_scan_date'];
+				if($rtsFee>0)
+				{
+					$items[] = [empty($p->cref) ? $p->hbn : $p->cref, $p->ref, $rtsScanDate, 'Returned to Sender Receiving Fee', $rtsFee, $p->id];
+					$tt+=$rtsFee;
+				}
+			}
+
+			if(sizeof($items)>0)
+			{
+				$owner = Org::model()->findByPk($k);
+				$invoice = new Invoice();
+				$invoice->type = Invoice::INVOICE_TYPE_RTS_FEE; // for RTS scan fee invoice
+				$invoice->to_id = $k;
+				$invoice->man_id = 0; // in case manifest id means nothing
+				$invoice->dpt_id = Org::PCAE_DEPARTMENT_SYDNEY;
+				$invoice->dpmt = Invoice::DPMT_IMPORT;
+				$invoice->status = Invoice::INVOICE_STATUS_PENDING;
+				$invoice->date = date('Y-m-d');
+				$invoiceCurrency = 1;
+				$orgRate = OrgRate::model()->find('org_id = :oid AND type = 40', [':oid' => $k]);
+				if (!empty($orgRate)) {
+					$invoice->currency = $orgRate['currency'];
+				}
+				$chargeGST = !empty($owner->extra['incl_gst']);
+				$invoice->mdata['payterm'] = empty($owner->extra['payterm']) ? '2 days' : $owner->extra['payterm'] . ' days';
+				$invoice->due = Invoice::calcDue($invoice->date, $invoice->mdata['payterm']);
+				$invoice->total = $tt;
+				if ($chargeGST) {
+					$invoice->gst = $tt * 0.1;
+					// 2020-06-03 RTS Invoice Total not include GST
+					$invoice->total += $invoice->gst;
+				}
+				$invoice->save();
+
+				foreach($items as $itm){
+					$il = new InvLine;
+					$il->inv_id = $invoice->id;
+					$il->amount = $itm[4];
+					if ($chargeGST) {
+						$il->gst = $il->amount * 0.1;
+						// 2020-06-03 RTS InvLine Amount not include GST
+						$il->amount += $il->gst;
+					}
+					$il->model = 'ImParcel';
+					$il->fid = array_pop($itm);
+					$il->mdata['items'] = [$itm];
+					if ($il->amount > 0) {
+						$il->save();
+					}
+				}
+
+				foreach($reArr as $kk2 => $re)
+				{
+					$re->mdata["surcharge_inv_id"] = $invoice->id;
+					$re->update(['meta']);
+				}
+			}
+		}
+		return $invoice;
+	}
+
+	public static function generateUnknownSurchargeInvoice($recId,$charges = null,$ids = null,$disputeInvoiceDets= null)
+	{
+		$invoice = new Invoice();
+		$appName = Yii::app()->name;
+		$res = null;
+		$consolArr = [];
+		$idArr = [];
+		$chargesArr = explode(',', $charges);
+		$idArr = explode(',', $ids);
+		$disputeInvoiceDetsArr = explode(',', $disputeInvoiceDets);
+		$myChargesArr = [];
+		$myDetArr = [];
+		foreach ($idArr as $key => $value) {
+			$myChargesArr[$value] = $chargesArr[$key];// put the id and charges into one array for creating invoice
+			$myDetArr[$value] = $disputeInvoiceDetsArr[$key];
+			if(empty($value))
+			{
+				unset($idArr[$key]);
+				unset($myChargesArr[$value]);
+				unset($myDetArr[$value]);
+			}
+		}
+
+		$res = SiReconcileLine::model()->findAll(' id in ('.join(',',$idArr).')');
+		$chargePercent = 0;
+
+		$reportArr = [];
+		$agentReArr = [];
+		foreach ($res as $key => $re) 
+		{
+			$p = $re->imparcel;
+			if(empty($p)||empty($p->agent_id))
+			{
+				continue;
+			}
+
+			if(!empty($re->mdata['surcharge_inv_id']))
+			{
+				continue;
+			}
+
+			if(empty($agentReArr[$re->imparcel->agent_id][$re->imparcel->consol_id]))
+			{
+				$agentReArr[$re->imparcel->agent_id][$re->imparcel->consol_id] = [$re];
+			}else
+			{
+				$agentReArr[$re->imparcel->agent_id][$re->imparcel->consol_id][] = $re;// one agent could have many consol
+			}
+		}
+
+		foreach ($agentReArr as $agentId => $consols) 
+		{
+			foreach ($consols as $consolId => $reArr)
+			{
+				$report = [];
+				$pid = [];
+				$shipment = $reArr[0]->imparcel;
+				if(empty($shipment))
+				{
+					continue;
+				}
+				$dpt_id = $shipment->ddpt_id;
+				$dpmt = Invoice::INVOICE_TYPE_IMPORT;
+				$to_id = $shipment->agent_id;
+				$currency = Invoice::CURRENCY_AUD;
+				$consol = $shipment->consol;
+				if(empty($consol))
+				{
+					continue;
+				}
+
+				$awb = $consol->awb;
+				$items = [];
+				$tt = 0;
+				$model = new Invoice();
+				$model->mdata['pid'] = [];
+				$model->type = Invoice::INVOICE_TYPE_OTHERS;
+				$model->dpt_id = $dpt_id;
+				$model->dpmt = $dpmt;
+				$model->to_id = $to_id;
+				$model->currency = $currency;
+				$model->consol_id = $consolId;
+				$model->status = 1;
+				$model->date=date('Y-m-d');
+				$model->due=date('Y-m-d');
+				$model->save();
+
+				$includingGST = false;
+				if (isset($shipment->agent->extra['incl_gst']) && $shipment->agent->extra['incl_gst'] == 1) {
+					$includingGST = true;
+				}
+
+
+				foreach ($reArr as $key => $re)
+				{
+					$p =$re->imparcel;
+
+					$il = new InvLine;
+					$il->inv_id = $model->id;
+					$il->ccode = $re->item_code;
+					$il->det = $myDetArr[$re->id];
+					$il->amount = $myChargesArr[$re->id];
+					$gst = 0;
+					$il->qty = 1;
+					$il->fid = $consol->id;
+					$il->model = $consol->getType();
+					if($includingGST)
+					{
+						$gst = round($il->amount * 10 / 100, 2);
+						$il->tax = 'OUTPUT';
+					}else{
+						$gst = 0;
+						$il->tax = 'EXEMPTOUTPUT';
+					}
+					$il->amount += $gst;
+					$il->gst = $gst;
+
+					// linked invoice line with related console if needed
+					if (!empty($consol)) {
+						$il->fid = $consol->id;
+						$il->model = $consol->getType();
+					}
+
+					$il->save();
+					$re->mdata['surcharge_inv_line_id'] = $il->id;
+					$re->mdata['surcharge_inv_id'] = $il->inv_id;
+					$re->mdata['invoice_det'] = $myDetArr[$re->id];
+					$re->update(['meta']);
+					$pid[] ='pid'.$p->id;
+
+				}
+
+				$model = Invoice::model()->findByPk($il->inv_id);
+				if(!empty($model->id))
+				{
+					$model->getTotal();
+					$model->mdata['awb'] = $awb;
+					$model->mdata['name'] = $model->cust->name;
+					$model->mdata['address'] = $model->cust->getAddress();
+					$model->mdata['payterm'] = empty($model->cust->extra['payterm']) ? 'COD' : $model->cust->extra['payterm'] . ' days';
+					$model->mdata['ccode'] = InvLine::SURCHARGECCODE;
+					$model->mdata['pid'] = $pid;
+					$model->update(["total","gst","meta"]);
+				}
+
+
+			}
+			
+		}
+		return $invoice;
+	}
+
+	public function splitSiReconcileToDpmt($si)
+	{
+		Yii::app()->name = 'TLA';
+		$has = SiReconcileDpmt::model()->count('si_reconcile_id=:sid',[":sid"=>$si->id]);
+		if($has>0) return false;
+		//DPMT_IMPORT = 10;
+		//DPMT_EXPORT = 20;
+		//DPMT_AIRSEA = 30;
+		//DPMT_3PL = 40;
+		//DPMT_COURIER_SERVICE = 50;
+		$supplierInvoice  = $si->parent;
+		$lines = $supplierInvoice->lines;
+		$total = [Invoice::DPMT_IMPORT=>0,Invoice::DPMT_3PL=>0,Invoice::DPMT_COURIER_SERVICE=>0];
+		$gst = [Invoice::DPMT_IMPORT=>0,Invoice::DPMT_3PL=>0,Invoice::DPMT_COURIER_SERVICE=>0];
+		$total_ex_gst = [Invoice::DPMT_IMPORT=>0,Invoice::DPMT_3PL=>0,Invoice::DPMT_COURIER_SERVICE=>0];
+		foreach ($lines as $key => $line)
+		{
+			if(empty($line->model)||$line->model=='ImParcel')
+			{
+				$p = Shipment::model()->find('(hbn = :ref or ref = :ref) and status!=100',[":ref"=>$line->ref]);
+				if(!empty($p)&&!empty($p->consol)&&$p->consol->is3PLOnly())
+				{
+					$total[Invoice::DPMT_3PL]+= $line->amount;
+					$gst[Invoice::DPMT_3PL]+= $line->gst;
+					$total_ex_gst[Invoice::DPMT_3PL]+= $line->amount_ex_gst;
+				}elseif(!empty($p)&&$p->isTopCourierServiceDelivery(true))
+				{
+					$total[Invoice::DPMT_COURIER_SERVICE]+= $line->amount;
+					$gst[Invoice::DPMT_COURIER_SERVICE]+= $line->gst;
+					$total_ex_gst[Invoice::DPMT_COURIER_SERVICE]+= $line->amount_ex_gst;
+				}else
+				{
+					$total[Invoice::DPMT_IMPORT]+= $line->amount;
+					$gst[Invoice::DPMT_IMPORT]+= $line->gst;
+					$total_ex_gst[Invoice::DPMT_IMPORT]+= $line->amount_ex_gst;
+				}
+			}else
+			{
+				$glCode = empty($line->mdata['charge_code'])?"xx":$line->mdata['charge_code'];
+				$chargeCode = Chargecode::model()->find('code = :code',[":code"=>$glCode]);
+				if(empty($chargeCode))
+				{
+					$total[Invoice::DPMT_IMPORT]+= $line->amount;
+					$gst[Invoice::DPMT_IMPORT]+= $line->gst;
+					$total_ex_gst[Invoice::DPMT_IMPORT]+= $line->amount_ex_gst;
+				}else
+				{
+				    $total[$chargeCode->dpmt]+= $line->amount;
+					$gst[$chargeCode->dpmt]+= $line->gst;
+					$total_ex_gst[$chargeCode->dpmt]+= $line->amount_ex_gst;
+				}
+			}
+		}
+		foreach ($total as $key => $tot)
+		{
+			if($tot==0) continue;
+			$siDpmt = new SiReconcileDpmt();
+			$siDpmt->si_reconcile_id = $si->id;
+			$siDpmt->dpmt = $key;
+			$siDpmt->total = number_format($tot,4,'.','');
+			$siDpmt->total_gst = number_format($gst[$key],4,'.','');
+			$siDpmt->total_ex_gst = number_format($total_ex_gst[$key],4,'.','');
+			$siDpmt->status = $si->status;
+			$siDpmt->confirm_status = $si->confirm_status;
+			Yii::app()->name = 'TLA';
+			$siDpmt->save();
+		}
+
+		return true;
+	}
+
+	public static function getEizNeedDisputeLineId($siReconcileId,$siReconcileLineId = false)
+	{
+		$model = SiReconcile::model()->findByPk($siReconcileId);
+		$ids = [];
+		$surcharges = [];
+		if(!empty($siReconcileLineId))
+		{
+			$lines = SiReconcileLine::model()->findByPk($siReconcileLineId);
+			$lines = [$lines];
+		}else
+		{
+			$lines = $model->lines;
+		}
+		foreach ($lines as $key => $re)
+		{
+			$shipment = ImParcel::model()->find(' ref = :ref ',[":ref"=>$re->ref]);
+			if(empty($shipment))
+			{
+				continue;
+			}
+			if(ImParcelService::isEizToll($shipment))
+			{
+				$amount = 0;
+				$rates = SystemSetting::getSurchargeChargeRate(strtoupper('TOLLOS'));
+				$rate = null;
+				$amountRe =[];
+
+				if(!empty($re->mdata['package']))
+				{
+					$packages = $re->mdata['package'];
+				}else
+				{
+					$packages = $shipment->mdata['eiz']['package'];
+				}
+				if(empty($packages))
+				{
+					echo $re->ref;
+					continue;
+				}
+				foreach($packages as $key => $pack)
+				{
+					$qty = $pack['qty'];
+					$weight = $pack['weight'];
+					$length = $pack['length'];
+					$height = $pack['height'];
+					$width =  $pack['width'];
+					$bultWeight = ($length*$height*$width)*250/1000000;
+					$myRate = null;
+					foreach ($rates as $key => $rate)
+					{
+						if(($weight>=$rate[4]&&$weight<=$rate[5])||($bultWeight>=$rate[6]&&$bultWeight<=$rate[7]))
+						{
+							$myRate = $rate;
+							break;
+						}
+
+						if(($length>=$rate[2]&&$length<=$rate[3])||($height>=$rate[2]&&$height<=$rate[3])||($width>=$rate[2]&&$width<=$rate[3]))
+						{
+							$myRate = $rate;
+							break;
+						}
+					}
+
+					if(!empty($myRate))
+					{
+						$amount += $myRate[0]*$qty;
+					}
+				}
+			}else
+			{
+				$amount = 0;
+				$amountQty = 1;
+				$rates = SystemSetting::getSurchargeChargeRate(strtoupper('ALLIEDOS'));
+				$rates2 = SystemSetting::getSurchargeChargeRate(strtoupper('ALLIEDLEN'));
+				$rate = null;
+				$amountRe =[];
+				$allBultWeight = 0;
+				$allWeight = 0;
+				$allQty = 0;
+
+				if(!empty($re->mdata['package']))
+				{
+					$packages = $re->mdata['package'];
+				}else
+				{
+					$packages = $shipment->mdata['eiz']['package'];
+				}
+				if(empty($packages))
+				{
+					echo $re->ref;
+					continue;
+				}
+				foreach($packages as $key => $pack)
+				{
+					$qty = $pack['qty'];
+					$weight = $pack['weight'];
+					$length = $pack['length'];
+					$height = $pack['height'];
+					$width =  $pack['width'];
+					$bultWeight = ($length*$height*$width)*250/1000000;
+					$allWeight += $weight*$qty;
+					$allBultWeight += $bultWeight;
+					$allQty += $qty;
+				}
+				$myRate = null;
+				$myRate2 = null;
+				foreach ($rates as $key => $rate)
+				{
+					if(($allWeight>=$rate[4]&&$allWeight<=$rate[5])||($allBultWeight>=$rate[6]&&$allBultWeight<=$rate[7]))
+					{
+						$myRate = $rate;
+						break;
+					}
+				}
+
+				foreach ($rates2 as $key => $rate)
+				{
+					if(($length>=$rate[4]&&$length<=$rate[5])||($height>=$rate[4]&&$height<=$rate[5])||($width>=$rate[4]&&$width<=$rate[5]))
+					{
+						$myRate2 = $rate;
+						break;
+					}
+				}
+
+				if(!empty($myRate))
+				{
+					$amount += $myRate[0];
+				}
+
+				if(!empty($myRate2))
+				{
+					$amount += $myRate2[0];
+				}
+
+			}
+
+			
+			if($amount<=0)
+			{
+				continue;
+			}
+
+			$surchare = round($amount*1.139,2);
+			$extra = $re->value-$re->my_value;
+			if(abs($surchare-$extra)<1.5)
+			{
+				continue;
+			}
+			$ids[] = $re->id;
+			$surcharges[$re->id] = [$surchare,$extra,$extra-$surchare];
+		}
+		if(!empty($siReconcileLineId))
+		{
+			return empty($surcharges)?[0,0,0]:$surcharges[$siReconcileLineId];
+		}
+		return [$ids,$surcharges];
+	}
+
+	public function adjustSiReconcileRef($file)
+	{
+		$this->appName = Yii::app()->name;
+		$data = $this->getFileData($file);
+		$data = $data[0];
+		$header = $data[1];
+		unset($data[1]);
+		$errors= [];
+		//$errors = $this->funcAdjustSiReconcileRef($data,false);
+		if(empty($errors))
+		{
+			$errors = $this->funcAdjustSiReconcileRef($data,true);
+			if(empty($errors))
+			{
+				return ["done"=>true,'msg'=>'Success'.json_encode($errors)];
+			}else
+			{
+				return ["done"=>false,'msg'=>'Failure'.json_encode($errors)];
+			}
+
+
+		}else
+		{
+			return ["done"=>false,'msg'=>'Failure'.json_encode($errors)];
+		}
+		
+		return ["done"=>false,'msg'=>'Success'.json_encode($errors)];
+	}
+
+	public function importUnmanifestList($file)
+	{
+		$this->appName = Yii::app()->name;
+		$data = $this->getFileData($file);
+		$data = $data[0];
+		$header = $data[1];
+		unset($data[1]);
+		[$errors,$success] = $this->funcImportUnmanifestList($data,true);
+		if(empty($errors))
+		{
+			return ["done"=>false,'msg'=>'Success'.json_encode(array_merge($errors,$success))];
+		}else
+		{
+			return ["done"=>false,'msg'=>'Failure'.json_encode(array_merge($errors,$success))];
+		}
+
+	}
+
+	public function funcImportUnmanifestList($data,$isSave = false)
+	{
+		$errors = [];
+		$success = [];
+		$dataHandling = [];
+
+		foreach ($data as $k1 => $d)
+		{
+			if(empty(trim($d[1]))) continue;
+			$siL = SiReconcileLine::model()->find('ref =:ref and model="ImParcel"',[":ref"=>trim($d[1])]);
+			if(empty($siL))
+			{
+				$errors[] = "Line ".$k1.":not found ref in si reconcile ".$d[1];
+				continue;
+			}
+			$invLine = SiReconcileLine::getUnmanifestInvoiceLine($siL->ref);
+			if(!empty($invline))
+			{
+				$errors[] = "Line ".$k1.":unmanifest invoice is generated ".$d[1].":".$invline->invoice->no;
+				continue;
+			}
+
+			if(empty($siL->shipment))
+			{
+				$this->updateLine($siL,'refresh');
+			}
+
+			if(!empty($siL->imparcel))
+			{
+				if(empty($siL->imparcel->consol_id))
+				{
+					$errors[] = "Line ".$k1.":empty consol, put shipment into consol before generate".$d[1];
+					continue;
+				}else{
+					$dataHandling[$siL->imparcel->consol_id][$siL->imparcel->agent_id][$siL->imparcel->id] = $d;
+				}
+			}else
+			{
+				$errors[] = "Line ".$k1.":empty shipment ".$d[1];
+				continue;
+			}
+			
+		}
+
+		if(!empty($dataHandling))
+		{
+			foreach ($dataHandling as $consolId => $agentArr)
+			{
+				foreach ($agentArr as $agentId => $dataArr)
+				{
+					$consol = Consol::model()->findByPk($consolId);
+					$owner = Org::model()->findByPk($agentId);
+					$includingGST = false;
+					if (isset($owner->extra['incl_gst']) && $owner->extra['incl_gst'] == 1) {
+						$includingGST = true;
+					}
+					// if including GST we add GST
+					$totalGst = 0;
+
+					$inv = new Invoice;
+					$inv->type = Invoice::INVOICE_TYPE_OTHERS;
+					$inv->dpmt = $consol->is3PL()?Invoice::DPMT_3PL:Invoice::DPMT_IMPORT;
+					$inv->to_id = $agentId;
+					$inv->dpt_id = $consol->dpt_id; // default set Sydney as warehouse
+					$inv->ref = "";
+					$inv->currency = 1;
+					$inv->consol_id = $consol->id;
+					$inv->status = Invoice::INVOICE_STATUS_PENDING;
+					$inv->date = date('Y-m-d', strtotime($consol->created));
+					$inv->mdata['name'] = $owner->name;
+					$inv->mdata['address'] = $owner->getAddress();
+					$inv->mdata['payterm'] = empty($owner->extra['payterm']) ? '2 days' : $owner->extra['payterm'] . ' days';
+					$inv->due = Invoice::calcDue($inv->date, $inv->mdata['payterm']);
+					if(!$inv->save())
+					{
+						Log::log2file("3PL create Invoice".$consol->no."=>".json_encode($inv->getErrors()), "transaction_err_log", "transaction");
+						continue;
+					}
+
+					$items = [];
+					$tot = 0;
+					$inv->total = 0;
+					$inv->refresh();
+					if(empty($inv->id))
+					{
+						continue;
+					}
+
+					foreach ($dataArr as $shipmentId => $d) {
+						$il = new InvLine;
+						$il->inv_id = $inv->id;
+						$il->ccode = 'TLA SERVICE';
+						$il->det = 'Unmanifest '.$d[1];
+						$il->fid = $shipmentId;
+						$il->model = 'ImParcel'; // invoice connected with console directly
+						$il->amount = round($d[2] * 1000) / 1000;
+						$il->qty = 1;
+						if ($includingGST) {
+							$gst = round($il->amount * 10 / 100, 2);
+							$il->tax = 'OUTPUT';
+						} else {
+							$gst = 0;
+							$il->tax = 'EXEMPTOUTPUT';
+						}
+						$il->gst = $gst;
+						$il->amount += $il->gst;
+						$il->gst = number_format($il->gst, 2, '.', '');
+						$il->amount = number_format($il->amount, 2, '.', '');
+						$il->save();
+						$success[] = 'Unmanifest '.$d[1]." invoice generated:".$inv->no;
+					}
+				}
+
+
+				$inv->refresh();
+
+				$inv->getTotal();
+				$inv->save();
+			}
+		}
+		return [$errors,$success];
+	}
+
+
+	public function funcAdjustSiReconcileRef($data,$isSave = false)
+	{
+		$errors = [];
+		foreach ($data as $k1 => $d)
+		{
+			if(empty(trim($d[1]))) continue;
+			$siLs = SiReconcileLine::model()->findAll('ref =:ref and model="ImParcel" and fid = 0',[":ref"=>trim($d[1])]);
+			if(empty($siLs))
+			{
+				$errors[] = "Line ".$k1.":not found old ref ".$d[1];
+				continue;
+			}
+
+			foreach ($siLs as $k2 => $siL)
+			{
+				$p = ImParcel::model()->find("ref = :ref and status<100",[":ref"=>$d[2]]);
+				if(empty($p))
+				{
+					$errors[] = "Line ".$k1.":not found new ref ".$d[2];
+					break;
+				}else
+				{
+					if(empty($siL->mdata['oRef']))
+					{
+						$siL->mdata['oRef'] = $siL->ref;
+					}
+
+					if($isSave)
+					{
+						$siL->ref = $d[2];
+						$siL->fid = $p->id;
+						$siL->model = "ImParcel";
+						$siL->update(['fid','ref','model','meta']);
+
+						$this->updateLine($siL,"refresh");
+					}
+				}
+				
+			}
+		}
+		return $errors;
+	}
+
+	public static function handlingSingleSiReconcileSurchargeLine($re,$si,$orgFlexibleRateService,&$chargedList)
+	{
+		// 获取到这个shipment
+		$p = $re->imparcel;
+		$finalCodes = [];
+		if(empty($re->imparcel->shipmentCharge))
+		{
+			$re->imparcel->getChargeByChargecode('',false,null,true,false,true,false,true);
+		}
+
+		$amount = 0;
+		$total = 0;
+		$charged = 0;
+		$isCharge = false;
+		$isMulti = 0;
+		$times = 0;
+		$skip = false;
+		// 首先我们在re 里面 可以有的是item_code 以及 金额
+		// 现在我们首先从 item_code 以及 金额推算出 supplier 那边是按照哪个code 收我们钱的
+		[$flexibleSupplierCode,$isMulti,$times] = $orgFlexibleRateService->getRealSupplierCode($si->org_id,@$si->parent->mdata['template'],$re->item_code,$re->value);
+		if(!empty($flexibleSupplierCode))
+		{
+			//现在我们有了supplierCode 以后，我们要根据supplierCode 对应到shipment 的 chargecode 的code
+			$chargecodeSurchargeCode = $orgFlexibleRateService->getChargecodeSurchargeCode($p,$si->org_id,$flexibleSupplierCode);
+			if($chargecodeSurchargeCode==2)
+			{
+				return ["old",$total,$charged,$finalCodes,$isCharge];
+			}
+
+			if(!empty($flexibleSupplierCode))
+			{
+				// 现在我们有了chargecode的SurchargeCode，我们就要查看这个code的type 有没有收过钱，如果没有收过钱就要收，有收过就要看差价
+				[$isCharge,$total,$charged,$finalCodes,$skip] =  $orgFlexibleRateService->checkShipmentSurchargeInvoice($p,$chargecodeSurchargeCode,$chargedList,$isMulti,$times,$re);
+				if($isCharge)
+				{
+					//amount 就是 当前这个surchargecode 收多少钱，$charged 就是之前收了多少钱
+					$amount = $total-$charged;
+				}else
+				{
+					$amount = $total;
+				}
+
+			}else
+			{
+				$amount = $re->value;
+			}
+			
+		}else
+		{
+			$amount = $re->value;
+		}
+
+		if($charged>0)
+		{
+			$amount = $total-$charged;
+			$isCharge = true;
+		}
+		return [$amount,$total,$charged,$finalCodes,$isCharge,$skip]; 
+	}
+
+	public function generatePortChargeSiReconcile($consol,$data)
+	{
+		$supplierInvoiceId = 0;
+		$thisData = [[]];
+		$thisData[0][1][2] = $data['supplier_id'];
+		$thisData[0][2] = "";
+		$thisData[0][3][1] = "PORT CHARGES";
+		$thisData[0][3][2] = $consol->no;
+		$thisData[0][3][3] = @$consol->container_no;
+		$thisData[0][3][4] = 1;
+		$thisData[0][3][5] = $data['price'];
+		$thisData[0][3][6] = '91033';
+		$thisData[0][3][7] = $data['gst'];
+		$thisData[0][3][8] = $data['price'];
+		$thisData[0][3][9] = $data['invoice_no'];
+		$thisData[0][3][10] = $data['invoice_date'];
+		$supplierInvoiceArr = [];
+		$supplierInvoiceArrLines =[];
+		$this->prepareConsolManualMulti($thisData,$supplierInvoiceArrLines,$supplierInvoiceArr,SiReconcile::TYPE_MANUAL);
+		if(!empty($this->errors))
+		{
+			return $this->getFailResult(join(',',$this->errors));
+		}
+
+
+		$transaction = Yii::app()->db_tla->beginTransaction();
+
+		try 
+		{
+			foreach ($supplierInvoiceArr as $key => $value) {
+				
+				$value->mdata['template'] = 'consol_manual_multi';
+				$value->save();
+				$supplierInvoiceId = $value->id;
+				foreach ($supplierInvoiceArrLines[$value->inv_no] as $key2 => $v2) {
+					$v2->inv_id = $value->id;
+					$v2->save();
+				}
+			}
+			$result = $this->saveMultiManualSupplierInvoiceToSiReconcile($supplierInvoiceArr,$supplierInvoiceArrLines);
+			if($result===true)
+			{
+				$transaction->commit();
+			}
+			$consol->process->mdata['port_charge_ge'] = 1;
+			$consol->process->update(['meta']);
+			SeaConsolService::updatePortChargeProcessStatus($consol);
+		} catch (Exception $e) {
+			print_r($e->getMessage());
+			$transaction->rollback();
+		}
+
+		if($supplierInvoiceId>0)
+		{
+			$consol->process->addOperationLog("Generate Port Charge");
+			$si = SiReconcile::model()->find('supplier_invoice_id = :sid',[":sid"=>$supplierInvoiceId]);
+			$reconcileService = new ReconcileService();
+			$errorChecking = $this->manualErrorChecking([$si]);
+			$LinkgBilling = $reconcileService->manualLinkingBilling([$si]);
+			$si->toPay(true);
+			$bi = Billing::model()->find("billing_cref=:cref and status=:status",[":cref"=>$si->parent->inv_no,":status"=>Billing::BILLING_STATUS_POSTED]);
+			BillingService::submitArrange($bi->id,$bi->total,true);
+		}
+
+		return $this->getSuccessResult();
+	}
+
+	private function prepareAupostWeightCheck($data,&$invoiceLines,&$invoice)
+	{
+		$rate = $data;
+		$head = $rate[1];
+		$weightIndex = 0;
+		$consignmentIndex = 0;
+		$gvChargesIndex = 0;
+		$mhpIndex = 0;
+		$fuelIndex = 0;
+		unset($rate[1]);
+		foreach ($rate as $key => $d) 
+		{
+			if(empty($d[11])) continue;
+			$itemCode = 'item';
+
+			$supplierInvoiceLineItem = new SupplierInvoiceLine();
+			$supplierInvoiceLineItem->ref = trim($d[11]);
+			$supplierInvoiceLineItem->item_code = $itemCode;
+			$supplierInvoiceLineItem->postcode = '';
+			$supplierInvoiceLineItem->det = "";
+			$supplierInvoiceLineItem->courier_cubic = 0;
+			$supplierInvoiceLineItem->weight = $d[17];
+			$supplierInvoiceLineItem->qty = 1;
+			$supplierInvoiceLineItem->cdeadwt = number_format(floatval($d[17]), 4, '.', '');
+
+
+			$supplierInvoiceLineItem->amount_ex_gst = number_format(floatval($d[19]), 4, '.', '');
+			$supplierInvoiceLineItem->gst = number_format($supplierInvoiceLineItem->amount_ex_gst*0.1, 4, '.', '');
+			$supplierInvoiceLineItem->amount = number_format(floatval($supplierInvoiceLineItem->amount_ex_gst+$supplierInvoiceLineItem->gst), 4, '.', '');
+
+
+			$invoiceLines[] = $supplierInvoiceLineItem;
+			$invoice->total+= $supplierInvoiceLineItem->amount;
+			$invoice->gst+= $supplierInvoiceLineItem->gst;
+			$invoice->total_ex_gst+= $supplierInvoiceLineItem->amount_ex_gst;
+
+		}
+
+		$invoice->total = number_format($invoice->total, 4, '.', '');
+		$invoice->gst = number_format($invoice->gst, 4, '.', '');
+		$invoice->total_ex_gst = number_format($invoice->total_ex_gst, 4, '.', '');
+	}
+
+}
+?>

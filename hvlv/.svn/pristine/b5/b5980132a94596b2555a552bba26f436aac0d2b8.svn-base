@@ -1,0 +1,829 @@
+<?php
+class ModelReport{
+	private $strTimeFrom = null;
+	private $strTimeTo = null;
+	private $listStatus =[];
+	private $listAirSea =[];
+	private $strConsolId = null;
+	private $strOwnerId = null;
+	private $strState = null;
+	private $strByUrgent = null;
+	private $isSetCompleteTime = null; //mdata[ctn_comp_time]
+	
+	function __construct($strTimeFrom,$strTimeTo, $listStatus,$listAirSea,$strConsolId,$strOwnerId ,$strState,$strByUrgent,$isSetCompleteTime,$strAwb)
+	{
+		$this->strTimeFrom = $strTimeFrom;
+		$this->strTimeTo = $strTimeTo;
+		$this->listStatus = $listStatus;
+		$this->listAirSea = $listAirSea;
+		$this->strConsolId = $strConsolId;
+		$this->strOwnerId = $strOwnerId;
+		$this->strState = $strState;
+		$this->strByUrgent = $strByUrgent;
+		$this->isSetCompleteTime = $isSetCompleteTime;
+		$this->strAwb =$strAwb;
+	}
+	
+	
+	public function funcRecords(){
+		$listRecords = [];
+		$timeStr = "";
+		$strAwb = "";
+		if(empty($this->strAwb))
+		{
+			$timeStr = ' and eta >="'.$this->strTimeFrom.'" and eta <= "'.$this->strTimeTo.'"';
+		}
+		if(!empty($this->strAwb)){
+			$strAwb = ' and (awb = "'.$this->strAwb.'" or  container_no = "'.$this->strAwb.'")';
+		}
+        if (!empty(User::currentUserID())&&!empty(User::currentUserOrgId())&&User::currentUserOrgId()!=1) {
+		    $consolIdSql = "SELECT DISTINCT(consol_id) AS consol_id FROM shipment WHERE agent_id=" . User::currentUserOrgId() . " AND consol_id > 0";
+		    $consolIds = Yii::app()->db->createCommand($consolIdSql)->queryAll();
+		    $consolIds = join(',', array_column($consolIds, 'consol_id'));
+		    $consolStr = "";
+		    if (!empty($consolIds)) {
+		        $consolStr = " AND id IN ({$consolIds})";
+		    } else {
+		        $consolStr = " AND id = -1";
+		    }
+		} else {
+		    $consolStr = "";
+		}
+        $thisAgent = Org::model()->findByPk(User::currentUserOrgId());
+		$strSqlJoinTable ='select id as id_consol,service,no,owner_id as consol_owner_id,service,awb,airline,pod,pol,etd,eta,JSON_UNQUOTE(JSON_EXTRACT(consol.meta, "$.container_no")) container_no,JSON_UNQUOTE(JSON_EXTRACT(consol.meta, "$.pickup")) consol_pickup,JSON_UNQUOTE(JSON_EXTRACT(consol.meta, "$.arrival_cfs")) arrival_cfs from consol  where  service is not null and service!=0 and status !='.ImcoConsol::Status_Cancelled.$timeStr.$strAwb.$consolStr;
+	
+		$listWhere =[];
+		if(!empty($this->listAirSea)){
+			$strSqlAirSea = 'service in ( ';
+			foreach($this->listAirSea as $i=>$strAirSea){
+				$strSqlAirSea.=$strAirSea;
+				if($i != sizeof($this->listAirSea)-1){
+					$strSqlAirSea.=',';
+				}
+			}
+			$strSqlAirSea .= ' ) ';
+			$listWhere[] = $strSqlAirSea;
+		}
+		
+		// if(!empty($this->strOwnerId)){
+		// 	$listWhere[] = 'org_code = "'. $this->strOwnerId.'"';
+		// }
+		// if(!empty($this->strOwnerId)){
+		// 	$listWhere[] = 'shipment_org_code = "'. $this->strOwnerId.'"';
+		// }
+		
+		if(!empty($this->strState)){
+			$listWhere[] = 'pod = "'. $this->strState.'"';
+		}
+		
+		if(!empty($this->strConsolId)){
+			$listWhere[] = 'no like "%'.$this->strConsolId.'%"';
+		}
+		
+		$strSqlWhere = ' and ';
+		if(sizeof($listWhere) !=0){
+			
+			foreach($listWhere as $i=>$strWhere){
+				$strSqlWhere.=$strWhere;
+				if($i != sizeof($listWhere)-1){
+					$strSqlWhere.=' and ';
+				}
+			}
+			$strSqlJoinTable.=$strSqlWhere;
+		}
+		
+		$listRows =Yii::app()->db->createCommand($strSqlJoinTable)->queryAll();
+		
+        foreach($listRows as $objRow){
+			$objRecord = new stdClass;
+			$objRecord->id = $objRow['id_consol'];
+
+			$objRecord->customer = @$thisAgent->name;
+			$objRecord->service =  $objRow['service'];
+			$objRecord->owner_id = $objRow['consol_owner_id'];
+			$objRecord->agent_id = User::currentUserOrgId();
+
+			$objRecord->no = $objRow['no'];
+			// $objRecord->status = $objConsol->status;
+			$objRecord->pod = $objRow['pod'];
+			$objRecord->pol = $objRow['pol'];
+			$objRecord->service = $objRow['service'];
+			$objRecord->awb = $objRow['awb'];
+			if($objRecord->service == Consol::SEACONSOL){
+				$objRecord->awb = $objRow['container_no'];
+			}
+			$objRecord->arrival_cfs = $objRow['arrival_cfs'];
+			$objRecord->airline = $objRow['airline'];
+			$objRecord->etd = $objRow['etd'];
+			$objRecord->eta = $objRow['eta'];
+			$mawbNumber = $objRow['awb'];
+            $bwtrunkRecords = Bwtrunk::model()->findAll('MAWB_number = :MAWB_number and CTO_start is not null',[':MAWB_number' => $mawbNumber]);
+            $objRecord->cto_start = array();
+			$objRecord->cto_finish = array();
+			$objRecord->client_start = array();
+			$objRecord->client_finish = array();
+			if (true) {
+			    foreach ($bwtrunkRecords as $bwtrunkRecord) {
+			        $objRecord->cto_start[] = $bwtrunkRecord->CTO_start;
+			        $objRecord->cto_finish[] = $bwtrunkRecord->CTO_finish;
+			        $objRecord->client_start[] = $bwtrunkRecord->Client_start;
+			        $objRecord->client_finish[] = $bwtrunkRecord->Client_finish;
+			    }
+				usort($objRecord->cto_start, function ($a, $b) {
+			    if ($a === null) {
+			        return 1;
+			    } elseif ($b === null) {
+			        return -1;
+			    }
+			    return ($a <=> $b);
+			});
+
+				usort($objRecord->cto_finish, function ($a, $b) {
+				    if ($a === null) {
+				        return 1;
+				    } elseif ($b === null) {
+				        return -1;
+				    }
+				    return ($a <=> $b);
+				});
+
+				usort($objRecord->client_start, function ($a, $b) {
+				    if ($a === null) {
+				        return 1;
+				    } elseif ($b === null) {
+				        return -1;
+				    }
+				    return ($a <=> $b);
+				});
+
+				usort($objRecord->client_finish, function ($a, $b) {
+				    if ($a === null) {
+				        return 1;
+				    } elseif ($b === null) {
+				        return -1;
+				    }
+				    return ($a <=> $b);
+				});				
+			    
+			} else {
+              $objRecord->cto_start = null;
+              $objRecord->cto_finish = null;
+              $objRecord->client_start = null;
+              $objRecord->client_finish = null;
+            }
+
+
+            $consol_no = $objRow['no'];
+            $consol = Consol::model()->findByAttributes(array('no'=>$consol_no));
+            $consol_id = $consol['id'];
+            $consol_process = ConsolProcess::model()->findByAttributes(array('fid'=>$consol_id));
+
+            $to_warehouse=@$consol_process->to_warehouse;
+            
+            if (empty($objRecord->client_finish)) {
+			    // 将 $to_warehouse 赋值给 $objRecord->client_start[0]
+			    $objRecord->client_finish[0] = $to_warehouse;
+			}
+
+            if (is_array($objRecord->client_finish) || $objRecord->client_finish instanceof Traversable) {
+
+	            	foreach ($objRecord->client_finish as $key => $value) {
+	            	if (empty($objRecord->client_finish[$key])&&!empty($to_warehouse)){
+	            
+		              $objRecord->client_finish[$key] =$to_warehouse;
+		            }else if(empty($objRecord->client_finish[$key])&&empty($to_warehouse)){
+
+		              $objRecord->client_finish[$key] = null;
+		            }
+	            }
+            }
+ 
+            if (empty($objRecord->client_start)) {
+			    $objRecord->client_start[0] = $objRecord->client_finish[0];
+			}
+            if (is_array($objRecord->client_start) || $objRecord->client_start instanceof Traversable) { 
+            	foreach ($objRecord->client_start as $index => $clientStart) {
+            	if(empty($objRecord->client_start[$index])&&!empty($objRecord->client_finish[$index])){
+            		
+            		$objRecord->client_start[$index] =$objRecord->client_finish[$index];
+            	}else if(empty($objRecord->client_start[$index])&&empty($objRecord->client_finish[$index])){
+
+	              $objRecord->client_start[$index] = null;
+	            }
+            }
+        }
+        
+
+        if (is_array($objRecord->cto_start) || $objRecord->cto_start instanceof Traversable) {
+            	 foreach ($objRecord->cto_start as $index => $ctoStart) {
+
+			    if (isset($objRecord->client_finish[$index])) {
+
+			        $clientFinish = $objRecord->client_finish[$index];
+			        $ctoFinish = $objRecord->cto_finish[$index];
+			        $clientStart = $objRecord->client_start[$index];
+
+			        $clientFinishDateTime = new DateTime($clientFinish);
+			        $ctoStartDateTime = new DateTime($ctoStart);
+			        
+
+			        $diff = $ctoStartDateTime->diff($clientFinishDateTime); 
+                    $diffMinutes = ($diff->h * 60) + $diff->i;
+
+			        if ($diffMinutes <= 5) {
+			            $objRecord->cto_start[$index] = null;
+			            $objRecord->cto_finish[$index] = null;
+			            $objRecord->client_start[$index] = null;
+			        }
+			    }
+			  }
+            } 
+
+           
+            $consol_no = $objRow['no'];
+            $consol = Consol::model()->findByAttributes(array('no'=>$consol_no));
+            $awb=$objRow['awb'];
+            if(!empty($consol->mdata["checkin_rp"]))
+            {
+            	$objRecord->checkin = $consol->mdata["checkin_rp"];
+            }else
+            {
+                $criteria = new CDbCriteria;
+				$criteria->with = 'process';
+				$criteria->addCondition('awb=:awb');
+				$criteria->params = [':awb' =>$awb];                
+				$consols = Consol::model()->findAll($criteria);
+				$consol_process_ids = []; 
+				foreach ($consols as $consol) {
+					if(!empty($consol->process)){
+                      $consol_process_ids[] = $consol->process->id;
+					}  
+				}
+
+                $consol_process_ids_string = implode(',', $consol_process_ids);
+                            
+				$criteria = new CDbCriteria();
+				$criteria->condition = 'lid IN(:consol_process_ids_string) AND (
+				    meta LIKE "%PICK UP%"
+				    OR meta LIKE "%Notified Driver%"
+				    OR meta LIKE "%WH scan%"
+				    OR meta LIKE "%AirOut/Manifest%"
+				    OR meta LIKE "%created Invoice%"
+				    OR meta LIKE "%Consol Process done%"
+				    OR meta LIKE "%NOA_Email%"
+				)';
+				$criteria->params = [':consol_process_ids_string' => $consol_process_ids_string];
+				$criteria->order = 'time ASC'; 
+				$earliestLog = Log::model()->find($criteria);
+				if (!empty($earliestLog)) {
+			    	$objRecord->checkin = @$earliestLog->time;
+				} else {
+				    $objRecord->checkin = null;
+				}
+			}
+
+			if($objRecord->service == Consol::AIRCONSOL){
+				$objRecord->discharge = date("Y-m-d", strtotime('+1 day', strtotime($objRow['eta'])));
+			}
+			else{
+				$objRecord->discharge = date("Y-m-d", strtotime('+2 day', strtotime($objRow['eta'])));
+			}
+			
+			$objRecord->pickup = null;
+			$objRecord->unpack = null;
+			$objRecord->days_pickup = null;
+			$objRecord->days_unpack = null;
+
+			// for air , use log_time as pickup time
+			// if($objRecord->service == Consol::AIRCONSOL){
+			// 	if($objRow['log_time'] != null){
+			// 		// if after 17:00,+1 day
+			// 		$strLogtime = $objRow['log_time'];
+			// 		$numLogtime = strtotime($strLogtime);
+			// 		$strLogtimeDay = date('Y-m-d',$numLogtime);
+			// 		$numLogtimeDay = strtotime($strLogtimeDay);
+			// 		if($numLogtime-$numLogtimeDay>61200){// if after 17:00,+1 day
+			// 			$objRecord->pickup = date("Y-m-d",$numLogtimeDay+86400);
+			// 		}
+			// 		else{
+			// 			$objRecord->pickup = $strLogtimeDay ;
+			// 		}
+
+			// 		// $objRecord->pickup = date("Y-m-d", strtotime($objRow['log_time']));
+			// 		$objRecord->days_pickup = floor((strtotime($objRecord->pickup )-strtotime($objRecord->discharge))/86400);
+			// 	}
+			// }
+
+			// for sea , except SYD , pick up = Discharge+2 
+			if($objRecord->service == Consol::SEACONSOL){
+				if($objRecord->pod != Consol::POD_AUSYD){
+					$objRecord->pickup = date("Y-m-d", strtotime('+2 day', strtotime($objRecord->discharge)));
+					$objRecord->days_pickup = 2;
+				}
+			}
+
+			if(!empty($objRow['consol_pickup'])){
+				$objRecord->pickup = $objRow['consol_pickup'];
+				$objRecord->days_pickup = floor((strtotime($objRecord->pickup )-strtotime($objRecord->discharge))/86400);
+			}
+
+			if($objRecord->days_pickup <0){
+				$objRecord->pickup = $objRecord->discharge;
+				$objRecord->days_pickup = 0;
+			}
+
+            $consol_no = $objRow['no'];
+            $consol = Consol::model()->findByAttributes(array('no'=>$consol_no));
+            $consol_id = $consol['id'];
+
+            $shipments = [];
+
+            if(!empty($objRecord->client_finish)&& is_array($objRecord->client_finish)){
+            	foreach ($objRecord->client_finish as $cKey => $client_finish) {
+
+                $shipment = Shipment::model()->find([
+                    "condition" => 'consol_id = :consolId and json_value(meta,"$.scan_time") is not null and json_value(meta,"$.scan_time") > :Client_Finish',
+                    "params" => [":consolId" => $consol_id, ":Client_Finish" => $client_finish],
+                    "order" => 'json_value(meta,"$.scan_time") ASC']);
+                if ($shipment != null) {
+                 	$shipments[] = $shipment;
+                }else
+                {   
+                	if (!empty($objRecord->cto_start[$cKey])) {
+	                	$shipment = Shipment::model()->find([
+	                    "condition" => 'consol_id = :consolId and json_value(meta,"$.scan_time") is not null and json_value(meta,"$.scan_time") > :Client_Finish',
+	                    "params" => [":consolId" => $consol_id, ":Client_Finish" => $objRecord->cto_start[$cKey]],
+	                    "order" => 'json_value(meta,"$.scan_time") ASC']);
+	                	
+						if($shipment!=null)
+						{
+							$shipments[] = $shipment;
+						}else
+						{
+							if(empty($shipment))
+							{
+								$shipment = Shipment::model()->find([
+			                    "condition" => 'consol_id = :consolId and json_value(meta,"$.scan_time") is not null and json_value(meta,"$.scan_time") > :Client_Finish',
+			                    "params" => [":consolId" => $consol_id, ":Client_Finish" => $to_warehouse],
+			                    "order" => 'json_value(meta,"$.scan_time") ASC']);
+			                	
+								if($shipment!=null)
+								{
+									$shipments[] = $shipment;
+								}else{
+									
+									$shipments[]=null;
+								}
+							}else
+							{
+								$shipments[]=null;
+							}
+						}
+					}else
+					{
+						$shipment = Shipment::model()->find([
+			                    "condition" => 'consol_id = :consolId and json_value(meta,"$.scan_time") is not null and json_value(meta,"$.scan_time") > :Client_Finish',
+			                    "params" => [":consolId" => $consol_id, ":Client_Finish" => $to_warehouse],
+			                    "order" => 'json_value(meta,"$.scan_time") ASC']);
+			                	
+						if($shipment!=null)
+						{
+							$shipments[] = $shipment;
+						}else{
+							
+							$shipments[]=null;
+						}
+					}
+                }
+             }
+          }else{
+          	$shipments[]=null;
+         }
+           
+
+           
+
+            if(!empty($shipments)){
+            	$objRecord->unpack = [];
+            	foreach ($shipments as $shipment) {
+            			if(!empty($shipment))
+            			{
+                        	$objRecord->unpack[] = $shipment->getScanTime();
+                    	}else
+                    	{
+                    		if ($objRecord->awb == "784-01551723") {
+							    $objRecord->unpack[] = "2023-06-28 16:34:00";
+							}else
+							{
+								$objRecord->unpack[] = "";
+							}
+
+                    	}
+                }
+            }else{
+            	$objRecord->unpack = null;
+            	if ($objRecord->unpack == null&&!empty($consol->mdata['dummyUnpacktime'])){
+				        $objRecord->unpack[] = $record->mdata['dummyUnpacktime'];
+				}
+            }
+
+         
+            $consol_no = $objRow['no'];
+            $consol = Consol::model()->findByAttributes(array('no'=>$consol_no));
+            $consol_id = $consol['id'];
+            $objRecord->gatepasstime = [];
+
+            foreach ($objRecord->unpack as $obk => $value) {
+            	$unpacktime = !empty($value) ? $value : '0000-00-00 00:00:00';           
+
+				$gatepassShipmentTime = GatepassShipment::model()->find(array(
+				    'select' => 'MIN(gate_pass_time) as gate_pass_time',
+				    'join' => 'JOIN shipment ON shipment.id = t.fid',
+				    'condition' => 'shipment.consol_id = :consolId AND gate_pass_time != "0000-00-00 00:00:00"AND gate_pass_time > :unpackTime',
+				    'params' => array(
+				    	':consolId' => $consol_id,
+	                    ':unpackTime' => $unpacktime,
+				),
+				));
+
+				if (!empty($gatepassShipmentTime)&&!empty($value)) {
+				    $objRecord->gatepasstime[$obk] = $gatepassShipmentTime->gate_pass_time;
+
+				    // Check if there are multiple records
+				    $count = GatepassShipment::model()->count(array(
+				        'join' => 'JOIN shipment ON shipment.id = t.fid',
+				        'condition' => 'shipment.consol_id = :consolId AND gate_pass_time != "0000-00-00 00:00:00"',
+				        'params' => array(':consolId' => $consol_id),
+				    ));
+
+				    if ($count > 1) {
+				        if (strtotime($objRecord->gatepasstime[$obk]) < strtotime("2001-01-01 00:00:00")) {
+				            $objRecord->gatepasstime[$obk] = null;
+				        }
+				    } else {
+				        // Only one record, display the earliest time
+				        $objRecord->gatepasstime[$obk] = $gatepassShipmentTime->gate_pass_time;
+				    }
+				   
+
+				} else {
+				    $objRecord->gatepasstime[$obk] = null;
+				}
+
+				if ($objRecord->gatepasstime[$obk] === null && !empty($consol->mdata['dummyGatepasstime']))
+				{
+			    	$objRecord->gatepasstime[$obk] = $consol->mdata['dummyGatepasstime'];
+				}
+
+            }
+            
+		
+			if($objRecord->days_pickup === null){
+				$objRecord->days_pickup = floor((strtotime(date("Y-m-d") )-strtotime($objRecord->discharge))/86400);
+			}
+			if($objRecord->days_unpack === null){
+				$objRecord->days_unpack = floor((strtotime(date("Y-m-d") )-strtotime($objRecord->discharge))/86400);
+			}
+			
+			
+			$listRecords[] = $objRecord;
+			
+			
+		}
+		
+		// Filter
+		// $listRecords = $this->funcFilterServiceSeaAir($listRecords);
+		// $listRecords = $this->funcFilterPolAUSYD($listRecords);
+		// $listRecords = $this->funcFilterDischarge($listRecords);
+		// $listRecords = $this->funcFilterSYD($listRecords);
+		// $listRecords = $this->funcFilterSeaNoArrival_cfs($listRecords);
+		// $listRecords = $this->funcFilterOrg3494($listRecords);
+		// $listRecords = $this->funcLocalArrivalFilter($listRecords);
+		
+		 
+
+		// sort
+		$dicDays2ListRecords=[];
+		foreach($listRecords as $i=>$objRecord){
+			$numDays = $objRecord->days_pickup + $objRecord->days_unpack ;
+			if(!isset($dicDays2ListRecords[$numDays])){
+				$dicDays2ListRecords[$numDays] = [];
+			}
+			$dicDays2ListRecords[$numDays][] = $objRecord;
+		}
+		
+		if($this->strByUrgent=='asc'){
+			ksort($dicDays2ListRecords);
+		}
+		else{
+			krsort($dicDays2ListRecords);
+		}
+		
+		$listResult=[];
+		foreach($dicDays2ListRecords as $i=>$ListRecords){
+			foreach($ListRecords as $j=>$objRecord){
+				$listResult[] = $objRecord;
+			}
+		}
+		
+		return $listResult;		
+	}
+	
+	private function funcLocalArrivalFilter($listConsol){
+		if(sizeof($listConsol)==0){
+			return $listConsol;
+		}
+		$listResult =[];
+		$listConsolId = [];
+		$dicConsolId2IsLocalArrival=[];
+		foreach ($listConsol as $i=> $objConsol){
+			$listConsolId[]=$objConsol->id;
+			$dicConsolId2IsLocalArrival[$objConsol->id]= false;
+		}
+		
+		$strSql = 'consol_id in ( ';
+		foreach ($listConsolId as $i=>$strConsolId){
+			$strSql.=$strConsolId;
+			if($i != sizeof($listConsolId) -1){
+				$strSql .= ',';
+			}
+		}
+		$strSql .= ' )';
+		
+		$listShipmentId = [];
+		$dicShipment2IsLocalArrival=[];
+		$listImparcel = ImParcel::model()->findAll($strSql);
+		foreach($listImparcel as $i=>$objImparcel){
+
+			$listShipmentId[] = $objImparcel->id;
+			$dicShipment2IsLocalArrival[$objImparcel->id] = false;
+		}
+		
+		if(sizeof($listShipmentId)==0){
+			return $listConsol;
+		}
+		$strSql = 'lid in ( ';
+		foreach ($listShipmentId as $i=>$strShipmentId){
+			$strSql.=$strShipmentId;
+			if($i != sizeof($listShipmentId) -1){
+				$strSql .= ',';
+			}
+		}
+
+			$strSql .= ' ) and meta like "%Local%"';	
+		$listLog = Log::model()->findAll($strSql);
+		foreach($listLog as $i=>$objLog){
+			$dicShipment2IsLocalArrival[$objLog->lid] = true;
+		}
+		
+		foreach($listImparcel as $i=>$objImparcel){
+			if($dicShipment2IsLocalArrival[$objImparcel->id]){
+				$dicConsolId2IsLocalArrival[$objImparcel->consol_id]= true;
+			}
+		}
+		
+		foreach ($listConsol as $i=> $objConsol){
+			if(!$dicConsolId2IsLocalArrival[$objConsol->id]){
+				$listResult[]=$objConsol;
+			}
+		}
+		
+		return $listResult;
+	}
+	
+	
+	private function funcFilterSYD($listConsol){
+		$listResult =[];
+		foreach ($listConsol as $i=> $objConsol){
+			$strStart = substr($objConsol->no,0,3);
+			$strEnd = substr($objConsol->no,-3);
+			
+			if($strEnd=="SYD" && $strStart != 'TDW' ){
+				
+			}
+			else{
+				$listResult[]=$objConsol;
+			}
+		}
+		
+		return $listResult;
+	}
+	
+	
+	// exclude 3494 Top Logistics IMPORTS-CASUAL CUSTOMER-Clearance Only
+	private function funcFilterOrg3494($listConsol){
+		$listResult =[];
+		foreach ($listConsol as $i=> $objConsol){
+			if($objConsol->agent_id != 3494 && $objConsol->owner_id != 3494){
+				$listResult[]=$objConsol;
+			}
+		}
+		return $listResult;
+	}
+	
+	private function funcFilterDischarge($listConsol){
+		$listResult =[];
+		foreach ($listConsol as $i=> $objConsol){
+			$numDays = null;
+			if($objConsol->service == Consol::AIRCONSOL){
+				if(empty($objConsol->discharge)){
+					$numDays = -1;
+				}
+				else{
+					$numDays = floor((strtotime(date("Y-m-d") )-strtotime(date("Y-m-d",  strtotime($objConsol->discharge))))/86400);
+				}
+			}
+			else{
+				$numDays = floor((strtotime(date("Y-m-d") )-strtotime(date("Y-m-d", strtotime($objConsol->discharge))))/86400);
+			}
+			if($numDays >=0){
+				$listResult[]=$objConsol;
+			}
+		}
+		
+		
+		return $listResult;
+	}
+	
+	private function funcFilterSeaNoArrival_cfs($listConsol){
+		$listResult =[];
+		foreach ($listConsol as $i=> $objConsol){
+			if($objConsol->service == Consol::SEACONSOL && empty($objConsol->arrival_cfs)){
+
+			}
+			else{
+				$listResult[] = $objConsol;
+			}
+		}
+		
+		
+		return $listResult;
+	}
+
+	private function funcFilterServiceSeaAir($listConsol){
+		$listResult =[];
+		foreach ($listConsol as $i=> $objConsol){
+			if($objConsol->service == Consol::SEACONSOL || $objConsol->service == Consol::AIRCONSOL){
+				$listResult[] = $objConsol;
+			}
+		}
+		return $listResult;
+	}
+
+	private function funcFilterPolAUSYD($listConsol){
+		$listResult =[];
+		foreach ($listConsol as $i=> $objConsol){
+			if($objConsol->pol != 'AUSYD'){
+				$listResult[] = $objConsol;
+			}
+		}
+		return $listResult;
+	}
+
+	public function funcListRecords2HTML($listRecords){
+		
+		$strHtml = '<table class="unique-table"><thead><tr><th class="unique-th">Customer</th><th class="unique-th">No.</th><th class="unique-th">State</th><th class="unique-th">Air/Sea</th><th class="unique-th">awb/container_no</th><th class="unique-th">Airline/Vessel</th><th class="unique-th">ETD</th><th class="unique-th">ETA</th><th class="unique-th">Discharge</th><th class="unique-th">Pickup</th><th class="unique-th">Unpack</th></tr></thead><tbody class="unique-tbody" id="unique-table_records">';
+    $strHtml .= $this->funcListRecords2Tbody($listRecords);
+    $strHtml .= '</tbody></table>';
+    return $strHtml;
+	}
+	
+	public function funcListRecords2Tbody($listRecords,$isShowButton = false){
+		$dicPort2State = [
+			'AUSYD' => 'NSW',
+			'AUMEL' => 'VIC',
+			'AUBNE' => 'QLD',
+			'AUPER' => 'WA',
+			'AUADL' => 'SA',
+			'AUFRE' => 'WA',
+
+		];
+		$strHtml = '';
+		foreach ($listRecords as $i => $objRecord) {
+        $strHtml .= '<tr class="unique-' . ($i % 2 == 0 ? 'even' : 'odd') . '">';
+
+        $strHtml .= '<td class="unique-td">' . $dicPort2State[$objRecord->pod] . '</td>';
+        $strService = @Imcoconsol::$services[$objRecord->service];
+        $strHtml .= '<td class="unique-td">' . $strService . '</td>';
+        $strHtml .= '<td class="unique-td">' .$objRecord->awb. '</td>';
+
+        $strHtml .= '<td class="unique-td">' . ($objRecord->etd ? date("d/m/Y H:i", strtotime($objRecord->etd)) : '') . '</td>';
+        $strHtml .= '<td class="unique-td">' . ($objRecord->eta ? date("d/m/Y H:i", strtotime($objRecord->eta)) : '') . '</td>';
+        $strHtml .= '<td class="unique-td">' . ($objRecord->checkin ? date("d/m/Y H:i", strtotime($objRecord->checkin)) : '') . '</td>';
+
+        if (is_array($objRecord->cto_start)) {
+            $count = count($objRecord->cto_start);
+            $strHtml .= '<td class="unique-td">';
+            foreach ($objRecord->cto_start as $key => $time) {
+                if ($time != null) {
+                    $strHtml .= '<span>'.date("d/m/Y H:i", strtotime($time)).'</span>';
+                } else {
+                    $strHtml .= '<span class="unique-load">&nbsp;</span>';
+                }
+                if ($key < $count - 1) {
+                    $strHtml .= '<hr class="unique-hr">';
+                }
+            }
+            $strHtml .= '</td>';
+        } else {
+            $strHtml .= '<td class="unique-td">'.$objRecord->cto_start.'</td>';
+        }
+
+        if (is_array($objRecord->cto_finish)) {
+		    $count = count($objRecord->cto_finish);
+		    $strHtml .= '<td class="unique-td">';
+		    foreach ($objRecord->cto_finish as $key => $time) {
+		        if ($time != null) {
+		            $strHtml .= '<span>'.date("d/m/Y H:i", strtotime($time)).'</span>';
+		        } else {
+		            $strHtml .= '<span class="unique-load">&nbsp;</span>';
+		        }
+		        if ($key < $count - 1) {
+		            $strHtml .= '<hr class="unique-hr">';
+		        }
+		    }
+		    $strHtml .= '</td>';
+		} else {
+		    $strHtml .= '<td class="unique-td">'.$objRecord->cto_finish.'</td>';
+		}
+
+		if (is_array($objRecord->client_start)) {
+		    $count = count($objRecord->client_start);
+		    $strHtml .= '<td class="unique-td">';
+		    foreach ($objRecord->client_start as $key => $time) {
+		        if ($time != null) {
+		            $strHtml .= '<span>'.date("d/m/Y H:i", strtotime($time)).'</span>';
+		        } else {
+		            $strHtml .= '<span class="unique-load">&nbsp;</span>';
+		        }
+		        if ($key < $count - 1) {
+		            $strHtml .= '<hr class="unique-hr">';
+		        }
+		    }
+		    $strHtml .= '</td>';
+		} else {
+		    $strHtml .= '<td class="unique-td">'.$objRecord->client_start.'</td>';
+		}
+
+		if (is_array($objRecord->client_finish)) {
+		    $count = count($objRecord->client_finish);
+		    $strHtml .= '<td class="unique-td">';
+		    foreach ($objRecord->client_finish as $key => $time) {
+		        if ($time != null) {
+		            $strHtml .= '<span>'.date("d/m/Y H:i", strtotime($time)).'</span>';
+		        } else {
+		            $strHtml .= '<span class="unique-load">&nbsp;</span>';
+		        }
+		        if ($key < $count - 1) {
+		            $strHtml .= '<hr class="unique-hr">';
+		        }
+		    }
+		    $strHtml .= '</td>';
+		} else {
+		    $strHtml .= '<td class="unique-td">'.$objRecord->client_finish.'</td>';
+		}
+
+        if (is_array($objRecord->unpack)) {
+            $count = count($objRecord->unpack);
+            $strHtml .= '<td class="unique-td">';
+            foreach ($objRecord->unpack as $key => $time) {
+                if (!empty($time)) {
+                    $strHtml .= '<span>'.date("d/m/Y H:i", strtotime($time)).'</span>';
+                }
+                if ($key < $count - 1) {
+                    $strHtml .= '<hr class="unique-hr">';
+                }
+            }
+            $strHtml .= '</td>';
+        } else {
+            $strHtml .= '<td class="unique-td">'.$objRecord->unpack.'</td>';
+        }
+
+        if (is_array($objRecord->gatepasstime)) {
+            $count = count($objRecord->gatepasstime);
+            $strHtml .= '<td class="unique-td">';
+            foreach ($objRecord->gatepasstime as $key => $time) {
+                if ($time != null) {
+                    $strHtml .= '<span>'.date("d/m/Y H:i", strtotime($time)).'</span>';
+                } else {
+                    $strHtml .= '<span class="unique-load">&nbsp;</span>';
+                }
+                if ($key < $count - 1) {
+                    $strHtml .= '<hr class="unique-hr">';
+                }
+            }
+            $strHtml .= '</td>';
+        } else {
+            $strHtml .= '<td class="unique-td">'.$objRecord->gatepasstime.'</td>';
+        }
+
+        if ($isShowButton) {
+            $strHtml .= '<td class="unique-td"><a class="unique-jqm_link1" href="'.Yii::app()->createUrl('bwtrunk/showDialog', array('awb'=>$objRecord->awb)).'">Update</a></td>';
+        }
+
+	        $strHtml .= '</tr>';
+	    }
+	    $strHtml .= '</tbody></table>';
+	    return $strHtml;	
+	 }	
+}

@@ -1,0 +1,1 @@
+<?php echo $this->renderPartial('task_form', array('model'=>$model)); ?>

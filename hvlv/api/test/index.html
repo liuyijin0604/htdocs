@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+<title>API test...</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="">
+<meta name="author" content="">
+
+<!-- Le styles -->
+        <link rel="stylesheet" type="text/css" href="./apitest/bootstrap.min.css">
+        <link rel="stylesheet" type="text/css" href="./apitest/bootstrap-responsive.min.css">
+        <link rel="stylesheet" type="text/css" href="./apitest/debug.css">
+
+</head>
+
+<body data-new-gr-c-s-check-loaded="14.1067.0" data-gr-ext-installed="" style="">
+
+	<div class="hidden">
+		<div class="httpparameter">
+			<!--<a class="close">&times;</a>-->
+			<div class="row show-grid">
+				<div class="span2">
+					<div class="control-group">
+						<div class="controls">
+							<label class="control-label mylabel">Parameter Name</label>
+						</div>
+					</div>
+				</div>
+
+				<div class="span3">
+					<div class="control-group">
+						<div class="controls">
+							<input type="text" class="input-xlarge realinputvalue" value="">
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+
+
+	<div class="navbar navbar-fixed-top navbar-inverse">
+		<div class="navbar-inner">
+			<div class="container">
+				<a class="btn btn-navbar" data-toggle="collapse" data-target=".nav-collapse"> <span class="icon-bar"></span> <span class="icon-bar"></span> <span class="icon-bar"></span>
+				</a> <a class="brand" href="https://apitest/api-test/#">TOPLogistics API TEST</a>
+				<!--/.nav-collapse -->
+			</div>
+		</div>
+	</div>
+
+	<div class="container">
+
+		<div class="row show-grid">
+			<div id="leftcolumn" class="span6">
+				<form id="paramform" class="well" target="outputframe">
+<!--fieldset-->
+					<fieldset>
+						<legend>HTTP request options</legend>
+						<br>
+
+ <!--request method-->
+						<div class="row show-grid">  
+							<div class="span1">
+								<div class="control-group">
+									<label class="control-label" for="httpmethod">Method</label>
+									<div class="controls">
+										<select class="input-small" id="httpmethod">
+										    <option id="option1">POST</option>
+										</select>
+									</div>
+								</div>
+							</div>
+
+							<div class="span4">
+								<div class="control-group">
+									<label class="control-label" for="web">Endpoint</label>
+									<div class="controls">
+											<select class="input-small" id="web">
+										    <option value="1">https://branch.toplogistics.com.au:8096/hvlv/api/shipment</option>
+											<option value="2">https://branch.toplogistics.com.au:8096/hvlv/api/product</option>
+										    <option value="3">https://branch.toplogistics.com.au:8096/hvlv/api/consol</option>
+										    <option value="4">https://branch.toplogistics.com.au:8096/hvlv/api/tracking</option>
+											<option value="5">https://branch.toplogistics.com.au:8096/hvlv/api/cnid</option>
+									     </select>
+										
+									</div>
+								</div>
+							</div>
+						</div>
+           	<div>
+		<div class="httpparameter">
+			<!--<a class="close">&times;</a>-->
+			<div class="row show-grid">
+				<div class="span2">
+					<div class="control-group">
+						<div class="controls">
+							<label class="control-label">key</label>
+						</div>
+					</div>
+				</div>
+
+				<div class="span3">
+					<div class="control-group">
+						<div class="controls">
+							<input type="text" class="input-xlarge" id="key" value="6366b2bb8b8d7407a3d46f6fa79a9af3472e1381442b49e637dfc96a0b0d6808">
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+						<p class="help-block"><i>If you need the app to Calculate the Sign for you, input the key, and click calculate sign button.otherwise, leave it blank!</i></p>
+<!--request method-->
+
+
+<!--parameters-->
+						<div id="allparameters" style="display: block;">
+
+							<div class="row show-grid">
+								<div class="span2">
+									<div class="control-group">
+										<label class="control-label">Parameter Name</label>
+									</div>
+								</div>
+
+								<div class="span3">
+									<div class="control-group">
+										<label class="control-label">Parameter Value</label>
+									</div>
+								</div>
+							</div>
+
+						<div class="httpparameter">
+			<!--<a class="close">&times;</a>-->
+			<div class="row show-grid">
+				<div class="span2">
+					<div class="control-group">
+						<div class="controls">
+							<label class="control-label mylabel">api_id</label>
+						</div>
+					</div>
+				</div>
+
+				<div class="span3">
+					<div class="control-group">
+						<div class="controls">
+							<input type="text" class="input-xlarge realinputvalue" value="api_test">
+						</div>
+					</div>
+				</div>
+			</div>
+		</div><div class="httpparameter">
+			<!--<a class="close">&times;</a>-->
+			<div class="row show-grid">
+				<div class="span2">
+					<div class="control-group">
+						<div class="controls">
+							<label class="control-label mylabel">method</label>
+						</div>
+					</div>
+				</div>
+
+				<div class="span3">
+					<div class="control-group">
+						<div class="controls">
+							<input type="text" class="input-xlarge realinputvalue" value="create">
+						</div>
+					</div>
+				</div>
+			</div>
+		</div><div class="httpparameter">
+			<!--<a class="close">&times;</a>-->
+			<div class="row show-grid">
+				<div class="span2">
+					<div class="control-group">
+						<div class="controls">
+							<label class="control-label mylabel">data</label>
+						</div>
+					</div>
+				</div>
+
+				<div class="span3">
+					<div class="control-group">
+						<div class="controls">
+							<input type="text" class="input-xlarge realinputvalue" value="">
+						</div>
+					</div>
+				</div>
+			</div>
+		</div><div class="httpparameter">
+			<!--<a class="close">&times;</a>-->
+			<div class="row show-grid">
+				<div class="span2">
+					<div class="control-group">
+						<div class="controls">
+							<label class="control-label mylabel">sign</label>
+						</div>
+					</div>
+				</div>
+
+				<div class="span3">
+					<div class="control-group">
+						<div class="controls">
+							<input type="text" class="input-xlarge realinputvalue" value="">
+						</div>
+					</div>
+				</div>
+			</div>
+		</div></div>
+
+<!--parameters-->
+						<br>
+
+<!--ajax-button-->
+						<div align="right">
+							<button id="submitSign" class="btn btn-success btn-large">
+								<i class="icon-download-alt icon-white"></i> Calculate Sign
+							</button>
+							<button id="submitajax" class="btn btn-success btn-large">
+								<i class="icon-download-alt icon-white"></i> Ajax request
+							</button>
+						</div>
+					</fieldset>
+<!--fieldset-->
+				</form>
+
+				<div id="errordiv"></div>
+
+<!--
+	show output info			-->
+        
+  			<div class="alert alert-info">
+					<a class="close" data-dismiss="alert">×</a> <strong>Welcome!</strong>
+          Use this simple page to poke around at the API.
+          Specify HTTP method, URL and parameters, and click on <b>Ajax Request</b>.
+          Note that this page requires a browser with HTML5 support.
+				</div>
+
+			</div>
+
+			<div class="span6">
+				<div id="ajaxoutput">
+					<pre id="statuspre">0</pre>
+					<pre class="pre-scrollable prettyprint linenums" id="outputpre"></pre>
+					<pre class="pre-scrollable prettyprint linenums" id="headerpre"></pre>
+					<pre id="outstr"></pre>
+					<pre id="outsign"></pre>
+				</div>
+			</div>
+		</div>
+
+		<br>
+
+
+	</div>
+
+		<script src="./apitest/jquery-1.10.2.min.js"></script>
+	<script src="./apitest/bootstrap.min.js"></script>
+	<script src="./apitest/debug.js"></script>
+
+
+</body><grammarly-desktop-integration data-grammarly-shadow-root="true"></grammarly-desktop-integration></html>

@@ -1,0 +1,25 @@
+<?php
+$g = include('default.php');
+return array_merge($g,array(
+	'Users' => '用户',
+	'Update User' => '更新用户',
+	'Title' => '称呼',
+	'First Name' => '名', 
+	'Surname' => '姓',
+	'Since' => '建立时间',
+	'Create User' => '新建用户',
+	'Organisation' => '归属企业',
+	'System Admin' => '系统管理员',
+	'CCIC Manager' => 'CCIC 授权签字人',
+	'CCIC Docs' => 'CCIC 单证员',
+	'CCIC Inspector' => 'CCIC 检验员',
+	'Mideast Inspector' => '中东检验员',
+	'CCIC China' => '监管人员',
+	'Exporter Manager' => '专营企业经理',
+	'Exporter Staff' => '专营企业用户',
+	'Confirm Password' => '密码确认',
+	'Mr' => '先生',
+	'Ms' => '女士',
+	'Mrs' => '夫人',
+	'Miss' => '小姐',
+));

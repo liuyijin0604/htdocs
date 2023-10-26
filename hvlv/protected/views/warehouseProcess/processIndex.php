@@ -1,0 +1,127 @@
+<style type="text/css">
+  
+
+.report_list {
+  font-family: "Helvetica Neue",Helvetica,Arial,sans-serif;
+    font-size: 0.5em;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    line-height: 1em;
+}
+.report_list ul{
+    list-style: none;
+    margin: 0;
+    padding-left: 5px;
+    font-size: 1rem;
+}
+.report_list ul li{
+  padding-top: 10px;
+    padding-bottom: 10px;
+}
+
+
+.report_list .grid-view table.items {
+    display: flex;
+    flex-flow: column;
+    height: 100%;
+    width: 100%;
+}
+.report_list .grid-view table.items thead, .report_list .grid-view table.items tfoot {
+    /* head takes the height it requires, 
+    and it's not scaled when table is resized */
+    flex: 0 0 auto;
+    width: calc(100% - 1.15em);
+}
+.report_list .grid-view table.items tbody {
+    /* body takes all the remaining available space */
+    flex: 1 1 auto;
+    display: block;
+    max-height: 400px;
+    overflow-y: scroll;
+    overflow-x: hidden;
+}
+.report_list .grid-view table.items tbody tr {
+    width: 100%;
+}
+.report_list .grid-view table.items thead, .report_list .grid-view table.items tfoot, .report_list .grid-view table.items tbody tr {
+    display: table;
+    table-layout: fixed;
+}
+
+.report_list span.exp{
+    border: 1px solid #15538b;
+    color: #15538b;
+    border-radius: 4px;
+    padding: 0px 4px;
+    cursor: pointer;
+    font-weight: bold;
+}
+.report_list span.exp:hover{
+    color: #fff;
+}
+.report_list span.exp:before{
+    content: "+";
+}
+.report_list span.exp.in{
+    padding: 0px 4px;
+}
+.report_list span.exp.in:before{
+    content: "-";
+}
+
+
+.report_list a.exp{
+    border: 1px solid #15538b;
+    color: #15538b;
+    border-radius: 4px;
+    padding: 0px 4px;
+    cursor: pointer;
+    font-weight: bold;
+}
+.report_list a.exp:hover{
+    color: #fff;
+}
+.report_list a.exp:before{
+    content: "+";
+}
+.report_list a.exp.in{
+    padding: 0 4px;
+}
+
+.report_list .grid-view table.items th, .grid-view table.items td{
+    border: 1px white solid;
+    padding: 0.3em;
+    /*white-space: nowrap;*/
+}
+</style>
+<h2><?=$name?> Warehouse Process</h2>
+</br>
+<div id="parcel-tabs">
+  <ul class="nav nav-tabs">
+ <?php
+    $tabs =[];
+
+    $tabs[] = ['check_in', $this->t('Check In'), true];
+    $tabs[] = ['putaway_sort_held', Yii::t('whscan','Put in Pallet')." + ".Yii::t('whscan','Put Away'), true];
+    $tabs[] = ['preparation', $this->t('Preparation'), true];
+    $tabs[] = ['held_shipment_resorting', $this->t('旧货'), true];
+    $tabs[] = ['gatepass_sign', $this->t('Gatepass Sign'), true];
+
+ foreach($tabs as $key => $tab){
+    $href = strpos($tab[0], '/') === false? $this->createUrl('warehouseProcess/processPage',array('tab'=>$tab[0], "tabid" => $_GET["tabid"]."tab".$key,"dptId"=>$dptId)) : $tab[0];
+    echo '<li><a href="'.$href.'" class="active">'.$tab[1].'</a></li>';
+ }
+ ?>
+  </ul>
+</div>
+<script type="text/javascript">
+$(function(){
+   var tab = $('#<?=$_GET["tabid"];?>');
+   var panel = $('#<?=$_GET["tabid"];?>').data('panel');
+
+  $('#parcel-tabs',panel).tabs({active: <?php echo empty($_GET['actab'])? 0 : $_GET['actab']; ?>, load: function(event,ui){
+    // posApp.ajaxifyForm(this);
+  }});
+});
+</script>

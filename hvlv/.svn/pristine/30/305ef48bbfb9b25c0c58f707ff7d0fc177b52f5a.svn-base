@@ -1,0 +1,180 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <meta name="wkhtmltopdf" content="--footer-center 'Page [page] of [toPage]' --footer-font-size 10 --footer-font-name 'Verdana' --dpi 150 -T 10 -R 10 -B 10 -L 10 -O Landscape" />
+    <?php //--disable-smart-shrinking 
+    $type = empty($type) ? "Air" : $type;
+    ?>
+    <title>Sea Outturn Report</title>
+    <style type="text/css">
+        * {
+            margin: 0;
+            padding: 0;
+            letter-spacing: normal !important;
+        }
+
+        html {
+            width: 100%;
+        }
+
+        body {
+            font-family: Verdana, Geneva, sans-serif;
+            font-size: 12px;
+            text-rendering: optimize-speed;
+            width: 100%;
+        }
+
+        table.chart td,
+        table.chart th {
+            border: 1px #999 solid;
+            padding: 2px;
+            border-right: none;
+            border-bottom: none;
+        }
+
+        table.chart {
+            border: none;
+            border: 1px #999 solid;
+            border-top: none;
+            border-left: none;
+        }
+
+        table.chart1 td,
+        table.chart1 th {
+            border: 1px #999 solid;
+            padding: 2px;
+            border-right: none;
+            border-bottom: none;
+        }
+
+        table.chart1 {
+            border: none;
+            border: 1px #999 solid;
+            border-top: none;
+            border-left: none;
+        }
+
+        table.charts td,
+        table.charts th {
+            border: none
+        }
+
+        table.charts {
+            border: none;
+        }
+
+        tr.even td,
+        tr.even th {
+            background: rgba(200, 200, 200, 0.6);
+        }
+
+        .even1 {
+            background: rgba(200, 200, 200, 0.6);
+        }
+
+        header {
+            padding-bottom: 15px;
+        }
+
+        footer {
+            padding-top: 10px;
+            page-break-after: always;
+        }
+
+        .outturn_list {
+            text-align: center;
+        }
+    </style>
+</head>
+
+<body width="1920">
+    <header>
+        <table width="100%" cellspacing="0" cellpadding="0" style="margin-top: 30px;height: 50px; ">
+            <tr>
+                <td style="text-align: left; font-size: 30px;font-weight: bold;padding-bottom:10px;" width="50%"><?= $type ?> Outturn Report</td>
+            </tr>
+            <tr>
+                <td width="200" valign="top"><img src="<?= Yii::app()->request->hostInfo . Yii::app()->baseUrl . '/images/tla_logo.png'; ?>" alt="TLA" width="240" height="140" /></td>
+                <td align="right" valign="top">
+                    <p style="font-size:32px;color:#193064;font-weight:bold;">
+                        Top Logistics Australia</p>
+                    <p><strong>ABN: 67 119 225 133</strong><br />
+                        E-Mail: <a href="mailto:imports@toplogistics.com.au">imports@toplogistics.com.au</a>
+                    </p>
+                </td>
+            </tr>
+        </table>
+    </header>
+    <table width="100%" cellpadding="0" cellspacing="0" height="100px;">
+        <tr>
+            <td width="50%" align="right" valign="top">
+                <table width="40%" cellspacing="0" cellpadding="0" class="chart1">
+                    <tr>
+                        <th class="even1" width="50%" align="left">CONTAINER NO.</th>
+                        <td width="50%" style="font-weight:bold;"><?= $model->container_no ?></td>
+                    </tr>
+                    <tr>
+                        <th class="even1" width="50%" align="left">CONSOL</th>
+                        <td width="50%"><?= @$model->no ?></td>
+                    </tr>
+                    <tr>
+                        <th class="even1" width="50%" align="left">DATE</th>
+                        <td width="50%"><?= date("d-M-y H:i") ?></td>
+                    </tr>
+                    <tr>
+                        <th class="even1" width="50%" align="left">AVAILABLE DATE</th>
+                        <td width="50%"><?= !empty($model->mdata['available_date']) ? date("d-M-y H:i", (intval(strtotime($model->mdata['available_date'])) + 60)) : '' ?></td>
+                    </tr>
+                    <tr ><th class="even1" width="50%" align="left">STORAGE STARTS</th><td width="50%">
+                        <?php
+                            $storageStart = $shipments[0]->getStorageStartDate();
+                            if(!empty($storageStart))
+                            {
+                                 echo date("d-M-y H:i", strtotime($storageStart));
+                            }
+                        ?>
+                    </td></tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+    <br />
+    <table width="100%" cellspacing="0" class="chart">
+        <tr>
+            <th class="outturn_list even1">HOUSEBILL</th>
+            <th class="outturn_list even1">CONSIGNEE</th>
+            <th class="outturn_list even1">MARKS AND NUMBER</th>
+            <th class="outturn_list even1">WEIGHT</th>
+            <th class="outturn_list even1">VOLUME</th>
+            <th class="outturn_list even1">MANIFEST</th>
+            <th class="outturn_list even1">OUTTURN</th>
+            <th class="outturn_list even1">SHORT</th>
+            <th class="outturn_list even1">SURPLUS</th>
+            <th class="outturn_list even1">PILLAGED</th>
+            <th class="outturn_list even1">DAMAGED</th>
+            <th class="outturn_list even1">REMARK</th>
+        </tr>
+        <?php
+        foreach ($shipments as $shipment) {
+            $short = $surplus = 0;
+            if ($shipment->pkg > $shipment->getOutPkg()) {
+                $short = $shipment->pkg - $shipment->getOutPkg();
+            } else if ($shipment->getOutPkg() > $shipment->pkg) {
+                $surplus = $shipment->getOutPkg() - $shipment->pkg;
+            }
+            $damaged = !empty($shipment->mdata['damaged_packs']) ? $shipment->mdata['damaged_packs'] : 0;
+            $comments = "";
+            if (!empty($shipment->mdata['amzon_pallet'])) {
+                $comments =  intval($shipment->mdata['amzon_pallet']) . " " . $shipment->mdata['amzon_pallet_type'] . " Pallets";
+            }
+            $comments .= empty($shipment->mdata['outturn_comments']) ? "" : "</br>" . $shipment->mdata['outturn_comments'];
+            echo '<tr height="90px"><td class="outturn_list">' . $shipment->hbn . '</td><td class="outturn_list">' . @$shipment->cnee->name . '</td><td class="outturn_list">' . $shipment->mdata['sea_mark_number'] . '</td><td class="outturn_list">' . $shipment->weight . 'KG</td><td class="outturn_list">' . number_format((float)$shipment->cbm, 2, '.', '') . 'M<sup>3</sup></td><td class="outturn_list">' . $shipment->pkg . '</td><td class="outturn_list">' . $shipment->getOutPkg() . '</td><td class="outturn_list">' . $short . '</td><td class="outturn_list">' . $surplus . '</td><td class="outturn_list">0</td><td class="outturn_list">' . $damaged . '</td><td class="outturn_list">' . $comments . '</td></tr>';
+        }
+        ?>
+    </table>
+    <?php include('_pagination.php'); ?>
+</body>
+
+</html>

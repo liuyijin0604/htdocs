@@ -1,0 +1,226 @@
+<?php 
+class ApiService extends Service
+{
+	public function getZWStorage($data)
+	{
+		$o = new stdClass;
+		$o->status = 1;
+		$o->data = array();
+		$o->msg = 'Success';
+		return $o;
+
+		$resultData = new stdClass;
+		$criteria = new CDbCriteria;
+		$criteria->addCondition('(status = 0 or (status = 99 and putcode is not null))and (json_value(t.meta,"$.notPush") = 0 or json_value(t.meta,"$.notPush") is null)');
+		$total = ImportZwStorage::model()->count($criteria);
+		$resultData->total = $total;
+		$rows = [];
+		$err = [];
+		if (!empty($data)) {
+			if($data->page_size>100)
+			{
+				$o = new stdClass;
+				$o->status = 1;
+				$o->data = array();
+				$o->msg = '[100005]: Require page_size max(100)';
+			}
+
+			$criteria->limit = $data->page_size; 
+			$criteria->offset = $data->page_number-1;
+			$zwData = ImportZwStorage::model()->findAll($criteria);
+			$transaction=Yii::app()->db->beginTransaction();
+			try
+			{
+					foreach ($zwData as $key => $zd) {
+					$thisData = new stdClass;
+					$thisData->tlano = $zd->tlano;
+					$thisData->memberid = $zd->memberid;
+					$thisData->store_code = $zd->store_code;
+					$thisData->transport_type = $zd->transport_type;
+					$thisData->channel_code = $zd->channel_code;
+					$thisData->volume = $zd->volume;
+					$thisData->status = ImportZwStorage::$states[$zd->status];
+					$thisData->goods_count = $zd->goods_count;
+					if(!empty($zd->arrival_city))$thisData->arrival_city = $zd->arrival_city;
+					if(!empty($zd->weight))$thisData->weight = $zd->weight;
+					if(!empty($zd->remark))$thisData->remark = $zd->remark;
+					if(!empty($zd->arrival_date))$thisData->arrival_date = $zd->arrival_date;
+					$rows[] = $thisData;
+					if(empty($zd->mdata['push']))
+					{
+						$zd->mdata['push'] = 1;
+						$zd->save();
+					}
+				}
+				$transaction->commit();
+			} catch (Exception $ex) {
+				$transaction->rollback();
+				$o->status = 0;
+				$o->error = ["[100002]: unknown error please try again"];
+				return $o;
+			}
+
+			$resultData->rows = $rows;
+			$o->data = $resultData;
+			return $o;
+		}else
+		{
+			$o = new stdClass;
+			$o->status = 0;
+			$o->data = array();
+			$o->msg = '[100004]: Require page_size max(100) and page_number';
+		}
+		return $o;
+	}
+
+	public function updateZWStorage($data)
+	{
+		$o = new stdClass;
+		$o->status = 0;
+		$o->msg = 'Success';
+		$err = [];
+		if(empty($data->tlano))
+		{
+			$o->error = ["[100001]: require tlano"];
+			return $o;
+		}
+		$tlano = $data->tlano;
+		$zwData = ImportZwStorage::model()->find("tlano = :tlano",[":tlano"=>$tlano]);
+		$err = [];
+		if (!empty($zwData)) {
+			if(!empty($data->putcode))
+			{
+				$zwData->putcode = $data->putcode;
+				$zwData->status = 1;
+			}
+			if(!empty($data->cutday))
+			{
+				$zwData->cutday = $data->cutday;
+				$zwData->status = 2;
+			}
+			if(!empty($data->volume))
+			{
+				$zwData->volume = $data->volume;
+				$zwData->status = ImportZwStorage::STATE_RECEIVED;
+			}
+
+			if(!empty($data->shipdate))
+			{
+				$zwData->mdata['shipdate'] = $data->shipdate;
+				$zwData->status = ImportZwStorage::STATE_SHIPPING;
+			}
+			
+			if(!empty($data->goods_count))
+			{
+				$zwData->goods_count = $data->goods_count;
+				$zwData->status = ImportZwStorage::STATE_RECEIVED;
+			}
+
+			if(!empty($data->weight))
+			{
+				$zwData->weight = $data->weight;
+				$zwData->status = ImportZwStorage::STATE_RECEIVED;
+			}
+
+			if(!empty($data->status))
+			{
+				if(in_array($data->status,ImportZwStorage::$outStatesArr)&&$zwData->status==ImportZwStorage::STATE_CANCEL)
+				{
+					$zwData->status = ImportZwStorage::STATE_CANCEL_NOTICED;
+				}
+			}
+
+
+			if($zwData->save())
+			{
+				$o->status = 1;
+				$o->data = ['tlano'=>$tlano];
+			}else
+			{
+				$o->data = ['tlano'=>$tlano];
+				$o->error = ["[100002]: unknown error please try again"];
+			}
+			return $o;
+		}else
+		{
+			$o->data = ['tlano'=>$tlano];
+			$o->error = ["[100003]: unknown tlano"];
+		}
+		return $o;
+	}
+
+	public function updateShipmentStatusForPCAE($d,$onlyTest = false)
+	{
+		$o = new stdClass;
+		$o->status = 1;
+		$o->hbn = $d->hbn;
+		$qs = [];
+		$params = [':hbn'=>$d->hbn];
+		$p = ImParcel::model()->find('hbn = :hbn AND status != 100', $params);
+		if(empty($p)){
+			$o->status = 0;
+			$o->msg = 'no hbn refer to shipment';
+			return $o;
+		}
+
+		$status = 0;
+		if($d->status=="HELD")
+		{
+			if(empty($p->mdata['was_update_status'])||$p->mdata['was_update_status']!=$d->status)
+			{
+				$p->status =ImParcel::STATE_HELD;
+				$p->mdata['held_reason'] = $d->held_reason;
+				$p->mdata['was_update_status'] = $d->status;
+				if(!$onlyTest)
+				{
+					$p->save();
+					$p->heldReason();
+				}
+			}
+
+			$o->msg = "Status update:".$p->status;
+		}else if($d->status=="CLEAR")
+		{
+			if(empty($p->mdata['was_update_status'])||$p->mdata['was_update_status']!=$d->status)
+			{
+				if($p->status<ImParcel::STATE_DUTY_HELD)
+				{
+					$tempStatus = ImParcel::STATE_CLEAR;
+					if (!$p->canSAC(true)) {
+						$tempStatus = ImParcel::STATE_DUTY_HELD;
+					}elseif ($p->hasCustomProcess() && empty($p->mdata['screen_period_exceed'])) {  //means the shipment go through our custom process
+						if((($p->bwf & 512 > 0) && ($p->bwf & 128 == 0)) && $p->status != ImParcel::STATE_CLEAR_WAIT )
+						{
+							$tempStatus = ImParcel::STATE_DUTY_HELD;
+						}
+					}
+					
+					if($tempStatus == ImParcel::STATE_CLEAR)
+					{
+						if($p->scanCount()>0&&$p->status!=ImParcel::STATE_CLEAR&&$p->isNotPickupSea())
+						{
+							$tempStatus = ImParcel::STATE_CLEAR_WAIT;
+							$p->mdata["clear_wait_process"] = true;
+						}
+					}
+					$cleared = true;
+					$p->status = $tempStatus;
+					$p->mdata['was_update_status'] = $d->status;
+					if(!$onlyTest)
+					{
+						$p->save();
+					}
+					$o->msg = "Status update:".$p->status;
+				}
+			}
+			$o->msg = "Status update:".$p->status;
+		}else
+		{
+			$o->status = 0;
+			$o->msg = "hehehehehe";
+		}
+		return $o;
+	}
+	
+}
+?>

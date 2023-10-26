@@ -1,0 +1,199 @@
+<h3><?='Si Reconcile-'.$type.'-'.$status?></h3>
+<style>
+    .cloumn_red{
+        background-color:pink;
+    }  
+    .column_direct{
+        color: green;
+        font-weight: bold;
+    }
+</style>
+<?php if($type==SiReconcile::TYPE_MANUAL||$type==SiReconcile::TYPE_EXPENSE):?>
+	<div>
+		<a href="#" class="manualErrorCheckingCurrentSearch"  data-baseurl="<?=$this->createUrl('siReconcile/manualErrorCheckingCurrentSearch', ['type'=>$_GET['type']]);?>"><div style="background-position:-48px -688px" class="icon"></div>Manual Error Checking Current Search</a> 
+
+		<a href="#" class="manualLinkingBillingCurrentSearch"  data-baseurl="<?=$this->createUrl('siReconcile/manualLinkingBillingCurrentSearch', ['type'=>$_GET['type']]);?>"><div style="background-position:-48px -688px" class="icon"></div>Manual Linking Billing Current Search</a> 
+		<a href="#" class="manualToPayCurrentSearch"  data-baseurl="<?=$this->createUrl('siReconcile/manualToPayCurrentSearch', ['type'=>$_GET['type']]);?>"><div style="background-position:-48px -688px" class="icon"></div>Manual To Pay Current Search</a> 
+	</div>
+
+<?php endif;?>
+<?php if($type==SiReconcile::TYPE_BROKER):?>
+	<div>
+		<a href="#" class="brokerLinkingBillingCurrentSearch"  data-baseurl="<?=$this->createUrl('siReconcile/brokerLinkingBillingCurrentSearch', ['type'=>$_GET['type']]);?>"><div style="background-position:-48px -688px" class="icon"></div>Broker Linking Billing Current Search</a> 
+		<a href="#" class="brokerToPayCurrentSearch"  data-baseurl="<?=$this->createUrl('siReconcile/brokerToPayCurrentSearch', ['type'=>$_GET['type']]);?>"><div style="background-position:-48px -688px" class="icon"></div>Broker To Pay Current Search</a>
+		<a href="#" class="brokerBulkUpdateInvoice"  data-baseurl="<?=$this->createUrl('siReconcile/bulkUpdateLine', ['type'=>$_GET['type']]);?>"><div style="background-position:-48px -688px" class="icon"></div>Broker Update Current Search</a>
+	</div>
+
+<?php endif;?>
+<?php if($type==SiReconcile::TYPE_TERMINAL):?>
+	<div>
+		<a href="#" class="terminalRefreshCurrentSearch"  data-baseurl="<?=$this->createUrl('siReconcile/terminalRefreshCurrentSearch', ['type'=>$_GET['type']]);?>"><div style="background-position:-48px -688px" class="icon"></div>Terminal Refresh Current Search</a>
+	</div>
+
+<?php endif;?>
+
+<?php 
+if($type==SiReconcile::TYPE_BROKER)
+{
+	$this->widget('application.extensions.CSpanableGridView.CSpanableGridView', [
+		'id'=>$_GET["tabid"].'_reconcile_grid',
+		'cssFile' => false,
+		'dataProvider'=>$model->search(true, 50),
+		'filter'=>$model,
+		'columns'=>[		
+			['name'=>'parent.inv_no','filter'=>CHtml::textField('SiReconcile[inv_no]',@$model->inv_no)],
+			['name'=>'refs','value'=>'@$data->lines[0]->ref'],
+			['name'=>'org_id'],
+			['header' => 'type','type'=>'raw','value'=>'@$data->lines[0]->getErrorTypes()','filter'=>false],
+			['name' => 'confirm_status','type'=>'raw', 'value' => '$data->getFullConfirmStatus()','filter'=>SiReconcile::$broker_confirmed_status],
+			['name'=>'total','header'=>'Billing Total'],
+			['header'=>'Billing Subtotal','value'=>'@$data->lines[0]->value'],
+			['header'=>'gst','value'=>'@$data->lines[0]->mdata["gst"]'],
+			['header'=>'invoice','value'=>'@$data->lines[0]->my_value'],
+			['header'=>'accrual_gst','value'=>'@$data->lines[0]->mdata["accrual_gst"]'],
+			['header'=>'diff','value'=>'@$data->lines[0]->diff'],
+			['name'=>'parent.inv_date','filter'=>CHtml::textField('SiReconcile[inv_date]',@$model->inv_date)],
+			['name'=>'create'],
+			['name'=>'note'],
+
+			['class'=>'oButtonColumn',
+				'template'=>'{operate}&nbsp;{confirm}&nbsp;{log}&nbsp;{pay}&nbsp;{done}&nbsp;{delete}',
+				'buttons'=>[
+					'operate' => [
+						'url'=>'Yii::app()->createURL("siReconcile/updateLine")."?id=".@$data->lines[0]->id',
+						'imageUrl'=>false,
+						'visible'=>'$data->lines[0]->type>0||$data->lines[0]->diff>0?true:false',
+						'options' => ['class' => 'jqm_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => '"SRDetail".'.'@$data->lines[0]->id'],
+					],
+					'confirm' => [
+						'url'=>'Yii::app()->createURL("siReconcile/confirmBrokerDiff")."?id=".@$data->lines[0]->id',
+						'imageUrl'=>false,
+						'visible'=>'$data->lines[0]->isInBrokerField()?false:true',
+						'options' => ['class' => 'ajax_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => '"SRDetail".'.'@$data->lines[0]->id', 'id' => 'confirm'],
+					],
+					'log' => [
+						'imageUrl'=>false,
+						'options' => ['class' => 'jqm_link grid_view_btn', 'label' => 'Log', 'data-win-class' => 'L'],
+						'visible' => 'true',
+						'url' => 'Yii::app()->createUrl("siReconcile/log", ["id" => $data->id])',
+						'label' => 'Log'
+					],
+					'pay' => [
+						'imageUrl'=>false,
+						'options' => ['class' => 'ajax_link grid_swap_btn', 'label' => 'To Pay', 'id' => 'to_pay'],
+						'visible' => '(($data->confirm_status & SiReconcile::BLILLING_LINKED)> 0 ? ($data->checkSyncBilling()?false:true) : false)',
+						'url' => 'Yii::app()->createUrl("siReconcile/topay", ["id" => $data->id])',
+						'label' => 'To Pay'
+					],
+					'done' => [
+						'imageUrl'=>false,
+						'options' => ['class' => 'ajax_link grid_done_btn', 'label' => 'To Pay', 'id' => 'to_pay'],
+						'visible' => '(($data->confirm_status & SiReconcile::BLILLING_LINKED)> 0 ? ($data->checkSyncBilling()?true:false) : false)',
+						'url' => 'Yii::app()->createUrl("siReconcile/topay", ["id" => $data->id])',
+						'label' => 'Sync Pay'
+					],
+					'delete' => array(
+						'imageUrl' => false,
+						'url' => 'Yii::app()->createUrl("siReconcile/delete", ["id" => $data->id])',
+						'visible' => '$data->confirm_status<16 || (isset(Yii::app()->user->grp) && Yii::app()->user->grp == 0)',
+						'options' => array('class' => 'delete_btn'),
+					),
+				],
+			]
+		],
+	]);
+
+}else
+{
+	$this->widget('application.extensions.CSpanableGridView.CSpanableGridView', [
+		'id'=>$_GET["tabid"].'_reconcile_grid',
+		'cssFile' => false,
+		'dataProvider'=>$model->search(true, 30),
+		'filter'=>$model,
+		'columns'=>[		
+			['name' => 'inv_no', 'value' => '@$data->parent->inv_no'],
+			['name'=>'org_id'],
+			['name' => 'status','type'=>'raw', 'value' => '$data->getFullStatus()', 'filter' => SiReconcile::$states],
+			['header' => 'error type','value' => '$data->getSubErrorType()'],
+			['name' => 'confirm_status','type'=>'raw', 'value' => '$data->getFullConfirmStatus()','filter'=>$model->type==SiReconcile::TYPE_MANUAL?SiReconcile::$broker_confirmed_status:SiReconcile::$search_confirmed_status],
+			['name'=>'total'],
+			['name'=>'total_gst'],
+			['name'=>'total_ex_gst'],
+			['name' => 'inv_date', 'value' => '@$data->parent->inv_date'],
+			['name'=>'create'],
+
+			['class'=>'oButtonColumn',
+				'template'=>'{operate}&nbsp;{log}&nbsp;{pay}&nbsp;{done}&nbsp;{delete}',
+				'buttons'=>[
+					'operate' => [
+						'url'=>'Yii::app()->createURL("siReconcile/getReconcileDpmt")."?id=".$data->id',
+						'imageUrl'=>false,
+						'visible'=>'true',
+						'options' => ['class' => 'tab_link grid_edit_btn', 'label'=>$this->t('Operation'), 'title' => '"SRDetail".'.'$data->id'],
+					],
+					'log' => [
+						'imageUrl'=>false,
+						'options' => ['class' => 'jqm_link grid_view_btn', 'label' => 'Log', 'data-win-class' => 'L'],
+						'visible' => 'true',
+						'url' => 'Yii::app()->createUrl("siReconcile/log", ["id" => $data->id])',
+						'label' => 'Log'
+					],
+					'pay' => [
+						'imageUrl'=>false,
+						'options' => ['class' => 'ajax_link grid_swap_btn', 'label' => 'To Pay', 'id' => 'to_pay'],
+						'visible' => '(($data->confirm_status & SiReconcile::BLILLING_LINKED)> 0 ? ($data->checkSyncBilling()?false:true) : false)',
+						'url' => 'Yii::app()->createUrl("siReconcile/topay", ["id" => $data->id])',
+						'label' => 'To Pay'
+					],
+					'done' => [
+						'imageUrl'=>false,
+						'options' => ['class' => 'ajax_link grid_done_btn', 'label' => 'To Pay', 'id' => 'to_pay'],
+						'visible' => '(($data->confirm_status & SiReconcile::BLILLING_LINKED)> 0 ? ($data->checkSyncBilling()?true:false) : false)',
+						'url' => 'Yii::app()->createUrl("siReconcile/topay", ["id" => $data->id])',
+						'label' => 'Sync Pay'
+					],
+					'delete' => array(
+						'imageUrl' => false,
+						'url' => 'Yii::app()->createUrl("siReconcile/delete", ["id" => $data->id])',
+						'visible' => '$data->confirm_status<16 || (isset(Yii::app()->user->grp) && Yii::app()->user->grp == 0)',
+						'options' => array('class' => 'delete_btn'),
+					),
+				],
+			]
+		],
+	])
+	;
+}
+
+; ?>
+
+<script>
+$(function() {
+	var tab = $('#<?=$_GET["tabid"]?>');
+	var panel = tab.data('panel');
+
+	tab.unbind('reload_reconcile_grid').bind('reload_reconcile_grid', function(){
+		$('#<?=$_GET["tabid"];?>_reconcile_grid', tab.data('panel')).yiiGridView('update');
+		return false;
+	});
+
+
+	$(panel).on('success', '#to_pay', function(e, r) {
+		if (r.done) {
+			myApp.alert(r.msg, false);
+		} else {
+			myApp.alert(r.msg, false);
+		}
+	});
+
+	$(panel).on('success', '#confirm', function(e, r) {
+		if (r.done) {
+			// myApp.alert(r.msg, false);
+			myApp.notice(r.msg, 5000);
+		} else {
+			myApp.alert(r.msg, false);
+		}
+		tab.trigger('reload_reconcile_grid');
+	});
+});
+</script>

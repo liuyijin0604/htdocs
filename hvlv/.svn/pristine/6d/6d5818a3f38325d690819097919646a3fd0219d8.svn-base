@@ -1,0 +1,67 @@
+<style>
+    .cloumn_red{
+        background-color:red;
+    }
+    .grid-view table.items th
+    {
+        font-size: 0.5em;
+    }
+    .grid-view table.items td
+    {
+        font-size: 0.7em;
+    }
+</style>
+<?php
+$this->widget('zii.widgets.CBreadcrumbs', array(
+        'homeLink'=>CHtml::link('Home', array('site/index')),
+    'links' => array(
+           'Time Report',
+    ),
+));
+?>
+<h2>Shipment</h2>
+<a id="export_search" style = "float:right;"target="_blank" href=""><div class="icon"></div> Export Current Search</a> 
+<br>
+<?php $this->widget('application.extensions.booster.TbExtendedGridView',array(
+    'fixedHeader'=>true,
+    'id'=>'task_grid_view',
+    'filter'=>$model,
+    'type'=>'striped bordered',
+    'headerOffset'=>40,
+    'responsiveTable'=>true,
+    'dataProvider'=>$model->search(),
+    'template' => "{summary}\n{items}\n{pager}",
+    'columns'=>array(
+        ['name'=>'ref','header'=>'包裹追踪号'],
+        ['name'=>'awb_name','header'=>'柜号  /  提单号','type'=>'raw','value'=>'@$data->consol->awb."&nbsp;&nbsp;&nbsp;&nbsp;/&nbsp;&nbsp;&nbsp;&nbsp;".@$data->consol->mdata["container_no"]','filter'=>CHtml::textfield('awb',@$model->awb_name,["class"=>"form-control"])],
+         ['header'=>'Memo','value'=>'$data->can'],
+         ['header'=>'状态','value'=>'ImParcel::$states[$data->status]',],
+         ['header'=>'拆柜时间','value'=>'ImParcelService::getTimePoint($data,1)'],
+         ['header'=>'从TLA仓库出库时间','value'=>'ImParcelService::getTimePoint($data,2)'],
+         ['header'=>'派送商揽收时间','value'=>'ImParcelService::getTimePoint($data,3)'],
+         ['header'=>'妥投时间','value'=>'ImParcelService::getTimePoint($data,4)'],
+         ['header'=>'最后一条追踪轨迹字段','value'=>'is_array(ImParcelService::getTimePoint($data,5))?ImParcelService::getTimePoint($data,5)[0]:""'],
+         ['header'=>'最后一条追踪轨迹对应的时间','value'=>'is_array(ImParcelService::getTimePoint($data,5))?ImParcelService::getTimePoint($data,5)[1]:""'],
+    ),
+    
+));
+?>
+
+ <?php ob_start(); ?>
+<script type="text/javascript">
+$(function(){
+    $('body').off('click', 'a.tracking-modal-link').on('click', 'a.tracking-modal-link', function(e){
+        $('#modal-tracking').modal();
+        $('#modal-tracking .modal-body').load($(this).attr('href'));
+        e.preventDefault();
+    });
+
+    $('#export_search').on('mousedown', function(){
+        var q = $('.filters input, .filters select').serialize();
+        $(this).attr('href', '<?=$this->createUrl('shipment/exportTimeReport');?>'+ '?' + q);
+        return true;
+    });
+
+});
+</script>
+<?php $this->registerJS(ob_get_clean()); ?>
